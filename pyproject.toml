@@ -1,0 +1,16 @@
+[project]
+name = "coding-guides-server"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "dynaconf>=3.2.12",
+    "mcp>=1.22.0",
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.4.0",
+    "ruff>=0.14.6",
+]

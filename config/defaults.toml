@@ -1,0 +1,9 @@
+[default]
+guides_dir = "guides"
+log_level = "INFO"
+
+[development]
+log_level = "DEBUG"
+
+[production]
+log_level = "WARNING"
