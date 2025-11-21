@@ -1,0 +1,42 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+      # - id: check-json
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: detect-private-key
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.6
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: uv-lock-check
+        name: uv lock check
+        entry: uv lock --check
+        language: system
+        pass_filenames: false
+      - id: uv-check-updates
+        name: uv sync updates
+        entry: uv sync -U
+        language: system
+        pass_filenames: false
+      - id: uv-sync-frozen
+        name: uv sync frozen
+        entry: uv sync --frozen
+        language: system
+        pass_filenames: false
+      - id: uv-export
+        name: uv export requirements
+        entry: bash -c 'uv export --frozen --no-hashes > requirements.txt && git diff --exit-code requirements.txt'
+        language: system
+        pass_filenames: false
