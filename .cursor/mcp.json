@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "coding-guides": {
+      "command": "docker",
+      "args": ["run", "--rm", "-i", "docker.io/delian/codeguide-mcp"]
+    }
+  }
+}

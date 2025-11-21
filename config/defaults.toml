@@ -1,6 +1,13 @@
 [default]
+mcp_name = "coding-guides"
 guides_dir = "guides"
+instructions = "MCP-instructions.md"
 log_level = "INFO"
+brief_max_length = 150
+github_repo = "delian/codeguide-mcp"
+github_path = "guides"
+github_branch = "main"
+cache_dir = ".guides-cache"
 
 [development]
 log_level = "DEBUG"
