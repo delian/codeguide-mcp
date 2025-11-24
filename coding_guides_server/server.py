@@ -19,11 +19,60 @@ mcp = FastMCP(
 GUIDES_DIR = Path(Settings.guides_dir)
 
 
+def extract_brief(content: str, max_length: int = Settings.brief_max_length) -> str:
+    """
+    Extract a brief description from guide content.
+    
+    Args:
+        content: The full content of the guide file.
+        max_length: Maximum length of the brief description.
+    
+    Returns:
+        A brief description extracted from the guide.
+    """
+    lines = content.split('\n')
+    brief_parts = []
+    
+    # Skip the title (first line if it starts with #)
+    start_idx = 1 if lines and lines[0].strip().startswith('#') else 0
+    
+    # Collect non-empty lines until we have enough content
+    for line in lines[start_idx:]:
+        line = line.strip()
+        if not line:
+            continue
+        # Skip markdown headers and code blocks
+        if line.startswith('#') or line.startswith('```'):
+            continue
+        brief_parts.append(line)
+        # Stop if we have enough content
+        if len(' '.join(brief_parts)) >= max_length:
+            break
+    
+    brief = ' '.join(brief_parts)
+    # Truncate to max_length and add ellipsis if needed
+    if len(brief) > max_length:
+        brief = brief[:max_length].rsplit(' ', 1)[0] + '...'
+    
+    return brief if brief else "No description available."
+
+
 @lru_cache(maxsize=1)
 def get_guides_list() -> str:
     if not GUIDES_DIR.exists():
         return "Guides directory not found."
-    return "\n".join([f.name for f in GUIDES_DIR.glob("*.md")])
+    
+    guides = []
+    for guide_file in sorted(GUIDES_DIR.glob("*.md")):
+        try:
+            content = cached_read_text(guide_file)
+            brief = extract_brief(content)
+            guides.append(f"{guide_file.name} - {brief}")
+        except Exception as e:
+            logger.warning(f"Error reading guide {guide_file.name}: {e}")
+            guides.append(f"{guide_file.name} - Error reading description")
+    
+    return "\n".join(guides)
 
 
 @mcp.resource("guides://list")

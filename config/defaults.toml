@@ -3,6 +3,7 @@ mcp_name = "coding-guides"
 guides_dir = "guides"
 instructions = "MCP-instructions.md"
 log_level = "INFO"
+brief_max_length = 150
 
 [development]
 log_level = "DEBUG"
