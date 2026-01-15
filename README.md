@@ -74,7 +74,20 @@ Add to your `mcp.json`:
   "mcpServers": {
     "coding-guides": {
       "command": "python",
-      "args": ["-m", "coding_guides_server"]
+      "args": ["-m", "main.py"]
+    }
+  }
+}
+```
+
+or
+
+```json
+{
+  "mcpServers": {
+    "coding-guides": {
+      "command": "docker",
+      "args": ["run", "--rm", "-i", "docker.io/delian/codeguide-mcp"]
     }
   }
 }
