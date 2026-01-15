@@ -1,10 +1,154 @@
 # Python Development Guidelines
 This document provides mandatory coding standards and development practices for AI agents and human developers working on this Python project.
+
 ## Core Principles
 All code contributions **MUST** adhere to these guidelines. Non-compliant code will be rejected during review.
 
+### Mandatory Requirements
+- **UV Only**: All package management through `uv`
+- **Dynaconf**: All configuration externalized to TOML files
+- **Type Hints**: Strict typing on all functions and classes
+- **Documentation**: Complete docstrings (Google style) for all code
+- **Comprehensions**: Prefer list/set/dict/generator comprehensions for performance and memory efficiency
+- **Testing**: 100% test coverage with pytest, all tests must pass
+- **Code Quality**: Ruff checks must pass without errors
+- **Agent Verification**: AI-generated code must be syntax-checked and tested before delivery
+
 ---
-## 1. Package Management: UV Only
+
+## 1. Agent Code Generation Requirements (MANDATORY)
+
+When an AI agent generates Python code, the following verification steps are **MANDATORY**:
+
+### A. Code Verification Protocol
+1. **ALWAYS verify Python syntax** before presenting code to the user
+2. **Parse the code** to ensure it's valid Python (no syntax errors)
+3. **Run tests with `uv run pytest`** to verify functionality
+4. **Fix any errors iteratively** until all tests pass
+5. **Verify dependencies** are properly specified and installable via `uv`
+
+### B. Verification Checklist
+- [ ] Code has valid Python syntax (can be parsed by `ast.parse()`)
+- [ ] All imports are available via `uv add package-name`
+- [ ] Tests exist for all new functions and classes
+- [ ] Tests pass when run with `uv run pytest`
+- [ ] Code follows type hint requirements (passes `uv run ruff check`)
+- [ ] All functions have complete docstrings
+- [ ] No hardcoded configuration values
+- [ ] Code formatted with `uv run ruff format`
+
+### C. Error Correction Process
+If the generated code fails verification:
+1. **Analyze the error message** (syntax error, import error, test failure, etc.)
+2. **Identify the root cause** (missing import, wrong indentation, logic error, etc.)
+3. **Fix the issue** in the generated code
+4. **Re-verify** by running the checks again
+5. **Repeat until successful** - iterate as many times as needed
+6. **Only present working, tested code** to the user
+
+### D. Example Verification Workflow
+```bash
+# Agent must simulate/verify this workflow
+
+# 1. Check syntax validity
+python -m py_compile module.py
+
+# 2. Verify with ruff
+uv run ruff check module.py
+
+# 3. Format code
+uv run ruff format module.py
+
+# 4. Run tests
+uv run pytest tests/test_module.py
+
+# If any step fails:
+# - Read the error output
+# - Fix the code
+# - Try again
+# - Repeat until success
+```
+
+### E. Test Requirements for Generated Code
+**Every function/class MUST have corresponding tests:**
+
+```python
+# Generated code: my_module.py
+def calculate_sum(numbers: list[float]) -> float:
+    """Calculate sum of numbers.
+    
+    Args:
+        numbers: List of numbers to sum.
+        
+    Returns:
+        Sum of all numbers.
+        
+    Example:
+        >>> calculate_sum([1, 2, 3])
+        6.0
+    """
+    return sum(numbers)
+
+
+# Generated tests: tests/test_my_module.py
+import pytest
+from my_module import calculate_sum
+
+
+def test_calculate_sum_basic() -> None:
+    """Test basic sum calculation."""
+    result = calculate_sum([1, 2, 3])
+    assert result == 6.0
+
+
+def test_calculate_sum_empty() -> None:
+    """Test sum of empty list."""
+    result = calculate_sum([])
+    assert result == 0.0
+
+
+def test_calculate_sum_negative() -> None:
+    """Test sum with negative numbers."""
+    result = calculate_sum([-1, 2, -3])
+    assert result == -2.0
+```
+
+**Run tests to verify:**
+```bash
+uv run pytest tests/test_my_module.py -v
+```
+
+### F. UV Prefix Requirement
+**ALL command executions MUST use `uv run` prefix:**
+
+✅ **CORRECT:**
+```bash
+uv run pytest
+uv run ruff check .
+uv run ruff format .
+uv run main.py
+uv run mypy .
+```
+
+❌ **WRONG:**
+```bash
+pytest                    # Missing uv run
+ruff check .             # Missing uv run
+python main.py           # Missing uv run
+pip install package      # Use uv add instead
+```
+
+**CRITICAL**: Never provide code to the user that:
+- Has syntax errors
+- Fails tests
+- Has missing dependencies
+- Doesn't follow the style guide
+
+Always verify first, fix issues, then present the working solution.
+
+---
+
+## 2. Package Management: UV Only
 ### Requirements
 - **ALWAYS** use `uv` for all package management operations
 - **NEVER** use `pip`, `poetry`, `pipenv`, or other package managers directly
@@ -60,7 +204,7 @@ uv add dynaconf ruff
 
 ---
 
-## 2. Configuration Management: Dynaconf
+## 3. Configuration Management: Dynaconf
 
 ### Requirements
 - **ALWAYS** use `dynaconf` for configuration management
@@ -253,7 +397,7 @@ python main.py
 ```
 
 ---
-## 3. Documentation: Comprehensive PyDoc
+## 4. Documentation: Comprehensive PyDoc
 
 ### Requirements
 
@@ -506,7 +650,7 @@ RuntimeError: If generation fails after maximum retries.
 
 ---
 
-## 4. Type Hints: Strict Typing
+## 5. Type Hints: Strict Typing
 ### Requirements
 - **ALL** function parameters **MUST** have type hints
 - **ALL** function return values **MUST** have type hints
@@ -796,8 +940,387 @@ def complex_func(
 
 ---
 
+## 6. Pythonic Code Patterns: Comprehensions (MANDATORY)
 
-## 5. Code Quality Enforcement
+### A. Comprehension Requirements
+
+**ALWAYS prefer comprehensions over loops for:**
+- Creating lists, sets, and dictionaries
+- Filtering and transforming data
+- Memory-efficient iteration (generators)
+
+**Benefits:**
+- **Performance**: 2-3x faster than equivalent loops
+- **Memory**: Generator expressions use constant memory
+- **Readability**: More concise and expressive
+- **Pythonic**: Idiomatic Python style
+
+### B. List Comprehensions
+
+```python
+# ✅ CORRECT - List comprehension (PREFERRED)
+squares = [x**2 for x in range(10)]
+
+# Filter with condition
+even_squares = [x**2 for x in range(10) if x % 2 == 0]
+
+# Nested comprehension for flattening
+matrix = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
+flattened = [num for row in matrix for num in row]
+
+# Transform with function
+names = ["alice", "bob", "charlie"]
+capitalized = [name.capitalize() for name in names]
+
+# ❌ WRONG - Manual loop (AVOID)
+squares = []
+for x in range(10):
+    squares.append(x**2)
+
+# ❌ WRONG - map() when comprehension is clearer
+squares = list(map(lambda x: x**2, range(10)))  # Less readable
+```
+
+### C. Set Comprehensions
+
+```python
+# ✅ CORRECT - Set comprehension (PREFERRED)
+unique_lengths = {len(word) for word in words}
+
+# Filter duplicates while transforming
+unique_squares = {x**2 for x in numbers}
+
+# Conditional set
+even_set = {x for x in range(20) if x % 2 == 0}
+
+# ❌ WRONG - Manual set creation
+unique_lengths = set()
+for word in words:
+    unique_lengths.add(len(word))
+```
+
+### D. Dictionary Comprehensions
+
+```python
+# ✅ CORRECT - Dictionary comprehension (PREFERRED)
+# Create dict from two lists
+keys = ['a', 'b', 'c']
+values = [1, 2, 3]
+mapping = {k: v for k, v in zip(keys, values)}
+
+# Transform dictionary
+prices = {'apple': 0.40, 'banana': 0.50}
+prices_usd = {item: price * 1.1 for item, price in prices.items()}
+
+# Filter dictionary
+expensive = {item: price for item, price in prices.items() if price > 0.45}
+
+# Invert dictionary
+inverted = {v: k for k, v in original_dict.items()}
+
+# Count occurrences
+words = ['apple', 'banana', 'apple', 'cherry', 'banana', 'apple']
+word_count = {word: words.count(word) for word in set(words)}
+
+# ❌ WRONG - Manual dictionary creation
+mapping = {}
+for k, v in zip(keys, values):
+    mapping[k] = v
+```
+
+### E. Generator Expressions (Memory Efficiency)
+
+```python
+# ✅ CORRECT - Generator expression (PREFERRED for large datasets)
+# Memory-efficient: creates values on-demand
+large_squares = (x**2 for x in range(1_000_000))
+
+# Use in iteration
+total = sum(x**2 for x in range(1_000_000))  # Constant memory
+
+# Chain generators
+data = (process(x) for x in read_large_file())
+filtered = (x for x in data if is_valid(x))
+
+# Generator with complex expression
+normalized = (
+    (value - mean) / std_dev
+    for value in dataset
+    if value is not None
+)
+
+# ❌ WRONG - List comprehension for large data (wastes memory)
+large_squares = [x**2 for x in range(1_000_000)]  # Uses ~8MB of RAM
+
+# ✅ CORRECT - Use generator when you only need to iterate once
+def process_large_file(filepath: Path) -> Generator[dict, None, None]:
+    """Process large file line by line without loading into memory."""
+    with filepath.open() as f:
+        return (json.loads(line) for line in f)
+
+# ❌ WRONG - Loading entire file into memory
+def process_large_file_bad(filepath: Path) -> list[dict]:
+    """BAD: Loads entire file into memory."""
+    with filepath.open() as f:
+        return [json.loads(line) for line in f]
+```
+
+### F. When to Use Each Type
+
+| Use Case | Comprehension Type | Reason |
+|----------|-------------------|---------|
+| Need to iterate multiple times | List `[...]` | Materialized data |
+| Need unique values | Set `{...}` | Automatic deduplication |
+| Need key-value mapping | Dict `{k: v ...}` | Fast lookups |
+| One-time iteration, large data | Generator `(...)` | Memory efficient |
+| Pass to function expecting iterable | Generator `(...)` | Lazy evaluation |
+
+### G. Complex Comprehensions
+
+```python
+# ✅ CORRECT - Nested comprehension
+# Cartesian product
+pairs = [(x, y) for x in range(3) for y in range(3)]
+# [(0,0), (0,1), (0,2), (1,0), (1,1), (1,2), (2,0), (2,1), (2,2)]
+
+# Matrix transposition
+matrix = [[1, 2, 3], [4, 5, 6]]
+transposed = [[row[i] for row in matrix] for i in range(len(matrix[0]))]
+# [[1, 4], [2, 5], [3, 6]]
+
+# Conditional expression (ternary)
+processed = [x if x > 0 else 0 for x in numbers]
+
+# Multiple conditions
+filtered = [
+    x for x in data
+    if x is not None
+    if x > 0
+    if x < 100
+]
+
+# ✅ CORRECT - Use comprehension with function call
+import numpy as np
+
+def validate_signal(signal: cp.ndarray) -> bool:
+    """Check if signal is valid."""
+    return bool(cp.any(signal))
+
+valid_signals = [
+    sig for sig in signals
+    if validate_signal(sig)
+]
+```
+
+### H. Readability Guidelines
+
+**DO use comprehensions when:**
+- The logic fits on 1-2 lines
+- The operation is simple and obvious
+- It improves performance significantly
+
+**DON'T use comprehensions when:**
+- Logic is complex and nested > 2 levels
+- Readability suffers
+- You need error handling
+
+```python
+# ⚠️ TOO COMPLEX - Use regular loop for readability
+# BAD: Hard to read
+result = [
+    func(x, y) if cond1(x) else other_func(x, y)
+    for x in data
+    if validate(x)
+    for y in get_related(x)
+    if y is not None and check(y)
+]
+
+# ✅ BETTER - Use regular loop for complex logic
+result = []
+for x in data:
+    if not validate(x):
+        continue
+    for y in get_related(x):
+        if y is None or not check(y):
+            continue
+        if cond1(x):
+            result.append(func(x, y))
+        else:
+            result.append(other_func(x, y))
+```
+
+### I. Performance Comparison
+
+```python
+# ✅ CORRECT - Comprehension (FASTEST)
+import timeit
+
+# List comprehension: ~0.065 seconds
+squares_comp = timeit.timeit(
+    '[x**2 for x in range(1000)]',
+    number=10000
+)
+
+# ❌ SLOWER - Loop with append: ~0.090 seconds
+squares_loop = timeit.timeit(
+    '''
+result = []
+for x in range(1000):
+    result.append(x**2)
+''',
+    number=10000
+)
+
+# ❌ SLOWER - map(): ~0.080 seconds
+squares_map = timeit.timeit(
+    'list(map(lambda x: x**2, range(1000)))',
+    number=10000
+)
+
+# ✅ BEST - Generator (constant memory, lazy evaluation)
+squares_gen = (x**2 for x in range(1_000_000))  # Instant, O(1) memory
+```
+
+### J. Real-World Examples
+
+```python
+# ✅ CORRECT - Data processing pipeline
+from pathlib import Path
+from typing import Generator
+
+def process_log_files(directory: Path) -> Generator[dict, None, None]:
+    """Process log files efficiently using generators."""
+    # Generator: Find all log files
+    log_files = (f for f in directory.glob("*.log") if f.is_file())
+    
+    # Generator: Read and parse lines
+    log_lines = (
+        line.strip()
+        for log_file in log_files
+        for line in log_file.open()
+        if line.strip()
+    )
+    
+    # Generator: Parse to structured data
+    parsed_logs = (
+        parse_log_line(line)
+        for line in log_lines
+        if not line.startswith('#')
+    )
+    
+    # Generator: Filter valid entries
+    return (
+        log for log in parsed_logs
+        if log.get('level') == 'ERROR'
+    )
+
+# ✅ CORRECT - Transform configuration
+config_raw = {
+    'timeout': '30',
+    'retries': '3',
+    'enabled': 'true',
+    'port': '8080'
+}
+
+# Dictionary comprehension for type conversion
+config_typed = {
+    key: int(value) if value.isdigit() else
+         value.lower() == 'true' if value.lower() in ('true', 'false') else
+         value
+    for key, value in config_raw.items()
+}
+
+# ✅ CORRECT - Filter and transform API responses
+users_data = [
+    {'name': 'Alice', 'age': 30, 'active': True},
+    {'name': 'Bob', 'age': 25, 'active': False},
+    {'name': 'Charlie', 'age': 35, 'active': True}
+]
+
+# Get names of active users
+active_names = [
+    user['name']
+    for user in users_data
+    if user.get('active', False)
+]
+
+# Create lookup dictionary
+user_lookup = {
+    user['name']: user
+    for user in users_data
+}
+
+# ✅ CORRECT - Signal processing with NumPy/CuPy
+import cupy as cp
+
+def process_signals(signals: list[cp.ndarray]) -> list[cp.ndarray]:
+    """Process multiple signals efficiently.
+    
+    Args:
+        signals: List of signal arrays.
+        
+    Returns:
+        List of normalized signals.
+    """
+    # Comprehension for batch processing
+    normalized = [
+        signal / cp.max(cp.abs(signal))
+        for signal in signals
+        if cp.any(signal)  # Skip empty signals
+    ]
+    
+    return normalized
+```
+
+### K. Anti-Patterns to Avoid
+
+```python
+# ❌ WRONG - Unnecessary list() around generator in sum/max/min
+total = sum([x**2 for x in range(1000)])  # Wastes memory
+
+# ✅ CORRECT - Use generator directly
+total = sum(x**2 for x in range(1000))  # Memory efficient
+
+
+# ❌ WRONG - Building list just to check existence
+if 'target' in [x.lower() for x in items]:  # O(n) memory + time
+    pass
+
+# ✅ CORRECT - Use generator expression
+if 'target' in (x.lower() for x in items):  # O(1) memory
+
+
+# ❌ WRONG - Filtering then mapping (two passes)
+filtered = [x for x in numbers if x > 0]
+result = [x**2 for x in filtered]
+
+# ✅ CORRECT - Combined filter and map (one pass)
+result = [x**2 for x in numbers if x > 0]
+
+
+# ❌ WRONG - Comprehension with side effects
+[print(x) for x in items]  # Creates unnecessary list
+
+# ✅ CORRECT - Use explicit loop for side effects
+for x in items:
+    print(x)
+```
+
+### L. Comprehension Checklist
+
+Before writing a loop, ask:
+- [ ] Can this be a list comprehension?
+- [ ] Should this be a generator expression (large data)?
+- [ ] Is this a set/dict creation? (use set/dict comprehension)
+- [ ] Is the logic simple enough to be readable?
+- [ ] Am I only iterating once? (use generator)
+
+**Rule of thumb:** If you're writing `result = []` followed by a loop with `append()`, use a comprehension instead.
+
+---
+
+
+## 7. Code Quality Enforcement
 
 
 ### Pre-Commit Checks
@@ -835,41 +1358,53 @@ pre-commit install
 
 **GitHub Actions** (`.github/workflows/ci.yml`):
 
+**ALL CI commands MUST use `uv run` prefix**
 
 ```yaml
 name: CI
 on: [push, pull_request]
+
 jobs:
-
-quality:
-
-runs-on: ubuntu-latest
-
-steps:
-- uses: actions/checkout@v4
-- name: Install uv
-
-uses: astral-sh/setup-uv@v1
-- name: Set up Python
-  run: uv python install 3.11
-- name: Install dependencies
-  run: |
-    uv venv
-    uv pip install -r requirements.txt
-    uv pip install ruff pytest
-- name: Run Ruff checks
-  run: uv run ruff check .
-- name: Run Ruff format check
-  run: uv run ruff format --check .
-- name: Run tests
-  run: uv run pytest
-
+  quality:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install uv
+        uses: astral-sh/setup-uv@v1
+        
+      - name: Set up Python
+        run: uv python install 3.11
+        
+      - name: Install dependencies
+        run: |
+          uv venv
+          uv sync
+          
+      - name: Verify syntax
+        run: uv run python -m py_compile **/*.py
+        
+      - name: Run Ruff checks
+        run: uv run ruff check .
+        
+      - name: Run Ruff format check
+        run: uv run ruff format --check .
+        
+      - name: Run tests with coverage
+        run: uv run pytest --cov=. --cov-report=xml --cov-report=term --cov-fail-under=100
+        
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: true
 ```
 
 
 ---
 
-## 6. Project Structure
+## 8. Project Structure
 
 ### Standard Layout
 
@@ -907,9 +1442,11 @@ project-name/
 ---
 
 
-## 7. Development Workflow
+## 9. Development Workflow
 
 ### Starting a New Feature
+
+**CRITICAL: ALL commands use `uv` or `uv run` prefix**
 
 ```bash
 # 1. Create feature branch
@@ -919,49 +1456,98 @@ git checkout -b feature/new-signal-type
 source .venv/bin/activate
 
 # 3. Install/update dependencies
-uv add -r requirements.txt
+uv sync
 
 # 4. Make changes with proper type hints and docstrings
+# - Add complete Google-style docstrings
+# - Add type hints to all parameters and returns
+# - Use Dynaconf for configuration
 
-# 5. Run quality checks
+# 5. Write tests FIRST or alongside code (TDD)
+# tests/test_new_feature.py
+uv run pytest tests/test_new_feature.py -v
+
+# 6. Verify syntax
+uv run python -m py_compile module.py
+
+# 7. Run quality checks
 uv run ruff check --fix .
 uv run ruff format .
 
-# 6. Run tests
-uv run pytest
+# 8. Run ALL tests with coverage
+uv run pytest --cov=. --cov-fail-under=100
 
-# 7. Commit and push
+# 9. Verify everything works
+uv run main.py
+
+# 10. Commit and push (only after all checks pass)
 git add .
-git commit -m "feat: add new signal type with proper typing"
+git commit -m "feat: add new signal type with tests and typing"
 git push origin feature/new-signal-type
-
 ```
+
+**Remember:** Never commit code without tests, and never commit code that doesn't pass all checks.
 
 
 ### Code Review Checklist
 
-Before submitting a PR, verify:
+**Before submitting a PR, ALL items must be verified:**
+
+#### Documentation
 - [ ] All functions have complete docstrings (Google style)
 - [ ] All parameters have type hints
 - [ ] All return values have type hints
+- [ ] Module-level docstrings present
+
+#### Configuration
 - [ ] Configuration values use Dynaconf (no hardcoded values)
+- [ ] Configuration changes documented in `defaults.toml`
+
+#### Code Quality
 - [ ] `uv run ruff check .` passes with no errors
 - [ ] `uv run ruff format .` has been applied
-- [ ] All tests pass (`uv run pytest`)
-- [ ] New functionality has tests
-- [ ] Configuration changes documented in `defaults.toml`
+- [ ] Code parses without syntax errors
+- [ ] List/set/dict comprehensions used instead of manual loops
+- [ ] Generator expressions used for memory efficiency
+- [ ] No unnecessary materializations (list wrapping generators)
+
+#### Testing (MANDATORY)
+- [ ] ALL new functions/classes have tests
+- [ ] ALL tests pass: `uv run pytest` returns 0
+- [ ] Coverage is 100%: `uv run pytest --cov=. --cov-fail-under=100`
+- [ ] ALL test commands use `uv run` prefix
+- [ ] Test names are descriptive
+
+#### UV Requirement
+- [ ] ALL package operations use `uv`
+- [ ] ALL Python/pytest commands use `uv run` prefix
+- [ ] No direct `pip`, `pytest`, or `python` commands
+
+#### Agent-Generated Code (If Applicable)
+- [ ] Agent verified code syntax before submission
+- [ ] Agent ran tests and confirmed they pass
+- [ ] Agent fixed any errors iteratively
 
 ---
 
-## 8. Testing Requirements
+## 10. Testing Requirements (MANDATORY)
 
-### Test File Structure
+**ALL code MUST have tests.** Tests are not optional - they are a required part of the development process.
+
+### A. Test Requirements
+* **100% test coverage** - Every function and class must have tests
+* **Tests MUST pass** - `uv run pytest` must return 0 exit code
+* **Use pytest framework** - Standard Python testing framework
+* **ALL tests use `uv run` prefix** - Ensures proper dependency management
+* **Tests before code review** - No untested code in PRs
+* **Fast execution** - Unit tests should run in < 5 seconds total
+* **Descriptive test names** - Test names explain what is being tested
+
+### B. Test File Structure
 
 ```python
-
 """
 Tests for OFDM signal generation.
-
 
 This module tests the core signal generation functions including chirp
 creation, OFDM modulation, and phase code optimization.
@@ -973,6 +1559,7 @@ import cupy as cp
 import numpy as np
 from generate_codes import generate_chirp_signal, generate_chirp_ofdm_signal
 from config import CONF
+
 
 class TestChirpGeneration:
     """Test suite for chirp signal generation."""
@@ -1004,55 +1591,228 @@ class TestChirpGeneration:
         with pytest.raises(ValueError):
             generate_chirp_signal(basefreq, 10e3, 50e-6, 1000)
 
+    def test_invalid_chirp_bw(self) -> None:
+        """Test that invalid chirp_bw raises ValueError."""
+        with pytest.raises(ValueError):
+            generate_chirp_signal(2e6, -10e3, 50e-6, 1000)
+
+    def test_invalid_duration(self) -> None:
+        """Test that invalid duration raises ValueError."""
+        with pytest.raises(ValueError):
+            generate_chirp_signal(2e6, 10e3, -50e-6, 1000)
+
     @pytest.fixture
     def sample_config(self) -> dict:
         """Provide sample configuration for tests."""
-
         return {
             'pulse_duration': 50e-6,
             'bandwidth': 5e6,
             'sample_rate': 20e6,
             'num_subcarriers': 250,
-            }
+        }
 
-    def test_config_loading(sample_config: dict) -> None:
+    def test_config_loading(self, sample_config: dict) -> None:
         """Test that configuration loads correctly."""
         assert 'pulse_duration' in sample_config
         assert 'bandwidth' in sample_config
         assert sample_config['sample_rate'] > 0
 
+
+class TestOFDMGeneration:
+    """Test suite for OFDM signal generation."""
+
+    def test_generate_ofdm_basic(self) -> None:
+        """Test basic OFDM signal generation."""
+        # Test implementation
+        pass
+
+    def test_generate_ofdm_with_phases(self) -> None:
+        """Test OFDM generation with phase codes."""
+        # Test implementation
+        pass
 ```
 
+### C. Test Organization
+
+**Directory Structure:**
+```
+tests/
+├── __init__.py
+├── conftest.py          # Shared fixtures
+├── test_chirp.py        # Chirp signal tests
+├── test_ofdm.py         # OFDM signal tests
+├── test_optimization.py # Optimization tests
+└── test_config.py       # Configuration tests
+```
+
+**Shared Fixtures (conftest.py):**
+```python
+"""Shared pytest fixtures for all tests."""
+
+import pytest
+from config import Settings
 
 
-### Running Tests
+@pytest.fixture
+def sample_config() -> dict:
+    """Provide sample configuration for tests."""
+    return Settings.to_dict()
 
+
+@pytest.fixture
+def sample_signal() -> cp.ndarray:
+    """Generate sample signal for testing."""
+    return cp.random.randn(1000) + 1j * cp.random.randn(1000)
+```
+
+### D. Running Tests (ALWAYS with `uv run`)
+
+**CRITICAL: ALL test commands MUST use `uv run` prefix**
 
 ```bash
-# Run all tests
+# ✅ CORRECT - Run all tests
 uv run pytest
 
-# Run with coverage
-uv run pytest --cov=generate_codes --cov-report=html
+# ✅ CORRECT - Run with coverage
+uv run pytest --cov=generate_codes --cov-report=html --cov-report=term
 
-# Run specific test file
+# ✅ CORRECT - Run specific test file
 uv run pytest tests/test_chirp.py
 
-# Run specific test
+# ✅ CORRECT - Run specific test
 uv run pytest tests/test_chirp.py::TestChirpGeneration::test_generate_chirp_signal_basic
 
-# Run with verbose output
+# ✅ CORRECT - Run with verbose output
 uv run pytest -v
 
-# Run tests matching pattern
+# ✅ CORRECT - Run tests matching pattern
 uv run pytest -k "chirp"
 
+# ✅ CORRECT - Run with coverage threshold
+uv run pytest --cov=generate_codes --cov-fail-under=100
+
+# ❌ WRONG - Missing uv run prefix
+pytest                    # Don't do this
+pytest --cov=.           # Don't do this
+python -m pytest         # Don't do this
+```
+
+### E. Test Coverage Requirements
+
+**100% coverage is MANDATORY:**
+
+```bash
+# Generate coverage report
+uv run pytest --cov=generate_codes --cov-report=html --cov-report=term-missing
+
+# View coverage in browser
+open htmlcov/index.html  # macOS
+xdg-open htmlcov/index.html  # Linux
+```
+
+**Coverage must show:**
+```
+Name                        Stmts   Miss  Cover   Missing
+---------------------------------------------------------
+generate_codes/__init__.py     45      0   100%
+generate_codes/chirp.py       123      0   100%
+generate_codes/ofdm.py        234      0   100%
+---------------------------------------------------------
+TOTAL                         402      0   100%
+```
+
+### F. Test-Driven Development (TDD)
+
+**ALWAYS write tests before or alongside code:**
+
+1. **Write the test first:**
+```python
+def test_new_feature() -> None:
+    """Test the new feature that doesn't exist yet."""
+    result = new_feature(input_data)
+    assert result == expected_output
+```
+
+2. **Run the test (it will fail):**
+```bash
+uv run pytest tests/test_new_feature.py
+```
+
+3. **Implement the feature:**
+```python
+def new_feature(input_data: Any) -> Any:
+    """Implement the feature."""
+    # Implementation
+    return output
+```
+
+4. **Run the test again (it should pass):**
+```bash
+uv run pytest tests/test_new_feature.py
+```
+
+### G. Pytest Best Practices
+
+**Use parametrize for multiple test cases:**
+```python
+@pytest.mark.parametrize(
+    "input_value,expected_output",
+    [
+        (0, 0),
+        (1, 1),
+        (2, 4),
+        (3, 9),
+        (-1, 1),
+    ]
+)
+def test_square_function(input_value: int, expected_output: int) -> None:
+    """Test square function with multiple inputs."""
+    assert square(input_value) == expected_output
+```
+
+**Use fixtures for setup:**
+```python
+@pytest.fixture
+def temp_file(tmp_path):
+    """Create a temporary file for testing."""
+    file_path = tmp_path / "test.txt"
+    file_path.write_text("test content")
+    return file_path
+
+
+def test_file_reading(temp_file) -> None:
+    """Test reading from file."""
+    content = read_file(temp_file)
+    assert content == "test content"
+```
+
+**Test exceptions properly:**
+```python
+def test_raises_value_error() -> None:
+    """Test that function raises ValueError for invalid input."""
+    with pytest.raises(ValueError, match="must be positive"):
+        process_value(-1)
+```
+
+### H. Integration with CI/CD
+
+**GitHub Actions must run tests:**
+```yaml
+# .github/workflows/ci.yml
+- name: Run tests with coverage
+  run: |
+    uv run pytest --cov=. --cov-report=xml --cov-fail-under=100
+    
+- name: Upload coverage
+  uses: codecov/codecov-action@v3
+  with:
+    files: ./coverage.xml
 ```
 
 ---
 
 
-## 9. Example: Compliant Function
+## 11. Example: Compliant Function
 
 
 Here's a complete example following all guidelines:
@@ -1170,67 +1930,116 @@ def correlate_two_signals(
 
 
 
-## 10. Quick Reference
+## 12. Quick Reference
 
 
 ### Command Cheat Sheet
 
+**CRITICAL: ALL commands MUST use `uv` or `uv run` prefix**
 
 ```bash
 # Package management
-uv venv # Create virtual environment
-uv add package # Install package
-uv add -r requirements.txt # Install from file
-uv pip freeze > requirements.txt # Save dependencies
+uv venv                              # Create virtual environment
+uv add package                       # Install package
+uv add package==1.2.3               # Install specific version
+uv add -r requirements.txt          # Install from file
+uv add --dev pytest ruff            # Install dev dependencies
+uv pip freeze > requirements.txt    # Save dependencies
 
-# Code quality
+# Code quality (ALWAYS use uv run)
+uv run ruff check .                 # Check code
+uv run ruff check --fix .           # Auto-fix issues
+uv run ruff format .                # Format code
+uv run mypy .                       # Type checking (optional)
 
-uv run ruff check . # Check code
-uv run ruff check --fix . # Auto-fix issues
-uv run ruff format . # Format code
+# Testing (ALWAYS use uv run - MANDATORY)
+uv run pytest                       # Run all tests
+uv run pytest -v                    # Run with verbose output
+uv run pytest --cov=.               # Run with coverage
+uv run pytest --cov=. --cov-fail-under=100  # Enforce 100% coverage
+uv run pytest tests/test_module.py  # Run specific test file
+uv run pytest -k "test_name"        # Run tests matching pattern
 
-# Testing
-
-uv run pytest # Run tests
-uv run pytest --cov=. # Run with coverage
-
-
+# Running Python scripts (ALWAYS use uv run)
+uv run main.py                      # Run main script
+uv run python -m module             # Run as module
 
 # Configuration
-export ENV_FOR_DYNACONF=development # Set environment
-python -c "from config import Settings; print(Settings.to_dict())" # View config
+export ENV_FOR_DYNACONF=development  # Set environment
+uv run python -c "from config import Settings; print(Settings.to_dict())"  # View config
+```
 
+**❌ NEVER do this:**
+```bash
+pytest                              # Missing uv run
+python main.py                      # Missing uv run
+pip install package                 # Use uv add instead
+ruff check .                        # Missing uv run
 ```
 
 
 ### Validation Checklist
 
+**Before committing code, ALL items must be checked:**
 
-Before committing code, ensure:
+#### Agent-Generated Code (If Applicable)
+- [ ] Agent verified Python syntax is valid
+- [ ] Agent ran `uv run pytest` and all tests passed
+- [ ] Agent fixed any errors before presenting code
 
+#### Package Management
 - [ ] Using `uv` for all package operations
+- [ ] All commands use `uv run` prefix
+- [ ] No direct `pip`, `pytest`, or `python` commands
+
+#### Configuration
 - [ ] All config in TOML files (Dynaconf)
-- [ ] Every function has complete docstring
+- [ ] No hardcoded values in source code
+- [ ] Configuration validated on load
+
+#### Documentation
+- [ ] Every function has complete docstring (Google style)
+- [ ] Every class has complete docstring
+- [ ] Module has docstring
 - [ ] All parameters have type hints
-- [ ] `uv run ruff check .` passes
+- [ ] All return values have type hints
+
+#### Code Quality
+- [ ] `uv run ruff check .` passes with no errors
 - [ ] `uv run ruff format .` applied
-- [ ] Tests written for new code
-- [ ] Tests pass: `uv run pytest`
+- [ ] Code follows all style guidelines
+- [ ] Comprehensions used instead of manual loops where appropriate
+- [ ] Generator expressions used for large datasets
+- [ ] No unnecessary list() around generators in sum/max/min
+
+#### Testing (MANDATORY)
+- [ ] Tests written for ALL new functions/classes
+- [ ] Tests pass: `uv run pytest` returns 0
+- [ ] Coverage is 100%: `uv run pytest --cov=. --cov-fail-under=100`
+- [ ] All tests use `uv run pytest` prefix
+- [ ] Test names are descriptive
+
+#### Final Verification
+- [ ] Code runs without errors: `uv run main.py`
+- [ ] All dependencies properly specified
+- [ ] No syntax errors (code parses correctly)
 
 
 ---
 
 
-## 11. Enforcement
+## 13. Enforcement
 
 ### Automated Checks
 
-These checks run automatically on every commit/PR:
+These checks run automatically on every commit/PR (ALL with `uv run`):
 
 1. **Pre-commit hooks** - Local validation before commit
 2. **GitHub Actions CI** - Server-side validation on push
-3. **Ruff checks** - Type hints, formatting, style
-4. **Pytest** - Unit and integration tests
+3. **Ruff checks** - Type hints, formatting, style (`uv run ruff check`)
+4. **Pytest** - Unit and integration tests (`uv run pytest`)
+5. **Coverage checks** - 100% coverage required (`uv run pytest --cov-fail-under=100`)
+6. **Syntax validation** - Code must parse without errors
 
 ### Manual Review
 
@@ -1238,7 +2047,10 @@ Code reviewers will verify:
 - Docstring completeness and quality
 - Type hint correctness and coverage
 - Configuration management practices
-- Testing coverage and quality
+- Testing coverage and quality (100% required)
+- All commands use `uv run` prefix
+- Tests exist for all new code
+- Agent-generated code was verified before submission
 
 ### Violations
 
@@ -1247,7 +2059,13 @@ Code that violates these guidelines will be **rejected** with feedback:
 - Missing type hints → Request type annotations
 - Hardcoded config values → Request Dynaconf migration
 - Not using `uv` → Request dependency management fix
+- Not using `uv run` prefix → Request command correction
 - Failing Ruff checks → Request code quality fixes
+- Missing tests → Request test implementation
+- Tests not passing → Fix code until tests pass
+- Coverage < 100% → Add tests for uncovered code
+- Syntax errors → Fix code to parse correctly
+- Agent code not verified → Re-verify with proper checks
 
 ---
 
@@ -1263,6 +2081,21 @@ Code that violates these guidelines will be **rejected** with feedback:
 
 ---
 
-**Last Updated:** 2024-11-03
-**Version:** 1.0
+## Summary
+
+This guide enforces:
+1. **UV-only dependency management** - All operations through `uv`, all commands with `uv run`
+2. **100% test coverage** - Every function must have tests that pass
+3. **Agent verification** - AI-generated code must be syntax-checked and tested
+4. **Complete documentation** - Google-style docstrings with type hints
+5. **Dynaconf configuration** - No hardcoded values
+6. **Pythonic comprehensions** - Prefer list/set/dict/generator comprehensions for performance and clarity
+7. **Ruff code quality** - Clean, formatted, type-safe code
+
+**Failure to follow these guidelines will result in code rejection.**
+
+---
+
+**Last Updated:** 2026-01-15
+**Version:** 2.0
 **Maintainer:** Development Team
