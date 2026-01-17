@@ -8,14 +8,590 @@ Objective: Generate production-ready, maintainable, and highly optimized docker-
 Tools: Docker Compose v2.x+, Docker Engine 24.x+, YAML 1.2 Standards.
 
 ## 1. Core Philosophies
-The agent must adhere to the "Four Pillars" standard for every docker-compose.yml generated:
+The agent must adhere to the "SIX PILLARS" standard for every docker-compose.yml generated:
 
 **Declarative**: Define desired state, not imperative commands.
 **Reproducible**: Same compose file = same environment (dev/staging/prod parity).
 **Secure**: Secrets management, least privilege, network isolation.
 **Maintainable**: Clear structure, comments, version control friendly.
+**Modular**: Separate components in individual files, composed with `include`.
+**Hexagonal**: Layer separation (domain, application, infrastructure) reflected in compose structure.
 
-## 2. Mandatory Structure Requirements
+## 2. Hexagonal Architecture & Modular Composition (MANDATORY)
+
+### A. Architecture Principles
+
+Docker Compose configurations MUST follow hexagonal (ports & adapters) architecture:
+
+- **Domain Layer**: Core business services (APIs, workers, schedulers)
+- **Infrastructure Layer**: External dependencies (databases, caches, message queues)
+- **Adapters Layer**: Gateways, proxies, load balancers, API gateways
+- **Observability Layer**: Monitoring, logging, tracing services
+
+### B. Modular File Structure
+
+**CRITICAL: Each architectural layer MUST be in a separate compose file, combined using `include`.**
+
+```
+project/
+├── docker-compose.yml           # Main entry point (uses include)
+├── compose/
+│   ├── domain/
+│   │   ├── api-services.yml      # Core API services
+│   │   ├── worker-services.yml   # Background workers
+│   │   └── scheduler-services.yml # Cron/scheduled jobs
+│   ├── infrastructure/
+│   │   ├── databases.yml         # PostgreSQL, MongoDB, etc.
+│   │   ├── caches.yml            # Redis, Memcached
+│   │   ├── messaging.yml         # RabbitMQ, Kafka, NATS
+│   │   └── storage.yml           # MinIO, S3-compatible storage
+│   ├── adapters/
+│   │   ├── gateway.yml           # API Gateway (Traefik, Kong)
+│   │   ├── proxy.yml             # Reverse proxy (Nginx)
+│   │   └── auth.yml              # Auth service (Keycloak, Auth0)
+│   ├── observability/
+│   │   ├── monitoring.yml        # Prometheus, Grafana
+│   │   ├── logging.yml           # Loki, Elasticsearch
+│   │   └── tracing.yml           # Jaeger, Tempo
+│   └── shared/
+│       ├── networks.yml          # Shared network definitions
+│       ├── volumes.yml           # Shared volume definitions
+│       └── secrets.yml           # Shared secrets
+├── docker-compose.dev.yml       # Development overrides
+├── docker-compose.prod.yml      # Production overrides
+└── .env
+```
+
+### C. Using `include` Directive
+
+The main `docker-compose.yml` uses `include` to compose modular files:
+
+```yaml
+# docker-compose.yml - Main composition file
+name: myapp-stack
+
+# Include modular compose files
+include:
+  # Shared resources (must be first)
+  - compose/shared/networks.yml
+  - compose/shared/volumes.yml
+  - compose/shared/secrets.yml
+  
+  # Infrastructure layer (databases, queues, caches)
+  - compose/infrastructure/databases.yml
+  - compose/infrastructure/caches.yml
+  - compose/infrastructure/messaging.yml
+  
+  # Domain layer (core business services)
+  - compose/domain/api-services.yml
+  - compose/domain/worker-services.yml
+  
+  # Adapters layer (gateways, proxies)
+  - compose/adapters/gateway.yml
+  - compose/adapters/proxy.yml
+  
+  # Observability layer (optional for production)
+  - path: compose/observability/monitoring.yml
+    env_file: .env.monitoring
+  - path: compose/observability/logging.yml
+    env_file: .env.logging
+
+# Global defaults (optional)
+services:
+  x-common-logging: &default-logging
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+```
+
+### D. Modular File Examples
+
+#### 1. Infrastructure Layer - Databases
+
+```yaml
+# compose/infrastructure/databases.yml
+name: infrastructure-databases
+
+services:
+  postgres:
+    image: postgres:16.1-alpine3.19
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${DB_NAME}
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d:ro
+    networks:
+      - database
+    secrets:
+      - db_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+    labels:
+      com.example.layer: "infrastructure"
+      com.example.component: "database"
+```
+
+#### 2. Infrastructure Layer - Caches
+
+```yaml
+# compose/infrastructure/caches.yml
+name: infrastructure-caches
+
+services:
+  redis:
+    image: redis:7.2-alpine3.19
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    networks:
+      - cache
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "--pass", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 768M
+    labels:
+      com.example.layer: "infrastructure"
+      com.example.component: "cache"
+```
+
+#### 3. Domain Layer - API Services
+
+```yaml
+# compose/domain/api-services.yml
+name: domain-api
+
+services:
+  user-service:
+    image: mycompany/user-service:${USER_SERVICE_VERSION}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=user-service
+      - PORT=3001
+      - DB_HOST=postgres
+      - CACHE_HOST=redis
+    expose:
+      - "3001"
+    networks:
+      - backend
+      - database
+      - cache
+    secrets:
+      - db_password
+      - jwt_secret
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+    labels:
+      com.example.layer: "domain"
+      com.example.component: "api"
+      com.example.service: "user-service"
+
+  order-service:
+    image: mycompany/order-service:${ORDER_SERVICE_VERSION}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=order-service
+      - PORT=3002
+      - DB_HOST=postgres
+      - CACHE_HOST=redis
+    expose:
+      - "3002"
+    networks:
+      - backend
+      - database
+      - cache
+    secrets:
+      - db_password
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+    labels:
+      com.example.layer: "domain"
+      com.example.component: "api"
+      com.example.service: "order-service"
+```
+
+#### 4. Domain Layer - Workers
+
+```yaml
+# compose/domain/worker-services.yml
+name: domain-workers
+
+services:
+  email-worker:
+    image: mycompany/email-worker:${WORKER_VERSION}
+    restart: unless-stopped
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - WORKER_TYPE=email
+      - QUEUE_HOST=rabbitmq
+    networks:
+      - backend
+      - messaging
+    secrets:
+      - smtp_credentials
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    labels:
+      com.example.layer: "domain"
+      com.example.component: "worker"
+      com.example.worker-type: "email"
+
+  notification-worker:
+    image: mycompany/notification-worker:${WORKER_VERSION}
+    restart: unless-stopped
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - WORKER_TYPE=notification
+      - QUEUE_HOST=rabbitmq
+    networks:
+      - backend
+      - messaging
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    labels:
+      com.example.layer: "domain"
+      com.example.component: "worker"
+      com.example.worker-type: "notification"
+```
+
+#### 5. Adapters Layer - Gateway
+
+```yaml
+# compose/adapters/gateway.yml
+name: adapters-gateway
+
+services:
+  traefik:
+    image: traefik:v3.0
+    restart: unless-stopped
+    command:
+      - --api.dashboard=true
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}
+      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+      - --metrics.prometheus=true
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-certs:/letsencrypt
+    networks:
+      - public
+      - backend
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+    labels:
+      com.example.layer: "adapter"
+      com.example.component: "gateway"
+      # Traefik dashboard
+      traefik.enable: "true"
+      traefik.http.routers.dashboard.rule: "Host(`traefik.${DOMAIN}`)"
+      traefik.http.routers.dashboard.service: "api@internal"
+```
+
+#### 6. Shared - Networks
+
+```yaml
+# compose/shared/networks.yml
+name: shared-networks
+
+networks:
+  # Public-facing network
+  public:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: app-public
+    labels:
+      com.example.layer: "adapter"
+  
+  # Backend services network
+  backend:
+    driver: bridge
+    internal: false
+    labels:
+      com.example.layer: "domain"
+  
+  # Database network (isolated)
+  database:
+    driver: bridge
+    internal: true
+    labels:
+      com.example.layer: "infrastructure"
+      com.example.isolated: "true"
+  
+  # Cache network
+  cache:
+    driver: bridge
+    internal: false
+    labels:
+      com.example.layer: "infrastructure"
+  
+  # Messaging network
+  messaging:
+    driver: bridge
+    internal: true
+    labels:
+      com.example.layer: "infrastructure"
+  
+  # Monitoring network
+  monitoring:
+    driver: bridge
+    labels:
+      com.example.layer: "observability"
+```
+
+#### 7. Shared - Volumes
+
+```yaml
+# compose/shared/volumes.yml
+name: shared-volumes
+
+volumes:
+  # Database volumes
+  postgres-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/data/postgres
+    labels:
+      com.example.layer: "infrastructure"
+      com.example.component: "database"
+  
+  # Cache volumes
+  redis-data:
+    driver: local
+    labels:
+      com.example.layer: "infrastructure"
+      com.example.component: "cache"
+  
+  # Gateway volumes
+  traefik-certs:
+    driver: local
+    labels:
+      com.example.layer: "adapter"
+      com.example.component: "gateway"
+  
+  # Monitoring volumes
+  prometheus-data:
+    driver: local
+    labels:
+      com.example.layer: "observability"
+  
+  grafana-data:
+    driver: local
+    labels:
+      com.example.layer: "observability"
+```
+
+#### 8. Shared - Secrets
+
+```yaml
+# compose/shared/secrets.yml
+name: shared-secrets
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
+  
+  jwt_secret:
+    file: ./secrets/jwt_secret.txt
+  
+  smtp_credentials:
+    file: ./secrets/smtp_credentials.txt
+  
+  api_key:
+    external: true
+    name: production_api_key
+```
+
+### E. Environment-Specific Composition
+
+Use environment-specific files that also leverage modular structure:
+
+```yaml
+# docker-compose.dev.yml - Development overrides
+include:
+  - compose/shared/networks.yml
+  - compose/shared/volumes.yml
+  - compose/infrastructure/databases.yml
+  - compose/infrastructure/caches.yml
+  - compose/domain/api-services.yml
+  # Note: No observability layer in dev
+
+services:
+  # Override user-service for development
+  user-service:
+    build:
+      context: ./services/user-service
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./services/user-service:/app:cached
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - DEBUG=app:*
+    ports:
+      - "3001:3001"
+      - "9229:9229"  # Debugger
+```
+
+```yaml
+# docker-compose.prod.yml - Production overrides
+include:
+  - compose/shared/networks.yml
+  - compose/shared/volumes.yml
+  - compose/shared/secrets.yml
+  - compose/infrastructure/databases.yml
+  - compose/infrastructure/caches.yml
+  - compose/infrastructure/messaging.yml
+  - compose/domain/api-services.yml
+  - compose/domain/worker-services.yml
+  - compose/adapters/gateway.yml
+  - compose/observability/monitoring.yml
+  - compose/observability/tracing.yml
+
+services:
+  # Production-specific overrides
+  user-service:
+    image: mycompany/user-service:${USER_SERVICE_VERSION}@sha256:${USER_SERVICE_DIGEST}
+    deploy:
+      replicas: 4
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+    restart: always
+```
+
+### F. Commands for Modular Composition
+
+```bash
+# Development (limited layers)
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+# Production (all layers)
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+# Only infrastructure layer
+docker compose -f compose/infrastructure/databases.yml up -d
+
+# Specific service layers
+docker compose -f docker-compose.yml up postgres redis user-service
+
+# Validate entire composition
+docker compose config
+
+# View merged configuration
+docker compose config --no-interpolate > merged-compose.yml
+```
+
+### G. Benefits of Modular Hexagonal Approach
+
+1. **Layer Isolation**: Infrastructure changes don't affect domain services
+2. **Independent Scaling**: Scale only the layers that need it
+3. **Team Ownership**: Different teams own different compose files
+4. **Environment Flexibility**: Include only needed layers per environment
+5. **Testing Simplicity**: Test each layer independently
+6. **Deployment Control**: Deploy layers in correct dependency order
+7. **Maintenance**: Smaller, focused files are easier to understand and modify
+8. **Reusability**: Share infrastructure layer across multiple projects
+
+### H. Mandatory Labels for Layers
+
+All services MUST include layer identification labels:
+
+```yaml
+labels:
+  com.example.layer: "domain|infrastructure|adapter|observability"
+  com.example.component: "api|worker|database|cache|gateway|etc"
+  com.example.service: "service-name"
+```
+
+## 3. Mandatory Structure Requirements
 
 ### A. File Format & Versioning
 * **File Name**: Use `docker-compose.yml` (preferred) or `docker-compose.yaml`.
@@ -841,6 +1417,17 @@ clean:
 ## 7. Validation & Testing
 
 ### Pre-Deployment Checklist
+
+#### Modular Architecture (MANDATORY)
+- [ ] **Separate compose files per layer** (domain, infrastructure, adapters, observability)
+- [ ] **Main docker-compose.yml uses `include`** to compose modular files
+- [ ] **Layer labels present** on all services (`com.example.layer`)
+- [ ] **Component labels present** on all services (`com.example.component`)
+- [ ] **Directory structure follows hexagonal pattern** (`compose/domain/`, `compose/infrastructure/`, etc.)
+- [ ] **Shared resources in dedicated files** (networks.yml, volumes.yml, secrets.yml)
+- [ ] **Environment overrides are modular** (dev/staging/prod files also use include)
+
+#### Security & Configuration
 - [ ] All images have specific version tags (no `:latest`)
 - [ ] Secrets use `secrets:` or external secret management
 - [ ] Health checks defined for all critical services
@@ -852,19 +1439,53 @@ clean:
 - [ ] Restart policies configured appropriately
 - [ ] Labels added for documentation and filtering
 
+#### Hexagonal Architecture Verification
+- [ ] **Infrastructure layer isolated** (databases, caches, messaging in separate networks)
+- [ ] **Domain services don't expose ports** directly (use expose, not ports)
+- [ ] **Adapters handle external traffic** (gateways, proxies with public network)
+- [ ] **Observability layer is optional** (can be excluded from dev environment)
+- [ ] **Dependencies flow inward** (domain depends on infrastructure, not vice versa)
+
 ### Validation Commands
+
 ```bash
-# Validate compose file syntax
+# Validate main compose file with all includes
 docker compose config
 
-# Validate and view final configuration
+# Validate and view final merged configuration
 docker compose config --quiet && echo "✅ Valid"
 
-# Check for configuration issues
+# View merged configuration without interpolation (for debugging)
+docker compose config --no-interpolate
+
+# Check for configuration issues with image digests
 docker compose config --resolve-image-digests
 
-# Dry-run to check images
+# Validate specific modular file
+docker compose -f compose/infrastructure/databases.yml config
+
+# List all services from merged composition
+docker compose config --services
+
+# List all networks from merged composition
+docker compose config --volumes
+
+# Dry-run to check all images are accessible
 docker compose pull --dry-run
+
+# Validate modular structure (check that files exist)
+test -f docker-compose.yml && \
+test -d compose/infrastructure && \
+test -d compose/domain && \
+test -d compose/adapters && \
+test -d compose/shared && \
+echo "✅ Modular structure valid" || \
+echo "❌ Missing required directories"
+
+# Verify all services have layer labels
+docker compose config --format json | \
+jq -r '.services | to_entries[] | select(.value.labels["com.example.layer"] == null) | .key' | \
+(grep . && echo "❌ Services missing layer labels" || echo "✅ All services have layer labels")
 ```
 
 ## 8. Interaction Protocol
@@ -875,19 +1496,33 @@ docker compose pull --dry-run
 
 1. **Analyze Context**: Django = Python web framework, needs WSGI server, static files, database migrations.
 
-2. **Select Pattern**: Multi-service setup (nginx → gunicorn → django, postgresql, redis).
+2. **Design Architecture**: Identify layers:
+   - Infrastructure: PostgreSQL, Redis
+   - Domain: Django API/WSGI service, worker processes
+   - Adapters: Nginx reverse proxy
+   - Observability: (optional) Prometheus, logging
 
-3. **Draft Configuration**: Apply security hardening, health checks, proper networking, and volume management.
+3. **Create Modular Structure**: 
+   - `compose/infrastructure/databases.yml` (PostgreSQL)
+   - `compose/infrastructure/caches.yml` (Redis)
+   - `compose/domain/api-services.yml` (Django/Gunicorn)
+   - `compose/adapters/proxy.yml` (Nginx)
+   - `compose/shared/networks.yml`, `volumes.yml`, `secrets.yml`
+   - Main `docker-compose.yml` with `include` directives
 
-4. **Environment Separation**: Provide base compose + development override.
+4. **Apply Best Practices**: Security hardening, health checks, proper networking, resource limits.
 
-5. **Review Against Four Pillars**: 
+5. **Environment Separation**: Provide environment-specific overrides (dev/staging/prod) that also use modular includes.
+
+6. **Review Against Six Pillars**: 
    - Declarative ✓
    - Reproducible ✓ (pinned versions)
    - Secure ✓ (secrets, non-root, isolated networks)
    - Maintainable ✓ (clear structure, comments)
+   - Modular ✓ (separate files per layer, include composition)
+   - Hexagonal ✓ (infrastructure/domain/adapter separation)
 
-6. **Output**: Return complete docker-compose.yml + .env template + brief explanation of design decisions.
+7. **Output**: Return modular compose files + directory structure + .env template + brief explanation of design decisions.
 
 ## 9. Common Anti-Patterns to AVOID
 
@@ -1100,11 +1735,30 @@ services:
 
 7. **Environment Overrides**: Multiple compose files allow reusing base configuration across dev/staging/prod while customizing as needed.
 
+8. **Modular Composition with `include`**: Breaking compose configurations into separate files per architectural layer provides:
+   - **Team Autonomy**: Different teams can own and modify their layers independently without conflicts
+   - **Selective Deployment**: Deploy only the layers needed for specific environments (e.g., skip observability in dev)
+   - **Easier Testing**: Test each layer in isolation before integration
+   - **Reduced Complexity**: Smaller, focused files are easier to understand, review, and maintain
+   - **Reusability**: Share common infrastructure layers across multiple projects
+   - **Version Control**: Clearer git history and easier code reviews with focused file changes
+
+9. **Hexagonal Architecture**: Mapping docker-compose structure to hexagonal architecture principles ensures:
+   - **Clear Boundaries**: Infrastructure (databases, caches) isolated from domain logic (APIs, workers)
+   - **Dependency Direction**: Domain services depend on infrastructure, never the reverse
+   - **Port Isolation**: Domain services use `expose` (internal), adapters use `ports` (external)
+   - **Network Segmentation**: Each layer has appropriate network access (database network is internal-only)
+   - **Independent Scaling**: Scale domain services without affecting infrastructure capacity
+   - **Technology Flexibility**: Swap infrastructure components (e.g., PostgreSQL → MySQL) without touching domain services
+   - **Security by Design**: Adapters act as security boundaries, domain core never exposed directly
+
 ---
 
 ## References & Further Reading
 
 - [Compose Specification](https://docs.docker.com/compose/compose-file/)
+- [Docker Compose `include` directive](https://docs.docker.com/compose/compose-file/14-include/)
 - [Docker Compose Best Practices](https://docs.docker.com/develop/dev-best-practices/)
 - [12-Factor App Methodology](https://12factor.net/)
+- [Hexagonal Architecture (Ports & Adapters)](https://alistair.cockburn.us/hexagonal-architecture/)
 - [OWASP Docker Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Docker_Security_Cheat_Sheet.html)
