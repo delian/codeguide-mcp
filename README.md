@@ -9,7 +9,10 @@ This MCP server exposes coding guidelines and style guides as resources that can
 ## Features
 
 - **Resource-based API**: Exposes coding guides through MCP resources
-- **Simple file-based storage**: Guides are stored as Markdown files in the `guides/` directory
+- **GitHub integration**: Loads guides from GitHub repositories over the web
+- **Automatic caching**: Caches downloaded guides locally for offline access
+- **Fallback support**: Uses local cache or directory when network is unavailable
+- **Simple file-based storage**: Guides can be stored as Markdown files locally
 - **FastMCP framework**: Built on the efficient FastMCP library for quick development
 - **Easy integration**: Works with any MCP-compatible client (Claude Desktop, Cline, etc.)
 
@@ -43,20 +46,53 @@ docker run -i codeguide-mcp
 
 ## Configuration
 
-Configure the server by creating a `settings.toml` file or setting environment variables:
+Configure the server by creating a `config.toml` file or setting environment variables:
+
+### GitHub Configuration (Recommended)
+
+To load guides from a GitHub repository:
+
+```toml
+github_repo = "owner/repository"  # e.g., "delian/codeguide-mcp"
+github_path = "guides"            # Path to guides directory in repo
+github_branch = "main"            # Branch to fetch from
+cache_dir = ".guides_cache"       # Local cache directory
+log_level = "INFO"
+```
+
+### Local Directory Configuration
+
+To use local guides only:
 
 ```toml
 guides_dir = "guides"
 log_level = "INFO"
 ```
 
-Environment variables:
-- `GUIDES_DIR` - Directory containing guide files (default: `guides`)
-- `LOG_LEVEL` - Logging level (default: `INFO`)
+### Environment Variables
+
+- `GUIDES_GITHUB_REPO` - GitHub repository (format: `owner/repo`)
+- `GUIDES_GITHUB_PATH` - Path to guides directory in repository (default: `guides`)
+- `GUIDES_GITHUB_BRANCH` - Branch to fetch from (default: `main`)
+- `GUIDES_CACHE_DIR` - Local cache directory (default: `.guides_cache`)
+- `GUIDES_DIR` - Local directory containing guide files (default: `guides`)
+- `GUIDES_LOG_LEVEL` - Logging level (default: `INFO`)
+
+### Behavior
+
+1. **Network available + GitHub configured**: Fetches guides from GitHub and caches them locally
+2. **Network unavailable**: Uses local cache if available
+3. **No cache available**: Falls back to local `guides_dir` if configured
 
 ## Adding Guides
 
-Simply add Markdown files to the `guides/` directory. Each file will be automatically available as a resource.
+### Using GitHub (Recommended)
+
+If you've configured `github_repo`, simply add Markdown files to the specified directory in your GitHub repository. The server will automatically fetch and cache them.
+
+### Using Local Directory
+
+Add Markdown files to the `guides/` directory. Each file will be automatically available as a resource.
 
 Example:
 ```bash

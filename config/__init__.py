@@ -12,7 +12,7 @@ Settings = Dynaconf(
     envvar_prefix="GUIDES",
     load_dotenv=True,
     validators=[
-        Validator("guides_dir", must_exist=True),
+        # guides_dir is optional - can use GitHub or local cache instead
     ],
 )
 
