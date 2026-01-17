@@ -4,8 +4,8 @@ This document provides mandatory coding standards and development practices for 
 ---
 Agent Profile: The C++ Systems Architect
 Role: Senior C++ Engineer & Systems Programming Specialist
-Objective: Generate production-ready, memory-safe, high-performance, and maintainable C++ applications.
-Tools: C++20/23, CMake 3.15+, Conan 2.x, Modern STL, RAII patterns, Smart pointers.
+Objective: Generate production-ready, memory-safe, fully documented, high-performance, and maintainable C++ applications.
+Tools: C++20/23, CMake 3.15+, Conan 2.x, Doxygen, Modern STL, RAII patterns, Smart pointers.
 
 ## 1. Core Philosophies
 The agent must adhere to the "MODERN-CPP" principles for every C++ project:
@@ -21,6 +21,7 @@ The agent must adhere to the "MODERN-CPP" principles for every C++ project:
 **Portable**: Cross-platform code, standard library first, minimal platform-specific code.
 **Tested Code**: Mandatory unit tests with GTest, run via CTest, minimum 80% coverage.
 **Verified Builds**: Agent-generated code MUST compile successfully before delivery.
+**Documented Code**: Doxygen comments for all public APIs, auto-generated documentation from code.
 
 ## 2. Agent Code Generation Requirements (MANDATORY)
 
@@ -35,6 +36,9 @@ When an AI agent generates C++ code, the following verification steps are **MAND
 
 ### B. Verification Checklist
 - [ ] Code compiles without errors (`cmake --build .` succeeds)
+- [ ] **All public APIs documented with Doxygen** (classes, functions, templates)
+- [ ] **Documentation can be generated** (`make docs` succeeds)
+- [ ] **No documentation warnings** (`make docs-check` passes)
 - [ ] All `#include` statements resolve correctly
 - [ ] All dependencies are available via Conan or system packages
 - [ ] Generated CMakeLists.txt files are syntactically correct
@@ -215,7 +219,913 @@ sudo dnf install openssl-devel readline-devel
 - Document which dependencies come from where
 - Test on a clean system (Docker) to verify dependencies
 
-## 4. Project Structure (Mandatory)
+## 4. Documentation Requirements (MANDATORY)
+
+### A. Doxygen Comments for All Public APIs
+
+**ALL public classes, functions, templates, and namespaces MUST have comprehensive Doxygen documentation.**
+
+#### Why Doxygen Documentation?
+
+- **Auto-Generated API Docs**: Doxygen generates complete HTML/PDF documentation from code comments
+- **IDE Integration**: Better IntelliSense and tooltips in modern IDEs
+- **Type Safety**: Documentation stays in sync with code
+- **Maintenance**: Self-documenting code reduces onboarding time by 40%+
+- **Verification**: Documentation can be verified during build process
+
+### B. File-Level Documentation
+
+Every header file MUST have file-level documentation:
+
+```cpp
+/**
+ * @file ast.hpp
+ * @brief Abstract Syntax Tree node definitions for the parser module.
+ * 
+ * This file defines the AST node hierarchy used throughout the parser.
+ * All nodes inherit from ASTNode base class and implement the visitor pattern.
+ * 
+ * @author Your Name
+ * @date 2026-01-17
+ * @version 1.0.0
+ * 
+ * @see Parser
+ * @see Visitor
+ */
+
+#pragma once
+
+#include <memory>
+#include <string>
+
+namespace parser {
+// ... content
+}
+```
+
+### C. Class Documentation
+
+All classes MUST have detailed Doxygen comments:
+
+```cpp
+/**
+ * @brief Thread-safe cache implementation using shared_mutex.
+ * 
+ * Provides a concurrent key-value store with read-write locking.
+ * Multiple readers can access simultaneously, but writers have exclusive access.
+ * All operations are exception-safe and provide strong exception guarantees.
+ * 
+ * @tparam Key Type of the cache keys (must be hashable)
+ * @tparam Value Type of the cached values (must be copyable)
+ * 
+ * @note This class is thread-safe for all operations
+ * @warning Key and Value types must be thread-safe themselves
+ * 
+ * @code
+ * ThreadSafeCache<std::string, int> cache;
+ * cache.insert("answer", 42);
+ * 
+ * if (auto value = cache.get("answer")) {
+ *     std::cout << "Value: " << *value << '\n';
+ * }
+ * @endcode
+ * 
+ * @see std::shared_mutex
+ * @see std::unordered_map
+ */
+template<typename Key, typename Value>
+class ThreadSafeCache {
+public:
+    /**
+     * @brief Constructs an empty cache.
+     * 
+     * Initializes the cache with no elements.
+     * The underlying hash table starts with default capacity.
+     * 
+     * @throws std::bad_alloc If initial memory allocation fails
+     */
+    ThreadSafeCache() = default;
+    
+    /**
+     * @brief Inserts or updates a key-value pair in the cache.
+     * 
+     * If the key already exists, its value is updated atomically.
+     * This operation acquires an exclusive write lock.
+     * 
+     * @param key The key to insert or update
+     * @param value The value to associate with the key
+     * 
+     * @throws std::bad_alloc If memory allocation fails
+     * @throws std::system_error If mutex locking fails
+     * 
+     * @pre key must be valid (not default-constructed for pointer types)
+     * @post The key-value pair exists in the cache
+     * 
+     * @note This operation is thread-safe
+     * @warning Value is moved if it's an rvalue reference
+     */
+    void insert(const Key& key, Value value);
+    
+    /**
+     * @brief Retrieves a value from the cache by key.
+     * 
+     * Performs a read-only lookup with shared lock.
+     * Multiple threads can call this simultaneously.
+     * 
+     * @param key The key to look up
+     * @return std::optional<Value> The value if found, std::nullopt otherwise
+     * 
+     * @throws std::system_error If mutex locking fails
+     * 
+     * @note This operation is thread-safe
+     * @note Returns a copy of the value, not a reference
+     * 
+     * @par Complexity
+     * Average case O(1), worst case O(n)
+     */
+    [[nodiscard]] auto get(const Key& key) const -> std::optional<Value>;
+    
+    /**
+     * @brief Removes a key-value pair from the cache.
+     * 
+     * If the key doesn't exist, this is a no-op.
+     * Acquires exclusive write lock.
+     * 
+     * @param key The key to remove
+     * @return true if the key was found and removed, false otherwise
+     * 
+     * @throws std::system_error If mutex locking fails
+     * 
+     * @post The key no longer exists in the cache
+     */
+    auto erase(const Key& key) -> bool;
+    
+    /**
+     * @brief Returns the number of elements in the cache.
+     * 
+     * Acquires shared read lock.
+     * 
+     * @return size_t The number of key-value pairs
+     * 
+     * @note This operation is thread-safe
+     * @note The size may change immediately after this call in multi-threaded code
+     */
+    [[nodiscard]] auto size() const noexcept -> size_t;
+    
+    /**
+     * @brief Clears all elements from the cache.
+     * 
+     * Acquires exclusive write lock and removes all entries.
+     * 
+     * @post size() == 0
+     * 
+     * @note This operation is thread-safe
+     */
+    void clear() noexcept;
+    
+private:
+    mutable std::shared_mutex mutex_;  ///< Mutex for thread synchronization
+    std::unordered_map<Key, Value> cache_;  ///< Underlying storage
+};
+```
+
+### D. Function Documentation
+
+All public functions MUST have complete Doxygen comments:
+
+```cpp
+/**
+ * @brief Parses an integer from a string with error handling.
+ * 
+ * Attempts to convert a string representation to an integer.
+ * Handles both decimal and hexadecimal formats (with 0x prefix).
+ * Returns an expected type for explicit error handling without exceptions.
+ * 
+ * @param str String to parse (must not be empty)
+ * @param base Numeric base (default: 10, valid range: 2-36)
+ * @return Result<int, ParseError> Success with parsed value or error code
+ * 
+ * @retval Success Contains the parsed integer value
+ * @retval Error Contains ParseError::InvalidFormat if string is malformed
+ * @retval Error Contains ParseError::OutOfRange if value exceeds int limits
+ * 
+ * @throws Never throws (noexcept guarantee)
+ * 
+ * @pre str must not be empty
+ * @pre base must be between 2 and 36 inclusive
+ * 
+ * @post If successful, the returned value equals the integer representation
+ * 
+ * @par Example
+ * @code
+ * auto result = parse_integer("42");
+ * if (result.has_value()) {
+ *     std::cout << "Parsed: " << result.value() << '\n';
+ * } else {
+ *     std::cerr << "Error: " << result.error().message() << '\n';
+ * }
+ * 
+ * // Hexadecimal parsing
+ * auto hex = parse_integer("0xFF", 16);
+ * assert(hex.value() == 255);
+ * @endcode
+ * 
+ * @see ParseError
+ * @see Result
+ * 
+ * @note This function is thread-safe
+ * @warning Leading/trailing whitespace is not automatically trimmed
+ */
+[[nodiscard]] auto parse_integer(std::string_view str, int base = 10) 
+    -> Result<int, ParseError>;
+
+/**
+ * @brief Computes the dot product of two 3D vectors.
+ * 
+ * Calculates the scalar product: a.x * b.x + a.y * b.y + a.z * b.z
+ * 
+ * @param a First vector
+ * @param b Second vector
+ * @return double The dot product result
+ * 
+ * @throws Never throws (noexcept guarantee)
+ * 
+ * @par Complexity
+ * O(1) - constant time
+ * 
+ * @par Example
+ * @code
+ * Vector3D v1{1.0, 0.0, 0.0};
+ * Vector3D v2{0.0, 1.0, 0.0};
+ * double product = dot(v1, v2);  // Result: 0.0 (perpendicular)
+ * @endcode
+ * 
+ * @note This is a constexpr function, can be evaluated at compile-time
+ */
+[[nodiscard]] constexpr auto dot(const Vector3D& a, const Vector3D& b) noexcept 
+    -> double {
+    return a.x() * b.x() + a.y() * b.y() + a.z() * b.z();
+}
+```
+
+### E. Template Documentation
+
+Template functions and classes require special attention:
+
+```cpp
+/**
+ * @brief Generic clamp function for numeric types.
+ * 
+ * Constrains a value to lie between a minimum and maximum value.
+ * Uses C++20 concepts for compile-time type checking.
+ * 
+ * @tparam T Numeric type (must satisfy Numeric concept)
+ * 
+ * @param value The value to clamp
+ * @param min_val Minimum allowed value
+ * @param max_val Maximum allowed value
+ * 
+ * @return T The clamped value
+ * 
+ * @pre min_val <= max_val (undefined behavior otherwise)
+ * @post return value is in range [min_val, max_val]
+ * 
+ * @throws Never throws (noexcept guarantee)
+ * 
+ * @par Example
+ * @code
+ * auto clamped = clamp(150, 0, 100);  // Result: 100
+ * auto in_range = clamp(50, 0, 100);  // Result: 50
+ * auto below = clamp(-10, 0, 100);    // Result: 0
+ * @endcode
+ * 
+ * @note This function is constexpr and can be used in compile-time contexts
+ * @see std::clamp (C++17 standard library version)
+ */
+template<Numeric T>
+[[nodiscard]] constexpr auto clamp(T value, T min_val, T max_val) noexcept -> T {
+    return std::max(min_val, std::min(value, max_val));
+}
+
+/**
+ * @brief Smart pointer factory with custom deleter.
+ * 
+ * Creates a unique_ptr with automatic resource cleanup.
+ * Useful for C APIs that require paired create/destroy calls.
+ * 
+ * @tparam T Type of the managed resource
+ * @tparam Creator Function type for resource creation
+ * @tparam Deleter Function type for resource destruction
+ * 
+ * @param creator Function that creates the resource
+ * @param deleter Function that destroys the resource
+ * 
+ * @return std::unique_ptr<T, Deleter> Smart pointer managing the resource
+ * 
+ * @throws std::runtime_error If creator returns nullptr
+ * 
+ * @par Example
+ * @code
+ * // Wrap C API file handle
+ * auto file = make_resource<FILE>(
+ *     []() { return fopen("file.txt", "r"); },
+ *     [](FILE* f) { if (f) fclose(f); }
+ * );
+ * @endcode
+ */
+template<typename T, typename Creator, typename Deleter>
+[[nodiscard]] auto make_resource(Creator&& creator, Deleter&& deleter) 
+    -> std::unique_ptr<T, Deleter>;
+```
+
+### F. Namespace Documentation
+
+Namespaces should be documented at their first declaration:
+
+```cpp
+/**
+ * @namespace parser
+ * @brief Core parsing functionality for the language frontend.
+ * 
+ * Contains all AST node definitions, lexer, parser, and semantic analysis.
+ * This namespace provides the complete parsing pipeline from source text
+ * to validated abstract syntax tree.
+ * 
+ * @par Key Components
+ * - Lexer: Tokenizes source code
+ * - Parser: Builds AST from tokens
+ * - Visitor: Traverses and transforms AST
+ * - Semantic: Type checking and validation
+ * 
+ * @par Thread Safety
+ * All classes in this namespace are thread-safe unless noted otherwise.
+ * 
+ * @par Example Usage
+ * @code
+ * namespace parser {
+ *     std::vector<Token> tokens = lexer.tokenize(source);
+ *     Parser parser{std::move(tokens)};
+ *     auto ast = parser.parse();
+ *     SemanticAnalyzer analyzer;
+ *     analyzer.check(ast.get());
+ * }
+ * @endcode
+ * 
+ * @see Lexer
+ * @see Parser
+ * @see ASTNode
+ */
+namespace parser {
+// ... content
+}
+```
+
+### G. Enum Documentation
+
+Enumerations should document each enumerator:
+
+```cpp
+/**
+ * @brief Error codes for parsing operations.
+ * 
+ * Defines all possible error conditions that can occur during parsing.
+ * Used with std::error_code for type-safe error handling.
+ */
+enum class ParseError {
+    /**
+     * @brief Input string has invalid format.
+     * 
+     * The string cannot be interpreted as the expected type.
+     * Example: "abc" when parsing an integer.
+     */
+    InvalidFormat,
+    
+    /**
+     * @brief Required field is missing from input.
+     * 
+     * A mandatory field was not provided in the input data.
+     * Example: Missing required JSON key.
+     */
+    MissingField,
+    
+    /**
+     * @brief Numeric value exceeds allowable range.
+     * 
+     * The parsed value is outside the valid range for the target type.
+     * Example: "999999999999999" for int32_t.
+     */
+    OutOfRange,
+    
+    /**
+     * @brief Unexpected end of input encountered.
+     * 
+     * Parser reached end of input while expecting more data.
+     */
+    UnexpectedEOF
+};
+```
+
+### H. Generating Documentation with Doxygen
+
+#### Installation
+
+```bash
+# Ubuntu/Debian
+sudo apt install doxygen graphviz
+
+# macOS
+brew install doxygen graphviz
+
+# Windows
+choco install doxygen.install graphviz
+```
+
+#### Doxyfile Configuration
+
+Create `Doxyfile` in project root:
+
+```doxyfile
+# Project information
+PROJECT_NAME           = "MyProject"
+PROJECT_NUMBER         = 1.0.0
+PROJECT_BRIEF          = "Modern C++ Application"
+OUTPUT_DIRECTORY       = docs
+
+# Input configuration
+INPUT                  = src/ include/ README.md
+RECURSIVE              = YES
+FILE_PATTERNS          = *.cpp *.hpp *.h *.md
+EXCLUDE_PATTERNS       = */build/* */tests/* */.git/*
+
+# Output formats
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+GENERATE_XML           = YES
+HTML_OUTPUT            = html
+HTML_FILE_EXTENSION    = .html
+
+# Documentation extraction
+EXTRACT_ALL            = NO
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+EXTRACT_LOCAL_CLASSES  = NO
+HIDE_UNDOC_MEMBERS     = YES
+HIDE_UNDOC_CLASSES     = YES
+
+# Appearance
+HTML_COLORSTYLE_HUE    = 220
+HTML_COLORSTYLE_SAT    = 100
+HTML_COLORSTYLE_GAMMA  = 80
+HTML_DYNAMIC_SECTIONS  = YES
+GENERATE_TREEVIEW      = YES
+
+# Diagrams and graphs
+HAVE_DOT               = YES
+DOT_IMAGE_FORMAT       = svg
+INTERACTIVE_SVG        = YES
+CLASS_DIAGRAMS         = YES
+COLLABORATION_GRAPH    = YES
+INCLUDE_GRAPH          = YES
+INCLUDED_BY_GRAPH      = YES
+CALL_GRAPH             = YES
+CALLER_GRAPH           = YES
+GRAPHICAL_HIERARCHY    = YES
+DIRECTORY_GRAPH        = YES
+
+# Warnings
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = YES
+WARN_AS_ERROR          = NO
+WARN_FORMAT            = "$file:$line: $text"
+
+# Source code
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = NO
+STRIP_CODE_COMMENTS    = NO
+REFERENCED_BY_RELATION = YES
+REFERENCES_RELATION    = YES
+
+# Preprocessing
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = NO
+PREDEFINED             = __cplusplus=202002L
+
+# Search
+SEARCHENGINE           = YES
+SERVER_BASED_SEARCH    = NO
+```
+
+#### CMake Integration
+
+Add to root `CMakeLists.txt`:
+
+```cmake
+# Documentation generation with Doxygen
+option(BUILD_DOCUMENTATION "Create and install the HTML based API documentation (requires Doxygen)" ON)
+
+if(BUILD_DOCUMENTATION)
+    find_package(Doxygen REQUIRED dot)
+    
+    if(DOXYGEN_FOUND)
+        # Configure Doxyfile
+        set(DOXYGEN_IN ${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile.in)
+        set(DOXYGEN_OUT ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile)
+        
+        configure_file(${DOXYGEN_IN} ${DOXYGEN_OUT} @ONLY)
+        
+        # Add documentation target
+        add_custom_target(docs
+            COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_OUT}
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            COMMENT "Generating API documentation with Doxygen"
+            VERBATIM
+        )
+        
+        # Add target to check documentation coverage
+        add_custom_target(docs-check
+            COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_OUT} 2>&1 | grep -i "warning\\|error" || true
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            COMMENT "Checking documentation warnings"
+            VERBATIM
+        )
+        
+        # Install documentation
+        install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/docs/html
+            DESTINATION share/doc/${PROJECT_NAME}
+            OPTIONAL
+        )
+    else()
+        message(STATUS "Doxygen not found, documentation will not be built")
+    endif()
+endif()
+```
+
+#### Generating Documentation
+
+```bash
+# Generate documentation
+mkdir build
+cd build
+cmake .. -DBUILD_DOCUMENTATION=ON
+make docs
+
+# Check documentation warnings
+make docs-check
+
+# View documentation
+open docs/html/index.html  # macOS
+xdg-open docs/html/index.html  # Linux
+start docs/html/index.html  # Windows
+```
+
+### I. Documentation Best Practices
+
+**DO:**
+- ✅ Document all public APIs (classes, functions, templates, enums)
+- ✅ Include `@brief` for one-line summary
+- ✅ Include `@param` for all parameters
+- ✅ Include `@return` or `@retval` for return values
+- ✅ Include `@throws` for functions that can throw
+- ✅ Provide `@code` examples for complex APIs
+- ✅ Use `@pre` and `@post` for preconditions and postconditions
+- ✅ Document thread safety with `@note`
+- ✅ Link related items with `@see`
+- ✅ Document complexity with `@par Complexity`
+- ✅ Keep documentation in sync with code
+
+**DON'T:**
+- ❌ Skip documentation for "obvious" functions
+- ❌ Write vague descriptions ("Does stuff", "Helper function")
+- ❌ Let documentation become outdated
+- ❌ Document private implementation details excessively
+- ❌ Commit generated docs to git (add `docs/` to `.gitignore`)
+- ❌ Use `@cond` to hide undocumented code
+- ❌ Copy-paste documentation without updating parameters
+
+### J. Documentation Verification
+
+Add documentation checks to CI/CD:
+
+```yaml
+# .github/workflows/ci.yml
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  documentation:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Doxygen
+        run: sudo apt-get install -y doxygen graphviz
+      
+      - name: Generate documentation
+        run: |
+          mkdir build
+          cd build
+          cmake .. -DBUILD_DOCUMENTATION=ON
+          make docs
+      
+      - name: Check documentation warnings
+        run: |
+          cd build
+          if make docs-check 2>&1 | grep -i "warning"; then
+            echo "Documentation has warnings!"
+            exit 1
+          fi
+      
+      - name: Upload documentation
+        uses: actions/upload-artifact@v3
+        with:
+          name: api-documentation
+          path: build/docs/html/
+      
+      - name: Deploy to GitHub Pages
+        if: github.ref == 'refs/heads/main'
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./build/docs/html
+```
+
+### K. Documentation Checklist
+
+**Before committing code, verify:**
+- [ ] All public classes have `@brief` and detailed description
+- [ ] All public functions have complete Doxygen comments
+- [ ] All function parameters documented with `@param`
+- [ ] All return values documented with `@return` or `@retval`
+- [ ] All exceptions documented with `@throws`
+- [ ] At least one `@code` example for complex APIs
+- [ ] Thread safety documented with `@note`
+- [ ] Preconditions documented with `@pre` where applicable
+- [ ] Postconditions documented with `@post` where applicable
+- [ ] File-level documentation present in all headers
+- [ ] Doxygen can generate docs: `make docs` succeeds
+- [ ] No documentation warnings: `make docs-check` passes
+- [ ] Generated documentation is readable and complete
+- [ ] Cross-references (`@see`) are correct
+
+### L. .gitignore Configuration
+
+Add to `.gitignore`:
+
+```gitignore
+# Build output
+/build/
+/out/
+*.o
+*.a
+*.so
+*.dll
+*.exe
+
+# Generated documentation (regenerate during CI/CD)
+/docs/html/
+/docs/latex/
+/docs/xml/
+/Doxyfile
+*.log
+
+# IDE files
+/.vscode/
+/.idea/
+*.swp
+*.swo
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+
+# Testing
+/Testing/
+CTestTestfile.cmake
+
+# Coverage
+*.gcov
+*.gcda
+*.gcno
+coverage.info
+```
+
+### M. Complete Documentation Example
+
+```cpp
+/**
+ * @file vector3d.hpp
+ * @brief 3D vector mathematics library.
+ * 
+ * Provides a complete 3D vector implementation with common operations.
+ * All operations are constexpr where possible for compile-time computation.
+ * 
+ * @author Your Name
+ * @date 2026-01-17
+ * @version 1.0.0
+ */
+
+#pragma once
+
+#include <cmath>
+#include <iostream>
+
+/**
+ * @namespace math
+ * @brief Mathematical utilities and data structures.
+ */
+namespace math {
+
+/**
+ * @class Vector3D
+ * @brief Represents a 3-dimensional vector with double precision.
+ * 
+ * Provides standard vector operations including addition, subtraction,
+ * scalar multiplication, dot product, cross product, and normalization.
+ * All operations maintain mathematical correctness and numerical stability.
+ * 
+ * @note This class is immutable - operations return new vectors
+ * @note All operations are constexpr except those requiring std::sqrt
+ * 
+ * @par Thread Safety
+ * This class is thread-safe because it's immutable.
+ * 
+ * @par Example
+ * @code
+ * Vector3D v1{1.0, 0.0, 0.0};
+ * Vector3D v2{0.0, 1.0, 0.0};
+ * 
+ * auto sum = v1 + v2;              // {1.0, 1.0, 0.0}
+ * auto scaled = v1 * 2.0;          // {2.0, 0.0, 0.0}
+ * auto product = dot(v1, v2);      // 0.0 (perpendicular)
+ * auto cross = v1.cross(v2);       // {0.0, 0.0, 1.0}
+ * auto normalized = v1.normalized(); // {1.0, 0.0, 0.0}
+ * @endcode
+ * 
+ * @see dot()
+ * @see cross()
+ */
+class Vector3D {
+public:
+    /**
+     * @brief Constructs a vector with specified components.
+     * 
+     * @param x X-component (default: 0.0)
+     * @param y Y-component (default: 0.0)
+     * @param z Z-component (default: 0.0)
+     * 
+     * @throws Never throws (noexcept guarantee)
+     * 
+     * @post x() == x, y() == y, z() == z
+     */
+    constexpr Vector3D(double x = 0.0, double y = 0.0, double z = 0.0) noexcept
+        : x_{x}, y_{y}, z_{z} {}
+    
+    /**
+     * @brief Returns the X-component.
+     * @return double The X-component value
+     * @throws Never throws (noexcept guarantee)
+     */
+    [[nodiscard]] constexpr auto x() const noexcept -> double { return x_; }
+    
+    /**
+     * @brief Returns the Y-component.
+     * @return double The Y-component value
+     * @throws Never throws (noexcept guarantee)
+     */
+    [[nodiscard]] constexpr auto y() const noexcept -> double { return y_; }
+    
+    /**
+     * @brief Returns the Z-component.
+     * @return double The Z-component value
+     * @throws Never throws (noexcept guarantee)
+     */
+    [[nodiscard]] constexpr auto z() const noexcept -> double { return z_; }
+    
+    /**
+     * @brief Computes the length (magnitude) of the vector.
+     * 
+     * @return double The Euclidean length: sqrt(x² + y² + z²)
+     * 
+     * @throws Never throws (noexcept guarantee)
+     * 
+     * @par Complexity
+     * O(1) - constant time
+     * 
+     * @note Not constexpr due to std::sqrt
+     */
+    [[nodiscard]] auto length() const noexcept -> double {
+        return std::sqrt(x_ * x_ + y_ * y_ + z_ * z_);
+    }
+    
+    /**
+     * @brief Returns a normalized (unit length) copy of this vector.
+     * 
+     * @return Vector3D Unit vector in same direction
+     * 
+     * @throws std::runtime_error If the vector is zero (cannot normalize)
+     * 
+     * @pre length() > 0.0
+     * @post Return value has length() approximately equal to 1.0
+     * 
+     * @par Example
+     * @code
+     * Vector3D v{3.0, 4.0, 0.0};
+     * auto unit = v.normalized();
+     * assert(std::abs(unit.length() - 1.0) < 1e-10);
+     * @endcode
+     */
+    [[nodiscard]] auto normalized() const -> Vector3D {
+        const auto len = length();
+        if (len == 0.0) {
+            throw std::runtime_error("Cannot normalize zero vector");
+        }
+        return {x_ / len, y_ / len, z_ / len};
+    }
+    
+    /**
+     * @brief Computes the cross product with another vector.
+     * 
+     * Returns a vector perpendicular to both this and other.
+     * The magnitude equals the area of the parallelogram formed by the vectors.
+     * 
+     * @param other The other vector
+     * @return Vector3D The cross product: this × other
+     * 
+     * @throws Never throws (noexcept guarantee)
+     * 
+     * @post Return value is perpendicular to both input vectors
+     * @post dot(result, this) ≈ 0 and dot(result, other) ≈ 0
+     * 
+     * @par Example
+     * @code
+     * Vector3D x_axis{1.0, 0.0, 0.0};
+     * Vector3D y_axis{0.0, 1.0, 0.0};
+     * auto z_axis = x_axis.cross(y_axis);  // {0.0, 0.0, 1.0}
+     * @endcode
+     * 
+     * @see dot()
+     */
+    [[nodiscard]] constexpr auto cross(const Vector3D& other) const noexcept 
+        -> Vector3D {
+        return {
+            y_ * other.z_ - z_ * other.y_,
+            z_ * other.x_ - x_ * other.z_,
+            x_ * other.y_ - y_ * other.x_
+        };
+    }
+    
+    // ... operator overloads with documentation ...
+    
+private:
+    double x_;  ///< X-component of the vector
+    double y_;  ///< Y-component of the vector
+    double z_;  ///< Z-component of the vector
+};
+
+/**
+ * @relates Vector3D
+ * @brief Computes the dot product of two vectors.
+ * 
+ * Calculates the scalar product: a·b = a.x*b.x + a.y*b.y + a.z*b.z
+ * 
+ * @param a First vector
+ * @param b Second vector
+ * @return double The dot product
+ * 
+ * @throws Never throws (noexcept guarantee)
+ * 
+ * @par Properties
+ * - Commutative: dot(a, b) == dot(b, a)
+ * - dot(a, a) == a.length()²
+ * - dot(a, b) == 0 if a and b are perpendicular
+ * 
+ * @par Complexity
+ * O(1) - constant time
+ * 
+ * @par Example
+ * @code
+ * Vector3D v1{1.0, 2.0, 3.0};
+ * Vector3D v2{4.0, 5.0, 6.0};
+ * double product = dot(v1, v2);  // 1*4 + 2*5 + 3*6 = 32
+ * @endcode
+ */
+[[nodiscard]] constexpr auto dot(const Vector3D& a, const Vector3D& b) noexcept 
+    -> double {
+    return a.x() * b.x() + a.y() * b.y() + a.z() * b.z();
+}
+
+}  // namespace math
+```
+
+---
+
+## 5. Project Structure (Mandatory)
 
 ### A. Directory Layout
 ```
@@ -1994,6 +2904,9 @@ endfunction()
 
 #### Agent Code Generation Verification (MANDATORY - For AI-Generated Code)
 - [ ] **Agent verified build succeeds** - Code was tested to compile before delivery
+- [ ] **All public APIs documented** - Doxygen comments added for all exported symbols
+- [ ] **Documentation can be generated** - `make docs` succeeds without errors
+- [ ] **No documentation warnings** - `make docs-check` passes
 - [ ] **All compilation errors fixed** - Agent iterated until clean build
 - [ ] **Dependencies properly configured** - All Conan packages or system packages available
 - [ ] **CMakeLists.txt syntax verified** - No CMake configuration errors
@@ -2008,6 +2921,10 @@ endfunction()
 - [ ] **Integration tests passing** (if applicable)
 
 #### Code Quality
+- [ ] **All public APIs have Doxygen documentation** - Classes, functions, templates
+- [ ] **Documentation complete** - Includes @brief, @param, @return, @throws
+- [ ] **Documentation examples provided** - @code blocks for complex APIs
+- [ ] **API documentation generated** - `make docs` creates readable output
 - [ ] All compiler warnings resolved (`-Wall -Wextra -Werror`)
 - [ ] Static analysis passing (clang-tidy)
 - [ ] No raw pointers in public APIs
@@ -2085,29 +3002,31 @@ echo "✅ All validation checks passed!"
 
 2. **Agent Build Verification**: Requiring agents to verify code compilation before delivery eliminates non-compiling code submissions, reduces developer frustration, and ensures all examples and generated code actually work. The iterative fix-and-rebuild cycle catches errors early.
 
-3. **Conan in CMake**: Single command build, reproducible builds, dependency isolation per module, no manual dependency management.
+3. **Doxygen + API Documentation**: Auto-generated documentation from code, always in sync, reduces onboarding time by 40%+, better IDE IntelliSense, enables API discoverability. Documentation as code ensures it never becomes outdated.
 
-4. **Modular Structure**: Small files, clear responsibilities, easy testing, parallel builds.
+4. **Conan in CMake**: Single command build, reproducible builds, dependency isolation per module, no manual dependency management.
 
-5. **C++20/23 Features**: Modern safety, better performance, cleaner code.
+5. **Modular Structure**: Small files, clear responsibilities, easy testing, parallel builds.
 
-6. **Smart Pointers**: Automatic memory management, no leaks, clear ownership.
+6. **C++20/23 Features**: Modern safety, better performance, cleaner code.
 
-7. **RAII**: Resource safety, exception safety, deterministic cleanup.
+7. **Smart Pointers**: Automatic memory management, no leaks, clear ownership.
 
-8. **Move Semantics**: Zero-copy where possible, explicit ownership transfer.
+8. **RAII**: Resource safety, exception safety, deterministic cleanup.
 
-9. **Concepts**: Compile-time constraints, better error messages, self-documenting.
+9. **Move Semantics**: Zero-copy where possible, explicit ownership transfer.
 
-10. **std::expected**: Explicit error handling, no exceptions for expected errors.
+10. **Concepts**: Compile-time constraints, better error messages, self-documenting.
 
-11. **Const Correctness**: Prevents bugs, enables optimizations, documents intent.
+11. **std::expected**: Explicit error handling, no exceptions for expected errors.
 
-12. **Comprehensive Warnings**: Catches bugs at compile-time, prevents undefined behavior.
+12. **Const Correctness**: Prevents bugs, enables optimizations, documents intent.
 
-13. **Mandatory Testing with GTest**: Industry-standard framework, excellent IDE integration, parameterized tests, mock support. CTest integration enables running tests as part of the build process and CI/CD pipelines. Tests catch regressions before they reach production.
+13. **Comprehensive Warnings**: Catches bugs at compile-time, prevents undefined behavior.
 
-14. **Per-Module Testing**: Each module manages its own test dependencies through Conan, enabling independent testing and parallel test execution.
+14. **Mandatory Testing with GTest**: Industry-standard framework, excellent IDE integration, parameterized tests, mock support. CTest integration enables running tests as part of the build process and CI/CD pipelines. Tests catch regressions before they reach production.
+
+15. **Per-Module Testing**: Each module manages its own test dependencies through Conan, enabling independent testing and parallel test execution.
 
 ---
 

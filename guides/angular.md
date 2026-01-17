@@ -4,8 +4,8 @@ This document provides mandatory coding standards and development practices for 
 ---
 Agent Profile: The Angular Architect
 Role: Senior Frontend Engineer & Angular Performance Specialist
-Objective: Generate production-ready, type-safe, highly performant, and maintainable Angular SPAs.
-Tools: Angular 17+, TypeScript 5.x, Signals, Standalone Components, RxJS 7.x, NgRx Signal Store.
+Objective: Generate production-ready, type-safe, fully documented, highly performant, and maintainable Angular SPAs.
+Tools: Angular 17+, TypeScript 5.x, Signals, Standalone Components, RxJS 7.x, NgRx Signal Store, TypeDoc.
 
 ## 1. Core Philosophies
 The agent must adhere to the "SIGNAL-FIRST" principles for every Angular application:
@@ -26,6 +26,7 @@ The agent must adhere to the "SIGNAL-FIRST" principles for every Angular applica
 **Modular Architecture**: Small, focused modules/components with clear boundaries and dependencies.
 **Tested Code**: Mandatory unit tests with Jasmine/Karma, 80%+ coverage, all tests must pass.
 **Verified Builds**: Agent-generated code MUST compile (ng build) and pass all tests before delivery.
+**Documented Code**: JSDoc comments for all exports, auto-generated API documentation with TypeDoc.
 
 ## 2. Mandatory Setup Requirements
 
@@ -237,7 +238,10 @@ src/
     "@angular-eslint/template-parser": "^17.2.0",
     "@typescript-eslint/eslint-plugin": "^6.19.0",
     "@typescript-eslint/parser": "^6.19.0",
-    "eslint": "^8.56.0"
+    "eslint": "^8.56.0",
+    // Documentation generation
+    "typedoc": "^0.25.0",
+    "typedoc-plugin-markdown": "^3.17.0"
   }
 }
 ```
@@ -661,7 +665,829 @@ describe('UserService', () => {
 
 ---
 
-## 4. Code Style Principles (MANDATORY)
+## 4. Documentation Requirements (MANDATORY)
+
+### A. JSDoc Comments for All Code
+
+**ALL exported components, services, pipes, directives, guards, interceptors, and interfaces MUST have comprehensive JSDoc documentation.**
+
+#### Why JSDoc Documentation?
+
+- **Auto-Generated API Docs**: TypeDoc generates complete API documentation from JSDoc comments
+- **IDE IntelliSense**: Better autocomplete and inline documentation for developers
+- **Type Safety**: JSDoc + TypeScript provides comprehensive type information
+- **Maintenance**: Self-documenting code reduces onboarding time by 40%+
+- **Verification**: Documentation is verified during build process
+
+### B. Component Documentation
+
+```typescript
+/**
+ * User card component for displaying user information.
+ * 
+ * Displays user details with optional action buttons. Supports editing and
+ * deletion through event outputs. Uses Angular Material for consistent UI.
+ * 
+ * @component
+ * @example
+ * ```typescript
+ * <app-user-card
+ *   [user]="currentUser"
+ *   [showActions]="true"
+ *   (edit)="handleEdit($event)"
+ *   (delete)="handleDelete($event)"
+ * />
+ * ```
+ * 
+ * @see {@link User} for the user data structure
+ */
+@Component({
+  selector: 'app-user-card',
+  standalone: true,
+  imports: [CommonModule, MatCardModule, MatButtonModule],
+  templateUrl: './user-card.component.html',
+  styleUrls: ['./user-card.component.scss'],
+  changeDetection: ChangeDetectionStrategy.OnPush
+})
+export class UserCardComponent {
+  /**
+   * User data to display (required).
+   * @type {InputSignal<User>}
+   */
+  user = input.required<User>();
+  
+  /**
+   * Whether to show action buttons (default: false).
+   * @type {InputSignal<boolean>}
+   */
+  showActions = input(false);
+  
+  /**
+   * Emitted when the edit button is clicked.
+   * Passes the user ID to the parent component.
+   * @type {OutputEmitterRef<string>}
+   */
+  edit = output<string>();
+  
+  /**
+   * Emitted when the delete button is clicked.
+   * Passes the user ID to the parent component.
+   * @type {OutputEmitterRef<string>}
+   */
+  delete = output<string>();
+  
+  /**
+   * Indicates whether a delete operation is in progress.
+   * @type {WritableSignal<boolean>}
+   */
+  isDeleting = signal(false);
+  
+  /**
+   * Computed avatar URL with fallback to default.
+   * @type {Signal<string>}
+   */
+  avatarUrl = computed(() => this.user().avatar ?? '/assets/default-avatar.png');
+  
+  /**
+   * Handles the edit action.
+   * Emits the edit event with the user's ID.
+   * 
+   * @returns {void}
+   */
+  handleEdit(): void {
+    this.edit.emit(this.user().id);
+  }
+  
+  /**
+   * Handles the delete action.
+   * Sets the deleting state and emits the delete event with the user's ID.
+   * 
+   * @returns {void}
+   */
+  handleDelete(): void {
+    this.isDeleting.set(true);
+    this.delete.emit(this.user().id);
+  }
+}
+```
+
+### C. Service Documentation
+
+```typescript
+/**
+ * Service for managing user data operations.
+ * 
+ * Provides methods for CRUD operations on users, including loading,
+ * creating, updating, and deleting. Manages loading and error states
+ * using signals. All HTTP operations use async/await pattern.
+ * 
+ * @service
+ * @providedIn 'root'
+ * 
+ * @example
+ * ```typescript
+ * @Component({...})
+ * export class UserListComponent {
+ *   private userService = inject(UserService);
+ *   
+ *   async ngOnInit(): Promise<void> {
+ *     await this.userService.loadUsers();
+ *   }
+ * }
+ * ```
+ */
+@Injectable({ providedIn: 'root' })
+export class UserService {
+  private http = inject(HttpClient);
+  private config = inject(APP_CONFIG);
+  
+  /**
+   * List of all users.
+   * @type {WritableSignal<User[]>}
+   */
+  users = signal<User[]>([]);
+  
+  /**
+   * Indicates whether a data operation is in progress.
+   * @type {WritableSignal<boolean>}
+   */
+  isLoading = signal(false);
+  
+  /**
+   * Error message from the last failed operation, or null.
+   * @type {WritableSignal<string | null>}
+   */
+  error = signal<string | null>(null);
+  
+  /**
+   * Loads all users from the API.
+   * 
+   * Sets loading state, fetches users, and updates the users signal.
+   * Handles errors by setting the error signal and logging.
+   * 
+   * @async
+   * @returns {Promise<void>} Promise that resolves when users are loaded
+   * @throws {Error} If the HTTP request fails
+   * 
+   * @example
+   * ```typescript
+   * await userService.loadUsers();
+   * console.log('Users:', userService.users());
+   * ```
+   */
+  async loadUsers(): Promise<void> {
+    this.isLoading.set(true);
+    this.error.set(null);
+    
+    try {
+      const users = await firstValueFrom(
+        this.http.get<User[]>(`${this.config.apiUrl}/users`)
+      );
+      this.users.set(users);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      this.error.set(message);
+      console.error('Failed to load users:', err);
+    } finally {
+      this.isLoading.set(false);
+    }
+  }
+  
+  /**
+   * Retrieves a single user by ID.
+   * 
+   * @async
+   * @param {string} id - The unique identifier of the user
+   * @returns {Promise<User | null>} Promise resolving to the user or null if not found
+   * 
+   * @example
+   * ```typescript
+   * const user = await userService.getUser('123');
+   * if (user) {
+   *   console.log('Found user:', user.name);
+   * }
+   * ```
+   */
+  async getUser(id: string): Promise<User | null> {
+    try {
+      return await firstValueFrom(
+        this.http.get<User>(`${this.config.apiUrl}/users/${id}`)
+      );
+    } catch {
+      return null;
+    }
+  }
+  
+  /**
+   * Creates a new user.
+   * 
+   * @async
+   * @param {Partial<User>} userData - The user data to create
+   * @returns {Promise<User>} Promise resolving to the created user
+   * @throws {Error} If the creation fails or validation errors occur
+   * 
+   * @example
+   * ```typescript
+   * const newUser = await userService.createUser({
+   *   name: 'John Doe',
+   *   email: 'john@example.com'
+   * });
+   * ```
+   */
+  async createUser(userData: Partial<User>): Promise<User> {
+    return await firstValueFrom(
+      this.http.post<User>(`${this.config.apiUrl}/users`, userData)
+    );
+  }
+  
+  /**
+   * Updates an existing user.
+   * 
+   * @async
+   * @param {string} id - The unique identifier of the user to update
+   * @param {Partial<User>} updates - The fields to update
+   * @returns {Promise<User>} Promise resolving to the updated user
+   * @throws {Error} If the user doesn't exist or update fails
+   * 
+   * @example
+   * ```typescript
+   * const updated = await userService.updateUser('123', {
+   *   name: 'Jane Doe'
+   * });
+   * ```
+   */
+  async updateUser(id: string, updates: Partial<User>): Promise<User> {
+    return await firstValueFrom(
+      this.http.put<User>(`${this.config.apiUrl}/users/${id}`, updates)
+    );
+  }
+  
+  /**
+   * Deletes a user by ID.
+   * 
+   * @async
+   * @param {string} id - The unique identifier of the user to delete
+   * @returns {Promise<void>} Promise that resolves when deletion is complete
+   * @throws {Error} If the user doesn't exist or deletion fails
+   * 
+   * @example
+   * ```typescript
+   * await userService.deleteUser('123');
+   * console.log('User deleted successfully');
+   * ```
+   */
+  async deleteUser(id: string): Promise<void> {
+    await firstValueFrom(
+      this.http.delete<void>(`${this.config.apiUrl}/users/${id}`)
+    );
+  }
+}
+```
+
+### D. Interface and Type Documentation
+
+```typescript
+/**
+ * Represents a user in the application.
+ * 
+ * Contains all user information including identification, profile data,
+ * and system metadata. Used throughout the application for user operations.
+ * 
+ * @interface
+ * @property {string} id - Unique identifier (UUID v4)
+ * @property {string} name - User's full name (1-100 characters)
+ * @property {string} email - User's email address (unique, validated)
+ * @property {UserRole} role - User's role for authorization
+ * @property {string} [avatar] - Optional URL to user's avatar image
+ * @property {boolean} isActive - Whether the user account is active
+ * @property {Date} createdAt - Account creation timestamp
+ * @property {Date} updatedAt - Last modification timestamp
+ * 
+ * @example
+ * ```typescript
+ * const user: User = {
+ *   id: '550e8400-e29b-41d4-a716-446655440000',
+ *   name: 'John Doe',
+ *   email: 'john@example.com',
+ *   role: 'user',
+ *   isActive: true,
+ *   createdAt: new Date(),
+ *   updatedAt: new Date()
+ * };
+ * ```
+ */
+export interface User {
+  readonly id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  avatar?: string;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * User role types for authorization.
+ * 
+ * - `admin`: Full system access, can manage all users and settings
+ * - `user`: Standard user with limited permissions
+ * - `guest`: Read-only access, no modification rights
+ * 
+ * @typedef {('admin' | 'user' | 'guest')} UserRole
+ */
+export type UserRole = 'admin' | 'user' | 'guest';
+
+/**
+ * Application configuration interface.
+ * 
+ * Defines the structure for application-wide configuration including
+ * API endpoints, feature flags, and environment settings.
+ * 
+ * @interface
+ * @property {string} apiUrl - Base URL for API endpoints
+ * @property {boolean} production - Whether running in production mode
+ * @property {object} features - Feature flag configuration
+ * @property {boolean} features.enableAnalytics - Analytics tracking enabled
+ * @property {boolean} features.enableDebug - Debug mode enabled
+ */
+export interface AppConfig {
+  apiUrl: string;
+  production: boolean;
+  features: {
+    enableAnalytics: boolean;
+    enableDebug: boolean;
+  };
+}
+```
+
+### E. Guard and Interceptor Documentation
+
+```typescript
+/**
+ * Authentication guard for protecting routes.
+ * 
+ * Checks if the user is authenticated before allowing route activation.
+ * Redirects to login page with return URL if not authenticated.
+ * 
+ * @function
+ * @param {ActivatedRouteSnapshot} route - The route being activated
+ * @param {RouterStateSnapshot} state - Current router state
+ * @returns {boolean} True if user can activate route, false otherwise
+ * 
+ * @example
+ * ```typescript
+ * const routes: Routes = [
+ *   {
+ *     path: 'dashboard',
+ *     canActivate: [authGuard],
+ *     loadComponent: () => import('./dashboard.component')
+ *   }
+ * ];
+ * ```
+ */
+export const authGuard: CanActivateFn = (route, state) => {
+  const authService = inject(AuthService);
+  const router = inject(Router);
+  
+  if (!authService.isAuthenticated()) {
+    router.navigate(['/login'], {
+      queryParams: { returnUrl: state.url }
+    });
+    return false;
+  }
+  
+  return true;
+};
+
+/**
+ * HTTP interceptor for adding authentication tokens to requests.
+ * 
+ * Automatically adds the Bearer token to all outgoing HTTP requests
+ * if the user is authenticated. Handles token refresh if needed.
+ * 
+ * @function
+ * @param {HttpRequest<unknown>} req - The outgoing HTTP request
+ * @param {HttpHandlerFn} next - The next handler in the chain
+ * @returns {Observable<HttpEvent<unknown>>} Observable of HTTP events
+ * 
+ * @example
+ * ```typescript
+ * export const appConfig: ApplicationConfig = {
+ *   providers: [
+ *     provideHttpClient(
+ *       withInterceptors([authInterceptor])
+ *     )
+ *   ]
+ * };
+ * ```
+ */
+export const authInterceptor: HttpInterceptorFn = (req, next) => {
+  const authService = inject(AuthService);
+  const token = authService.getToken();
+  
+  if (token) {
+    const authReq = req.clone({
+      setHeaders: {
+        Authorization: `Bearer ${token}`
+      }
+    });
+    return next(authReq);
+  }
+  
+  return next(req);
+};
+```
+
+### F. Pipe and Directive Documentation
+
+```typescript
+/**
+ * Custom date formatting pipe using date-fns.
+ * 
+ * Formats dates according to the specified format string.
+ * Handles various input types (Date, string, number) and provides
+ * error handling for invalid dates.
+ * 
+ * @pipe
+ * @standalone
+ * 
+ * @example
+ * ```html
+ * <p>{{ createdAt() | customDate:'PPpp' }}</p>
+ * <!-- Output: Apr 29, 2021, 12:30:00 PM -->
+ * 
+ * <p>{{ createdAt() | customDate:'yyyy-MM-dd' }}</p>
+ * <!-- Output: 2021-04-29 -->
+ * ```
+ */
+@Pipe({
+  name: 'customDate',
+  standalone: true
+})
+export class CustomDatePipe implements PipeTransform {
+  /**
+   * Transforms a date value into a formatted string.
+   * 
+   * @param {Date | string | number} value - The date to format
+   * @param {string} [formatString='PP'] - The format pattern (date-fns format)
+   * @returns {string} Formatted date string or empty string if invalid
+   * 
+   * @see {@link https://date-fns.org/docs/format} for format options
+   */
+  transform(value: Date | string | number, formatString: string = 'PP'): string {
+    if (!value) return '';
+    
+    try {
+      const date = typeof value === 'string' || typeof value === 'number'
+        ? new Date(value)
+        : value;
+      
+      return format(date, formatString);
+    } catch (error) {
+      console.error('Date formatting error:', error);
+      return '';
+    }
+  }
+}
+
+/**
+ * Directive for highlighting elements on hover.
+ * 
+ * Changes the background color of the host element when the user
+ * hovers over it. Configurable highlight color via input.
+ * 
+ * @directive
+ * @standalone
+ * @selector [appHighlight]
+ * 
+ * @example
+ * ```html
+ * <p appHighlight [highlightColor]="'lightblue'">
+ *   Hover over me!
+ * </p>
+ * ```
+ */
+@Directive({
+  selector: '[appHighlight]',
+  standalone: true
+})
+export class HighlightDirective {
+  /**
+   * The color to use for highlighting (default: 'yellow').
+   * @type {InputSignal<string>}
+   */
+  highlightColor = input<string>('yellow');
+  
+  private el = inject(ElementRef);
+  
+  /**
+   * Handles mouse enter event.
+   * Applies the highlight color to the element.
+   */
+  @HostListener('mouseenter')
+  onMouseEnter(): void {
+    this.highlight(this.highlightColor());
+  }
+  
+  /**
+   * Handles mouse leave event.
+   * Removes the highlight color from the element.
+   */
+  @HostListener('mouseleave')
+  onMouseLeave(): void {
+    this.highlight('');
+  }
+  
+  /**
+   * Applies or removes highlight color.
+   * 
+   * @private
+   * @param {string} color - The color to apply or empty string to remove
+   */
+  private highlight(color: string): void {
+    this.el.nativeElement.style.backgroundColor = color;
+  }
+}
+```
+
+### G. Generating Documentation with TypeDoc
+
+#### Installation and Setup
+
+```bash
+# Install TypeDoc and plugins
+npm add --save-dev typedoc typedoc-plugin-markdown
+
+# Add scripts to package.json
+npm pkg set scripts.docs="typedoc --out docs src/app"
+npm pkg set scripts.docs:check="typedoc --emit none --validation.notDocumented true"
+npm pkg set scripts.docs:serve="typedoc --out docs src/app && npx serve docs"
+npm pkg set scripts.docs:json="typedoc --json docs/api.json src/app"
+```
+
+#### TypeDoc Configuration
+
+Create `typedoc.json` in project root:
+
+```json
+{
+  "entryPoints": ["src/app"],
+  "entryPointStrategy": "expand",
+  "out": "docs",
+  "exclude": [
+    "**/*.spec.ts",
+    "**/test/**",
+    "**/tests/**",
+    "**/__tests__/**",
+    "**/environments/**"
+  ],
+  "excludePrivate": true,
+  "excludeProtected": false,
+  "excludeInternal": false,
+  "readme": "README.md",
+  "plugin": ["typedoc-plugin-markdown"],
+  "theme": "default",
+  "categorizeByGroup": true,
+  "categoryOrder": [
+    "Components",
+    "Services",
+    "Guards",
+    "Interceptors",
+    "Pipes",
+    "Directives",
+    "Models",
+    "*"
+  ],
+  "navigation": {
+    "includeCategories": true,
+    "includeGroups": true
+  },
+  "sort": ["source-order"],
+  "validation": {
+    "notExported": true,
+    "invalidLink": true,
+    "notDocumented": true
+  },
+  "compilerOptions": {
+    "moduleResolution": "bundler"
+  }
+}
+```
+
+#### Generating Documentation
+
+```bash
+# Generate HTML documentation
+npm run docs
+
+# Check documentation completeness
+npm run docs:check
+
+# Generate and serve documentation
+npm run docs:serve
+
+# Generate JSON documentation (for tooling)
+npm run docs:json
+
+# Open generated docs
+open docs/index.html  # macOS
+xdg-open docs/index.html  # Linux
+```
+
+#### Documentation Categories
+
+Organize your code with JSDoc tags:
+
+```typescript
+/**
+ * User list component.
+ * @category Components
+ */
+export class UserListComponent {}
+
+/**
+ * User service.
+ * @category Services
+ */
+export class UserService {}
+
+/**
+ * Authentication guard.
+ * @category Guards
+ */
+export const authGuard: CanActivateFn = () => true;
+
+/**
+ * Custom date pipe.
+ * @category Pipes
+ */
+export class CustomDatePipe {}
+
+/**
+ * User model interface.
+ * @category Models
+ */
+export interface User {}
+```
+
+### H. Documentation Verification
+
+**Add documentation checks to package.json:**
+
+```json
+{
+  "scripts": {
+    "ng": "ng",
+    "start": "ng serve",
+    "build": "ng build",
+    "test": "ng test",
+    "test:ci": "ng test --no-watch --code-coverage --browsers=ChromeHeadless",
+    "lint": "ng lint",
+    "docs": "typedoc --out docs src/app",
+    "docs:check": "typedoc --emit none --validation.notDocumented true",
+    "docs:serve": "typedoc --out docs src/app && npx serve docs",
+    "docs:json": "typedoc --json docs/api.json src/app",
+    "verify": "ng lint && npm run docs:check && ng test --no-watch --browsers=ChromeHeadless"
+  }
+}
+```
+
+### I. CI/CD Integration
+
+```yaml
+# .github/workflows/ci.yml
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Lint code
+        run: ng lint
+      
+      - name: Verify documentation
+        run: npm run docs:check
+      
+      - name: Run tests
+        run: ng test --no-watch --code-coverage --browsers=ChromeHeadless
+      
+      - name: Build production
+        run: ng build --configuration production
+      
+      - name: Generate documentation
+        run: npm run docs
+      
+      - name: Upload documentation artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: api-documentation
+          path: docs/
+      
+      - name: Deploy documentation to GitHub Pages
+        if: github.ref == 'refs/heads/main'
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs
+```
+
+### J. Documentation Best Practices
+
+**DO:**
+- ✅ Document all public exports (components, services, pipes, directives, guards, interceptors)
+- ✅ Include `@param` for all method parameters
+- ✅ Include `@returns` for all return values
+- ✅ Include `@throws` for methods that can throw
+- ✅ Provide at least one `@example` for complex APIs
+- ✅ Use `@type` for signals and class properties
+- ✅ Include `@see` tags for related components/services
+- ✅ Keep examples up-to-date with implementation
+- ✅ Generate docs as part of CI/CD pipeline
+- ✅ Use `@category` to organize documentation
+
+**DON'T:**
+- ❌ Skip documentation for "obvious" components
+- ❌ Write vague descriptions ("Does stuff", "Helper component")
+- ❌ Let examples become outdated
+- ❌ Commit generated docs to git (add `docs/` to `.gitignore`)
+- ❌ Use `@ts-ignore` to suppress documentation warnings
+- ❌ Document private implementation details excessively
+
+### K. Documentation Checklist
+
+**Before committing code, verify:**
+- [ ] All exported components have JSDoc comments
+- [ ] All services have JSDoc comments
+- [ ] All pipes and directives have JSDoc comments
+- [ ] All guards and interceptors have JSDoc comments
+- [ ] All public interfaces and types have JSDoc comments
+- [ ] All `@param` tags document parameter types and purpose
+- [ ] All `@returns` tags document return types and values
+- [ ] At least one `@example` provided for complex APIs
+- [ ] TypeDoc can generate docs: `npm run docs:check` passes
+- [ ] Generated documentation is readable and complete
+- [ ] No "not documented" warnings from TypeDoc
+- [ ] Examples compile and run correctly
+
+### L. .gitignore Configuration
+
+```gitignore
+# Dependencies
+/node_modules
+
+# Build output
+/dist
+/out-tsc
+/tmp
+
+# Generated documentation (regenerate during CI/CD)
+/docs
+/api-docs
+
+# IDEs and editors
+.idea/
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+.vscode/*
+
+# Testing
+/coverage
+/.nyc_output
+
+# Environment
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Angular
+/.angular/cache
+```
+
+---
+
+## 5. Code Style Principles (MANDATORY)
 
 ### A. Async/Await Pattern (Preferred)
 
@@ -2809,6 +3635,9 @@ export const appConfig: ApplicationConfig = {
 **If code was generated by an agent, verify BEFORE delivery:**
 - [ ] TypeScript compilation successful: `ng build` returns exit code 0
 - [ ] All linter checks pass: `ng lint`
+- [ ] **All exported components/services documented with JSDoc** (complete with `@param`, `@returns`, `@example`)
+- [ ] **Documentation check passes**: `npm run docs:check` returns exit code 0
+- [ ] **Documentation can be generated**: `npm run docs` succeeds without errors
 - [ ] Strict template type checking passes
 - [ ] Unit tests created for ALL new components, services, pipes, directives, guards, and interceptors
 - [ ] All tests passing: `ng test --no-watch --browsers=ChromeHeadless` returns exit code 0
@@ -2827,6 +3656,8 @@ export const appConfig: ApplicationConfig = {
 
 ### Pre-Production Validation
 - [ ] All TypeScript errors resolved
+- [ ] **All components/services documented with JSDoc** (`npm run docs:check`)
+- [ ] **API documentation generated successfully** (`npm run docs`)
 - [ ] All tests passing (`ng test`)
 - [ ] E2E tests passing
 - [ ] All components use standalone: true
@@ -2859,33 +3690,35 @@ export const appConfig: ApplicationConfig = {
 
 2. **Signals**: Fine-grained reactivity, better performance than zone.js, simpler mental model.
 
-3. **Async/Await**: Cleaner, more readable async code, easier error handling, no callback hell.
+3. **JSDoc + TypeDoc**: Auto-generated documentation from code, always in sync, reduces onboarding time by 40%+, better IDE IntelliSense, verified during build.
 
-4. **Angular Material**: Consistent UI, accessibility built-in, battle-tested components, responsive design.
+4. **Async/Await**: Cleaner, more readable async code, easier error handling, no callback hell.
 
-5. **Minimalistic Code**: Easier to maintain, faster to understand, fewer bugs, better performance.
+5. **Angular Material**: Consistent UI, accessibility built-in, battle-tested components, responsive design.
 
-6. **Modular Architecture**: Clear separation of concerns, reusable code, easier testing, scalable codebase.
+6. **Minimalistic Code**: Easier to maintain, faster to understand, fewer bugs, better performance.
 
-7. **Functional APIs**: Less boilerplate, better type inference, easier testing.
+7. **Modular Architecture**: Clear separation of concerns, reusable code, easier testing, scalable codebase.
 
-8. **Agent Build Verification**: Ensures generated code compiles and tests pass before delivery, preventing broken code.
+8. **Functional APIs**: Less boilerplate, better type inference, easier testing.
 
-9. **Mandatory Testing**: 80%+ coverage requirement catches bugs early, reduces production issues.
+9. **Agent Build Verification**: Ensures generated code compiles, documented, and tests pass before delivery, preventing broken code.
 
-10. **Lazy Loading**: Reduced initial bundle size, faster first paint.
+10. **Mandatory Testing**: 80%+ coverage requirement catches bugs early, reduces production issues.
 
-11. **OnPush Detection**: Minimal change detection runs, better performance.
+11. **Lazy Loading**: Reduced initial bundle size, faster first paint.
 
-12. **TypeScript Strict**: Catches 15-30% more bugs at compile time.
+12. **OnPush Detection**: Minimal change detection runs, better performance.
 
-13. **Modern @-syntax**: Cleaner templates, better performance than structural directives.
+13. **TypeScript Strict**: Catches 15-30% more bugs at compile time.
 
-14. **RxJS Interop**: Best of both worlds - signals for state, RxJS for reactive streams.
+14. **Modern @-syntax**: Cleaner templates, better performance than structural directives.
 
-15. **Typed Forms**: Type safety from form to submission, better DX.
+15. **RxJS Interop**: Best of both worlds - signals for state, RxJS for reactive streams.
 
-16. **Functional Guards/Interceptors**: Less boilerplate, better composition.
+16. **Typed Forms**: Type safety from form to submission, better DX.
+
+17. **Functional Guards/Interceptors**: Less boilerplate, better composition.
 
 ---
 

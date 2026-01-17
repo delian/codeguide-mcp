@@ -4,8 +4,8 @@ This document provides mandatory coding standards and development practices for 
 ---
 Agent Profile: The TypeScript Architect
 Role: Senior Full-Stack Engineer & Node.js Performance Specialist
-Objective: Generate production-ready, type-safe, highly performant, and maintainable Node.js applications.
-Tools: Node.js 22.x LTS, TypeScript 5.x, ESM modules, Modern tooling (Biome/oxc, tsx, npm).
+Objective: Generate production-ready, type-safe, fully documented, highly performant, and maintainable Node.js applications.
+Tools: Node.js 22.x LTS, TypeScript 5.x, ESM modules, TypeDoc, Modern tooling (Biome/oxc, tsx, npm).
 
 ## 1. Core Philosophies
 The agent must adhere to the "MASTER" principles for every Node.js/TypeScript project:
@@ -16,6 +16,7 @@ The agent must adhere to the "MASTER" principles for every Node.js/TypeScript pr
 **Tested**: 80%+ coverage, unit + integration tests, type testing.
 **Efficient**: Optimize for performance, use native APIs, minimize dependencies.
 **Resilient**: Proper error handling, graceful degradation, observability.
+**Documented**: JSDoc comments for all exports, auto-generated API documentation with TypeDoc.
 
 ## 2. Mandatory Setup Requirements
 
@@ -141,6 +142,7 @@ project/
 ├── .env.example
 ├── .gitignore
 ├── biome.json           # Linter & formatter config
+├── typedoc.json         # Documentation config
 ├── package.json
 ├── tsconfig.json
 └── README.md
@@ -176,13 +178,873 @@ project/
     "@vitest/coverage-v8": "^1.2.0",
     // Type testing
     "@vitest/expect-type": "^1.2.0",
+    // Documentation generation
+    "typedoc": "^0.25.0",
+    "typedoc-plugin-markdown": "^3.17.0",
     // Node.js types
     "@types/node": "^22.0.0"
   }
 }
 ```
 
-## 3. Mandatory Code Standards
+## 3. Documentation Requirements (MANDATORY)
+
+### A. JSDoc Comments for All Code
+
+**ALL exported functions, classes, interfaces, and types MUST have comprehensive JSDoc documentation.**
+
+#### Why JSDoc Documentation?
+
+- **Auto-Generated API Docs**: TypeDoc generates complete API documentation from JSDoc comments
+- **IDE IntelliSense**: Better autocomplete and inline documentation for developers
+- **Type Safety**: JSDoc + TypeScript provides comprehensive type information
+- **Maintenance**: Self-documenting code reduces onboarding time by 40%+
+- **Verification**: Documentation is verified during build process
+
+### B. Function Documentation
+
+```typescript
+/**
+ * Fetches a user by their unique identifier.
+ * 
+ * Retrieves user data from the database and returns it wrapped in a Result type.
+ * If the user is not found, returns a NotFoundError. Handles database errors gracefully.
+ * 
+ * @param userId - The unique identifier of the user (UUID v4 format)
+ * @returns Promise resolving to a Result containing the User or an error
+ * @throws {DatabaseError} If database connection fails
+ * 
+ * @example
+ * ```typescript
+ * const result = await getUserById('550e8400-e29b-41d4-a716-446655440000');
+ * if (result.success) {
+ *   console.log('User found:', result.data.name);
+ * } else {
+ *   console.error('Error:', result.error.message);
+ * }
+ * ```
+ * 
+ * @see {@link User} for the user data structure
+ * @see {@link Result} for the result type pattern
+ */
+export async function getUserById(userId: string): Promise<Result<User>> {
+  try {
+    const user = await userRepository.findById(userId);
+    if (!user) {
+      return {
+        success: false,
+        error: new NotFoundError('User'),
+      };
+    }
+    return { success: true, data: user };
+  } catch (error) {
+    logger.error({ error, userId }, 'Failed to fetch user');
+    throw error;
+  }
+}
+
+/**
+ * Processes a batch of items concurrently with controlled parallelism.
+ * 
+ * Executes the processor function for each item in the batch, limiting
+ * the number of concurrent operations to prevent resource exhaustion.
+ * 
+ * @template T - Type of items being processed
+ * @template R - Type of the processing result
+ * @param items - Array of items to process
+ * @param processor - Async function that processes each item
+ * @param concurrency - Maximum number of concurrent operations (default: 10)
+ * @returns Promise resolving to an array of results
+ * 
+ * @example
+ * ```typescript
+ * const urls = ['https://api.example.com/1', 'https://api.example.com/2'];
+ * const results = await processBatch(
+ *   urls,
+ *   async (url) => fetch(url).then(r => r.json()),
+ *   5
+ * );
+ * ```
+ */
+export async function processBatch<T, R>(
+  items: T[],
+  processor: (item: T) => Promise<R>,
+  concurrency: number = 10,
+): Promise<R[]> {
+  // Implementation
+}
+```
+
+### C. Class Documentation
+
+```typescript
+/**
+ * Service for managing user operations.
+ * 
+ * Provides high-level business logic for user management, including
+ * creation, retrieval, updating, and deletion. Implements proper error
+ * handling and logging for all operations.
+ * 
+ * @class
+ * @example
+ * ```typescript
+ * const repository = new PrismaUserRepository(prisma);
+ * const service = new UserService(repository);
+ * 
+ * const result = await service.createUser({
+ *   email: 'user@example.com',
+ *   name: 'John Doe'
+ * });
+ * ```
+ */
+export class UserService {
+  /**
+   * Creates a new UserService instance.
+   * 
+   * @param repository - Repository for user data access
+   * @param logger - Logger instance for structured logging (optional)
+   */
+  constructor(
+    private readonly repository: UserRepository,
+    private readonly logger: Logger = defaultLogger,
+  ) {}
+
+  /**
+   * Creates a new user in the system.
+   * 
+   * Validates the input, checks for duplicate emails, and creates
+   * the user record. Returns a Result type to handle errors gracefully.
+   * 
+   * @param input - User creation data
+   * @param input.email - User's email address (must be unique)
+   * @param input.name - User's full name
+   * @param input.role - Optional user role (defaults to 'user')
+   * @returns Promise resolving to Result containing the created User or an error
+   * 
+   * @example
+   * ```typescript
+   * const result = await service.createUser({
+   *   email: 'new@example.com',
+   *   name: 'Jane Smith'
+   * });
+   * 
+   * if (!result.success) {
+   *   console.error('Failed to create user:', result.error.message);
+   * }
+   * ```
+   */
+  async createUser(input: CreateUserInput): Promise<Result<User>> {
+    // Implementation
+  }
+
+  /**
+   * Retrieves a user by their unique identifier.
+   * 
+   * @param id - User's unique identifier
+   * @returns Promise resolving to Result containing the User or an error
+   */
+  async getUserById(id: string): Promise<Result<User>> {
+    // Implementation
+  }
+}
+```
+
+### D. Interface and Type Documentation
+
+```typescript
+/**
+ * Represents a user in the system.
+ * 
+ * Users have a unique identifier, authentication credentials,
+ * and role-based permissions. All timestamps are in ISO 8601 format.
+ * 
+ * @interface
+ * @property {string} id - Unique identifier (UUID v4)
+ * @property {string} email - Email address (unique, validated)
+ * @property {string} name - Full name (1-100 characters)
+ * @property {UserRole} role - User's role in the system
+ * @property {Date} createdAt - Account creation timestamp
+ * @property {Date} updatedAt - Last modification timestamp
+ * @property {Record<string, unknown>} [metadata] - Optional metadata
+ */
+export interface User {
+  readonly id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  createdAt: Date;
+  updatedAt: Date;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * User role types available in the application.
+ * 
+ * - `admin`: Full system access, can manage all users
+ * - `user`: Standard user with limited permissions
+ * - `guest`: Read-only access, no modification rights
+ * 
+ * @typedef {('admin' | 'user' | 'guest')} UserRole
+ */
+export type UserRole = 'admin' | 'user' | 'guest';
+
+/**
+ * Result type for operations that can fail gracefully.
+ * 
+ * Provides a type-safe way to handle errors without throwing exceptions.
+ * Success results contain data, failure results contain error information.
+ * 
+ * @template T - Type of the success data
+ * @template E - Type of the error (defaults to Error)
+ * @typedef {Object} Result
+ * @property {boolean} success - Indicates operation success
+ * 
+ * @example Success result
+ * ```typescript
+ * const result: Result<User> = {
+ *   success: true,
+ *   data: { id: '123', name: 'John', email: 'john@example.com' }
+ * };
+ * ```
+ * 
+ * @example Error result
+ * ```typescript
+ * const result: Result<User> = {
+ *   success: false,
+ *   error: new NotFoundError('User not found')
+ * };
+ * ```
+ */
+export type Result<T, E = Error> =
+  | { success: true; data: T }
+  | { success: false; error: E };
+
+/**
+ * Input data for creating a new user.
+ * 
+ * Omits system-generated fields (id, timestamps) from the User type.
+ * All fields are validated before user creation.
+ * 
+ * @interface
+ */
+export interface CreateUserInput {
+  /** User's email address (must be unique) */
+  email: string;
+  /** User's full name (1-100 characters) */
+  name: string;
+  /** Optional role assignment (defaults to 'user') */
+  role?: UserRole;
+}
+```
+
+### E. Repository Pattern Documentation
+
+```typescript
+/**
+ * Repository interface for user data access.
+ * 
+ * Defines the contract for user data operations, abstracting
+ * the underlying data source. Implementations must be thread-safe
+ * and handle database errors appropriately.
+ * 
+ * @interface
+ * @see {@link PrismaUserRepository} for Prisma implementation
+ */
+export interface UserRepository {
+  /**
+   * Finds a user by their unique identifier.
+   * 
+   * @param id - User's unique identifier
+   * @returns Promise resolving to User or null if not found
+   */
+  findById(id: string): Promise<User | null>;
+
+  /**
+   * Finds a user by their email address.
+   * 
+   * @param email - User's email address
+   * @returns Promise resolving to User or null if not found
+   */
+  findByEmail(email: string): Promise<User | null>;
+
+  /**
+   * Creates a new user record.
+   * 
+   * @param data - User creation data
+   * @returns Promise resolving to the created User
+   * @throws {UniqueConstraintError} If email already exists
+   */
+  create(data: CreateUserInput): Promise<User>;
+
+  /**
+   * Updates an existing user record.
+   * 
+   * @param id - User's unique identifier
+   * @param data - Partial user data to update
+   * @returns Promise resolving to the updated User
+   * @throws {NotFoundError} If user doesn't exist
+   */
+  update(id: string, data: Partial<User>): Promise<User>;
+
+  /**
+   * Deletes a user record.
+   * 
+   * @param id - User's unique identifier
+   * @returns Promise resolving when deletion is complete
+   * @throws {NotFoundError} If user doesn't exist
+   */
+  delete(id: string): Promise<void>;
+}
+
+/**
+ * Prisma implementation of the UserRepository interface.
+ * 
+ * Provides type-safe database access using Prisma Client.
+ * All operations are transactional and properly handle errors.
+ * 
+ * @class
+ * @implements {UserRepository}
+ */
+export class PrismaUserRepository implements UserRepository {
+  /**
+   * Creates a new Prisma user repository.
+   * 
+   * @param db - Prisma client instance
+   */
+  constructor(private readonly db: PrismaClient) {}
+
+  /** @inheritdoc */
+  async findById(id: string): Promise<User | null> {
+    return this.db.user.findUnique({ where: { id } });
+  }
+
+  /** @inheritdoc */
+  async findByEmail(email: string): Promise<User | null> {
+    return this.db.user.findUnique({ where: { email } });
+  }
+
+  /** @inheritdoc */
+  async create(data: CreateUserInput): Promise<User> {
+    return this.db.user.create({ data });
+  }
+
+  /** @inheritdoc */
+  async update(id: string, data: Partial<User>): Promise<User> {
+    return this.db.user.update({ where: { id }, data });
+  }
+
+  /** @inheritdoc */
+  async delete(id: string): Promise<void> {
+    await this.db.user.delete({ where: { id } });
+  }
+}
+```
+
+### F. Generating Documentation with TypeDoc
+
+#### Installation and Setup
+
+```bash
+# Install TypeDoc and plugins
+npm add --save-dev typedoc typedoc-plugin-markdown
+
+# Add scripts to package.json
+npm pkg set scripts.docs="typedoc --out docs src/"
+npm pkg set scripts.docs:check="typedoc --emit none --validation.notDocumented true"
+npm pkg set scripts.docs:serve="typedoc --out docs src/ && npx serve docs"
+npm pkg set scripts.docs:json="typedoc --json docs/api.json src/"
+```
+
+#### TypeDoc Configuration
+
+Create `typedoc.json` in project root:
+
+```json
+{
+  "entryPoints": ["src/index.ts"],
+  "entryPointStrategy": "expand",
+  "out": "docs",
+  "exclude": [
+    "**/*.test.ts",
+    "**/*.spec.ts",
+    "**/test/**",
+    "**/tests/**",
+    "**/__tests__/**"
+  ],
+  "excludePrivate": true,
+  "excludeProtected": false,
+  "excludeInternal": false,
+  "readme": "README.md",
+  "plugin": ["typedoc-plugin-markdown"],
+  "theme": "default",
+  "categorizeByGroup": true,
+  "categoryOrder": [
+    "Services",
+    "Repositories",
+    "Controllers",
+    "Middleware",
+    "Utilities",
+    "Types",
+    "*"
+  ],
+  "navigation": {
+    "includeCategories": true,
+    "includeGroups": true
+  },
+  "sort": ["source-order"],
+  "validation": {
+    "notExported": true,
+    "invalidLink": true,
+    "notDocumented": true
+  },
+  "compilerOptions": {
+    "moduleResolution": "bundler"
+  }
+}
+```
+
+#### Generating Documentation
+
+```bash
+# Generate HTML documentation
+npm run docs
+
+# Check documentation completeness
+npm run docs:check
+
+# Generate and serve documentation
+npm run docs:serve
+
+# Generate JSON documentation (for tooling)
+npm run docs:json
+
+# Open generated docs
+open docs/index.html  # macOS
+xdg-open docs/index.html  # Linux
+```
+
+#### Documentation Categories
+
+Organize your code with JSDoc tags:
+
+```typescript
+/**
+ * User service for business logic.
+ * @category Services
+ */
+export class UserService {}
+
+/**
+ * User repository for data access.
+ * @category Repositories
+ */
+export class UserRepository {}
+
+/**
+ * Authentication middleware.
+ * @category Middleware
+ */
+export function authMiddleware() {}
+
+/**
+ * Logger utility.
+ * @category Utilities
+ */
+export const logger = createLogger();
+
+/**
+ * User type definition.
+ * @category Types
+ */
+export interface User {}
+```
+
+### G. Documentation Verification
+
+**Add documentation checks to scripts:**
+
+```json
+// package.json
+{
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "biome check .",
+    "lint:fix": "biome check --apply .",
+    "format": "biome format --write .",
+    "typecheck": "tsc --noEmit",
+    "docs": "typedoc --out docs src/",
+    "docs:check": "typedoc --emit none --validation.notDocumented true",
+    "docs:serve": "typedoc --out docs src/ && npx serve docs",
+    "verify": "npm run typecheck && npm run docs:check && npm run lint && npm run test"
+  }
+}
+```
+
+### H. CI/CD Integration
+
+```yaml
+# .github/workflows/ci.yml
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Type check
+        run: npm run typecheck
+      
+      - name: Verify documentation
+        run: npm run docs:check
+      
+      - name: Lint code
+        run: npm run lint
+      
+      - name: Run tests
+        run: npm run test:coverage
+      
+      - name: Generate documentation
+        run: npm run docs
+      
+      - name: Upload documentation artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: api-documentation
+          path: docs/
+      
+      - name: Deploy documentation to GitHub Pages
+        if: github.ref == 'refs/heads/main'
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs
+```
+
+### I. Documentation Best Practices
+
+**DO:**
+- ✅ Document all public exports (functions, classes, interfaces, types)
+- ✅ Include `@param` for all function parameters
+- ✅ Include `@returns` for all return values
+- ✅ Include `@throws` for functions that can throw
+- ✅ Provide at least one `@example` for complex APIs
+- ✅ Use `@template` for generic type parameters
+- ✅ Include `@see` tags for related functions/types
+- ✅ Keep examples up-to-date with implementation
+- ✅ Generate docs as part of CI/CD pipeline
+- ✅ Use `@category` to organize documentation
+
+**DON'T:**
+- ❌ Skip documentation for "obvious" functions
+- ❌ Write vague descriptions ("Does stuff", "Helper function")
+- ❌ Let examples become outdated
+- ❌ Commit generated docs to git (add `docs/` to `.gitignore`)
+- ❌ Use `@ts-ignore` to suppress documentation warnings
+- ❌ Document private implementation details excessively
+
+### J. Documentation Checklist
+
+**Before committing code, verify:**
+- [ ] All exported functions have JSDoc comments
+- [ ] All classes have JSDoc comments
+- [ ] All public interfaces and types have JSDoc comments
+- [ ] All `@param` tags document parameter types and purpose
+- [ ] All `@returns` tags document return types and values
+- [ ] At least one `@example` provided for complex APIs
+- [ ] `@throws` documented for functions that can throw errors
+- [ ] TypeDoc can generate docs: `npm run docs:check` passes
+- [ ] Generated documentation is readable and complete
+- [ ] No "not documented" warnings from TypeDoc
+- [ ] Examples compile and run correctly
+
+### K. Complete Documentation Example
+
+```typescript
+/**
+ * @fileoverview User authentication service with JWT token management.
+ * Provides secure authentication, authorization, and session management.
+ * @module services/auth
+ */
+
+import { SignJWT, jwtVerify } from 'jose';
+import type { User } from '../types/user.types.js';
+import type { UserRepository } from '../repositories/user.repository.js';
+import { logger } from '../utils/logger.js';
+
+/**
+ * JWT payload structure for authentication tokens.
+ * 
+ * @interface
+ * @property {string} userId - Unique user identifier
+ * @property {string} email - User's email address
+ * @property {UserRole} role - User's role for authorization
+ * @property {number} iat - Issued at timestamp (Unix epoch)
+ * @property {number} exp - Expiration timestamp (Unix epoch)
+ */
+export interface JWTPayload {
+  userId: string;
+  email: string;
+  role: string;
+  iat: number;
+  exp: number;
+}
+
+/**
+ * Authentication credentials for login.
+ * 
+ * @interface
+ * @property {string} email - User's email address
+ * @property {string} password - User's password (plain text, will be hashed)
+ */
+export interface LoginCredentials {
+  email: string;
+  password: string;
+}
+
+/**
+ * Authentication result after successful login.
+ * 
+ * @interface
+ * @property {User} user - Authenticated user data
+ * @property {string} token - JWT access token
+ * @property {string} refreshToken - Refresh token for obtaining new access tokens
+ */
+export interface AuthResult {
+  user: User;
+  token: string;
+  refreshToken: string;
+}
+
+/**
+ * Service for handling user authentication and authorization.
+ * 
+ * Manages JWT token generation, validation, and refresh operations.
+ * Uses industry-standard security practices including password hashing
+ * with bcrypt and secure token signing with HS256 algorithm.
+ * 
+ * @class
+ * @category Services
+ * 
+ * @example
+ * ```typescript
+ * const authService = new AuthService(userRepository);
+ * 
+ * // Login
+ * const result = await authService.login({
+ *   email: 'user@example.com',
+ *   password: 'secure-password'
+ * });
+ * 
+ * if (result.success) {
+ *   console.log('Token:', result.data.token);
+ * }
+ * 
+ * // Verify token
+ * const payload = await authService.verifyToken(result.data.token);
+ * ```
+ */
+export class AuthService {
+  private readonly jwtSecret: Uint8Array;
+  private readonly tokenExpiry = '24h';
+  private readonly refreshExpiry = '7d';
+
+  /**
+   * Creates a new authentication service.
+   * 
+   * @param repository - User repository for data access
+   * @param jwtSecret - Secret key for JWT signing (min 32 bytes)
+   * @throws {Error} If JWT secret is not provided or too short
+   */
+  constructor(
+    private readonly repository: UserRepository,
+    jwtSecret: string = process.env.JWT_SECRET || '',
+  ) {
+    if (!jwtSecret || jwtSecret.length < 32) {
+      throw new Error('JWT_SECRET must be at least 32 characters');
+    }
+    this.jwtSecret = new TextEncoder().encode(jwtSecret);
+  }
+
+  /**
+   * Authenticates a user with email and password.
+   * 
+   * Validates credentials, generates JWT tokens, and returns user data.
+   * Uses bcrypt for secure password comparison. Failed attempts are logged.
+   * 
+   * @param credentials - User login credentials
+   * @param credentials.email - User's email address
+   * @param credentials.password - User's password (plain text)
+   * @returns Promise resolving to Result with AuthResult or error
+   * 
+   * @example
+   * ```typescript
+   * const result = await authService.login({
+   *   email: 'user@example.com',
+   *   password: 'my-password'
+   * });
+   * 
+   * if (result.success) {
+   *   const { user, token } = result.data;
+   *   // Store token and redirect to dashboard
+   * } else {
+   *   console.error('Login failed:', result.error.message);
+   * }
+   * ```
+   * 
+   * @see {@link verifyToken} for token validation
+   * @see {@link refreshToken} for obtaining new tokens
+   */
+  async login(credentials: LoginCredentials): Promise<Result<AuthResult>> {
+    const { email, password } = credentials;
+
+    // Find user
+    const user = await this.repository.findByEmail(email);
+    if (!user) {
+      logger.warn({ email }, 'Login attempt with non-existent email');
+      return {
+        success: false,
+        error: new UnauthorizedError('Invalid credentials'),
+      };
+    }
+
+    // Verify password
+    const isValid = await this.verifyPassword(password, user.passwordHash);
+    if (!isValid) {
+      logger.warn({ userId: user.id }, 'Login attempt with invalid password');
+      return {
+        success: false,
+        error: new UnauthorizedError('Invalid credentials'),
+      };
+    }
+
+    // Generate tokens
+    const token = await this.generateToken({
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+    });
+
+    const refreshToken = await this.generateRefreshToken(user.id);
+
+    logger.info({ userId: user.id }, 'User logged in successfully');
+
+    return {
+      success: true,
+      data: { user, token, refreshToken },
+    };
+  }
+
+  /**
+   * Verifies a JWT access token.
+   * 
+   * Validates token signature, expiration, and claims. Returns the
+   * decoded payload if valid, or an error if verification fails.
+   * 
+   * @param token - JWT token string to verify
+   * @returns Promise resolving to Result with JWTPayload or error
+   * @throws {UnauthorizedError} If token is invalid or expired
+   * 
+   * @example
+   * ```typescript
+   * const result = await authService.verifyToken(
+   *   'eyJhbGciOiJIUzI1NiIs...'
+   * );
+   * 
+   * if (result.success) {
+   *   const { userId, role } = result.data;
+   *   // Check permissions based on role
+   * }
+   * ```
+   */
+  async verifyToken(token: string): Promise<Result<JWTPayload>> {
+    try {
+      const { payload } = await jwtVerify(token, this.jwtSecret, {
+        issuer: 'myapp',
+        audience: 'myapp-api',
+      });
+
+      return {
+        success: true,
+        data: payload as JWTPayload,
+      };
+    } catch (error) {
+      logger.warn({ error }, 'Token verification failed');
+      return {
+        success: false,
+        error: new UnauthorizedError('Invalid or expired token'),
+      };
+    }
+  }
+
+  /**
+   * Generates a new JWT access token.
+   * 
+   * @private
+   * @param payload - Token payload data
+   * @returns Promise resolving to signed JWT string
+   */
+  private async generateToken(payload: Omit<JWTPayload, 'iat' | 'exp'>): Promise<string> {
+    return await new SignJWT(payload)
+      .setProtectedHeader({ alg: 'HS256' })
+      .setIssuedAt()
+      .setExpirationTime(this.tokenExpiry)
+      .setIssuer('myapp')
+      .setAudience('myapp-api')
+      .sign(this.jwtSecret);
+  }
+
+  /**
+   * Generates a refresh token for obtaining new access tokens.
+   * 
+   * @private
+   * @param userId - User's unique identifier
+   * @returns Promise resolving to signed refresh token string
+   */
+  private async generateRefreshToken(userId: string): Promise<string> {
+    return await new SignJWT({ userId, type: 'refresh' })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setIssuedAt()
+      .setExpirationTime(this.refreshExpiry)
+      .setIssuer('myapp')
+      .setAudience('myapp-api')
+      .sign(this.jwtSecret);
+  }
+
+  /**
+   * Verifies a password against its hash.
+   * 
+   * @private
+   * @param password - Plain text password
+   * @param hash - Bcrypt password hash
+   * @returns Promise resolving to true if password matches
+   */
+  private async verifyPassword(password: string, hash: string): Promise<boolean> {
+    // Implementation with bcrypt
+    return true; // Placeholder
+  }
+}
+```
+
+---
+
+## 4. Mandatory Code Standards
 
 ### A. Type Safety
 * **NEVER use `any`**. Use `unknown` and type guards instead.
@@ -1118,10 +1980,15 @@ app.use('/api/', limiter);
     "lint:fix": "biome check --apply .",
     "format": "biome format --write .",
     "typecheck": "tsc --noEmit",
+    "docs": "typedoc --out docs src/",
+    "docs:check": "typedoc --emit none --validation.notDocumented true",
+    "docs:serve": "typedoc --out docs src/ && npx serve docs",
+    "docs:json": "typedoc --json docs/api.json src/",
+    "verify": "npm run typecheck && npm run docs:check && npm run lint && npm run test",
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist docs"
   }
 }
 ```
@@ -1283,6 +2150,8 @@ export function errorHandler(error: Error, c: Context) {
 
 ### Pre-Production Validation
 - [ ] All TypeScript strict checks enabled and passing
+- [ ] **All exported functions/classes documented with JSDoc** (`npm run docs:check`)
+- [ ] **API documentation generated successfully** (`npm run docs`)
 - [ ] Test coverage ≥ 80% on business logic
 - [ ] No `any` types in production code
 - [ ] Environment variables validated with Zod
@@ -1297,6 +2166,19 @@ export function errorHandler(error: Error, c: Context) {
 - [ ] Graceful shutdown handlers implemented
 - [ ] Health check endpoint implemented
 - [ ] Monitoring/observability configured (OpenTelemetry, Sentry, etc.)
+
+### Agent Code Generation Verification (MANDATORY)
+**If code was generated by an agent, verify BEFORE delivery:**
+- [ ] TypeScript compilation successful: `npm run typecheck` passes
+- [ ] **JSDoc comments added for ALL new exports** (functions, classes, types)
+- [ ] **Documentation check passes**: `npm run docs:check` returns exit code 0
+- [ ] **Documentation can be generated**: `npm run docs` succeeds without errors
+- [ ] All documentation includes `@param`, `@returns`, and `@example` tags
+- [ ] Biome linter passes: `npm run lint` passes
+- [ ] All tests passing: `npm run test` passes
+- [ ] Test coverage ≥ 80%: `npm run test:coverage`
+- [ ] No `any` types used as workarounds
+- [ ] Agent has documented any complex fixes made during verification
 
 ### Environment Variables Template
 ```bash
@@ -1321,27 +2203,72 @@ API_KEY=your-api-key-here
 SENTRY_DSN=https://...
 ```
 
+### .gitignore Template
+```gitignore
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+*.js
+*.js.map
+*.d.ts
+*.d.ts.map
+
+# Generated documentation (regenerate during CI/CD)
+docs/
+api-docs/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Testing
+coverage/
+.nyc_output/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+```
+
 ## 11. Why This Configuration Works
 
 1. **ESM Modules**: Modern standard, tree-shaking support, better for performance and compatibility with web standards.
 
 2. **TypeScript Strict Mode**: Catches errors at compile time, reduces runtime bugs by 15-30%.
 
-3. **Zod Validation**: Runtime type safety at API boundaries, automatic TypeScript type inference.
+3. **JSDoc + TypeDoc**: Auto-generated documentation from code, always in sync, reduces onboarding time by 40%+, better IDE IntelliSense, verified during build.
 
-4. **Result Type Pattern**: Explicit error handling, makes error states visible in types, prevents uncaught exceptions.
+4. **Zod Validation**: Runtime type safety at API boundaries, automatic TypeScript type inference.
 
-5. **Structured Logging**: Essential for debugging in production, enables log aggregation and analysis.
+5. **Result Type Pattern**: Explicit error handling, makes error states visible in types, prevents uncaught exceptions.
 
-6. **Repository Pattern**: Separates data access from business logic, easier testing, database agnostic.
+6. **Structured Logging**: Essential for debugging in production, enables log aggregation and analysis.
 
-7. **Vitest**: 10x faster than Jest, native ESM support, better TypeScript integration.
+7. **Repository Pattern**: Separates data access from business logic, easier testing, database agnostic.
 
-8. **Biome**: Single tool for linting and formatting, 100x faster than ESLint+Prettier.
+8. **Vitest**: 10x faster than Jest, native ESM support, better TypeScript integration.
 
-9. **npm**: Standard tool working correctly under Linux, OSX and Windows.
+9. **Biome**: Single tool for linting and formatting, 100x faster than ESLint+Prettier.
 
-10. **Native APIs**: Better performance, smaller bundle size, no external dependencies to maintain.
+10. **npm**: Standard tool working correctly under Linux, OSX and Windows.
+
+11. **Native APIs**: Better performance, smaller bundle size, no external dependencies to maintain.
 
 ---
 

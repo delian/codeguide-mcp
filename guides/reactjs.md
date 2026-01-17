@@ -4,8 +4,8 @@ This document provides mandatory coding standards and development practices for 
 ---
 Agent Profile: The React Architect
 Role: Senior Frontend Engineer & React Performance Specialist
-Objective: Generate production-ready, type-safe, highly performant, and maintainable React SPAs.
-Tools: React 19.x, TypeScript 5.x, Vite 5.x, Modern Hooks, TanStack ecosystem.
+Objective: Generate production-ready, type-safe, fully documented, highly performant, and maintainable React SPAs.
+Tools: React 19.x, TypeScript 5.x, Vite 5.x, TypeDoc, Modern Hooks, TanStack ecosystem.
 
 ## 1. Core Philosophies
 The agent must adhere to the "REACT-PRO" principles for every React application:
@@ -18,7 +18,8 @@ The agent must adhere to the "REACT-PRO" principles for every React application:
 **Performance Optimized**: Code splitting, lazy loading, optimized re-renders.
 **Reactive State Management**: Modern hooks, server state separation, minimal global state.
 **Observable Patterns**: Proper dependency arrays, effect cleanup, no memory leaks.
-**Verified Builds**: Agent-generated code MUST compile (TypeScript check) and pass all tests before delivery.
+**Documented Code**: JSDoc comments for all exports, auto-generated API documentation with TypeDoc.
+**Verified Builds**: Agent-generated code MUST compile (TypeScript check), have documentation, and pass all tests before delivery.
 
 ## 2. Mandatory Setup Requirements
 
@@ -31,6 +32,8 @@ The agent must adhere to the "REACT-PRO" principles for every React application:
 
 * **Package Manager**: Use `npm` v10+ and not pnpm and yarn.
 
+* **Documentation**: TypeDoc for auto-generated API documentation.
+
 ```bash
 # ✅ CORRECT - Modern project setup
 npm create vite my-app --template react-ts
@@ -39,6 +42,14 @@ npm install
 
 # Update to React 19
 npm add react@latest react-dom@latest
+
+# Add documentation tools
+npm add --save-dev typedoc typedoc-plugin-markdown
+
+# Add scripts to package.json
+npm pkg set scripts.docs="typedoc --out docs src/"
+npm pkg set scripts.docs:check="typedoc --emit none --validation.notDocumented true"
+npm pkg set scripts.docs:serve="typedoc --out docs src/ && npx serve docs"
 
 # ❌ WRONG - Deprecated
 npx create-react-app my-app
@@ -196,6 +207,9 @@ src/
     "@testing-library/react": "^14.1.2",
     "@testing-library/jest-dom": "^6.2.0",
     "@testing-library/user-event": "^14.5.2",
+    // Documentation
+    "typedoc": "^0.25.0",
+    "typedoc-plugin-markdown": "^3.17.0",
     // Linting & Formatting
     "@biomejs/biome": "^1.5.0",
     // CSS
@@ -243,14 +257,23 @@ src/
    - MUST complete without errors
    - Check bundle size is reasonable
 
-4. **Unit Test Creation (MANDATORY)**:
+4. **Documentation Verification**:
+   ```bash
+   # Check documentation completeness
+   npm run docs:check
+   ```
+   - All exported functions/components have JSDoc comments
+   - No "not documented" warnings from TypeDoc
+   - Examples are provided for complex APIs
+
+5. **Unit Test Creation (MANDATORY)**:
    - Write tests for ALL new components
    - Write tests for ALL new hooks
    - Write tests for ALL new utility functions
    - Minimum 80% code coverage
    - Tests MUST follow Testing Library best practices
 
-5. **Test Execution**:
+6. **Test Execution**:
    ```bash
    # Run all tests
    npm test
@@ -444,6 +467,9 @@ describe('UserCard', () => {
 **NEVER deliver code that:**
 - ❌ Has TypeScript compilation errors
 - ❌ Uses `any` types to bypass type checking
+- ❌ **Lacks JSDoc documentation for exported functions/components**
+- ❌ **Has undocumented parameters or return types**
+- ❌ **Fails documentation check** (`npm run docs:check`)
 - ❌ Has failing tests
 - ❌ Lacks tests for new functionality
 - ❌ Has test coverage < 80%
@@ -454,7 +480,656 @@ describe('UserCard', () => {
 
 ---
 
-## 4. Component Patterns
+## 4. Documentation Requirements (MANDATORY)
+
+### A. JSDoc Comments for All Code
+
+**ALL components, hooks, utilities, and types MUST have comprehensive JSDoc documentation.**
+
+#### Why JSDoc Documentation?
+
+- **Auto-Generated API Docs**: Tools like TypeDoc generate beautiful documentation websites
+- **IDE IntelliSense**: Better autocomplete and inline documentation
+- **Type Safety**: JSDoc + TypeScript = comprehensive type information
+- **Maintenance**: Self-documenting code reduces onboarding time
+- **Verification**: Documentation is checked during build process
+
+### B. Component Documentation
+
+```typescript
+/**
+ * UserCard component displays user information in a card layout.
+ * 
+ * Supports optional edit functionality and loading states. The card
+ * automatically handles avatar fallbacks and accessibility attributes.
+ * 
+ * @component
+ * @example
+ * ```tsx
+ * <UserCard
+ *   user={{ id: '1', name: 'John Doe', email: 'john@example.com' }}
+ *   onEdit={(id) => console.log('Edit user:', id)}
+ * />
+ * ```
+ * 
+ * @param props - Component props
+ * @param props.user - User object containing id, name, email, and optional avatar
+ * @param props.onEdit - Optional callback fired when edit button is clicked
+ * @param props.className - Optional CSS class name for styling
+ * @returns React component displaying user information
+ */
+export function UserCard({ user, onEdit, className }: UserCardProps) {
+  // Implementation
+}
+
+/**
+ * Props for the UserCard component.
+ * 
+ * @interface UserCardProps
+ * @property {User} user - User data to display
+ * @property {(userId: string) => void} [onEdit] - Optional edit handler
+ * @property {string} [className] - Optional CSS class
+ */
+interface UserCardProps {
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    avatar?: string;
+  };
+  onEdit?: (userId: string) => void;
+  className?: string;
+}
+```
+
+### C. Hook Documentation
+
+```typescript
+/**
+ * Custom hook for managing async operations with loading and error states.
+ * 
+ * Provides automatic error handling, loading states, and cleanup on unmount.
+ * Supports both immediate and manual execution modes.
+ * 
+ * @template T - The type of data returned by the async function
+ * @param {() => Promise<T>} asyncFunction - Async function to execute
+ * @param {boolean} [immediate=true] - Whether to execute immediately on mount
+ * @returns {UseAsyncResult<T>} Object containing data, error, loading state, and execute function
+ * 
+ * @example
+ * ```tsx
+ * const { data, error, isLoading, execute } = useAsync(
+ *   () => api.fetchUser('123'),
+ *   true
+ * );
+ * 
+ * if (isLoading) return <Spinner />;
+ * if (error) return <Error message={error.message} />;
+ * return <UserProfile user={data} />;
+ * ```
+ */
+function useAsync<T>(
+  asyncFunction: () => Promise<T>,
+  immediate = true,
+): UseAsyncResult<T> {
+  // Implementation
+}
+
+/**
+ * Return type for useAsync hook.
+ * 
+ * @template T - Type of the async operation result
+ * @interface UseAsyncResult
+ * @property {T | null} data - The fetched data, null if not loaded
+ * @property {Error | null} error - Error object if operation failed
+ * @property {boolean} isLoading - True while operation is in progress
+ * @property {() => Promise<void>} execute - Function to manually trigger the async operation
+ */
+interface UseAsyncResult<T> {
+  data: T | null;
+  error: Error | null;
+  isLoading: boolean;
+  execute: () => Promise<void>;
+}
+```
+
+### D. Utility Function Documentation
+
+```typescript
+/**
+ * Formats a date string into a human-readable format.
+ * 
+ * Handles various input formats and provides localized output.
+ * Falls back to ISO string if parsing fails.
+ * 
+ * @param {string | Date} date - Date to format (ISO string or Date object)
+ * @param {string} [locale='en-US'] - Locale for formatting (e.g., 'en-US', 'fr-FR')
+ * @param {Intl.DateTimeFormatOptions} [options] - Formatting options
+ * @returns {string} Formatted date string
+ * @throws {TypeError} If date parameter is not a string or Date object
+ * 
+ * @example
+ * ```ts
+ * formatDate('2024-01-15T10:30:00Z');
+ * // Returns: "January 15, 2024"
+ * 
+ * formatDate(new Date(), 'en-US', { dateStyle: 'short' });
+ * // Returns: "1/15/24"
+ * ```
+ */
+export function formatDate(
+  date: string | Date,
+  locale = 'en-US',
+  options?: Intl.DateTimeFormatOptions,
+): string {
+  try {
+    const dateObj = typeof date === 'string' ? new Date(date) : date;
+    return new Intl.DateTimeFormat(locale, options).format(dateObj);
+  } catch (error) {
+    console.error('Failed to format date:', error);
+    return date.toString();
+  }
+}
+```
+
+### E. Type Documentation
+
+```typescript
+/**
+ * Represents a user in the system.
+ * 
+ * @interface User
+ * @property {string} id - Unique identifier (UUID v4)
+ * @property {string} email - Email address (validated format)
+ * @property {string} name - Full name
+ * @property {string} [avatar] - Optional avatar URL
+ * @property {UserRole} role - User's role in the system
+ * @property {Date} createdAt - Account creation timestamp
+ * @property {Date} updatedAt - Last update timestamp
+ */
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  avatar?: string;
+  role: UserRole;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * User role types in the application.
+ * 
+ * @typedef {'admin' | 'user' | 'guest'} UserRole
+ */
+export type UserRole = 'admin' | 'user' | 'guest';
+
+/**
+ * API response wrapper for paginated data.
+ * 
+ * @template T - Type of items in the data array
+ * @interface PaginatedResponse
+ * @property {T[]} data - Array of items for current page
+ * @property {number} total - Total number of items across all pages
+ * @property {number} page - Current page number (1-indexed)
+ * @property {number} pageSize - Number of items per page
+ * @property {boolean} hasMore - Whether more pages are available
+ */
+export interface PaginatedResponse<T> {
+  data: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+}
+```
+
+### F. Complex Component Documentation
+
+```typescript
+/**
+ * DataTable component with sorting, filtering, and pagination.
+ * 
+ * A comprehensive data table implementation with built-in support for:
+ * - Column sorting (ascending/descending)
+ * - Text-based filtering
+ * - Pagination with configurable page sizes
+ * - Row selection (single or multi-select)
+ * - Loading and empty states
+ * - Accessibility (keyboard navigation, screen readers)
+ * 
+ * @component
+ * @template T - Type of data items in the table
+ * 
+ * @param {DataTableProps<T>} props - Component props
+ * @param {T[]} props.data - Array of data items to display
+ * @param {ColumnDef<T>[]} props.columns - Column definitions
+ * @param {boolean} [props.isLoading=false] - Whether data is loading
+ * @param {(item: T) => void} [props.onRowClick] - Callback when row is clicked
+ * @param {number} [props.pageSize=10] - Number of items per page
+ * @param {string} [props.emptyMessage='No data available'] - Message when table is empty
+ * 
+ * @returns {JSX.Element} Rendered data table
+ * 
+ * @example
+ * ```tsx
+ * const columns: ColumnDef<User>[] = [
+ *   { key: 'name', label: 'Name', sortable: true },
+ *   { key: 'email', label: 'Email', sortable: true },
+ *   { key: 'role', label: 'Role', sortable: false },
+ * ];
+ * 
+ * <DataTable
+ *   data={users}
+ *   columns={columns}
+ *   isLoading={isLoadingUsers}
+ *   onRowClick={(user) => navigate(`/users/${user.id}`)}
+ *   pageSize={25}
+ * />
+ * ```
+ * 
+ * @see {@link ColumnDef} for column configuration options
+ * @see {@link usePagination} for pagination logic
+ */
+export function DataTable<T extends Record<string, any>>({
+  data,
+  columns,
+  isLoading = false,
+  onRowClick,
+  pageSize = 10,
+  emptyMessage = 'No data available',
+}: DataTableProps<T>): JSX.Element {
+  // Implementation
+}
+```
+
+### G. Generating Documentation with TypeDoc
+
+#### Installation
+
+```bash
+# Install TypeDoc and related plugins
+npm add --save-dev typedoc typedoc-plugin-markdown
+
+# Add to package.json scripts
+{
+  "scripts": {
+    "docs": "typedoc --out docs src/",
+    "docs:serve": "typedoc --out docs src/ && npx serve docs",
+    "docs:json": "typedoc --json docs/api.json src/"
+  }
+}
+```
+
+#### TypeDoc Configuration
+
+Create `typedoc.json` in project root:
+
+```json
+{
+  "entryPoints": ["src/index.ts"],
+  "entryPointStrategy": "expand",
+  "out": "docs",
+  "exclude": [
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*.spec.tsx",
+    "**/test/**",
+    "**/tests/**"
+  ],
+  "excludePrivate": true,
+  "excludeProtected": false,
+  "excludeInternal": false,
+  "readme": "README.md",
+  "plugin": ["typedoc-plugin-markdown"],
+  "theme": "default",
+  "categorizeByGroup": true,
+  "categoryOrder": [
+    "Components",
+    "Hooks",
+    "Utilities",
+    "Types",
+    "*"
+  ],
+  "navigation": {
+    "includeCategories": true,
+    "includeGroups": true
+  },
+  "sort": ["source-order"],
+  "validation": {
+    "notExported": true,
+    "invalidLink": true,
+    "notDocumented": true
+  }
+}
+```
+
+#### Generating Documentation
+
+```bash
+# Generate HTML documentation
+npm run docs
+
+# Generate and serve documentation
+npm run docs:serve
+
+# Generate JSON documentation (for tooling)
+npm run docs:json
+
+# Open generated docs in browser
+open docs/index.html  # macOS
+xdg-open docs/index.html  # Linux
+start docs/index.html  # Windows
+```
+
+#### Documentation Categories
+
+Organize your code with JSDoc tags:
+
+```typescript
+/**
+ * Button component with multiple variants.
+ * @component
+ * @category Components/UI
+ */
+export function Button() { }
+
+/**
+ * Hook for managing authentication state.
+ * @hook
+ * @category Hooks/Auth
+ */
+export function useAuth() { }
+
+/**
+ * Utility for formatting currency values.
+ * @function
+ * @category Utilities/Format
+ */
+export function formatCurrency() { }
+
+/**
+ * User data type.
+ * @interface
+ * @category Types/Models
+ */
+export interface User { }
+```
+
+### H. Documentation Verification
+
+**Add documentation checks to build process:**
+
+```json
+// package.json
+{
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "docs:check": "typedoc --emit none --validation.notDocumented true",
+    "docs:build": "typedoc --out docs src/",
+    "lint": "biome check src/",
+    "test": "vitest run",
+    "verify": "npm run typecheck && npm run docs:check && npm run lint && npm test"
+  }
+}
+```
+
+**Pre-commit hook to ensure documentation:**
+
+```yaml
+# .husky/pre-commit or pre-commit-config.yaml
+- name: Check documentation
+  run: npm run docs:check
+```
+
+### I. CI/CD Integration
+
+```yaml
+# .github/workflows/ci.yml
+- name: Verify TypeScript compilation
+  run: npm run typecheck
+
+- name: Verify documentation
+  run: npm run docs:check
+
+- name: Generate documentation
+  run: npm run docs:build
+
+- name: Upload documentation artifacts
+  uses: actions/upload-artifact@v3
+  with:
+    name: api-documentation
+    path: docs/
+
+- name: Deploy documentation to GitHub Pages
+  if: github.ref == 'refs/heads/main'
+  uses: peaceiris/actions-gh-pages@v3
+  with:
+    github_token: ${{ secrets.GITHUB_TOKEN }}
+    publish_dir: ./docs
+```
+
+### J. Documentation Best Practices
+
+**DO:**
+- ✅ Document all public APIs (exported functions, components, hooks)
+- ✅ Include `@example` tags with runnable code snippets
+- ✅ Document all parameters with `@param`
+- ✅ Document return values with `@returns`
+- ✅ Document exceptions with `@throws`
+- ✅ Use `@template` for generic types
+- ✅ Include `@see` tags for related functions
+- ✅ Keep examples up-to-date with implementation
+- ✅ Generate docs as part of CI/CD pipeline
+- ✅ Version documentation alongside code
+
+**DON'T:**
+- ❌ Skip documentation for "obvious" functions
+- ❌ Write vague descriptions ("Does stuff")
+- ❌ Let examples become outdated
+- ❌ Commit generated docs to git (add `docs/` to `.gitignore`)
+- ❌ Use `@ts-ignore` to suppress documentation warnings
+- ❌ Document private implementation details excessively
+
+### K. Documentation Checklist
+
+**Before committing code, verify:**
+- [ ] All exported components have JSDoc comments
+- [ ] All custom hooks have JSDoc comments
+- [ ] All utility functions have JSDoc comments
+- [ ] All type definitions have JSDoc comments
+- [ ] All `@param` tags document parameter types and purpose
+- [ ] All `@returns` tags document return types
+- [ ] At least one `@example` provided for complex APIs
+- [ ] `@throws` documented for functions that can throw
+- [ ] TypeDoc can generate docs: `npm run docs:check`
+- [ ] Generated documentation is readable and complete
+- [ ] No "not documented" warnings from TypeDoc
+
+### L. Complete Example
+
+```typescript
+/**
+ * @fileoverview Authentication hook with token management.
+ * Provides login, logout, and session management functionality.
+ * @module hooks/useAuth
+ */
+
+import { useState, useEffect, useCallback } from 'react';
+import { useAuthStore } from '@/stores/authStore';
+import { api } from '@/services/api';
+
+/**
+ * Authentication credentials for login.
+ * 
+ * @interface LoginCredentials
+ * @property {string} email - User's email address
+ * @property {string} password - User's password (min 8 characters)
+ */
+export interface LoginCredentials {
+  email: string;
+  password: string;
+}
+
+/**
+ * Return type for useAuth hook.
+ * 
+ * @interface UseAuthReturn
+ * @property {User | null} user - Currently authenticated user, null if not logged in
+ * @property {boolean} isAuthenticated - Whether user is authenticated
+ * @property {boolean} isLoading - Whether authentication state is being loaded
+ * @property {(credentials: LoginCredentials) => Promise<void>} login - Function to log in user
+ * @property {() => Promise<void>} logout - Function to log out user
+ * @property {() => Promise<void>} refreshToken - Function to refresh auth token
+ */
+export interface UseAuthReturn {
+  user: User | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  login: (credentials: LoginCredentials) => Promise<void>;
+  logout: () => Promise<void>;
+  refreshToken: () => Promise<void>;
+}
+
+/**
+ * Hook for managing user authentication state.
+ * 
+ * Provides methods for login, logout, and token refresh.
+ * Automatically loads user data on mount if a valid token exists.
+ * Handles token expiration and refresh logic.
+ * 
+ * @hook
+ * @category Hooks/Auth
+ * 
+ * @returns {UseAuthReturn} Authentication state and methods
+ * 
+ * @example
+ * ```tsx
+ * function LoginPage() {
+ *   const { login, isLoading, user } = useAuth();
+ *   
+ *   const handleSubmit = async (credentials: LoginCredentials) => {
+ *     try {
+ *       await login(credentials);
+ *       navigate('/dashboard');
+ *     } catch (error) {
+ *       console.error('Login failed:', error);
+ *     }
+ *   };
+ *   
+ *   if (user) return <Navigate to="/dashboard" />;
+ *   
+ *   return <LoginForm onSubmit={handleSubmit} isLoading={isLoading} />;
+ * }
+ * ```
+ * 
+ * @example
+ * ```tsx
+ * function ProtectedRoute({ children }: { children: React.ReactNode }) {
+ *   const { isAuthenticated, isLoading } = useAuth();
+ *   
+ *   if (isLoading) return <Spinner />;
+ *   if (!isAuthenticated) return <Navigate to="/login" />;
+ *   
+ *   return <>{children}</>;
+ * }
+ * ```
+ * 
+ * @throws {Error} When login fails due to invalid credentials
+ * @throws {Error} When token refresh fails
+ * 
+ * @see {@link useAuthStore} for underlying state management
+ * @see {@link LoginCredentials} for login parameter types
+ */
+export function useAuth(): UseAuthReturn {
+  const { user, token, setUser, clearUser } = useAuthStore();
+  const [isLoading, setIsLoading] = useState(true);
+
+  /**
+   * Authenticates user with provided credentials.
+   * 
+   * @param {LoginCredentials} credentials - User email and password
+   * @throws {Error} If credentials are invalid or network request fails
+   */
+  const login = useCallback(async (credentials: LoginCredentials) => {
+    setIsLoading(true);
+    try {
+      const response = await api.auth.login(credentials);
+      setUser(response.user, response.token);
+    } catch (error) {
+      console.error('Login error:', error);
+      throw error;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [setUser]);
+
+  /**
+   * Logs out current user and clears authentication state.
+   */
+  const logout = useCallback(async () => {
+    try {
+      await api.auth.logout();
+    } finally {
+      clearUser();
+    }
+  }, [clearUser]);
+
+  /**
+   * Refreshes authentication token.
+   * 
+   * @throws {Error} If token refresh fails
+   */
+  const refreshToken = useCallback(async () => {
+    if (!token) throw new Error('No token to refresh');
+    
+    try {
+      const response = await api.auth.refreshToken(token);
+      setUser(response.user, response.token);
+    } catch (error) {
+      console.error('Token refresh failed:', error);
+      clearUser();
+      throw error;
+    }
+  }, [token, setUser, clearUser]);
+
+  // Load user on mount if token exists
+  useEffect(() => {
+    const loadUser = async () => {
+      if (!token) {
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        const user = await api.auth.getMe();
+        setUser(user, token);
+      } catch (error) {
+        console.error('Failed to load user:', error);
+        clearUser();
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadUser();
+  }, [token, setUser, clearUser]);
+
+  return {
+    user,
+    isAuthenticated: !!user,
+    isLoading,
+    login,
+    logout,
+    refreshToken,
+  };
+}
+```
+
+---
+
+## 5. Component Patterns
 
 ### A. Functional Components (ONLY)
 * **NEVER use class components**. Use functional components with hooks.
@@ -1985,6 +2660,10 @@ export class ErrorBoundary extends React.Component<Props, State> {
 - [ ] TypeScript compilation successful: `npm run typecheck` returns exit code 0
 - [ ] All linter checks pass: `npx @biomejs/biome check src/`
 - [ ] Production build succeeds: `npm run build` completes without errors
+- [ ] **JSDoc comments added for ALL new exports** (components, hooks, utilities, types)
+- [ ] **Documentation check passes**: `npm run docs:check` returns exit code 0
+- [ ] **Documentation can be generated**: `npm run docs` succeeds without errors
+- [ ] All documentation includes `@param`, `@returns`, and `@example` tags
 - [ ] Unit tests created for ALL new components, hooks, and utilities
 - [ ] All tests passing: `npm test` returns exit code 0
 - [ ] Test coverage ≥ 80%: `npm test -- --coverage`
@@ -1994,7 +2673,9 @@ export class ErrorBoundary extends React.Component<Props, State> {
 - [ ] Agent has documented any complex fixes made during verification
 
 ### Pre-Production Validation
-- [ ] All TypeScript errors resolved (`npm typecheck`)
+- [ ] All TypeScript errors resolved (`npm run typecheck`)
+- [ ] **All exports documented with JSDoc** (`npm run docs:check`)
+- [ ] **API documentation generated successfully** (`npm run docs`)
 - [ ] All tests passing (`npm test`)
 - [ ] Test coverage ≥ 80%
 - [ ] No console.log statements in production code
@@ -2030,23 +2711,25 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
 3. **TypeScript Strict**: Catches 15-30% more bugs at compile time.
 
-4. **Agent Build Verification**: Ensures generated code compiles and tests pass before delivery, preventing broken code.
+4. **JSDoc + TypeDoc**: Auto-generated documentation from code, always in sync, reduces onboarding time by 40%, better IDE IntelliSense.
 
-5. **Mandatory Testing**: 80%+ coverage requirement catches bugs early, reduces production issues.
+5. **Agent Build Verification**: Ensures generated code compiles, has documentation, and tests pass before delivery, preventing broken code.
 
-6. **TanStack Query**: Declarative data fetching, automatic caching, optimistic updates.
+6. **Mandatory Testing**: 80%+ coverage requirement catches bugs early, reduces production issues.
 
-7. **React Hook Form + Zod**: Best form performance, type-safe validation.
+7. **TanStack Query**: Declarative data fetching, automatic caching, optimistic updates.
 
-8. **Zustand**: Minimal boilerplate vs Redux, better TypeScript support.
+8. **React Hook Form + Zod**: Best form performance, type-safe validation.
 
-9. **Component Composition**: Reusability, testability, maintainability.
+9. **Zustand**: Minimal boilerplate vs Redux, better TypeScript support.
 
-10. **Testing Library**: Tests user behavior, not implementation details.
+10. **Component Composition**: Reusability, testability, maintainability.
 
-11. **Accessibility First**: Legal compliance, better UX for all users.
+11. **Testing Library**: Tests user behavior, not implementation details.
 
-12. **Performance Optimization**: Lazy loading, memoization, virtual lists for scale.
+12. **Accessibility First**: Legal compliance, better UX for all users.
+
+13. **Performance Optimization**: Lazy loading, memoization, virtual lists for scale.
 
 ---
 

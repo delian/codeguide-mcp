@@ -9,7 +9,9 @@ All code contributions **MUST** adhere to these guidelines. Non-compliant code w
 - **Dynaconf**: All configuration externalized to TOML files
 - **Type Hints**: Strict typing on all functions and classes
 - **Documentation**: Complete docstrings (Google style) for all code
+- **Generated Docs**: API and functional documentation must be generated with pydoc
 - **Comprehensions**: Prefer list/set/dict/generator comprehensions for performance and memory efficiency
+- **Functional Programming**: Prefer functional programming style whenever applicable
 - **Testing**: 100% test coverage with pytest, all tests must pass
 - **Code Quality**: Ruff checks must pass without errors
 - **Agent Verification**: AI-generated code must be syntax-checked and tested before delivery
@@ -647,6 +649,301 @@ RuntimeError: If generation fails after maximum retries.
 - [ ] Related functions in `See Also:` section (if applicable)
 - [ ] Performance characteristics documented (if relevant)
 
+### Generating Documentation (MANDATORY)
+
+**ALL projects MUST provide generated API documentation accessible via pydoc:**
+
+#### A. Viewing Documentation with pydoc
+
+**Use Python's built-in pydoc to view documentation:**
+
+```bash
+# View module documentation
+uv run python -m pydoc module_name
+
+# View specific function/class documentation
+uv run python -m pydoc module_name.ClassName
+uv run python -m pydoc module_name.function_name
+
+# Start HTTP server for browsing documentation
+uv run python -m pydoc -b
+# Opens browser to http://localhost:port/ for interactive browsing
+
+# Generate HTML documentation for a module
+uv run python -m pydoc -w module_name
+# Creates module_name.html in current directory
+
+# Generate HTML for entire package
+uv run python -m pydoc -w package_name
+```
+
+#### B. Documentation Generation Examples
+
+**View module documentation in terminal:**
+```bash
+# View main module documentation
+uv run python -m pydoc generate_codes
+
+# View specific class documentation
+uv run python -m pydoc generate_codes.OFDMCodebookGenerator
+
+# View function documentation
+uv run python -m pydoc generate_codes.generate_chirp_signal
+```
+
+**Generate HTML documentation:**
+```bash
+# Generate HTML docs for all modules
+uv run python -m pydoc -w generate_codes
+uv run python -m pydoc -w generate_codes.chirp
+uv run python -m pydoc -w generate_codes.ofdm
+uv run python -m pydoc -w generate_codes.optimization
+
+# Generate HTML for config module
+uv run python -m pydoc -w config
+
+# Creates HTML files: generate_codes.html, config.html, etc.
+```
+
+**Interactive documentation browser:**
+```bash
+# Start pydoc server (automatically opens browser)
+uv run python -m pydoc -b
+
+# Or specify port manually
+uv run python -m pydoc -p 8080
+# Then visit http://localhost:8080/ in your browser
+```
+
+#### C. Documentation Structure Requirements
+
+**Generated documentation MUST include:**
+
+1. **Module Overview**:
+   - Module-level docstring appears at the top
+   - Lists all public classes and functions
+   - Shows module dependencies
+
+2. **API Reference**:
+   - All public functions with complete signatures
+   - All public classes with methods
+   - Type hints visible in signatures
+   - Parameter and return value documentation
+
+3. **Code Examples**:
+   - Examples from docstrings are included
+   - Shows usage patterns
+   - Demonstrates common use cases
+
+4. **Cross-References**:
+   - Links to related functions (from `See Also:` sections)
+   - Links to parent modules and submodules
+   - Links to parameter types and return types
+
+#### D. Creating a Documentation Directory
+
+**For projects requiring persistent documentation:**
+
+```bash
+# Create docs directory
+mkdir -p docs/api
+
+# Generate all module documentation as HTML
+for module in generate_codes generate_codes.chirp generate_codes.ofdm config; do
+    uv run python -m pydoc -w $module
+    mv ${module}.html docs/api/
+done
+
+# Create index.html for navigation
+cat > docs/api/index.html << 'EOF'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Project API Documentation</title>
+</head>
+<body>
+    <h1>API Documentation</h1>
+    <ul>
+        <li><a href="generate_codes.html">generate_codes (Main Module)</a></li>
+        <li><a href="generate_codes.chirp.html">generate_codes.chirp</a></li>
+        <li><a href="generate_codes.ofdm.html">generate_codes.ofdm</a></li>
+        <li><a href="config.html">config (Configuration)</a></li>
+    </ul>
+</body>
+</html>
+EOF
+```
+
+#### E. Documentation Verification
+
+**Before committing, verify documentation is complete:**
+
+```bash
+# 1. Check that pydoc can parse all modules
+uv run python -m pydoc generate_codes > /dev/null
+echo $?  # Should return 0
+
+# 2. Generate HTML and check for completeness
+uv run python -m pydoc -w generate_codes
+
+# 3. View in browser to ensure formatting is correct
+uv run python -m pydoc -b
+
+# 4. Verify all public APIs are documented
+uv run python -c "
+import generate_codes
+import inspect
+
+# Get all public members
+members = [m for m in dir(generate_codes) if not m.startswith('_')]
+
+# Check each member has a docstring
+for member in members:
+    obj = getattr(generate_codes, member)
+    if callable(obj) and not obj.__doc__:
+        print(f'Missing docstring: {member}')
+"
+```
+
+#### F. Makefile Integration
+
+**Add documentation generation to Makefile:**
+
+```makefile
+.PHONY: docs
+docs:
+	@echo "Generating API documentation..."
+	@mkdir -p docs/api
+	@uv run python -m pydoc -w generate_codes
+	@uv run python -m pydoc -w generate_codes.chirp
+	@uv run python -m pydoc -w generate_codes.ofdm
+	@uv run python -m pydoc -w config
+	@mv *.html docs/api/
+	@echo "Documentation generated in docs/api/"
+
+.PHONY: docs-serve
+docs-serve:
+	@echo "Starting documentation server..."
+	@uv run python -m pydoc -b
+
+.PHONY: docs-check
+docs-check:
+	@echo "Verifying documentation completeness..."
+	@uv run python -m pydoc generate_codes > /dev/null && echo "✓ Documentation is valid"
+```
+
+**Usage:**
+```bash
+# Generate HTML documentation
+make docs
+
+# Start interactive documentation browser
+make docs-serve
+
+# Verify documentation validity
+make docs-check
+```
+
+#### G. CI/CD Integration
+
+**Add documentation check to GitHub Actions:**
+
+```yaml
+# .github/workflows/ci.yml
+- name: Verify documentation
+  run: |
+    uv run python -m pydoc generate_codes > /dev/null
+    uv run python -m pydoc config > /dev/null
+
+- name: Generate documentation
+  run: |
+    mkdir -p docs/api
+    uv run python -m pydoc -w generate_codes
+    uv run python -m pydoc -w config
+    mv *.html docs/api/
+
+- name: Upload documentation artifacts
+  uses: actions/upload-artifact@v3
+  with:
+    name: api-documentation
+    path: docs/api/
+```
+
+#### H. Documentation Best Practices
+
+**DO:**
+- ✅ Generate documentation after every significant change
+- ✅ Keep generated HTML docs in `docs/` directory
+- ✅ Include documentation generation in Makefile
+- ✅ Verify pydoc can parse all modules before committing
+- ✅ Use `uv run python -m pydoc -b` for quick reference during development
+- ✅ Include links to documentation in README.md
+- ✅ Regenerate docs as part of release process
+
+**DON'T:**
+- ❌ Commit generated `.html` files to git (add `docs/api/*.html` to .gitignore)
+- ❌ Use external documentation tools when pydoc is sufficient
+- ❌ Write docstrings that don't render well in pydoc
+- ❌ Forget to test documentation generation in CI
+
+#### I. Example: Complete Documentation Workflow
+
+```bash
+# 1. Write code with complete docstrings
+cat > mymodule.py << 'EOF'
+"""
+My Module: Signal Processing Utilities.
+
+This module provides signal processing functions for OFDM signals.
+"""
+
+def process_signal(signal: list[float], threshold: float = 0.5) -> list[float]:
+    """
+    Process signal by applying threshold filter.
+    
+    Args:
+        signal: Input signal as list of floats.
+        threshold: Threshold value for filtering. Defaults to 0.5.
+        
+    Returns:
+        Filtered signal with values above threshold.
+        
+    Example:
+        >>> process_signal([0.1, 0.6, 0.3, 0.8], 0.5)
+        [0.6, 0.8]
+    """
+    return [s for s in signal if s >= threshold]
+EOF
+
+# 2. Verify docstring completeness
+uv run python -c "import mymodule; print(mymodule.process_signal.__doc__)"
+
+# 3. View in terminal
+uv run python -m pydoc mymodule.process_signal
+
+# 4. Generate HTML
+uv run python -m pydoc -w mymodule
+
+# 5. View in browser
+uv run python -m pydoc -b
+# Opens browser to view interactive documentation
+
+# 6. Verify it works
+test -f mymodule.html && echo "✓ Documentation generated successfully"
+```
+
+#### J. Documentation Checklist
+
+**Before submitting code, verify:**
+- [ ] All modules can be parsed by pydoc: `uv run python -m pydoc module_name`
+- [ ] Generated HTML documentation is readable and complete
+- [ ] All public functions/classes appear in documentation
+- [ ] Examples in docstrings render correctly
+- [ ] Type hints are visible in generated documentation
+- [ ] Cross-references between functions work
+- [ ] Makefile includes `docs` target for documentation generation
+- [ ] README.md includes instructions for viewing documentation
+- [ ] CI pipeline verifies documentation can be generated
 
 ---
 
@@ -1319,8 +1616,597 @@ Before writing a loop, ask:
 
 ---
 
+## 7. Functional Programming Style (MANDATORY)
 
-## 7. Code Quality Enforcement
+### A. Functional Programming Requirements
+
+**ALWAYS prefer functional programming patterns when applicable:**
+- Write pure functions without side effects
+- Use immutable data structures
+- Leverage higher-order functions
+- Compose functions for complex operations
+- Avoid mutating state
+
+**Benefits:**
+- **Testability**: Pure functions are easier to test
+- **Reliability**: No side effects = predictable behavior
+- **Concurrency**: Immutable data is thread-safe
+- **Readability**: Declarative code is easier to understand
+- **Maintainability**: Less hidden state to track
+
+### B. Pure Functions (MANDATORY)
+
+```python
+# ✅ CORRECT - Pure function (PREFERRED)
+def calculate_total(prices: list[float], tax_rate: float) -> float:
+    """Calculate total price with tax.
+    
+    Args:
+        prices: List of item prices.
+        tax_rate: Tax rate as decimal (e.g., 0.08 for 8%).
+        
+    Returns:
+        Total price including tax.
+    """
+    subtotal = sum(prices)
+    return subtotal * (1 + tax_rate)
+
+# ❌ WRONG - Function with side effects (AVOID)
+total = 0.0
+
+def add_to_total(price: float) -> None:
+    """BAD: Modifies global state."""
+    global total
+    total += price  # Side effect!
+
+
+# ✅ CORRECT - Transform data without mutation
+def normalize_data(data: list[float]) -> list[float]:
+    """Normalize data to 0-1 range.
+    
+    Args:
+        data: Input data values.
+        
+    Returns:
+        Normalized data (new list, input unchanged).
+    """
+    if not data:
+        return []
+    
+    min_val = min(data)
+    max_val = max(data)
+    range_val = max_val - min_val
+    
+    if range_val == 0:
+        return [0.0] * len(data)
+    
+    return [(x - min_val) / range_val for x in data]
+
+# ❌ WRONG - Mutates input data
+def normalize_data_bad(data: list[float]) -> None:
+    """BAD: Modifies input list in place."""
+    min_val = min(data)
+    max_val = max(data)
+    range_val = max_val - min_val
+    
+    for i in range(len(data)):
+        data[i] = (data[i] - min_val) / range_val  # Mutation!
+```
+
+### C. Immutability (MANDATORY)
+
+```python
+from typing import NamedTuple, FrozenSet
+from dataclasses import dataclass
+
+# ✅ CORRECT - Immutable data structures (PREFERRED)
+# Use tuples instead of lists when data shouldn't change
+def get_coordinates() -> tuple[float, float, float]:
+    """Return fixed coordinates."""
+    return (10.5, 20.3, 30.1)
+
+# Use frozenset instead of set for immutable collections
+ALLOWED_EXTENSIONS: FrozenSet[str] = frozenset(['.py', '.txt', '.md'])
+
+# Use NamedTuple for immutable records
+class Point(NamedTuple):
+    """Immutable 3D point."""
+    x: float
+    y: float
+    z: float
+
+p1 = Point(1.0, 2.0, 3.0)
+# p1.x = 5.0  # AttributeError - immutable!
+
+# Use dataclass with frozen=True
+@dataclass(frozen=True)
+class Config:
+    """Immutable configuration."""
+    host: str
+    port: int
+    timeout: float
+
+config = Config(host="localhost", port=8080, timeout=30.0)
+# config.port = 9000  # FrozenInstanceError - immutable!
+
+
+# ✅ CORRECT - Return new objects instead of modifying
+def add_item(items: tuple[str, ...], new_item: str) -> tuple[str, ...]:
+    """Add item to tuple (returns new tuple).
+    
+    Args:
+        items: Existing items.
+        new_item: Item to add.
+        
+    Returns:
+        New tuple with added item.
+    """
+    return items + (new_item,)
+
+# ❌ WRONG - Mutable default arguments (DANGEROUS)
+def append_to_list_bad(value: int, lst: list[int] = []) -> list[int]:
+    """BAD: Mutable default argument causes bugs."""
+    lst.append(value)  # Modifies shared default!
+    return lst
+
+# ✅ CORRECT - Immutable default with None
+def append_to_list(value: int, lst: list[int] | None = None) -> list[int]:
+    """Safely append to list with default.
+    
+    Args:
+        value: Value to append.
+        lst: Optional list (creates new if None).
+        
+    Returns:
+        New list with appended value.
+    """
+    if lst is None:
+        lst = []
+    return [*lst, value]  # Creates new list
+```
+
+### D. Higher-Order Functions
+
+```python
+from functools import reduce, partial
+from typing import Callable
+
+# ✅ CORRECT - Using map, filter, reduce (PREFERRED)
+numbers = [1, 2, 3, 4, 5]
+
+# Map: Transform each element
+squared = list(map(lambda x: x**2, numbers))
+# [1, 4, 9, 16, 25]
+
+# Filter: Select elements matching condition
+evens = list(filter(lambda x: x % 2 == 0, numbers))
+# [2, 4]
+
+# Reduce: Combine elements into single value
+from functools import reduce
+product = reduce(lambda x, y: x * y, numbers, 1)
+# 120
+
+# ✅ CORRECT - Functions as arguments
+def apply_operation(
+    data: list[float],
+    operation: Callable[[float], float]
+) -> list[float]:
+    """Apply operation to all elements.
+    
+    Args:
+        data: Input data.
+        operation: Function to apply to each element.
+        
+    Returns:
+        Transformed data.
+    """
+    return [operation(x) for x in data]
+
+def square(x: float) -> float:
+    """Square a number."""
+    return x ** 2
+
+result = apply_operation([1.0, 2.0, 3.0], square)
+# [1.0, 4.0, 9.0]
+
+
+# ✅ CORRECT - Partial application
+def multiply(x: float, y: float) -> float:
+    """Multiply two numbers."""
+    return x * y
+
+double = partial(multiply, 2.0)  # Fix first argument
+triple = partial(multiply, 3.0)
+
+print(double(5.0))  # 10.0
+print(triple(5.0))  # 15.0
+
+
+# ✅ CORRECT - Returning functions (closures)
+def create_multiplier(factor: float) -> Callable[[float], float]:
+    """Create a multiplication function.
+    
+    Args:
+        factor: Multiplication factor.
+        
+    Returns:
+        Function that multiplies by factor.
+    """
+    def multiplier(x: float) -> float:
+        return x * factor
+    return multiplier
+
+times_two = create_multiplier(2.0)
+times_ten = create_multiplier(10.0)
+
+print(times_two(5.0))  # 10.0
+print(times_ten(5.0))  # 50.0
+```
+
+### E. Function Composition
+
+```python
+from typing import Callable, TypeVar
+
+T = TypeVar('T')
+U = TypeVar('U')
+V = TypeVar('V')
+
+# ✅ CORRECT - Function composition (PREFERRED)
+def compose(
+    f: Callable[[U], V],
+    g: Callable[[T], U]
+) -> Callable[[T], V]:
+    """Compose two functions: (f ∘ g)(x) = f(g(x)).
+    
+    Args:
+        f: Second function to apply.
+        g: First function to apply.
+        
+    Returns:
+        Composed function.
+    """
+    def composed(x: T) -> V:
+        return f(g(x))
+    return composed
+
+# Example: Create data processing pipeline
+def clean_text(text: str) -> str:
+    """Remove whitespace."""
+    return text.strip()
+
+def to_lowercase(text: str) -> str:
+    """Convert to lowercase."""
+    return text.lower()
+
+def remove_punctuation(text: str) -> str:
+    """Remove punctuation."""
+    import string
+    return text.translate(str.maketrans('', '', string.punctuation))
+
+# Compose functions into pipeline
+process_text = compose(
+    remove_punctuation,
+    compose(to_lowercase, clean_text)
+)
+
+result = process_text("  Hello, World!  ")
+# "hello world"
+
+
+# ✅ CORRECT - Pipeline using reduce
+def pipeline(*functions: Callable) -> Callable:
+    """Create function pipeline from multiple functions.
+    
+    Args:
+        *functions: Functions to compose (applied left to right).
+        
+    Returns:
+        Composed function.
+    """
+    def apply_pipeline(value):
+        return reduce(lambda v, f: f(v), functions, value)
+    return apply_pipeline
+
+# Create text processing pipeline
+process = pipeline(
+    str.strip,
+    str.lower,
+    lambda s: s.replace(',', ''),
+    lambda s: s.replace('!', '')
+)
+
+result = process("  Hello, World!  ")
+# "hello world"
+```
+
+### F. Functional Data Processing
+
+```python
+from itertools import chain, groupby, takewhile, dropwhile
+from functools import reduce
+from typing import Iterator
+
+# ✅ CORRECT - Using itertools for functional operations
+data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+# takewhile: Take elements while condition is true
+small_numbers = list(takewhile(lambda x: x < 5, data))
+# [1, 2, 3, 4]
+
+# dropwhile: Skip elements while condition is true
+large_numbers = list(dropwhile(lambda x: x < 5, data))
+# [5, 6, 7, 8, 9, 10]
+
+# chain: Flatten nested iterables
+nested = [[1, 2], [3, 4], [5, 6]]
+flattened = list(chain.from_iterable(nested))
+# [1, 2, 3, 4, 5, 6]
+
+# groupby: Group consecutive elements
+data_with_types = [
+    ('a', 1), ('a', 2), ('b', 3), ('b', 4), ('c', 5)
+]
+grouped = {
+    key: list(group)
+    for key, group in groupby(data_with_types, key=lambda x: x[0])
+}
+# {'a': [('a', 1), ('a', 2)], 'b': [('b', 3), ('b', 4)], 'c': [('c', 5)]}
+
+
+# ✅ CORRECT - Functional data transformations
+def process_sales_data(
+    sales: list[dict[str, float | str]]
+) -> dict[str, float]:
+    """Process sales data functionally.
+    
+    Args:
+        sales: List of sale records with 'category' and 'amount'.
+        
+    Returns:
+        Dictionary mapping category to total sales.
+    """
+    # Filter valid sales
+    valid_sales = filter(
+        lambda s: s.get('amount', 0) > 0,
+        sales
+    )
+    
+    # Group by category and sum
+    from collections import defaultdict
+    category_totals: dict[str, float] = defaultdict(float)
+    
+    for sale in valid_sales:
+        category = str(sale.get('category', 'unknown'))
+        amount = float(sale.get('amount', 0))
+        category_totals[category] += amount
+    
+    return dict(category_totals)
+
+
+# ✅ CORRECT - Using reduce for complex aggregations
+def calculate_statistics(numbers: list[float]) -> dict[str, float]:
+    """Calculate statistics using functional approach.
+    
+    Args:
+        numbers: List of numbers.
+        
+    Returns:
+        Dictionary with min, max, sum, count, mean.
+    """
+    if not numbers:
+        return {'min': 0.0, 'max': 0.0, 'sum': 0.0, 'count': 0, 'mean': 0.0}
+    
+    stats = reduce(
+        lambda acc, x: {
+            'min': min(acc['min'], x),
+            'max': max(acc['max'], x),
+            'sum': acc['sum'] + x,
+            'count': acc['count'] + 1
+        },
+        numbers,
+        {'min': float('inf'), 'max': float('-inf'), 'sum': 0.0, 'count': 0}
+    )
+    
+    stats['mean'] = stats['sum'] / stats['count'] if stats['count'] > 0 else 0.0
+    return stats
+```
+
+### G. Lambda Functions (Use Judiciously)
+
+```python
+# ✅ CORRECT - Simple lambdas for callbacks (PREFERRED)
+numbers = [1, 2, 3, 4, 5]
+
+# Good: Simple transformation
+squared = list(map(lambda x: x**2, numbers))
+
+# Good: Simple predicate
+evens = list(filter(lambda x: x % 2 == 0, numbers))
+
+# Good: Key function for sorting
+data = [{'name': 'Alice', 'age': 30}, {'name': 'Bob', 'age': 25}]
+sorted_data = sorted(data, key=lambda x: x['age'])
+
+
+# ✅ CORRECT - Named function for complex logic (PREFERRED)
+def is_valid_email(email: str) -> bool:
+    """Check if email is valid.
+    
+    Args:
+        email: Email address to validate.
+        
+    Returns:
+        True if valid email format.
+    """
+    return '@' in email and '.' in email.split('@')[1]
+
+emails = ['test@example.com', 'invalid', 'user@domain.org']
+valid_emails = list(filter(is_valid_email, emails))
+
+
+# ❌ WRONG - Complex lambda (hard to read, use named function instead)
+result = list(map(
+    lambda x: x**2 if x > 0 else -x**2 if x < 0 else 0,
+    numbers
+))
+
+# ✅ CORRECT - Named function for clarity
+def transform_number(x: float) -> float:
+    """Transform number based on sign."""
+    if x > 0:
+        return x**2
+    elif x < 0:
+        return -x**2
+    else:
+        return 0.0
+
+result = list(map(transform_number, numbers))
+```
+
+### H. Avoiding Side Effects
+
+```python
+# ❌ WRONG - Function with hidden side effects
+log_entries = []
+
+def process_data_bad(data: list[int]) -> list[int]:
+    """BAD: Has side effect of logging."""
+    result = [x * 2 for x in data]
+    log_entries.append(f"Processed {len(data)} items")  # Side effect!
+    return result
+
+
+# ✅ CORRECT - Explicit logging parameter
+def process_data(
+    data: list[int],
+    logger: Callable[[str], None] | None = None
+) -> list[int]:
+    """Process data with optional logging.
+    
+    Args:
+        data: Input data.
+        logger: Optional logging function.
+        
+    Returns:
+        Processed data.
+    """
+    result = [x * 2 for x in data]
+    
+    if logger:
+        logger(f"Processed {len(data)} items")
+    
+    return result
+
+# Usage
+log_buffer: list[str] = []
+result = process_data([1, 2, 3], logger=lambda msg: log_buffer.append(msg))
+
+
+# ✅ CORRECT - Pure function returns both result and log
+def process_data_pure(data: list[int]) -> tuple[list[int], str]:
+    """Process data and return result with log message.
+    
+    Args:
+        data: Input data.
+        
+    Returns:
+        Tuple of (processed data, log message).
+    """
+    result = [x * 2 for x in data]
+    log_message = f"Processed {len(data)} items"
+    return result, log_message
+
+# Usage
+result, log_msg = process_data_pure([1, 2, 3])
+```
+
+### I. Functional Programming with NumPy/CuPy
+
+```python
+import numpy as np
+import cupy as cp
+
+# ✅ CORRECT - Functional array operations (PREFERRED)
+def normalize_array(arr: np.ndarray) -> np.ndarray:
+    """Normalize array to 0-1 range (pure function).
+    
+    Args:
+        arr: Input array.
+        
+    Returns:
+        New normalized array (input unchanged).
+    """
+    min_val = np.min(arr)
+    max_val = np.max(arr)
+    range_val = max_val - min_val
+    
+    if range_val == 0:
+        return np.zeros_like(arr)
+    
+    # Returns new array, doesn't modify input
+    return (arr - min_val) / range_val
+
+# ✅ CORRECT - Chaining array operations
+def process_signal(signal: cp.ndarray) -> cp.ndarray:
+    """Process signal using functional composition.
+    
+    Args:
+        signal: Input signal.
+        
+    Returns:
+        Processed signal.
+    """
+    # Each operation returns new array
+    centered = signal - cp.mean(signal)
+    normalized = centered / cp.std(centered)
+    filtered = cp.where(cp.abs(normalized) < 3, normalized, 0)
+    return filtered
+
+# ❌ WRONG - Mutating arrays in place
+def process_signal_bad(signal: cp.ndarray) -> None:
+    """BAD: Modifies input array."""
+    signal -= cp.mean(signal)  # In-place mutation!
+    signal /= cp.std(signal)   # In-place mutation!
+```
+
+### J. When to Use Functional Programming
+
+**✅ USE functional programming for:**
+- Data transformations (map, filter, reduce)
+- Mathematical operations
+- Data validation and filtering
+- Configuration processing
+- Stateless computations
+- Parallel/concurrent operations
+
+**⚠️ USE CAUTION for:**
+- I/O operations (inherently have side effects)
+- Performance-critical code (profiling may show loops are faster)
+- Very complex logic (readability may suffer)
+
+**❌ DON'T force functional style when:**
+- Imperative code is significantly clearer
+- Dealing with external state (databases, files, APIs)
+- Readability suffers from excessive abstraction
+
+### K. Functional Programming Checklist
+
+Before writing imperative code, ask:
+- [ ] Can this be a pure function without side effects?
+- [ ] Should I use immutable data structures?
+- [ ] Can I use map/filter/reduce instead of loops?
+- [ ] Can I compose smaller functions?
+- [ ] Am I mutating input data (use copy instead)?
+- [ ] Can I use comprehensions or generators?
+
+**Rule of thumb:** Default to functional style, but prioritize readability and maintainability.
+
+---
+
+
+## 8. Code Quality Enforcement
 
 
 ### Pre-Commit Checks
@@ -1365,31 +2251,31 @@ name: CI
 on: [push, pull_request]
 
 jobs:
-  quality:
-    runs-on: ubuntu-latest
-    
-    steps:
-      - uses: actions/checkout@v4
-      
+quality:
+runs-on: ubuntu-latest
+
+steps:
+- uses: actions/checkout@v4
+
       - name: Install uv
-        uses: astral-sh/setup-uv@v1
+uses: astral-sh/setup-uv@v1
         
-      - name: Set up Python
-        run: uv python install 3.11
+- name: Set up Python
+  run: uv python install 3.11
         
-      - name: Install dependencies
-        run: |
-          uv venv
+- name: Install dependencies
+  run: |
+    uv venv
           uv sync
           
       - name: Verify syntax
         run: uv run python -m py_compile **/*.py
         
-      - name: Run Ruff checks
-        run: uv run ruff check .
+- name: Run Ruff checks
+  run: uv run ruff check .
         
-      - name: Run Ruff format check
-        run: uv run ruff format --check .
+- name: Run Ruff format check
+  run: uv run ruff format --check .
         
       - name: Run tests with coverage
         run: uv run pytest --cov=. --cov-report=xml --cov-report=term --cov-fail-under=100
@@ -1404,7 +2290,7 @@ jobs:
 
 ---
 
-## 8. Project Structure
+## 9. Project Structure
 
 ### Standard Layout
 
@@ -1442,7 +2328,7 @@ project-name/
 ---
 
 
-## 9. Development Workflow
+## 10. Development Workflow
 
 ### Starting a New Feature
 
@@ -1498,6 +2384,8 @@ git push origin feature/new-signal-type
 - [ ] All parameters have type hints
 - [ ] All return values have type hints
 - [ ] Module-level docstrings present
+- [ ] Documentation can be generated with pydoc: `uv run python -m pydoc module_name`
+- [ ] Generated documentation is complete and readable
 
 #### Configuration
 - [ ] Configuration values use Dynaconf (no hardcoded values)
@@ -1530,7 +2418,7 @@ git push origin feature/new-signal-type
 
 ---
 
-## 10. Testing Requirements (MANDATORY)
+## 11. Testing Requirements (MANDATORY)
 
 **ALL code MUST have tests.** Tests are not optional - they are a required part of the development process.
 
@@ -1609,7 +2497,7 @@ class TestChirpGeneration:
             'bandwidth': 5e6,
             'sample_rate': 20e6,
             'num_subcarriers': 250,
-        }
+            }
 
     def test_config_loading(self, sample_config: dict) -> None:
         """Test that configuration loads correctly."""
@@ -1812,7 +2700,7 @@ def test_raises_value_error() -> None:
 ---
 
 
-## 11. Example: Compliant Function
+## 12. Example: Compliant Function
 
 
 Here's a complete example following all guidelines:
@@ -1930,7 +2818,7 @@ def correlate_two_signals(
 
 
 
-## 12. Quick Reference
+## 13. Quick Reference
 
 
 ### Command Cheat Sheet
@@ -1963,6 +2851,12 @@ uv run pytest -k "test_name"        # Run tests matching pattern
 # Running Python scripts (ALWAYS use uv run)
 uv run main.py                      # Run main script
 uv run python -m module             # Run as module
+
+# Documentation generation (ALWAYS use uv run)
+uv run python -m pydoc module_name              # View module docs in terminal
+uv run python -m pydoc module.function          # View function docs
+uv run python -m pydoc -w module_name           # Generate HTML documentation
+uv run python -m pydoc -b                       # Start interactive doc browser
 
 # Configuration
 export ENV_FOR_DYNACONF=development  # Set environment
@@ -2003,6 +2897,8 @@ ruff check .                        # Missing uv run
 - [ ] Module has docstring
 - [ ] All parameters have type hints
 - [ ] All return values have type hints
+- [ ] pydoc can generate documentation: `uv run python -m pydoc module_name`
+- [ ] Generated HTML documentation is complete: `uv run python -m pydoc -w module_name`
 
 #### Code Quality
 - [ ] `uv run ruff check .` passes with no errors
@@ -2011,6 +2907,9 @@ ruff check .                        # Missing uv run
 - [ ] Comprehensions used instead of manual loops where appropriate
 - [ ] Generator expressions used for large datasets
 - [ ] No unnecessary list() around generators in sum/max/min
+- [ ] Functional programming style preferred (pure functions, immutability)
+- [ ] No mutable default arguments
+- [ ] Functions avoid side effects where possible
 
 #### Testing (MANDATORY)
 - [ ] Tests written for ALL new functions/classes
@@ -2028,7 +2927,7 @@ ruff check .                        # Missing uv run
 ---
 
 
-## 13. Enforcement
+## 14. Enforcement
 
 ### Automated Checks
 
@@ -2087,10 +2986,12 @@ This guide enforces:
 1. **UV-only dependency management** - All operations through `uv`, all commands with `uv run`
 2. **100% test coverage** - Every function must have tests that pass
 3. **Agent verification** - AI-generated code must be syntax-checked and tested
-4. **Complete documentation** - Google-style docstrings with type hints
+4. **Complete documentation** - Google-style docstrings with type hints, pydoc-generated API documentation
 5. **Dynaconf configuration** - No hardcoded values
 6. **Pythonic comprehensions** - Prefer list/set/dict/generator comprehensions for performance and clarity
-7. **Ruff code quality** - Clean, formatted, type-safe code
+7. **Functional programming** - Prefer pure functions, immutability, and functional patterns whenever applicable
+8. **Ruff code quality** - Clean, formatted, type-safe code
+9. **Generated documentation** - API and functional documentation must be generated with pydoc
 
 **Failure to follow these guidelines will result in code rejection.**
 
