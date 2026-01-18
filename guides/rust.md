@@ -11,6 +11,9 @@ Tools: Rust 2021 Edition, Cargo, rustdoc, clippy, rustfmt, cargo-test, cargo-tar
 
 The agent must adhere to the "RUST-FIRST" principles for every Rust project:
 
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+
 **Result & Option**: Explicit error handling, no panics in production, exhaustive pattern matching.
 **RAII Everywhere**: Automatic resource management, Drop trait for cleanup, no manual memory management.
 **Safe & Sound**: Zero-cost abstractions, memory safety without garbage collection, thread safety.
@@ -206,6 +209,194 @@ If verification fails:
 - ❌ Ignores Result types with `let _ =`
 - ❌ Uses `.clone()` unnecessarily
 - ❌ Has poor naming (non-idiomatic Rust)
+- ❌ **Fixes bugs without adding regression tests first**
+- ❌ **Writes implementation before writing tests (violates TDD)**
+- ❌ **Skips Red-Green-Refactor cycle for new features**
+
+---
+
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. 🔴 RED: Write a failing test first
+   ↓
+2. 🟢 GREEN: Write minimal code to make it pass
+   ↓
+3. 🔵 REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for Rust
+
+```rust
+// Step 1: RED - Write failing test first
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_email() {
+        let result = parse_email("user@example.com");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().local(), "user");
+    }
+
+    #[test]
+    fn test_parse_email_invalid() {
+        let result = parse_email("invalid");
+        assert!(result.is_err());
+    }
+}
+
+// Run: cargo test
+// ❌ FAILS - parse_email doesn't exist yet
+
+// Step 2: GREEN - Write minimal implementation
+#[derive(Debug, PartialEq)]
+pub struct Email {
+    local: String,
+    domain: String,
+}
+
+impl Email {
+    pub fn local(&self) -> &str {
+        &self.local
+    }
+}
+
+pub fn parse_email(input: &str) -> Result<Email, String> {
+    let parts: Vec<&str> = input.split('@').collect();
+    if parts.len() != 2 {
+        return Err("Invalid email format".to_string());
+    }
+    
+    Ok(Email {
+        local: parts[0].to_string(),
+        domain: parts[1].to_string(),
+    })
+}
+
+// Run: cargo test
+// ✅ PASSES - tests pass
+
+// Step 3: REFACTOR - Improve with proper error types
+#[derive(Debug, thiserror::Error)]
+pub enum EmailError {
+    #[error("Invalid email format: missing @ separator")]
+    MissingSeparator,
+    #[error("Invalid email format: {0}")]
+    InvalidFormat(String),
+}
+
+pub fn parse_email(input: &str) -> Result<Email, EmailError> {
+    let parts: Vec<&str> = input.split('@').collect();
+    if parts.len() != 2 {
+        return Err(EmailError::MissingSeparator);
+    }
+    
+    if parts[0].is_empty() || parts[1].is_empty() {
+        return Err(EmailError::InvalidFormat("empty local or domain".to_string()));
+    }
+    
+    Ok(Email {
+        local: parts[0].to_string(),
+        domain: parts[1].to_string(),
+    })
+}
+// Tests still pass ✓
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. 🐛 Bug Reported/Discovered
+   ↓
+2. ✍️ Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. ✅ Verify the test fails for the right reason
+   ↓
+4. 🔧 Fix the bug (make the test pass)
+   ↓
+5. 🟢 Verify the test now PASSES
+   ↓
+6. 📝 Document the bug in test comments (include bug ID)
+   ↓
+7. 🚀 Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix
+
+```rust
+// Bug Report #5932: Calculator panics on division by zero
+
+// Step 1-2: Write test that reproduces the bug
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_divide_by_zero_bug_5932() {
+        // Bug: divide(10, 0) panicked instead of returning error
+        // Discovered: 2026-01-18
+        // This test prevents regression
+        
+        let result = divide(10, 0);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Division by zero"
+        );
+    }
+}
+
+// Run: cargo test
+// ❌ FAILS - thread 'tests::test_divide_by_zero_bug_5932' panicked at 'attempt to divide by zero'
+
+// Step 3: Fix the bug
+#[derive(Debug, thiserror::Error)]
+pub enum MathError {
+    #[error("Division by zero")]
+    DivisionByZero,
+}
+
+/// Divides two numbers.
+///
+/// # Errors
+///
+/// Returns `MathError::DivisionByZero` if divisor is zero.
+pub fn divide(dividend: i32, divisor: i32) -> Result<i32, MathError> {
+    // FIX: Check for zero before division
+    if divisor == 0 {
+        return Err(MathError::DivisionByZero);
+    }
+    
+    Ok(dividend / divisor)
+}
+
+// Run: cargo test
+// ✅ PASSES - bug fixed, regression prevented ✓
+```
+
+### Prohibited Practices for Bug Fixes
+
+**NEVER:**
+- ❌ Fix a bug without adding a regression test first
+- ❌ Write implementation before writing tests (violates TDD)
+- ❌ Skip the Red-Green-Refactor cycle
+- ❌ Commit code with failing tests
+- ❌ Remove tests to make code pass
+- ❌ Use `#[ignore]` to skip failing tests
 
 ---
 

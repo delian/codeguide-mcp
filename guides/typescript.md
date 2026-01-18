@@ -10,6 +10,8 @@ Tools: TypeScript 5.x, TypeDoc, Modern testing frameworks (Vitest/Jest), ESLint,
 ## 1. Core Philosophies
 The agent must adhere to the "TYPE-SAFE" principles for every TypeScript project:
 
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
 **Type Safety First**: Strict mode enabled, no `any`, comprehensive type coverage, branded types.
 **You Own Your Types**: Define explicit types, avoid type inference abuse, document complex types.
 **Pure Functions Preferred**: Side-effect free where possible, explicit about effects, testable, functional programming patterns.
@@ -147,6 +149,148 @@ If verification fails:
 - ❌ Uses promise chains where async/await is clearer
 - ❌ Mutates input parameters
 - ❌ Has side effects in functions without documentation
+- ❌ **Fixes bugs without adding regression tests first**
+- ❌ **Writes implementation before writing tests (violates TDD)**
+- ❌ **Skips Red-Green-Refactor cycle for new features**
+
+---
+
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. 🔴 RED: Write a failing test first
+   ↓
+2. 🟢 GREEN: Write minimal code to make it pass
+   ↓
+3. 🔵 REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow
+
+```typescript
+// Step 1: RED - Write failing test first
+import { describe, it, expect } from 'vitest';
+import { calculateDiscount } from './pricing';
+
+describe('calculateDiscount', () => {
+  it('applies 10% discount for premium users', () => {
+    expect(calculateDiscount(100, 'premium')).toBe(90);
+  });
+  
+  it('no discount for standard users', () => {
+    expect(calculateDiscount(100, 'standard')).toBe(100);
+  });
+});
+
+// Run: npm test
+// ❌ FAILS - calculateDiscount doesn't exist yet
+
+// Step 2: GREEN - Write minimal implementation
+type UserTier = 'standard' | 'premium';
+
+export function calculateDiscount(price: number, tier: UserTier): number {
+  if (tier === 'premium') {
+    return price * 0.9;
+  }
+  return price;
+}
+
+// Run: npm test
+// ✅ PASSES - tests pass
+
+// Step 3: REFACTOR - Improve readability
+const DISCOUNT_RATES: Record<UserTier, number> = {
+  standard: 0,
+  premium: 0.1,
+};
+
+export function calculateDiscount(price: number, tier: UserTier): number {
+  const discountRate = DISCOUNT_RATES[tier];
+  return price * (1 - discountRate);
+}
+// Tests still pass ✓
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. 🐛 Bug Reported/Discovered
+   ↓
+2. ✍️ Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. ✅ Verify the test fails for the right reason
+   ↓
+4. 🔧 Fix the bug (make the test pass)
+   ↓
+5. 🟢 Verify the test now PASSES
+   ↓
+6. 📝 Document the bug in test comments (include bug ID)
+   ↓
+7. 🚀 Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix
+
+```typescript
+// Bug Report #2041: formatCurrency fails with negative zero (-0)
+
+// Step 1-2: Write test that reproduces the bug
+import { describe, it, expect } from 'vitest';
+import { formatCurrency } from './formatters';
+
+describe('formatCurrency - Bug #2041', () => {
+  it('formats negative zero correctly - Bug #2041', () => {
+    // Bug: formatCurrency(-0) returned "-$0.00" instead of "$0.00"
+    // Discovered: 2026-01-18
+    // This test prevents regression
+    
+    expect(formatCurrency(-0)).toBe('$0.00');
+  });
+  
+  it('formats regular negative numbers', () => {
+    expect(formatCurrency(-10.5)).toBe('-$10.50');
+  });
+});
+
+// Run: npm test
+// ❌ FAILS - formatCurrency(-0) returns "-$0.00"
+
+// Step 3: Fix the bug
+export function formatCurrency(amount: number): string {
+  // FIX: Normalize negative zero to positive zero
+  const normalized = Object.is(amount, -0) ? 0 : amount;
+  
+  const sign = normalized < 0 ? '-' : '';
+  const abs = Math.abs(normalized);
+  
+  return `${sign}$${abs.toFixed(2)}`;
+}
+
+// Run: npm test
+// ✅ PASSES - bug fixed, regression prevented ✓
+```
+
+### Prohibited Practices for Bug Fixes
+
+**NEVER:**
+- ❌ Fix a bug without adding a regression test first
+- ❌ Write implementation before writing tests (violates TDD)
+- ❌ Skip the Red-Green-Refactor cycle
+- ❌ Commit code with failing tests
+- ❌ Remove tests to make code pass
+- ❌ Use test.skip() to ignore failing tests
 
 ---
 

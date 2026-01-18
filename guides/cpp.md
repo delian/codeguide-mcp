@@ -10,6 +10,8 @@ Tools: C++20/23, CMake 3.15+, Conan 2.x, Doxygen, Modern STL, RAII patterns, Sma
 ## 1. Core Philosophies
 The agent must adhere to the "MODERN-CPP" principles for every C++ project:
 
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
 **Memory Safe**: RAII, smart pointers, no raw pointers, no manual memory management.
 **Optimal Performance**: Zero-cost abstractions, move semantics, constexpr, std::optional.
 **Deterministic Behavior**: Value semantics, explicit lifetimes, no undefined behavior.
@@ -73,6 +75,552 @@ cd ..
 ```
 
 **CRITICAL**: Never provide code to the user that doesn't compile. Always verify first, fix issues, then present the working solution.
+
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. 🔴 RED: Write a failing test first
+   ↓
+2. 🟢 GREEN: Write minimal code to make it pass
+   ↓
+3. 🔵 REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for C++ Function
+
+```cpp
+// Step 1: RED - Write failing test first (tests/core/test_validation.cpp)
+#include <gtest/gtest.h>
+#include "core/validation.hpp"
+
+TEST(EmailValidation, AcceptsValidEmails) {
+    // Test will fail - function doesn't exist yet
+    EXPECT_TRUE(validate_email("user@example.com"));
+    EXPECT_TRUE(validate_email("test.user@domain.co.uk"));
+}
+
+TEST(EmailValidation, RejectsInvalidEmails) {
+    EXPECT_FALSE(validate_email("invalid"));
+    EXPECT_FALSE(validate_email("user@"));
+    EXPECT_FALSE(validate_email("@domain.com"));
+}
+
+TEST(EmailValidation, RejectsEmptyStrings) {
+    EXPECT_FALSE(validate_email(""));
+}
+
+// Run: ctest
+// ❌ FAILS - validate_email doesn't exist yet
+
+// Step 2: GREEN - Write minimal implementation (include/core/validation.hpp)
+#pragma once
+#include <string_view>
+#include <regex>
+
+/**
+ * @brief Validates an email address format.
+ * 
+ * Checks if the provided string conforms to a valid email address pattern.
+ * Uses a regular expression for validation.
+ * 
+ * @param email The email address to validate
+ * @return true if the email is valid, false otherwise
+ * 
+ * @par Example
+ * @code
+ * if (validate_email("user@example.com")) {
+ *     std::cout << "Valid email\n";
+ * }
+ * @endcode
+ * 
+ * @note This function is thread-safe
+ * @see https://emailregex.com/ for email regex patterns
+ */
+[[nodiscard]] inline auto validate_email(std::string_view email) -> bool {
+    if (email.empty()) {
+        return false;
+    }
+    
+    static const std::regex email_regex{R"([^\s@]+@[^\s@]+\.[^\s@]+)"};
+    return std::regex_match(email.begin(), email.end(), email_regex);
+}
+
+// Run: ctest
+// ✅ PASSES - tests pass
+
+// Step 3: REFACTOR - Improve with more robust validation
+/**
+ * @brief Validates an email address format.
+ * 
+ * Performs comprehensive email validation including:
+ * - Basic format check (user@domain.tld)
+ * - Length constraints (3-254 characters)
+ * - RFC 5322 compliant pattern
+ * 
+ * @param email The email address to validate
+ * @return true if the email is valid, false otherwise
+ * 
+ * @throws Never throws (noexcept guarantee)
+ * 
+ * @pre email must be a valid string_view
+ * @post Return value indicates validity, no side effects
+ * 
+ * @par Complexity
+ * O(n) where n is the length of the email string
+ * 
+ * @par Example
+ * @code
+ * #include <iostream>
+ * #include "core/validation.hpp"
+ * 
+ * if (validate_email("user@example.com")) {
+ *     std::cout << "Valid email\n";
+ * } else {
+ *     std::cerr << "Invalid email\n";
+ * }
+ * @endcode
+ * 
+ * @note This function is thread-safe and constexpr-compatible
+ * @see RFC 5322 for email address specification
+ */
+[[nodiscard]] inline auto validate_email(std::string_view email) noexcept -> bool {
+    // Check length constraints
+    if (email.empty() || email.length() < 3 || email.length() > 254) {
+        return false;
+    }
+    
+    // More robust RFC 5322 compliant regex
+    static const std::regex email_regex{
+        R"([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})"
+    };
+    
+    return std::regex_match(email.begin(), email.end(), email_regex);
+}
+// Tests still pass ✓
+```
+
+### Example TDD for C++ Class
+
+```cpp
+// Step 1: RED - Write failing test first
+#include <gtest/gtest.h>
+#include "core/counter.hpp"
+
+TEST(Counter, InitializesWithDefaultValue) {
+    // Test will fail - Counter doesn't exist yet
+    Counter counter;
+    EXPECT_EQ(counter.value(), 0);
+}
+
+TEST(Counter, IncrementsCorrectly) {
+    Counter counter;
+    counter.increment();
+    EXPECT_EQ(counter.value(), 1);
+}
+
+TEST(Counter, DecrementsCorrectly) {
+    Counter counter;
+    counter.increment();
+    counter.increment();
+    counter.decrement();
+    EXPECT_EQ(counter.value(), 1);
+}
+
+TEST(Counter, ResetsToInitialValue) {
+    Counter counter{5};
+    counter.increment();
+    counter.reset();
+    EXPECT_EQ(counter.value(), 5);
+}
+
+// Run: ctest
+// ❌ FAILS - Counter class doesn't exist yet
+
+// Step 2: GREEN - Write minimal implementation (include/core/counter.hpp)
+#pragma once
+
+/**
+ * @class Counter
+ * @brief Simple counter with increment/decrement operations.
+ * 
+ * Provides basic counting functionality with value tracking.
+ * Thread-safe for single-threaded use.
+ * 
+ * @par Example
+ * @code
+ * Counter counter{10};
+ * counter.increment();  // counter.value() == 11
+ * counter.decrement();  // counter.value() == 10
+ * counter.reset();      // counter.value() == 10
+ * @endcode
+ */
+class Counter {
+public:
+    /**
+     * @brief Constructs a counter with initial value.
+     * @param initial_value Starting value (default: 0)
+     * @throws Never throws (noexcept guarantee)
+     */
+    explicit Counter(int initial_value = 0) noexcept 
+        : initial_value_{initial_value}, current_value_{initial_value} {}
+    
+    /**
+     * @brief Returns current counter value.
+     * @return Current value
+     * @throws Never throws (noexcept guarantee)
+     */
+    [[nodiscard]] auto value() const noexcept -> int {
+        return current_value_;
+    }
+    
+    /**
+     * @brief Increments counter by 1.
+     * @throws Never throws (noexcept guarantee)
+     */
+    auto increment() noexcept -> void {
+        ++current_value_;
+    }
+    
+    /**
+     * @brief Decrements counter by 1.
+     * @throws Never throws (noexcept guarantee)
+     */
+    auto decrement() noexcept -> void {
+        --current_value_;
+    }
+    
+    /**
+     * @brief Resets counter to initial value.
+     * @throws Never throws (noexcept guarantee)
+     */
+    auto reset() noexcept -> void {
+        current_value_ = initial_value_;
+    }
+
+private:
+    int initial_value_;
+    int current_value_;
+};
+
+// Run: ctest
+// ✅ PASSES - tests pass
+
+// Step 3: REFACTOR - Add overflow protection and thread safety
+#include <atomic>
+#include <limits>
+#include <stdexcept>
+
+/**
+ * @class Counter
+ * @brief Thread-safe counter with overflow protection.
+ * 
+ * Provides atomic counting operations with integer overflow detection.
+ * All operations are thread-safe and provide strong exception guarantees.
+ * 
+ * @note This class is thread-safe for all operations
+ * @warning Overflow detection throws exceptions - handle appropriately
+ * 
+ * @par Thread Safety
+ * All public methods are thread-safe and use atomic operations.
+ * 
+ * @par Example
+ * @code
+ * #include <thread>
+ * Counter counter{10};
+ * 
+ * std::thread t1([&] { counter.increment(); });
+ * std::thread t2([&] { counter.increment(); });
+ * t1.join(); t2.join();
+ * 
+ * std::cout << counter.value() << '\n';  // 12
+ * @endcode
+ */
+class Counter {
+public:
+    /**
+     * @brief Constructs a counter with initial value.
+     * 
+     * @param initial_value Starting value (default: 0)
+     * @throws std::invalid_argument If initial_value is invalid
+     * 
+     * @post value() == initial_value
+     */
+    explicit Counter(int initial_value = 0) 
+        : initial_value_{initial_value}, current_value_{initial_value} {
+        if (initial_value < 0) {
+            throw std::invalid_argument("Initial value cannot be negative");
+        }
+    }
+    
+    /**
+     * @brief Returns current counter value atomically.
+     * 
+     * @return Current value
+     * @throws Never throws (noexcept guarantee)
+     * 
+     * @note Thread-safe, uses memory_order_relaxed
+     */
+    [[nodiscard]] auto value() const noexcept -> int {
+        return current_value_.load(std::memory_order_relaxed);
+    }
+    
+    /**
+     * @brief Increments counter by 1 atomically.
+     * 
+     * @throws std::overflow_error If increment would cause overflow
+     * 
+     * @post If successful, value() == old_value + 1
+     * 
+     * @note Thread-safe
+     */
+    auto increment() -> void {
+        const int current = current_value_.load(std::memory_order_relaxed);
+        if (current >= std::numeric_limits<int>::max()) {
+            throw std::overflow_error("Counter overflow");
+        }
+        current_value_.fetch_add(1, std::memory_order_relaxed);
+    }
+    
+    /**
+     * @brief Decrements counter by 1 atomically.
+     * 
+     * @throws std::underflow_error If decrement would cause underflow
+     * 
+     * @post If successful, value() == old_value - 1
+     * 
+     * @note Thread-safe
+     */
+    auto decrement() -> void {
+        const int current = current_value_.load(std::memory_order_relaxed);
+        if (current <= 0) {
+            throw std::underflow_error("Counter underflow");
+        }
+        current_value_.fetch_sub(1, std::memory_order_relaxed);
+    }
+    
+    /**
+     * @brief Resets counter to initial value atomically.
+     * 
+     * @throws Never throws (noexcept guarantee)
+     * 
+     * @post value() == initial_value
+     * 
+     * @note Thread-safe
+     */
+    auto reset() noexcept -> void {
+        current_value_.store(initial_value_, std::memory_order_relaxed);
+    }
+
+private:
+    int initial_value_;
+    std::atomic<int> current_value_;
+};
+// Tests still pass ✓
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. 🐛 Bug Reported/Discovered
+   ↓
+2. ✍️ Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. ✅ Verify the test fails for the right reason
+   ↓
+4. 🔧 Fix the bug (make the test pass)
+   ↓
+5. 🟢 Verify the test now PASSES
+   ↓
+6. 📝 Document the bug in test comments (include bug ID)
+   ↓
+7. 🚀 Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix
+
+```cpp
+// Bug Report #1523: parse_json crashes on empty input
+
+// Step 1-2: Write test that reproduces the bug
+// tests/core/test_json_parser.cpp
+#include <gtest/gtest.h>
+#include "core/json_parser.hpp"
+
+TEST(JsonParser, HandlesEmptyInput_Bug1523) {
+    // Bug #1523: parse_json crashes on empty input
+    // Discovered: 2026-01-18
+    // This test prevents regression
+    
+    EXPECT_THROW({
+        parse_json("");
+    }, std::invalid_argument);
+}
+
+TEST(JsonParser, HandlesWhitespaceOnly_Bug1523) {
+    // Additional edge case discovered during bug investigation
+    EXPECT_THROW({
+        parse_json("   \n\t  ");
+    }, std::invalid_argument);
+}
+
+// Run: ctest
+// ❌ FAILS - parse_json crashes instead of throwing
+
+// Step 3: Fix the bug (include/core/json_parser.hpp)
+/**
+ * @brief Parses a JSON string into a value.
+ * 
+ * Validates input and parses JSON according to RFC 8259 specification.
+ * Provides detailed error messages for invalid input.
+ * 
+ * @param json_string The JSON string to parse
+ * @return Parsed JSON value
+ * 
+ * @throws std::invalid_argument If input is empty or invalid JSON
+ * @throws std::runtime_error If parsing fails due to internal error
+ * 
+ * @pre json_string must not be null
+ * @post If successful, returns valid JSON value
+ * 
+ * @par Example
+ * @code
+ * try {
+ *     auto value = parse_json(R"({"key": "value"})");
+ *     // Use value...
+ * } catch (const std::invalid_argument& e) {
+ *     std::cerr << "Invalid JSON: " << e.what() << '\n';
+ * }
+ * @endcode
+ * 
+ * @note This function is thread-safe
+ * @see RFC 8259 for JSON specification
+ */
+[[nodiscard]] auto parse_json(std::string_view json_string) -> JsonValue {
+    // FIX: Validate input before parsing
+    if (json_string.empty()) {
+        throw std::invalid_argument("JSON input cannot be empty");
+    }
+    
+    // Trim whitespace
+    const auto trimmed = trim(json_string);
+    if (trimmed.empty()) {
+        throw std::invalid_argument("JSON input contains only whitespace");
+    }
+    
+    // Original parsing logic here...
+    return parse_json_impl(trimmed);
+}
+
+// Run: ctest
+// ✅ PASSES - bug fixed, regression prevented ✓
+```
+
+### Example Bug Fix with Memory Safety
+
+```cpp
+// Bug Report #1524: Buffer overflow in string copy
+
+// Step 1-2: Write test that reproduces the bug
+#include <gtest/gtest.h>
+#include "core/string_utils.hpp"
+
+TEST(StringUtils, HandlesLongStrings_Bug1524) {
+    // Bug #1524: Buffer overflow when copying strings > 256 chars
+    // Discovered: 2026-01-18
+    // This test prevents regression
+    
+    std::string long_string(1000, 'a');
+    EXPECT_NO_THROW({
+        auto result = safe_copy(long_string);
+        EXPECT_EQ(result, long_string);
+    });
+}
+
+TEST(StringUtils, HandlesEmptyString_Bug1524) {
+    // Edge case: empty string should work
+    EXPECT_NO_THROW({
+        auto result = safe_copy("");
+        EXPECT_EQ(result, "");
+    });
+}
+
+// Run: ctest with ASAN
+// ❌ FAILS - AddressSanitizer detects buffer overflow
+
+// Step 3: Fix the bug (include/core/string_utils.hpp)
+/**
+ * @brief Safely copies a string without buffer overflows.
+ * 
+ * Performs safe string copy with automatic memory management.
+ * Uses std::string to prevent buffer overflows and memory leaks.
+ * 
+ * @param source The source string to copy
+ * @return Copied string
+ * 
+ * @throws std::bad_alloc If memory allocation fails
+ * 
+ * @post Return value equals source string
+ * 
+ * @par Complexity
+ * O(n) where n is the length of the source string
+ * 
+ * @par Example
+ * @code
+ * std::string original = "Hello, World!";
+ * auto copy = safe_copy(original);
+ * assert(copy == original);
+ * @endcode
+ * 
+ * @note This function is exception-safe (strong guarantee)
+ * @note Thread-safe (no shared state)
+ */
+[[nodiscard]] auto safe_copy(std::string_view source) -> std::string {
+    // FIX: Use std::string instead of fixed-size buffer
+    // OLD (buggy) code:
+    // char buffer[256];
+    // strcpy(buffer, source.data());  // Buffer overflow!
+    // return std::string{buffer};
+    
+    // NEW (safe) code:
+    return std::string{source};  // std::string handles any length safely
+}
+
+// Run: ctest with ASAN
+// ✅ PASSES - bug fixed, no memory errors, regression prevented ✓
+```
+
+### Prohibited Practices for Bug Fixes
+
+**NEVER:**
+- ❌ Fix a bug without adding a regression test first
+- ❌ Write implementation before writing tests (violates TDD)
+- ❌ Skip the Red-Green-Refactor cycle
+- ❌ Commit code with failing tests
+- ❌ Remove tests to make code pass
+- ❌ Use `DISABLED_` prefix to ignore failing tests
+- ❌ Suppress ASAN/UBSAN errors instead of fixing them
+
+**ALWAYS:**
+- ✅ Write a test that reproduces the bug first
+- ✅ Verify the test fails before fixing
+- ✅ Document bug ID in test comments
+- ✅ Run with sanitizers (ASAN, UBSAN, TSAN)
+- ✅ Ensure fix doesn't introduce new bugs
+- ✅ Keep tests in codebase permanently
+
+---
 
 ## 3. Dependency Management Strategy (MANDATORY)
 

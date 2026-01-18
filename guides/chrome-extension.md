@@ -24,7 +24,7 @@ The agent must adhere to the **MODERN-EXTENSION** standard for every Chrome exte
 
 - **E**xtension Security: Manifest V3, least privilege, secure defaults
 - **X**plicit Types: TypeScript strict mode, proper type definitions
-- **T**esting First: Comprehensive tests, mandatory for all code
+- **T**esting First: **TDD MANDATORY - Write tests BEFORE code (Red-Green-Refactor)**
 - **E**fficient Builds: Fast compilation, incremental builds, tree shaking
 - **N**ative Features: Platform-specific optimizations when needed
 - **S**tandard Patterns: Follow Chrome extension best practices
@@ -35,6 +35,7 @@ The agent must adhere to the **MODERN-EXTENSION** standard for every Chrome exte
 **V**erified Builds: Agent-generated code MUST compile, pass tests, and validate before delivery
 - **E**xplicit Dependencies: Clear dependency management, version pinning
 - **R**obust Error Handling: Try-catch, proper error messages
+- **R**egression Shield: **EVERY bug MUST get a test BEFORE fixing**
 - **I**mmutable Patterns: Prefer immutable data where possible
 - **F**unctional Style: Pure functions, minimal side effects
 - **I**dempotent Operations: Safe to retry, no side effects
@@ -941,30 +942,83 @@ eval(userInput);  // ❌ Never use eval
 
 ---
 
-## 12. Summary
+## 12. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. 🐛 Bug Reported/Discovered
+   ↓
+2. ✍️ Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. ✅ Verify the test fails for the right reason
+   ↓
+4. 🔧 Fix the bug (make the test pass)
+   ↓
+5. 🟢 Verify the test now PASSES
+   ↓
+6. 📝 Document the bug in test comments (include bug ID)
+   ↓
+7. 🚀 Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix
+
+```typescript
+// Bug Report #456: Extension popup doesn't save settings when theme is 'dark'
+
+// Step 1-2: Write test that reproduces the bug
+describe('ChromeStorageRepository - Bug #456', () => {
+  it('should save dark theme settings - Bug #456', async () => {
+    // Bug: Dark theme settings not persisted
+    // Discovered: 2026-01-18
+    // This test prevents regression
+    
+    const repository = new ChromeStorageRepository();
+    const settings = { theme: 'dark', notifications: true };
+    
+    await repository.saveSettings(settings);
+    const retrieved = await repository.getSettings();
+    
+    expect(retrieved?.theme).toBe('dark');
+  });
+});
+// Test FAILS - reproduces bug ✓
+
+// Step 3: Fix the bug (update saveSettings implementation)
+// Test PASSES - bug fixed ✓
+```
+
+## 13. Summary
 
 **CRITICAL Requirements for All Chrome Extension Code:**
 
-1. **Dependency Management**: Explicit version constraints, prefer stable packages
-2. **Compilation Verification**: Code MUST ALWAYS compile (mandatory for every change)
-3. **Unit Tests**: ALWAYS required for all new/modified code, MUST pass
-4. **Hexagonal Architecture**: All extensions MUST follow ports and adapters pattern
-5. **Manifest V3**: All extensions MUST use Manifest V3
-6. **TypeScript Strict Mode**: Always use strict mode for type safety
-7. **Documentation**: Complete JSDoc/TypeDoc documentation, auto-generatable
-8. **Testing**: 80%+ code coverage, comprehensive unit tests, always required
-9. **Error Handling**: Explicit error handling, meaningful messages
-10. **Security**: Least privilege permissions, safe APIs, CSP compliance
-11. **Performance**: Lazy loading, efficient API usage, minimal bundle size
-12. **Code Style**: Descriptive names, async/await, proper types
-13. **Minimalistic Code**: Clean, readable, concise code
-14. **Verification**: Agent MUST compile, test, and generate docs before delivery
+1. **Test-Driven Development**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor)
+2. **Regression Shield**: EVERY bug MUST get a test BEFORE fixing (mandatory)
+3. **Dependency Management**: Explicit version constraints, prefer stable packages
+4. **Compilation Verification**: Code MUST ALWAYS compile (mandatory for every change)
+5. **Unit Tests**: ALWAYS required for all new/modified code, MUST pass
+6. **Hexagonal Architecture**: All extensions MUST follow ports and adapters pattern
+7. **Manifest V3**: All extensions MUST use Manifest V3
+8. **TypeScript Strict Mode**: Always use strict mode for type safety
+9. **Documentation**: Complete JSDoc/TypeDoc documentation, auto-generatable
+10. **Testing**: 80%+ code coverage, comprehensive unit tests, always required
+11. **Error Handling**: Explicit error handling, meaningful messages
+12. **Security**: Least privilege permissions, safe APIs, CSP compliance
+13. **Performance**: Lazy loading, efficient API usage, minimal bundle size
+14. **Code Style**: Descriptive names, async/await, proper types
+15. **Minimalistic Code**: Clean, readable, concise code
+16. **Verification**: Agent MUST compile, test, and generate docs before delivery
 
 **Agent Verification Protocol:**
+- **MANDATORY**: Follow TDD (write tests first, then implementation)
+- **MANDATORY**: Add regression test BEFORE fixing any bug
 - **MANDATORY**: Compile code (`npm run type-check`, `npm run build`) - ALWAYS required
 - **MANDATORY**: Run unit tests (`npm test`) - ALWAYS required, MUST pass
 - Generate documentation (`npm run docs`)
 - **MANDATORY**: After ANY modification, re-compile and re-run tests
 - Only present working, tested, documented code to the user
 
-**Remember**: Minimalistic, clean, readable, well-documented, secure Chrome extension code with hexagonal architecture, Manifest V3, TypeScript strict mode, comprehensive testing, and focus on performance and portability. Keep it simple, keep it secure, keep it working.
+**Remember**: Minimalistic, clean, readable, well-documented, secure Chrome extension code with hexagonal architecture, Manifest V3, TypeScript strict mode, comprehensive testing, TDD, and focus on performance and portability. Test first, fix bugs with regression tests, keep it simple, keep it secure, keep it working.

@@ -10,6 +10,9 @@ Tools: ESNext (ES2024+), JSDoc, Modern testing frameworks (Vitest/Jest), ESLint,
 ## 1. Core Philosophies
 The agent must adhere to the "MODERN-JS" principles for every JavaScript project:
 
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+
 **Modern Standards**: Use latest ECMAScript features (ES2024+), avoid legacy patterns.
 **Only const/let**: Use `const` by default, `let` when needed, NEVER `var`.
 **Deterministic**: Predictable behavior, no implicit coercion, explicit conversions.
@@ -165,6 +168,168 @@ If verification fails:
 - ❌ Uses imperative for loops when map/filter/reduce would be clearer
 - ❌ Mutates data structures instead of creating new ones
 - ❌ Has hidden side effects in "pure" functions
+- ❌ **Fixes bugs without adding regression tests first**
+- ❌ **Writes implementation before writing tests (violates TDD)**
+- ❌ **Skips Red-Green-Refactor cycle for new features**
+
+---
+
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. 🔴 RED: Write a failing test first
+   ↓
+2. 🟢 GREEN: Write minimal code to make it pass
+   ↓
+3. 🔵 REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow
+
+```javascript
+// Step 1: RED - Write failing test first
+import { describe, it, expect } from 'vitest';
+import { calculateShipping } from './shipping.js';
+
+describe('calculateShipping', () => {
+  it('calculates standard shipping cost', () => {
+    expect(calculateShipping(100, 'standard')).toBe(10);
+  });
+  
+  it('calculates express shipping cost', () => {
+    expect(calculateShipping(100, 'express')).toBe(20);
+  });
+  
+  it('free shipping over $200', () => {
+    expect(calculateShipping(250, 'standard')).toBe(0);
+  });
+});
+
+// Run: npm test
+// ❌ FAILS - calculateShipping doesn't exist yet
+
+// Step 2: GREEN - Write minimal implementation
+/**
+ * Calculate shipping cost based on cart value and method.
+ * @param {number} cartValue - Cart total value
+ * @param {'standard'|'express'} method - Shipping method
+ * @returns {number} Shipping cost
+ */
+export function calculateShipping(cartValue, method) {
+  if (cartValue >= 200) return 0;
+  return method === 'express' ? 20 : 10;
+}
+
+// Run: npm test
+// ✅ PASSES - tests pass
+
+// Step 3: REFACTOR - Improve with constants
+const SHIPPING_COSTS = {
+  standard: 10,
+  express: 20,
+};
+const FREE_SHIPPING_THRESHOLD = 200;
+
+export function calculateShipping(cartValue, method) {
+  if (cartValue >= FREE_SHIPPING_THRESHOLD) return 0;
+  return SHIPPING_COSTS[method];
+}
+// Tests still pass ✓
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. 🐛 Bug Reported/Discovered
+   ↓
+2. ✍️ Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. ✅ Verify the test fails for the right reason
+   ↓
+4. 🔧 Fix the bug (make the test pass)
+   ↓
+5. 🟢 Verify the test now PASSES
+   ↓
+6. 📝 Document the bug in test comments (include bug ID)
+   ↓
+7. 🚀 Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix
+
+```javascript
+// Bug Report #3156: parseQueryParams fails with empty string values
+
+// Step 1-2: Write test that reproduces the bug
+import { describe, it, expect } from 'vitest';
+import { parseQueryParams } from './url.js';
+
+describe('parseQueryParams - Bug #3156', () => {
+  it('handles empty string values - Bug #3156', () => {
+    // Bug: parseQueryParams('?name=&age=25') crashed
+    // Discovered: 2026-01-18
+    // This test prevents regression
+    
+    const result = parseQueryParams('?name=&age=25');
+    
+    expect(result).toEqual({
+      name: '',
+      age: '25',
+    });
+  });
+});
+
+// Run: npm test
+// ❌ FAILS - throws error on empty value
+
+// Step 3: Fix the bug
+/**
+ * Parse URL query parameters into an object.
+ * @param {string} queryString - Query string (with or without '?')
+ * @returns {Object<string, string>} Parsed parameters
+ */
+export function parseQueryParams(queryString) {
+  const params = {};
+  const query = queryString.startsWith('?') 
+    ? queryString.slice(1) 
+    : queryString;
+  
+  // FIX: Handle empty values by checking for both key and value existence
+  for (const pair of query.split('&')) {
+    const [key, value = ''] = pair.split('=');
+    if (key) {
+      params[key] = value;
+    }
+  }
+  
+  return params;
+}
+
+// Run: npm test
+// ✅ PASSES - bug fixed, regression prevented ✓
+```
+
+### Prohibited Practices for Bug Fixes
+
+**NEVER:**
+- ❌ Fix a bug without adding a regression test first
+- ❌ Write implementation before writing tests (violates TDD)
+- ❌ Skip the Red-Green-Refactor cycle
+- ❌ Commit code with failing tests
+- ❌ Remove tests to make code pass
+- ❌ Comment out failing tests
 
 ---
 

@@ -11,6 +11,9 @@ Tools: Zig 0.12+, zig build, zig test, zig fmt, comptime, std library.
 
 The agent must adhere to the "ZIG-FIRST" principles for every Zig project:
 
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+
 **Zero Hidden Control Flow**: No hidden allocations, explicit everything, visible side effects.
 **Intentional Memory Management**: Allocators passed explicitly, defer for cleanup, arena allocators.
 **Generics via Comptime**: Use comptime for generic programming, type introspection, compile-time execution.
@@ -209,6 +212,207 @@ If verification fails:
 - ❌ Has poor naming (non-idiomatic Zig)
 - ❌ Doesn't use comptime when appropriate
 - ❌ Uses `unreachable` without justification
+- ❌ **Fixes bugs without adding regression tests first**
+- ❌ **Writes implementation before writing tests (violates TDD)**
+- ❌ **Skips Red-Green-Refactor cycle for new features**
+
+---
+
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. 🔴 RED: Write a failing test first
+   ↓
+2. 🟢 GREEN: Write minimal code to make it pass
+   ↓
+3. 🔵 REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for Zig
+
+```zig
+// Step 1: RED - Write failing test first
+const std = @import("std");
+const testing = std.testing;
+
+test "stack push and pop" {
+    var stack = Stack(i32).init();
+    defer stack.deinit();
+    
+    try stack.push(42);
+    try testing.expectEqual(@as(i32, 42), try stack.pop());
+}
+
+test "stack pop empty" {
+    var stack = Stack(i32).init();
+    defer stack.deinit();
+    
+    try testing.expectError(error.StackEmpty, stack.pop());
+}
+
+// Run: zig test src/stack.zig
+// ❌ FAILS - Stack doesn't exist yet
+
+// Step 2: GREEN - Write minimal implementation
+pub fn Stack(comptime T: type) type {
+    return struct {
+        const Self = @This();
+        items: std.ArrayList(T),
+        
+        pub fn init(allocator: std.mem.Allocator) Self {
+            return .{
+                .items = std.ArrayList(T).init(allocator),
+            };
+        }
+        
+        pub fn deinit(self: *Self) void {
+            self.items.deinit();
+        }
+        
+        pub fn push(self: *Self, value: T) !void {
+            try self.items.append(value);
+        }
+        
+        pub fn pop(self: *Self) !T {
+            if (self.items.items.len == 0) {
+                return error.StackEmpty;
+            }
+            return self.items.pop();
+        }
+    };
+}
+
+// Run: zig test src/stack.zig
+// ✅ PASSES - tests pass
+
+// Step 3: REFACTOR - Add size method, better encapsulation
+pub fn Stack(comptime T: type) type {
+    return struct {
+        const Self = @This();
+        items: std.ArrayList(T),
+        
+        pub fn init(allocator: std.mem.Allocator) Self {
+            return .{
+                .items = std.ArrayList(T).init(allocator),
+            };
+        }
+        
+        pub fn deinit(self: *Self) void {
+            self.items.deinit();
+        }
+        
+        pub fn push(self: *Self, value: T) !void {
+            try self.items.append(value);
+        }
+        
+        pub fn pop(self: *Self) !T {
+            if (self.isEmpty()) {
+                return error.StackEmpty;
+            }
+            return self.items.pop();
+        }
+        
+        pub fn isEmpty(self: *const Self) bool {
+            return self.items.items.len == 0;
+        }
+        
+        pub fn size(self: *const Self) usize {
+            return self.items.items.len;
+        }
+    };
+}
+// Tests still pass ✓
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. 🐛 Bug Reported/Discovered
+   ↓
+2. ✍️ Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. ✅ Verify the test fails for the right reason
+   ↓
+4. 🔧 Fix the bug (make the test pass)
+   ↓
+5. 🟢 Verify the test now PASSES
+   ↓
+6. 📝 Document the bug in test comments (include bug ID)
+   ↓
+7. 🚀 Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix
+
+```zig
+// Bug Report #6847: parseInt fails with leading zeros
+
+// Step 1-2: Write test that reproduces the bug
+const std = @import("std");
+const testing = std.testing;
+
+test "parseInt handles leading zeros - Bug #6847" {
+    // Bug: parseInt("0042") returned error instead of 42
+    // Discovered: 2026-01-18
+    // This test prevents regression
+    
+    const result = try parseInt("0042");
+    try testing.expectEqual(@as(i32, 42), result);
+}
+
+// Run: zig test src/parse.zig
+// ❌ FAILS - returns error.InvalidCharacter
+
+// Step 3: Fix the bug
+pub fn parseInt(str: []const u8) !i32 {
+    if (str.len == 0) {
+        return error.EmptyString;
+    }
+    
+    // FIX: Skip leading zeros
+    var start: usize = 0;
+    while (start < str.len and str[start] == '0') : (start += 1) {}
+    
+    // Handle "000" case
+    if (start == str.len) {
+        return 0;
+    }
+    
+    var result: i32 = 0;
+    for (str[start..]) |c| {
+        if (c < '0' or c > '9') {
+            return error.InvalidCharacter;
+        }
+        result = result * 10 + @as(i32, c - '0');
+    }
+    
+    return result;
+}
+
+// Run: zig test src/parse.zig
+// ✅ PASSES - bug fixed, regression prevented ✓
+```
+
+### Prohibited Practices for Bug Fixes
+
+**NEVER:**
+- ❌ Fix a bug without adding a regression test first
+- ❌ Write implementation before writing tests (violates TDD)
+- ❌ Skip the Red-Green-Refactor cycle
+- ❌ Commit code with failing tests
+- ❌ Remove tests to make code pass
 
 ---
 

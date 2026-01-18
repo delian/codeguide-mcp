@@ -15,6 +15,8 @@ This document provides mandatory coding standards and development practices for 
 
 The agent must adhere to the **MODERN-FLUTTER** standard for every Flutter/Dart implementation:
 
+- **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory)
+- **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression
 - **M**inimalistic Code: Clean, concise, readable Dart code
 - **O**ptimized Performance: Const widgets, efficient rebuilds, lazy loading
 - **D**ocumentation as Code: API documentation auto-generatable from code
@@ -163,6 +165,758 @@ If verification fails:
 2. **Unit tests are ALWAYS required** - All new/modified code MUST have unit tests
 3. **Tests MUST pass** - All unit tests MUST pass before code delivery
 4. **Re-verify after changes** - After ANY code modification, re-compile and re-run tests
+5. **TDD is MANDATORY** - Write tests BEFORE implementation (Red-Green-Refactor)
+6. **Bug regression tests MANDATORY** - Every bug MUST get a test BEFORE fixing
+
+---
+
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new Flutter/Dart code.**
+
+### TDD Cycle for Flutter
+
+```
+1. 🔴 RED: Write a failing test first
+   ↓
+2. 🟢 GREEN: Write minimal code to make it pass
+   ↓
+3. 🔵 REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for Dart Function
+
+```dart
+// Step 1: RED - Write failing test first
+// test/utils/validation_test.dart
+import 'package:flutter_test/flutter_test.dart';
+import 'package:my_app/utils/validation.dart';
+
+void main() {
+  group('EmailValidator', () {
+    // Test will fail - function doesn't exist yet
+    test('accepts valid email addresses', () {
+      expect(isValidEmail('user@example.com'), true);
+      expect(isValidEmail('test.user@domain.co.uk'), true);
+    });
+
+    test('rejects invalid email addresses', () {
+      expect(isValidEmail('invalid'), false);
+      expect(isValidEmail('user@'), false);
+      expect(isValidEmail('@domain.com'), false);
+    });
+
+    test('rejects empty strings', () {
+      expect(isValidEmail(''), false);
+    });
+  });
+}
+
+// Run: flutter test
+// ❌ FAILS - isValidEmail doesn't exist yet
+
+// Step 2: GREEN - Write minimal implementation
+// lib/utils/validation.dart
+/// Validates an email address format.
+///
+/// Checks if the provided string conforms to a valid email address pattern.
+///
+/// Returns `true` if the email is valid, `false` otherwise.
+///
+/// Example:
+/// ```dart
+/// if (isValidEmail('user@example.com')) {
+///   print('Valid email');
+/// }
+/// ```
+bool isValidEmail(String email) {
+  if (email.isEmpty) {
+    return false;
+  }
+
+  final emailRegex = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
+  return emailRegex.hasMatch(email);
+}
+
+// Run: flutter test
+// ✅ PASSES - tests pass
+
+// Step 3: REFACTOR - Improve with more robust validation
+/// Validates an email address format.
+///
+/// Performs comprehensive email validation including:
+/// - Basic format check (user@domain.tld)
+/// - Length constraints (3-254 characters)
+/// - RFC 5322 compliant pattern
+///
+/// Returns `true` if the email is valid, `false` otherwise.
+///
+/// Example:
+/// ```dart
+/// if (isValidEmail('user@example.com')) {
+///   print('Valid email');
+/// } else {
+///   print('Invalid email');
+/// }
+/// ```
+///
+/// See also:
+/// - [RFC 5322](https://tools.ietf.org/html/rfc5322) for email specification
+bool isValidEmail(String email) {
+  // Check length constraints
+  if (email.isEmpty || email.length < 3 || email.length > 254) {
+    return false;
+  }
+
+  // More robust RFC 5322 compliant regex
+  final emailRegex = RegExp(
+    r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
+  );
+
+  return emailRegex.hasMatch(email);
+}
+// Tests still pass ✓
+```
+
+### Example TDD for Flutter Widget
+
+```dart
+// Step 1: RED - Write failing test first
+// test/widgets/counter_widget_test.dart
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:my_app/widgets/counter_widget.dart';
+
+void main() {
+  group('CounterWidget', () {
+    // Test will fail - widget doesn't exist yet
+    testWidgets('displays initial count of 0', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: CounterWidget(),
+          ),
+        ),
+      );
+
+      expect(find.text('0'), findsOneWidget);
+    });
+
+    testWidgets('increments counter when button pressed', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: CounterWidget(),
+          ),
+        ),
+      );
+
+      // Tap increment button
+      await tester.tap(find.byIcon(Icons.add));
+      await tester.pump();
+
+      expect(find.text('1'), findsOneWidget);
+    });
+
+    testWidgets('decrements counter when button pressed', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: CounterWidget(),
+          ),
+        ),
+      );
+
+      // Increment first
+      await tester.tap(find.byIcon(Icons.add));
+      await tester.pump();
+
+      // Then decrement
+      await tester.tap(find.byIcon(Icons.remove));
+      await tester.pump();
+
+      expect(find.text('0'), findsOneWidget);
+    });
+  });
+}
+
+// Run: flutter test
+// ❌ FAILS - CounterWidget doesn't exist yet
+
+// Step 2: GREEN - Write minimal implementation
+// lib/widgets/counter_widget.dart
+import 'package:flutter/material.dart';
+
+/// A simple counter widget with increment and decrement buttons.
+///
+/// Displays the current count and provides buttons to modify it.
+///
+/// Example:
+/// ```dart
+/// CounterWidget()
+/// ```
+class CounterWidget extends StatefulWidget {
+  const CounterWidget({super.key});
+
+  @override
+  State<CounterWidget> createState() => _CounterWidgetState();
+}
+
+class _CounterWidgetState extends State<CounterWidget> {
+  int _count = 0;
+
+  void _increment() {
+    setState(() {
+      _count++;
+    });
+  }
+
+  void _decrement() {
+    setState(() {
+      _count--;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Text(
+          '$_count',
+          style: const TextStyle(fontSize: 48),
+        ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.remove),
+              onPressed: _decrement,
+            ),
+            IconButton(
+              icon: const Icon(Icons.add),
+              onPressed: _increment,
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+// Run: flutter test
+// ✅ PASSES - tests pass
+
+// Step 3: REFACTOR - Improve with better styling and constraints
+/// A customizable counter widget with increment and decrement buttons.
+///
+/// Displays the current count with Material Design styling and provides
+/// buttons to modify it. Supports custom initial value and callbacks.
+///
+/// Example:
+/// ```dart
+/// CounterWidget(
+///   initialValue: 10,
+///   onChanged: (value) => print('Count: $value'),
+/// )
+/// ```
+class CounterWidget extends StatefulWidget {
+  /// Creates a counter widget.
+  ///
+  /// The [initialValue] defaults to 0.
+  const CounterWidget({
+    super.key,
+    this.initialValue = 0,
+    this.onChanged,
+  });
+
+  /// The initial counter value.
+  final int initialValue;
+
+  /// Called when the counter value changes.
+  final ValueChanged<int>? onChanged;
+
+  @override
+  State<CounterWidget> createState() => _CounterWidgetState();
+}
+
+class _CounterWidgetState extends State<CounterWidget> {
+  late int _count;
+
+  @override
+  void initState() {
+    super.initState();
+    _count = widget.initialValue;
+  }
+
+  void _increment() {
+    setState(() {
+      _count++;
+      widget.onChanged?.call(_count);
+    });
+  }
+
+  void _decrement() {
+    setState(() {
+      _count--;
+      widget.onChanged?.call(_count);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 4,
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '$_count',
+              style: Theme.of(context).textTheme.displayLarge,
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton.filled(
+                  icon: const Icon(Icons.remove),
+                  onPressed: _decrement,
+                ),
+                const SizedBox(width: 16),
+                IconButton.filled(
+                  icon: const Icon(Icons.add),
+                  onPressed: _increment,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+// Tests still pass ✓
+```
+
+### Example TDD for Riverpod Provider
+
+```dart
+// Step 1: RED - Write failing test first
+// test/providers/user_provider_test.dart
+import 'package:flutter_test/flutter_test.dart';
+import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:my_app/providers/user_provider.dart';
+import 'package:my_app/models/user.dart';
+
+void main() {
+  group('UserProvider', () {
+    // Test will fail - provider doesn't exist yet
+    test('starts with null user', () {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+
+      final user = container.read(userProvider);
+      expect(user, null);
+    });
+
+    test('updates user when setUser is called', () {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+
+      final testUser = User(id: '1', name: 'John Doe', email: 'john@example.com');
+
+      container.read(userProvider.notifier).setUser(testUser);
+
+      final user = container.read(userProvider);
+      expect(user, testUser);
+    });
+
+    test('clears user when clearUser is called', () {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+
+      final testUser = User(id: '1', name: 'John Doe', email: 'john@example.com');
+
+      container.read(userProvider.notifier).setUser(testUser);
+      container.read(userProvider.notifier).clearUser();
+
+      final user = container.read(userProvider);
+      expect(user, null);
+    });
+  });
+}
+
+// Run: flutter test
+// ❌ FAILS - userProvider doesn't exist yet
+
+// Step 2: GREEN - Write minimal implementation
+// lib/models/user.dart
+import 'package:freezed_annotation/freezed_annotation.dart';
+
+part 'user.freezed.dart';
+part 'user.g.dart';
+
+@freezed
+class User with _$User {
+  const factory User({
+    required String id,
+    required String name,
+    required String email,
+  }) = _User;
+
+  factory User.fromJson(Map<String, dynamic> json) => _$UserFromJson(json);
+}
+
+// lib/providers/user_provider.dart
+import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'package:my_app/models/user.dart';
+
+part 'user_provider.g.dart';
+
+/// Provider for managing user state.
+///
+/// Provides methods to set and clear the current user.
+@riverpod
+class UserNotifier extends _$UserNotifier {
+  @override
+  User? build() => null;
+
+  /// Sets the current user.
+  void setUser(User user) {
+    state = user;
+  }
+
+  /// Clears the current user.
+  void clearUser() {
+    state = null;
+  }
+}
+
+// Run: flutter test
+// ✅ PASSES - tests pass
+
+// Step 3: REFACTOR - Add async loading and error handling
+/// Provider for managing user state with async operations.
+///
+/// Provides methods to load, set, and clear the current user.
+/// Handles loading states and errors.
+@riverpod
+class UserNotifier extends _$UserNotifier {
+  @override
+  User? build() => null;
+
+  /// Loads user from API.
+  ///
+  /// Throws [Exception] if loading fails.
+  Future<void> loadUser(String userId) async {
+    state = null; // Clear current user
+
+    try {
+      // Simulate API call
+      await Future.delayed(const Duration(seconds: 1));
+      final user = User(
+        id: userId,
+        name: 'John Doe',
+        email: 'john@example.com',
+      );
+      state = user;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  /// Sets the current user.
+  void setUser(User user) {
+    state = user;
+  }
+
+  /// Clears the current user.
+  void clearUser() {
+    state = null;
+  }
+}
+// Tests still pass ✓
+```
+
+---
+
+## 2B. Bug Fix Protocol for Flutter (MANDATORY)
+
+**CRITICAL: Every Flutter bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow for Flutter
+
+```
+1. 🐛 Bug Reported/Discovered
+   ↓
+2. ✍️ Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. ✅ Verify the test fails for the right reason
+   ↓
+4. 🔧 Fix the bug (make the test pass)
+   ↓
+5. 🟢 Verify the test now PASSES
+   ↓
+6. 📝 Document the bug in test comments (include bug ID)
+   ↓
+7. 🚀 Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix: Widget State Issue
+
+```dart
+// Bug Report #4521: Counter doesn't reset when widget is rebuilt
+
+// Step 1-2: Write test that reproduces the bug
+// test/widgets/counter_widget_test.dart
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:my_app/widgets/counter_widget.dart';
+
+void main() {
+  group('CounterWidget - Bug #4521', () {
+    testWidgets('resets count when initialValue changes - Bug #4521', (tester) async {
+      // Bug #4521: Counter doesn't reset when initialValue changes
+      // Discovered: 2026-01-18
+      // This test prevents regression
+
+      // Build widget with initial value 0
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: CounterWidget(initialValue: 0),
+          ),
+        ),
+      );
+
+      expect(find.text('0'), findsOneWidget);
+
+      // Increment counter
+      await tester.tap(find.byIcon(Icons.add));
+      await tester.pump();
+
+      expect(find.text('1'), findsOneWidget);
+
+      // Rebuild widget with new initial value
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: CounterWidget(initialValue: 10),
+          ),
+        ),
+      );
+
+      // Should show new initial value, not old count
+      expect(find.text('10'), findsOneWidget);
+      expect(find.text('1'), findsNothing);
+    });
+  });
+}
+
+// Run: flutter test
+// ❌ FAILS - Counter still shows '1' instead of '10'
+
+// Step 3: Fix the bug
+// lib/widgets/counter_widget.dart
+class _CounterWidgetState extends State<CounterWidget> {
+  late int _count;
+
+  @override
+  void initState() {
+    super.initState();
+    _count = widget.initialValue;
+  }
+
+  // FIX: Add didUpdateWidget to handle initialValue changes
+  @override
+  void didUpdateWidget(CounterWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    
+    // Reset count if initialValue changed
+    if (widget.initialValue != oldWidget.initialValue) {
+      _count = widget.initialValue;
+    }
+  }
+
+  // ... rest of implementation
+}
+
+// Run: flutter test
+// ✅ PASSES - bug fixed, regression prevented ✓
+```
+
+### Example Bug Fix: Async State Issue
+
+```dart
+// Bug Report #4522: Race condition in async data loading
+
+// Step 1-2: Write test that reproduces the bug
+// test/providers/data_provider_test.dart
+import 'package:flutter_test/flutter_test.dart';
+import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:my_app/providers/data_provider.dart';
+
+void main() {
+  group('DataProvider - Bug #4522', () {
+    test('handles rapid successive calls correctly - Bug #4522', () async {
+      // Bug #4522: Race condition when loadData called multiple times
+      // Discovered: 2026-01-18
+      // This test prevents regression
+
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+
+      final notifier = container.read(dataProvider.notifier);
+
+      // Trigger multiple rapid calls
+      final future1 = notifier.loadData('id1');
+      final future2 = notifier.loadData('id2');
+      final future3 = notifier.loadData('id3');
+
+      await Future.wait([future1, future2, future3]);
+
+      // Should have data from last call (id3), not mixed data
+      final state = container.read(dataProvider);
+      expect(state?.id, 'id3');
+    });
+  });
+}
+
+// Run: flutter test
+// ❌ FAILS - State contains mixed data from multiple calls
+
+// Step 3: Fix the bug
+// lib/providers/data_provider.dart
+import 'package:riverpod_annotation/riverpod_annotation.dart';
+
+part 'data_provider.g.dart';
+
+@riverpod
+class DataNotifier extends _$DataNotifier {
+  // FIX: Track current request to cancel stale ones
+  int _requestId = 0;
+
+  @override
+  Data? build() => null;
+
+  Future<void> loadData(String id) async {
+    // Increment request ID for this call
+    final currentRequestId = ++_requestId;
+
+    try {
+      // Simulate API call
+      await Future.delayed(const Duration(milliseconds: 100));
+      final data = Data(id: id, value: 'Data for $id');
+
+      // FIX: Only update state if this is still the latest request
+      if (currentRequestId == _requestId) {
+        state = data;
+      }
+      // Otherwise, this request was superseded - ignore result
+    } catch (e) {
+      // Only update error if this is still the latest request
+      if (currentRequestId == _requestId) {
+        rethrow;
+      }
+    }
+  }
+}
+
+// Run: flutter test
+// ✅ PASSES - bug fixed, race condition resolved, regression prevented ✓
+```
+
+### Example Bug Fix: Memory Leak
+
+```dart
+// Bug Report #4523: Memory leak in stream subscription
+
+// Step 1-2: Write test that reproduces the bug
+// test/services/location_service_test.dart
+import 'package:flutter_test/flutter_test.dart';
+import 'package:my_app/services/location_service.dart';
+
+void main() {
+  group('LocationService - Bug #4523', () {
+    test('properly disposes stream subscription - Bug #4523', () async {
+      // Bug #4523: Stream subscription not cancelled on dispose
+      // Discovered: 2026-01-18
+      // This test prevents regression
+
+      final service = LocationService();
+
+      // Start listening
+      service.startListening();
+
+      // Verify subscription is active
+      expect(service.isListening, true);
+
+      // Dispose service
+      service.dispose();
+
+      // Subscription should be cancelled
+      expect(service.isListening, false);
+
+      // Should not throw or leak memory
+    });
+  });
+}
+
+// Run: flutter test
+// ❌ FAILS - Subscription not cancelled, memory leak detected
+
+// Step 3: Fix the bug
+// lib/services/location_service.dart
+import 'dart:async';
+
+/// Service for managing location updates.
+///
+/// Properly handles stream subscription lifecycle to prevent memory leaks.
+class LocationService {
+  StreamSubscription<Position>? _subscription;
+
+  bool get isListening => _subscription != null;
+
+  void startListening() {
+    _subscription = locationStream.listen((position) {
+      // Handle position update
+    });
+  }
+
+  // FIX: Properly cancel subscription on dispose
+  void dispose() {
+    _subscription?.cancel();
+    _subscription = null;
+  }
+}
+
+// Run: flutter test
+// ✅ PASSES - bug fixed, memory leak resolved, regression prevented ✓
+```
+
+### Prohibited Practices for Flutter Bug Fixes
+
+**NEVER:**
+- ❌ Fix a bug without adding a regression test first
+- ❌ Write implementation before writing tests (violates TDD)
+- ❌ Skip the Red-Green-Refactor cycle
+- ❌ Commit code with failing tests
+- ❌ Remove tests to make code pass
+- ❌ Use `skip: true` to ignore failing tests
+- ❌ Suppress analyzer warnings instead of fixing them
+
+**ALWAYS:**
+- ✅ Write a test that reproduces the bug first
+- ✅ Verify the test fails before fixing
+- ✅ Document bug ID in test comments
+- ✅ Run `flutter analyze` after fix
+- ✅ Ensure fix doesn't introduce new issues
+- ✅ Keep tests in codebase permanently
+- ✅ Test on multiple platforms if platform-specific
 
 ---
 

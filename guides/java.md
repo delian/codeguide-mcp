@@ -15,6 +15,8 @@ This document provides mandatory coding standards and development practices for 
 
 The agent must adhere to the **MODERN-JAVA** standard for every Java implementation:
 
+- **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory)
+- **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression
 - **M**inimalistic Code: Less verbose, concise, clean, readable, expressive code
 - **O**bject-Oriented Modern: Records, sealed classes, pattern matching
 - **D**ata-Centric: Immutable data carriers, records over POJOs
@@ -175,6 +177,473 @@ mvn javadoc:javadoc
 2. **Unit tests are ALWAYS required** - All new/modified code MUST have unit tests
 3. **Tests MUST pass** - All unit tests MUST pass before code delivery
 4. **Re-verify after changes** - After ANY code modification, re-compile and re-run tests
+5. **TDD is MANDATORY** - Write tests BEFORE implementation (Red-Green-Refactor)
+6. **Bug regression tests MANDATORY** - Every bug MUST get a test BEFORE fixing
+
+---
+
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new Java code.**
+
+### TDD Cycle for Java
+
+```
+1. 🔴 RED: Write a failing test first
+   ↓
+2. 🟢 GREEN: Write minimal code to make it pass
+   ↓
+3. 🔵 REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for Java Method
+
+```java
+// Step 1: RED - Write failing test first
+// src/test/java/com/example/util/EmailValidatorTest.java
+package com.example.util;
+
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
+class EmailValidatorTest {
+    // Test will fail - method doesn't exist yet
+    @Test
+    void acceptsValidEmails() {
+        assertTrue(EmailValidator.isValid("user@example.com"));
+        assertTrue(EmailValidator.isValid("test.user@domain.co.uk"));
+    }
+
+    @Test
+    void rejectsInvalidEmails() {
+        assertFalse(EmailValidator.isValid("invalid"));
+        assertFalse(EmailValidator.isValid("user@"));
+        assertFalse(EmailValidator.isValid("@domain.com"));
+    }
+
+    @Test
+    void rejectsEmptyStrings() {
+        assertFalse(EmailValidator.isValid(""));
+        assertFalse(EmailValidator.isValid(null));
+    }
+}
+
+// Run: mvn test or ./gradlew test
+// ❌ FAILS - EmailValidator doesn't exist yet
+
+// Step 2: GREEN - Write minimal implementation
+// src/main/java/com/example/util/EmailValidator.java
+package com.example.util;
+
+import java.util.regex.Pattern;
+
+/**
+ * Validates email address formats.
+ *
+ * <p>Provides methods to check if a string conforms to a valid email address pattern.
+ *
+ * @since 1.0
+ */
+public final class EmailValidator {
+    private static final Pattern EMAIL_PATTERN = 
+        Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
+
+    private EmailValidator() {
+        throw new AssertionError("Utility class");
+    }
+
+    /**
+     * Validates an email address format.
+     *
+     * @param email the email address to validate
+     * @return {@code true} if the email is valid, {@code false} otherwise
+     */
+    public static boolean isValid(String email) {
+        if (email == null || email.isEmpty()) {
+            return false;
+        }
+        return EMAIL_PATTERN.matcher(email).matches();
+    }
+}
+
+// Run: mvn test
+// ✅ PASSES - tests pass
+
+// Step 3: REFACTOR - Improve with more robust validation
+/**
+ * Validates email address formats according to RFC 5322.
+ *
+ * <p>Provides comprehensive email validation including:
+ * <ul>
+ *   <li>Basic format check (user@domain.tld)</li>
+ *   <li>Length constraints (3-254 characters)</li>
+ *   <li>RFC 5322 compliant pattern</li>
+ * </ul>
+ *
+ * @since 1.0
+ */
+public final class EmailValidator {
+    private static final Pattern EMAIL_PATTERN = Pattern.compile(
+        "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+    );
+    private static final int MIN_LENGTH = 3;
+    private static final int MAX_LENGTH = 254;
+
+    private EmailValidator() {
+        throw new AssertionError("Utility class");
+    }
+
+    /**
+     * Validates an email address format.
+     *
+     * <p>Checks if the provided string conforms to a valid email address pattern
+     * according to RFC 5322 specification.
+     *
+     * @param email the email address to validate
+     * @return {@code true} if the email is valid, {@code false} otherwise
+     * @see <a href="https://tools.ietf.org/html/rfc5322">RFC 5322</a>
+     */
+    public static boolean isValid(String email) {
+        if (email == null || email.isEmpty()) {
+            return false;
+        }
+
+        if (email.length() < MIN_LENGTH || email.length() > MAX_LENGTH) {
+            return false;
+        }
+
+        return EMAIL_PATTERN.matcher(email).matches();
+    }
+}
+// Tests still pass ✓
+```
+
+### Example TDD for Java Record
+
+```java
+// Step 1: RED - Write failing test first
+// src/test/java/com/example/model/UserTest.java
+package com.example.model;
+
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
+class UserTest {
+    // Test will fail - User record doesn't exist yet
+    @Test
+    void createsUserWithValidData() {
+        var user = new User("user-123", "John Doe", "john@example.com");
+        
+        assertEquals("user-123", user.id());
+        assertEquals("John Doe", user.name());
+        assertEquals("john@example.com", user.email());
+    }
+
+    @Test
+    void throwsOnNullId() {
+        assertThrows(NullPointerException.class, () -> 
+            new User(null, "John", "john@example.com")
+        );
+    }
+
+    @Test
+    void throwsOnInvalidEmail() {
+        assertThrows(IllegalArgumentException.class, () -> 
+            new User("user-123", "John", "invalid-email")
+        );
+    }
+}
+
+// Run: mvn test
+// ❌ FAILS - User record doesn't exist yet
+
+// Step 2: GREEN - Write minimal implementation
+// src/main/java/com/example/model/User.java
+package com.example.model;
+
+import java.util.Objects;
+
+/**
+ * Represents a user in the system.
+ *
+ * @param id    the unique user identifier
+ * @param name  the user's full name
+ * @param email the user's email address
+ */
+public record User(String id, String name, String email) {
+    public User {
+        Objects.requireNonNull(id, "id cannot be null");
+        Objects.requireNonNull(name, "name cannot be null");
+        Objects.requireNonNull(email, "email cannot be null");
+        
+        if (!email.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")) {
+            throw new IllegalArgumentException("Invalid email format");
+        }
+    }
+}
+
+// Run: mvn test
+// ✅ PASSES - tests pass
+
+// Step 3: REFACTOR - Add validation and factory methods
+/**
+ * Represents an immutable user in the system.
+ *
+ * <p>This record enforces validation rules:
+ * <ul>
+ *   <li>ID must not be null or empty</li>
+ *   <li>Name must not be null or empty</li>
+ *   <li>Email must be valid format</li>
+ * </ul>
+ *
+ * @param id    the unique user identifier (non-null, non-empty)
+ * @param name  the user's full name (non-null, non-empty)
+ * @param email the user's email address (non-null, valid format)
+ * @since 1.0
+ */
+public record User(String id, String name, String email) {
+    private static final Pattern EMAIL_PATTERN = Pattern.compile(
+        "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+    );
+
+    /**
+     * Compact constructor with validation.
+     *
+     * @throws NullPointerException     if any parameter is null
+     * @throws IllegalArgumentException if email format is invalid or any field is empty
+     */
+    public User {
+        Objects.requireNonNull(id, "id cannot be null");
+        Objects.requireNonNull(name, "name cannot be null");
+        Objects.requireNonNull(email, "email cannot be null");
+
+        if (id.isBlank()) {
+            throw new IllegalArgumentException("id cannot be empty");
+        }
+        if (name.isBlank()) {
+            throw new IllegalArgumentException("name cannot be empty");
+        }
+        if (!EMAIL_PATTERN.matcher(email).matches()) {
+            throw new IllegalArgumentException("Invalid email format: " + email);
+        }
+    }
+
+    /**
+     * Creates a new user with updated name.
+     *
+     * @param newName the new name
+     * @return a new User instance with the updated name
+     */
+    public User withName(String newName) {
+        return new User(id, newName, email);
+    }
+}
+// Tests still pass ✓
+```
+
+---
+
+## 2B. Bug Fix Protocol for Java (MANDATORY)
+
+**CRITICAL: Every Java bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow for Java
+
+```
+1. 🐛 Bug Reported/Discovered
+   ↓
+2. ✍️ Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. ✅ Verify the test fails for the right reason
+   ↓
+4. 🔧 Fix the bug (make the test pass)
+   ↓
+5. 🟢 Verify the test now PASSES
+   ↓
+6. 📝 Document the bug in test comments (include bug ID)
+   ↓
+7. 🚀 Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix: NullPointerException
+
+```java
+// Bug Report #7821: NullPointerException in getUserName when user is null
+
+// Step 1-2: Write test that reproduces the bug
+// src/test/java/com/example/service/UserServiceTest.java
+package com.example.service;
+
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
+class UserServiceTest {
+    /**
+     * Bug #7821: getUserName throws NullPointerException when user is null.
+     * Discovered: 2026-01-18
+     * This test prevents regression.
+     */
+    @Test
+    void getUserName_returnsEmptyOptional_whenUserIsNull_Bug7821() {
+        var service = new UserService();
+        
+        // Should return empty Optional, not throw NPE
+        var result = service.getUserName(null);
+        
+        assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void getUserName_returnsName_whenUserExists() {
+        var service = new UserService();
+        var user = new User("123", "John Doe", "john@example.com");
+        
+        var result = service.getUserName(user);
+        
+        assertTrue(result.isPresent());
+        assertEquals("John Doe", result.get());
+    }
+}
+
+// Run: mvn test
+// ❌ FAILS - NullPointerException thrown
+
+// Step 3: Fix the bug
+// src/main/java/com/example/service/UserService.java
+package com.example.service;
+
+import java.util.Optional;
+
+/**
+ * Service for user-related operations.
+ *
+ * @since 1.0
+ */
+public class UserService {
+    /**
+     * Gets the user's name.
+     *
+     * <p><b>Bug Fix #7821:</b> Now properly handles null users by returning
+     * empty Optional instead of throwing NullPointerException.
+     *
+     * @param user the user (may be null)
+     * @return an Optional containing the user's name, or empty if user is null
+     */
+    public Optional<String> getUserName(User user) {
+        // FIX: Check for null before accessing user
+        return Optional.ofNullable(user)
+                       .map(User::name);
+    }
+}
+
+// Run: mvn test
+// ✅ PASSES - bug fixed, regression prevented ✓
+```
+
+### Example Bug Fix: Concurrent Modification
+
+```java
+// Bug Report #7822: ConcurrentModificationException in removeInactiveUsers
+
+// Step 1-2: Write test that reproduces the bug
+package com.example.service;
+
+import org.junit.jupiter.api.Test;
+import java.util.*;
+import static org.junit.jupiter.api.Assertions.*;
+
+class UserManagerTest {
+    /**
+     * Bug #7822: ConcurrentModificationException when removing inactive users.
+     * Discovered: 2026-01-18
+     * This test prevents regression.
+     */
+    @Test
+    void removeInactiveUsers_doesNotThrowConcurrentModification_Bug7822() {
+        var manager = new UserManager();
+        
+        // Add multiple users
+        manager.addUser(new User("1", "John", "john@example.com", false));
+        manager.addUser(new User("2", "Jane", "jane@example.com", true));
+        manager.addUser(new User("3", "Bob", "bob@example.com", false));
+        
+        // Should not throw ConcurrentModificationException
+        assertDoesNotThrow(() -> manager.removeInactiveUsers());
+        
+        // Should only have active users left
+        assertEquals(1, manager.getUserCount());
+    }
+}
+
+// Run: mvn test
+// ❌ FAILS - ConcurrentModificationException thrown
+
+// Step 3: Fix the bug
+package com.example.service;
+
+import java.util.*;
+
+/**
+ * Manages a collection of users.
+ *
+ * @since 1.0
+ */
+public class UserManager {
+    private final List<User> users = new ArrayList<>();
+
+    public void addUser(User user) {
+        users.add(user);
+    }
+
+    /**
+     * Removes all inactive users from the collection.
+     *
+     * <p><b>Bug Fix #7822:</b> Now uses iterator for safe removal during
+     * iteration, preventing ConcurrentModificationException.
+     */
+    public void removeInactiveUsers() {
+        // FIX: Use iterator for safe removal
+        // OLD (buggy) code:
+        // for (User user : users) {
+        //     if (!user.isActive()) {
+        //         users.remove(user);  // ConcurrentModificationException!
+        //     }
+        // }
+        
+        // NEW (fixed) code:
+        users.removeIf(user -> !user.isActive());
+    }
+
+    public int getUserCount() {
+        return users.size();
+    }
+}
+
+// Run: mvn test
+// ✅ PASSES - bug fixed, regression prevented ✓
+```
+
+### Prohibited Practices for Java Bug Fixes
+
+**NEVER:**
+- ❌ Fix a bug without adding a regression test first
+- ❌ Write implementation before writing tests (violates TDD)
+- ❌ Skip the Red-Green-Refactor cycle
+- ❌ Commit code with failing tests
+- ❌ Remove tests to make code pass
+- ❌ Use `@Disabled` to ignore failing tests
+- ❌ Suppress warnings instead of fixing root cause
+
+**ALWAYS:**
+- ✅ Write a test that reproduces the bug first
+- ✅ Verify the test fails before fixing
+- ✅ Document bug ID in test JavaDoc
+- ✅ Run `mvn verify` or `./gradlew check` after fix
+- ✅ Ensure fix doesn't introduce new issues
+- ✅ Keep tests in codebase permanently
+- ✅ Test with different JVM versions if applicable
 
 ---
 

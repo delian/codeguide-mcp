@@ -10,6 +10,8 @@ Tools: React 19.x, TypeScript 5.x, Vite 5.x, TypeDoc, Modern Hooks, TanStack eco
 ## 1. Core Philosophies
 The agent must adhere to the "REACT-PRO" principles for every React application:
 
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
 **React-Native Patterns**: Use built-in React features first, minimal external dependencies.
 **End-to-End Type Safety**: TypeScript strict mode, no `any`, comprehensive type coverage.
 **Accessibility First**: WCAG 2.1 AA compliance, semantic HTML, keyboard navigation.
@@ -477,6 +479,173 @@ describe('UserCard', () => {
 - ❌ Fails to build for production
 - ❌ Suppresses linter errors without justification
 - ❌ Has console.log statements in production code
+- ❌ **Fixes bugs without adding regression tests first**
+- ❌ **Writes implementation before writing tests (violates TDD)**
+- ❌ **Skips Red-Green-Refactor cycle for new features**
+
+---
+
+## 3A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. 🔴 RED: Write a failing test first
+   ↓
+2. 🟢 GREEN: Write minimal code to make it pass
+   ↓
+3. 🔵 REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for React Component
+
+```typescript
+// Step 1: RED - Write failing test first
+import { describe, it, expect } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { UserBadge } from './UserBadge';
+
+describe('UserBadge', () => {
+  it('displays user initials when no avatar provided', () => {
+    render(<UserBadge name="John Doe" />);
+    
+    expect(screen.getByText('JD')).toBeInTheDocument();
+  });
+});
+
+// Run: npm test
+// ❌ FAILS - UserBadge component doesn't exist yet
+
+// Step 2: GREEN - Write minimal implementation
+interface UserBadgeProps {
+  name: string;
+  avatar?: string;
+}
+
+export function UserBadge({ name, avatar }: UserBadgeProps) {
+  const initials = name
+    .split(' ')
+    .map(n => n[0])
+    .join('')
+    .toUpperCase();
+  
+  return avatar ? (
+    <img src={avatar} alt={name} />
+  ) : (
+    <div>{initials}</div>
+  );
+}
+
+// Run: npm test
+// ✅ PASSES - test passes
+
+// Step 3: REFACTOR - Add styles, accessibility, etc.
+export function UserBadge({ name, avatar }: UserBadgeProps) {
+  const initials = name
+    .split(' ')
+    .map(n => n[0])
+    .join('')
+    .toUpperCase();
+  
+  return avatar ? (
+    <img src={avatar} alt={name} className="rounded-full w-10 h-10" />
+  ) : (
+    <div className="flex items-center justify-center w-10 h-10 rounded-full bg-gray-300" role="img" aria-label={name}>
+      <span className="text-sm font-medium">{initials}</span>
+    </div>
+  );
+}
+// Tests still pass ✓
+```
+
+---
+
+## 3B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. 🐛 Bug Reported/Discovered
+   ↓
+2. ✍️ Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. ✅ Verify the test fails for the right reason
+   ↓
+4. 🔧 Fix the bug (make the test pass)
+   ↓
+5. 🟢 Verify the test now PASSES
+   ↓
+6. 📝 Document the bug in test comments (include bug ID)
+   ↓
+7. 🚀 Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix
+
+```typescript
+// Bug Report #1523: DatePicker crashes when date prop is null
+
+// Step 1-2: Write test that reproduces the bug
+import { describe, it, expect } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { DatePicker } from './DatePicker';
+
+describe('DatePicker - Bug #1523', () => {
+  it('handles null date without crashing - Bug #1523', () => {
+    // Bug: DatePicker crashes when date={null}
+    // Discovered: 2026-01-18
+    // This test prevents regression
+    
+    expect(() => {
+      render(<DatePicker date={null} onChange={vi.fn()} />);
+    }).not.toThrow();
+    
+    expect(screen.getByPlaceholderText('Select date')).toBeInTheDocument();
+  });
+});
+
+// Run: npm test
+// ❌ FAILS - component crashes with "Cannot read property 'toLocaleDateString' of null"
+
+// Step 3: Fix the bug
+interface DatePickerProps {
+  date: Date | null;
+  onChange: (date: Date) => void;
+}
+
+export function DatePicker({ date, onChange }: DatePickerProps) {
+  // FIX: Handle null date safely
+  const displayValue = date?.toLocaleDateString() ?? '';
+  
+  return (
+    <input
+      type="text"
+      value={displayValue}
+      placeholder="Select date"
+      onClick={() => {/* show calendar */}}
+    />
+  );
+}
+
+// Run: npm test
+// ✅ PASSES - bug fixed, regression prevented ✓
+```
+
+### Prohibited Practices for Bug Fixes
+
+**NEVER:**
+- ❌ Fix a bug without adding a regression test first
+- ❌ Write implementation before writing tests (violates TDD)
+- ❌ Skip the Red-Green-Refactor cycle
+- ❌ Commit code with failing tests
+- ❌ Remove tests to make code pass
+- ❌ Use `.skip()` to ignore failing tests
 
 ---
 

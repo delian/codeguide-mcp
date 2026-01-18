@@ -15,6 +15,8 @@ This document provides mandatory coding standards and development practices for 
 
 The agent must adhere to the **MINIMAL-KOTLIN** standard for every Kotlin implementation:
 
+- **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory)
+- **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression
 - **M**inimal Boilerplate: Functions over classes, data classes, extension functions
 - **I**mmutable by Default: val over var, read-only collections, sealed classes
 - **N**ullable Safety: Prefer nullable operator (?), safe calls, elvis operator
@@ -178,6 +180,392 @@ If verification fails:
 2. **Unit tests are ALWAYS required** - All new/modified code MUST have unit tests
 3. **Tests MUST pass** - All unit tests MUST pass before code delivery
 4. **Re-verify after changes** - After ANY code modification, re-compile and re-run tests
+5. **TDD is MANDATORY** - Write tests BEFORE implementation (Red-Green-Refactor)
+6. **Bug regression tests MANDATORY** - Every bug MUST get a test BEFORE fixing
+
+---
+
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new Kotlin code.**
+
+### TDD Cycle for Kotlin
+
+```
+1. 🔴 RED: Write a failing test first
+   ↓
+2. 🟢 GREEN: Write minimal code to make it pass
+   ↓
+3. 🔵 REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for Kotlin Function
+
+```kotlin
+// Step 1: RED - Write failing test first
+// src/test/kotlin/com/example/util/EmailValidatorTest.kt
+package com.example.util
+
+import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.shouldBe
+
+class EmailValidatorTest : FunSpec({
+    // Test will fail - function doesn't exist yet
+    test("accepts valid email addresses") {
+        isValidEmail("user@example.com") shouldBe true
+        isValidEmail("test.user@domain.co.uk") shouldBe true
+    }
+
+    test("rejects invalid email addresses") {
+        isValidEmail("invalid") shouldBe false
+        isValidEmail("user@") shouldBe false
+        isValidEmail("@domain.com") shouldBe false
+    }
+
+    test("rejects empty strings") {
+        isValidEmail("") shouldBe false
+    }
+})
+
+// Run: ./gradlew test
+// ❌ FAILS - isValidEmail doesn't exist yet
+
+// Step 2: GREEN - Write minimal implementation
+// src/main/kotlin/com/example/util/EmailValidator.kt
+package com.example.util
+
+/**
+ * Validates an email address format.
+ *
+ * @param email the email address to validate
+ * @return `true` if the email is valid, `false` otherwise
+ *
+ * @sample
+ * ```kotlin
+ * if (isValidEmail("user@example.com")) {
+ *     println("Valid email")
+ * }
+ * ```
+ */
+fun isValidEmail(email: String): Boolean {
+    if (email.isEmpty()) return false
+    return email.matches(Regex("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"))
+}
+
+// Run: ./gradlew test
+// ✅ PASSES - tests pass
+
+// Step 3: REFACTOR - Improve with more robust validation
+private val EMAIL_REGEX = Regex("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$")
+private const val MIN_LENGTH = 3
+private const val MAX_LENGTH = 254
+
+/**
+ * Validates an email address format according to RFC 5322.
+ *
+ * Performs comprehensive email validation including:
+ * - Basic format check (user@domain.tld)
+ * - Length constraints (3-254 characters)
+ * - RFC 5322 compliant pattern
+ *
+ * @param email the email address to validate
+ * @return `true` if the email is valid, `false` otherwise
+ *
+ * @see <a href="https://tools.ietf.org/html/rfc5322">RFC 5322</a>
+ */
+fun isValidEmail(email: String): Boolean =
+    email.isNotEmpty() &&
+    email.length in MIN_LENGTH..MAX_LENGTH &&
+    EMAIL_REGEX.matches(email)
+// Tests still pass ✓
+```
+
+### Example TDD for Kotlin Data Class
+
+```kotlin
+// Step 1: RED - Write failing test first
+// src/test/kotlin/com/example/model/UserTest.kt
+package com.example.model
+
+import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.shouldBe
+
+class UserTest : FunSpec({
+    // Test will fail - User class doesn't exist yet
+    test("creates user with valid data") {
+        val user = User("user-123", "John Doe", "john@example.com")
+        
+        user.id shouldBe "user-123"
+        user.name shouldBe "John Doe"
+        user.email shouldBe "john@example.com"
+    }
+
+    test("throws on invalid email") {
+        shouldThrow<IllegalArgumentException> {
+            User("user-123", "John", "invalid-email")
+        }
+    }
+})
+
+// Run: ./gradlew test
+// ❌ FAILS - User class doesn't exist yet
+
+// Step 2: GREEN - Write minimal implementation
+// src/main/kotlin/com/example/model/User.kt
+package com.example.model
+
+/**
+ * Represents a user in the system.
+ *
+ * @property id the unique user identifier
+ * @property name the user's full name
+ * @property email the user's email address
+ */
+data class User(
+    val id: String,
+    val name: String,
+    val email: String
+) {
+    init {
+        require(email.matches(Regex("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"))) {
+            "Invalid email format: $email"
+        }
+    }
+}
+
+// Run: ./gradlew test
+// ✅ PASSES - tests pass
+
+// Step 3: REFACTOR - Add validation and copy methods
+private val EMAIL_REGEX = Regex("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$")
+
+/**
+ * Represents an immutable user in the system.
+ *
+ * This data class enforces validation rules:
+ * - ID must not be blank
+ * - Name must not be blank
+ * - Email must be valid format
+ *
+ * @property id the unique user identifier (non-blank)
+ * @property name the user's full name (non-blank)
+ * @property email the user's email address (valid format)
+ * @since 1.0
+ */
+data class User(
+    val id: String,
+    val name: String,
+    val email: String
+) {
+    init {
+        require(id.isNotBlank()) { "id cannot be blank" }
+        require(name.isNotBlank()) { "name cannot be blank" }
+        require(EMAIL_REGEX.matches(email)) { "Invalid email format: $email" }
+    }
+
+    /**
+     * Creates a copy of this user with updated name.
+     *
+     * @param newName the new name
+     * @return a new User instance with the updated name
+     */
+    fun withName(newName: String) = copy(name = newName)
+}
+// Tests still pass ✓
+```
+
+---
+
+## 2B. Bug Fix Protocol for Kotlin (MANDATORY)
+
+**CRITICAL: Every Kotlin bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow for Kotlin
+
+```
+1. 🐛 Bug Reported/Discovered
+   ↓
+2. ✍️ Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. ✅ Verify the test fails for the right reason
+   ↓
+4. 🔧 Fix the bug (make the test pass)
+   ↓
+5. 🟢 Verify the test now PASSES
+   ↓
+6. 📝 Document the bug in test comments (include bug ID)
+   ↓
+7. 🚀 Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix: NullPointerException
+
+```kotlin
+// Bug Report #9123: NullPointerException in getUserName when user is null
+
+// Step 1-2: Write test that reproduces the bug
+// src/test/kotlin/com/example/service/UserServiceTest.kt
+package com.example.service
+
+import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.shouldBe
+
+class UserServiceTest : FunSpec({
+    /**
+     * Bug #9123: getUserName throws NullPointerException when user is null.
+     * Discovered: 2026-01-18
+     * This test prevents regression.
+     */
+    test("getUserName returns null when user is null - Bug #9123") {
+        val service = UserService()
+        
+        // Should return null, not throw NPE
+        service.getUserName(null) shouldBe null
+    }
+
+    test("getUserName returns name when user exists") {
+        val service = UserService()
+        val user = User("123", "John Doe", "john@example.com")
+        
+        service.getUserName(user) shouldBe "John Doe"
+    }
+})
+
+// Run: ./gradlew test
+// ❌ FAILS - NullPointerException thrown
+
+// Step 3: Fix the bug
+// src/main/kotlin/com/example/service/UserService.kt
+package com.example.service
+
+/**
+ * Service for user-related operations.
+ *
+ * @since 1.0
+ */
+class UserService {
+    /**
+     * Gets the user's name.
+     *
+     * **Bug Fix #9123:** Now properly handles null users by returning
+     * null instead of throwing NullPointerException.
+     *
+     * @param user the user (may be null)
+     * @return the user's name, or null if user is null
+     */
+    fun getUserName(user: User?): String? = user?.name
+}
+
+// Run: ./gradlew test
+// ✅ PASSES - bug fixed, regression prevented ✓
+```
+
+### Example Bug Fix: Coroutine Race Condition
+
+```kotlin
+// Bug Report #9124: Race condition in loadData when called rapidly
+
+// Step 1-2: Write test that reproduces the bug
+package com.example.repository
+
+import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.shouldBe
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.test.runTest
+
+class DataRepositoryTest : FunSpec({
+    /**
+     * Bug #9124: Race condition when loadData called multiple times.
+     * Discovered: 2026-01-18
+     * This test prevents regression.
+     */
+    test("loadData handles rapid successive calls correctly - Bug #9124") = runTest {
+        val repository = DataRepository()
+
+        // Trigger multiple rapid calls
+        val results = listOf(
+            async { repository.loadData("id1") },
+            async { repository.loadData("id2") },
+            async { repository.loadData("id3") }
+        ).awaitAll()
+
+        // Should have data from last call (id3), not mixed data
+        repository.currentData?.id shouldBe "id3"
+    }
+})
+
+// Run: ./gradlew test
+// ❌ FAILS - Data contains mixed results
+
+// Step 3: Fix the bug
+package com.example.repository
+
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.atomic.AtomicInteger
+
+/**
+ * Repository for managing data operations.
+ *
+ * @since 1.0
+ */
+class DataRepository {
+    private val mutex = Mutex()
+    private val requestId = AtomicInteger(0)
+    var currentData: Data? = null
+        private set
+
+    /**
+     * Loads data asynchronously.
+     *
+     * **Bug Fix #9124:** Now properly handles concurrent calls by tracking
+     * request IDs and only updating state with the latest request.
+     *
+     * @param id the data ID to load
+     */
+    suspend fun loadData(id: String) {
+        val currentRequestId = requestId.incrementAndGet()
+
+        // Simulate API call
+        kotlinx.coroutines.delay(100)
+        val data = Data(id, "Data for $id")
+
+        // FIX: Only update if this is still the latest request
+        mutex.withLock {
+            if (currentRequestId == requestId.get()) {
+                currentData = data
+            }
+        }
+    }
+}
+
+// Run: ./gradlew test
+// ✅ PASSES - bug fixed, race condition resolved, regression prevented ✓
+```
+
+### Prohibited Practices for Kotlin Bug Fixes
+
+**NEVER:**
+- ❌ Fix a bug without adding a regression test first
+- ❌ Write implementation before writing tests (violates TDD)
+- ❌ Skip the Red-Green-Refactor cycle
+- ❌ Commit code with failing tests
+- ❌ Remove tests to make code pass
+- ❌ Use `@Disabled` or `xtest` to ignore failing tests
+- ❌ Suppress warnings instead of fixing root cause
+
+**ALWAYS:**
+- ✅ Write a test that reproduces the bug first
+- ✅ Verify the test fails before fixing
+- ✅ Document bug ID in test KDoc
+- ✅ Run `./gradlew check` after fix
+- ✅ Ensure fix doesn't introduce new issues
+- ✅ Keep tests in codebase permanently
+- ✅ Test coroutine code with `runTest` from kotlinx-coroutines-test
 
 ---
 

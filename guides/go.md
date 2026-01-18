@@ -15,6 +15,9 @@ This document provides mandatory coding style and practices for Go (Golang) prog
 
 The agent must adhere to the **MODULAR-GO** standard for every Go implementation:
 
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+
 - **M**odular Architecture: Hexagonal architecture (ports and adapters), clean separation of concerns
 - **O**rganized Structure: Clear directory layout, logical package organization, easy navigation
 - **D**ependency Injection: Container structs, wire dependencies explicitly, testable components
@@ -296,6 +299,189 @@ If verification fails:
 - ❌ Uses global variables for application state
 - ❌ Has untested error paths
 - ❌ Lacks context propagation in long-running operations
+- ❌ **Fixes bugs without adding regression tests first**
+- ❌ **Writes implementation before writing tests (violates TDD)**
+- ❌ **Skips Red-Green-Refactor cycle for new features**
+
+---
+
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. 🔴 RED: Write a failing test first
+   ↓
+2. 🟢 GREEN: Write minimal code to make it pass
+   ↓
+3. 🔵 REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for Go
+
+```go
+// Step 1: RED - Write failing test first (user_test.go)
+package user_test
+
+import (
+	"testing"
+	"yourapp/user"
+)
+
+func TestValidateEmail(t *testing.T) {
+	tests := []struct {
+		name    string
+		email   string
+		wantErr bool
+	}{
+		{"valid email", "user@example.com", false},
+		{"missing @", "userexample.com", true},
+		{"empty", "", true},
+	}
+	
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := user.ValidateEmail(tt.email)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateEmail() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// Run: go test ./...
+// ❌ FAILS - ValidateEmail doesn't exist yet
+
+// Step 2: GREEN - Write minimal implementation (user.go)
+package user
+
+import (
+	"errors"
+	"strings"
+)
+
+func ValidateEmail(email string) error {
+	if email == "" {
+		return errors.New("email is empty")
+	}
+	if !strings.Contains(email, "@") {
+		return errors.New("invalid email format")
+	}
+	return nil
+}
+
+// Run: go test ./...
+// ✅ PASSES - tests pass
+
+// Step 3: REFACTOR - Use proper email validation
+func ValidateEmail(email string) error {
+	if email == "" {
+		return ErrEmptyEmail
+	}
+	
+	parts := strings.Split(email, "@")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return ErrInvalidFormat
+	}
+	
+	return nil
+}
+
+var (
+	ErrEmptyEmail   = errors.New("email is empty")
+	ErrInvalidFormat = errors.New("invalid email format")
+)
+// Tests still pass ✓
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. 🐛 Bug Reported/Discovered
+   ↓
+2. ✍️ Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. ✅ Verify the test fails for the right reason
+   ↓
+4. 🔧 Fix the bug (make the test pass)
+   ↓
+5. 🟢 Verify the test now PASSES
+   ↓
+6. 📝 Document the bug in test comments (include bug ID)
+   ↓
+7. 🚀 Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix
+
+```go
+// Bug Report #7123: ParseAge panics on negative numbers
+
+// Step 1-2: Write test that reproduces the bug (parse_test.go)
+func TestParseAge_NegativeNumber_Bug7123(t *testing.T) {
+	// Bug: ParseAge("-5") caused panic instead of error
+	// Discovered: 2026-01-18
+	// This test prevents regression
+	
+	_, err := ParseAge("-5")
+	if err == nil {
+		t.Error("expected error for negative age, got nil")
+	}
+}
+
+// Run: go test ./...
+// ❌ FAILS - panic: runtime error: index out of range
+
+// Step 3: Fix the bug (parse.go)
+package parse
+
+import (
+	"errors"
+	"strconv"
+)
+
+var (
+	ErrInvalidAge  = errors.New("age must be non-negative")
+	ErrInvalidFormat = errors.New("invalid age format")
+)
+
+func ParseAge(s string) (int, error) {
+	age, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, ErrInvalidFormat
+	}
+	
+	// FIX: Check for negative numbers
+	if age < 0 {
+		return 0, ErrInvalidAge
+	}
+	
+	return age, nil
+}
+
+// Run: go test ./...
+// ✅ PASSES - bug fixed, regression prevented ✓
+```
+
+### Prohibited Practices for Bug Fixes
+
+**NEVER:**
+- ❌ Fix a bug without adding a regression test first
+- ❌ Write implementation before writing tests (violates TDD)
+- ❌ Skip the Red-Green-Refactor cycle
+- ❌ Commit code with failing tests
+- ❌ Remove tests to make code pass
+- ❌ Use `t.Skip()` to ignore failing tests
 
 ---
 

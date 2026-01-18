@@ -15,6 +15,8 @@ This document provides mandatory coding style and practices for CUDA programming
 
 The agent must adhere to the **PERFORMANCE-FIRST** standard for every CUDA implementation:
 
+- **Test-Driven Development (TDD)**: ALWAYS write tests (CPU reference + GPU accuracy) BEFORE kernel implementation (Red-Green-Refactor cycle mandatory)
+- **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression
 - **P**erformance Optimized: Maximum throughput, minimal latency, profiler-verified bottlenecks
 - **E**fficient Memory: Minimize host-device transfers, maximize coalesced access, leverage shared memory
 - **R**eusable Templates: Prefer compile-time fusion over multi-pass algorithms
@@ -619,6 +621,659 @@ TEST_F(ReferencePortTest, ValidateAgainstReference) {
 - ❌ Lacks documentation of performance characteristics
 - ❌ Uses `printf` in kernels without warning about performance impact
 - ❌ **When porting: Delivers code with known deviations from reference without user approval**
+- ❌ **Fixes bugs without adding regression tests first**
+- ❌ **Writes kernel implementation before writing tests (violates TDD)**
+- ❌ **Skips Red-Green-Refactor cycle for new kernels**
+
+---
+
+## 2A. Test-Driven Development (TDD) Protocol for CUDA (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new CUDA kernels.**
+
+### TDD Cycle for CUDA
+
+```
+1. 🔴 RED: Write CPU reference + failing GPU test first
+   ↓
+2. 🟢 GREEN: Write minimal GPU kernel to make it pass
+   ↓
+3. 🔵 REFACTOR: Optimize kernel while keeping tests green
+   ↓
+4. 📊 PROFILE: Verify performance with ncu/Nsight
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for CUDA Kernel
+
+```cpp
+// Step 1: RED - Write CPU reference and failing test first
+// tests/test_vector_add.cu
+#include <gtest/gtest.h>
+#include <cuda_runtime.h>
+#include <vector>
+#include <cmath>
+
+// CPU reference implementation (write this FIRST)
+void vector_add_cpu(float* c, const float* a, const float* b, int n) {
+    for (int i = 0; i < n; ++i) {
+        c[i] = a[i] + b[i];
+    }
+}
+
+// Forward declaration of GPU kernel (doesn't exist yet)
+__global__ void vector_add_gpu(float* c, const float* a, const float* b, int n);
+
+TEST(VectorAdd, GPUMatchesCPU) {
+    // Test will fail - kernel doesn't exist yet
+    const int n = 1024;
+    const size_t bytes = n * sizeof(float);
+    
+    // Host memory
+    std::vector<float> h_a(n, 1.0f);
+    std::vector<float> h_b(n, 2.0f);
+    std::vector<float> h_c_gpu(n);
+    std::vector<float> h_c_cpu(n);
+    
+    // Device memory
+    float *d_a, *d_b, *d_c;
+    cudaMalloc(&d_a, bytes);
+    cudaMalloc(&d_b, bytes);
+    cudaMalloc(&d_c, bytes);
+    
+    // Copy to device
+    cudaMemcpy(d_a, h_a.data(), bytes, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_b, h_b.data(), bytes, cudaMemcpyHostToDevice);
+    
+    // Run GPU kernel
+    int block_size = 256;
+    int grid_size = (n + block_size - 1) / block_size;
+    vector_add_gpu<<<grid_size, block_size>>>(d_c, d_a, d_b, n);
+    cudaDeviceSynchronize();
+    
+    // Copy result back
+    cudaMemcpy(h_c_gpu.data(), d_c, bytes, cudaMemcpyDeviceToHost);
+    
+    // Run CPU reference
+    vector_add_cpu(h_c_cpu.data(), h_a.data(), h_b.data(), n);
+    
+    // Compare results
+    float max_error = 0.0f;
+    for (int i = 0; i < n; ++i) {
+        float error = std::abs(h_c_gpu[i] - h_c_cpu[i]);
+        max_error = std::max(max_error, error);
+    }
+    
+    EXPECT_LT(max_error, 1e-5f);
+    
+    // Cleanup
+    cudaFree(d_a);
+    cudaFree(d_b);
+    cudaFree(d_c);
+}
+
+// Run: ctest
+// ❌ FAILS - vector_add_gpu doesn't exist yet
+
+// Step 2: GREEN - Write minimal GPU kernel implementation
+// src/vector_add.cu
+/**
+ * @brief Adds two vectors element-wise on GPU.
+ * 
+ * Performs c[i] = a[i] + b[i] for all elements.
+ * 
+ * @param c Output vector (device pointer)
+ * @param a First input vector (device pointer)
+ * @param b Second input vector (device pointer)
+ * @param n Number of elements
+ * 
+ * @note Each thread processes one element
+ * @note Requires n threads total
+ * 
+ * @par Example
+ * @code
+ * int block_size = 256;
+ * int grid_size = (n + block_size - 1) / block_size;
+ * vector_add_gpu<<<grid_size, block_size>>>(d_c, d_a, d_b, n);
+ * cudaDeviceSynchronize();
+ * @endcode
+ */
+__global__ void vector_add_gpu(float* c, const float* a, const float* b, int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) {
+        c[idx] = a[idx] + b[idx];
+    }
+}
+
+// Run: ctest
+// ✅ PASSES - tests pass
+
+// Step 3: REFACTOR - Optimize with vectorized loads
+/**
+ * @brief Optimized vector addition using float4 vectorization.
+ * 
+ * Performs vectorized element-wise addition: c[i] = a[i] + b[i]
+ * Uses float4 for coalesced memory access and improved bandwidth.
+ * 
+ * @param c Output vector (device pointer, must be 16-byte aligned)
+ * @param a First input vector (device pointer, must be 16-byte aligned)
+ * @param b Second input vector (device pointer, must be 16-byte aligned)
+ * @param n Number of elements (must be multiple of 4)
+ * 
+ * @pre n must be divisible by 4
+ * @pre All pointers must be 16-byte aligned
+ * @post c[i] = a[i] + b[i] for all i in [0, n)
+ * 
+ * @note Each thread processes 4 elements using float4
+ * @note Achieves ~2x bandwidth compared to naive version
+ * 
+ * @par Performance
+ * - Memory bandwidth: ~800 GB/s on A100
+ * - Occupancy: 100% with block_size=256
+ * 
+ * @par Example
+ * @code
+ * // Ensure n is multiple of 4
+ * int n_aligned = (n + 3) & ~3;
+ * 
+ * int block_size = 256;
+ * int grid_size = (n_aligned / 4 + block_size - 1) / block_size;
+ * vector_add_gpu_optimized<<<grid_size, block_size>>>(d_c, d_a, d_b, n_aligned);
+ * cudaDeviceSynchronize();
+ * @endcode
+ */
+__global__ void vector_add_gpu_optimized(float* c, const float* a, const float* b, int n) {
+    int idx = (blockIdx.x * blockDim.x + threadIdx.x) * 4;
+    
+    if (idx < n) {
+        // Vectorized load (4 floats at once)
+        float4 a4 = reinterpret_cast<const float4*>(a)[idx / 4];
+        float4 b4 = reinterpret_cast<const float4*>(b)[idx / 4];
+        
+        // Vectorized compute
+        float4 c4;
+        c4.x = a4.x + b4.x;
+        c4.y = a4.y + b4.y;
+        c4.z = a4.z + b4.z;
+        c4.w = a4.w + b4.w;
+        
+        // Vectorized store
+        reinterpret_cast<float4*>(c)[idx / 4] = c4;
+    }
+}
+// Tests still pass ✓
+
+// Step 4: PROFILE - Verify performance
+// Run: ncu --set full ./test_vector_add
+// Verify: Memory bandwidth, occupancy, warp efficiency
+```
+
+### Example TDD for Complex CUDA Kernel (Matrix Multiply)
+
+```cpp
+// Step 1: RED - Write CPU reference and failing test
+// tests/test_matmul.cu
+#include <gtest/gtest.h>
+#include <cuda_runtime.h>
+
+// CPU reference implementation (NAIVE - for correctness, not speed)
+void matmul_cpu(float* C, const float* A, const float* B, int M, int N, int K) {
+    for (int i = 0; i < M; ++i) {
+        for (int j = 0; j < N; ++j) {
+            float sum = 0.0f;
+            for (int k = 0; k < K; ++k) {
+                sum += A[i * K + k] * B[k * N + j];
+            }
+            C[i * N + j] = sum;
+        }
+    }
+}
+
+// Forward declaration (doesn't exist yet)
+__global__ void matmul_gpu(float* C, const float* A, const float* B, int M, int N, int K);
+
+TEST(MatMul, SmallMatrix_GPUMatchesCPU) {
+    // Test will fail - kernel doesn't exist yet
+    const int M = 64, N = 64, K = 64;
+    const size_t size_A = M * K * sizeof(float);
+    const size_t size_B = K * N * sizeof(float);
+    const size_t size_C = M * N * sizeof(float);
+    
+    // Host memory
+    std::vector<float> h_A(M * K, 1.0f);
+    std::vector<float> h_B(K * N, 2.0f);
+    std::vector<float> h_C_gpu(M * N);
+    std::vector<float> h_C_cpu(M * N);
+    
+    // Device memory
+    float *d_A, *d_B, *d_C;
+    cudaMalloc(&d_A, size_A);
+    cudaMalloc(&d_B, size_B);
+    cudaMalloc(&d_C, size_C);
+    
+    cudaMemcpy(d_A, h_A.data(), size_A, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_B, h_B.data(), size_B, cudaMemcpyHostToDevice);
+    
+    // Run GPU kernel
+    dim3 block(16, 16);
+    dim3 grid((N + block.x - 1) / block.x, (M + block.y - 1) / block.y);
+    matmul_gpu<<<grid, block>>>(d_C, d_A, d_B, M, N, K);
+    cudaDeviceSynchronize();
+    
+    cudaMemcpy(h_C_gpu.data(), d_C, size_C, cudaMemcpyDeviceToHost);
+    
+    // Run CPU reference
+    matmul_cpu(h_C_cpu.data(), h_A.data(), h_B.data(), M, N, K);
+    
+    // Compare results
+    float max_error = 0.0f;
+    for (int i = 0; i < M * N; ++i) {
+        float error = std::abs(h_C_gpu[i] - h_C_cpu[i]);
+        max_error = std::max(max_error, error);
+    }
+    
+    EXPECT_LT(max_error, 1e-3f);
+    
+    cudaFree(d_A);
+    cudaFree(d_B);
+    cudaFree(d_C);
+}
+
+// Run: ctest
+// ❌ FAILS - matmul_gpu doesn't exist yet
+
+// Step 2: GREEN - Write minimal GPU kernel
+/**
+ * @brief Naive matrix multiplication kernel.
+ * 
+ * Computes C = A * B where:
+ * - A is M x K
+ * - B is K x N
+ * - C is M x N
+ * 
+ * @param C Output matrix (device pointer)
+ * @param A First input matrix (device pointer)
+ * @param B Second input matrix (device pointer)
+ * @param M Number of rows in A and C
+ * @param N Number of columns in B and C
+ * @param K Number of columns in A and rows in B
+ * 
+ * @note Each thread computes one element of C
+ * @note This is a naive implementation for correctness, not performance
+ */
+__global__ void matmul_gpu(float* C, const float* A, const float* B, 
+                           int M, int N, int K) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    
+    if (row < M && col < N) {
+        float sum = 0.0f;
+        for (int k = 0; k < K; ++k) {
+            sum += A[row * K + k] * B[k * N + col];
+        }
+        C[row * N + col] = sum;
+    }
+}
+
+// Run: ctest
+// ✅ PASSES - tests pass
+
+// Step 3: REFACTOR - Optimize with shared memory tiling
+/**
+ * @brief Optimized matrix multiplication with shared memory tiling.
+ * 
+ * Uses shared memory to cache tiles of A and B, reducing global memory access.
+ * Achieves significantly higher performance than naive version.
+ * 
+ * @param C Output matrix (device pointer)
+ * @param A First input matrix (device pointer)
+ * @param B Second input matrix (device pointer)
+ * @param M Number of rows in A and C
+ * @param N Number of columns in B and C
+ * @param K Number of columns in A and rows in B
+ * 
+ * @tparam TILE_SIZE Size of shared memory tile (typically 16 or 32)
+ * 
+ * @note Requires shared memory: 2 * TILE_SIZE * TILE_SIZE * sizeof(float)
+ * @note Achieves ~10x speedup over naive version
+ * 
+ * @par Performance
+ * - TFLOPS: ~15 on A100 for large matrices
+ * - Memory bandwidth: ~1.2 TB/s
+ * - Occupancy: 75-100% depending on TILE_SIZE
+ */
+template<int TILE_SIZE = 16>
+__global__ void matmul_gpu_tiled(float* C, const float* A, const float* B,
+                                  int M, int N, int K) {
+    __shared__ float As[TILE_SIZE][TILE_SIZE];
+    __shared__ float Bs[TILE_SIZE][TILE_SIZE];
+    
+    int row = blockIdx.y * TILE_SIZE + threadIdx.y;
+    int col = blockIdx.x * TILE_SIZE + threadIdx.x;
+    
+    float sum = 0.0f;
+    
+    // Loop over tiles
+    for (int t = 0; t < (K + TILE_SIZE - 1) / TILE_SIZE; ++t) {
+        // Load tile of A into shared memory
+        if (row < M && t * TILE_SIZE + threadIdx.x < K) {
+            As[threadIdx.y][threadIdx.x] = A[row * K + t * TILE_SIZE + threadIdx.x];
+        } else {
+            As[threadIdx.y][threadIdx.x] = 0.0f;
+        }
+        
+        // Load tile of B into shared memory
+        if (col < N && t * TILE_SIZE + threadIdx.y < K) {
+            Bs[threadIdx.y][threadIdx.x] = B[(t * TILE_SIZE + threadIdx.y) * N + col];
+        } else {
+            Bs[threadIdx.y][threadIdx.x] = 0.0f;
+        }
+        
+        __syncthreads();
+        
+        // Compute partial dot product
+        #pragma unroll
+        for (int k = 0; k < TILE_SIZE; ++k) {
+            sum += As[threadIdx.y][k] * Bs[k][threadIdx.x];
+        }
+        
+        __syncthreads();
+    }
+    
+    // Write result
+    if (row < M && col < N) {
+        C[row * N + col] = sum;
+    }
+}
+// Tests still pass ✓
+
+// Step 4: PROFILE
+// Run: ncu --set full ./test_matmul
+// Verify: FLOPS, memory bandwidth, shared memory efficiency
+```
+
+---
+
+## 2B. Bug Fix Protocol for CUDA (MANDATORY)
+
+**CRITICAL: Every CUDA bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow for CUDA
+
+```
+1. 🐛 Bug Reported/Discovered (incorrect results, crash, performance issue)
+   ↓
+2. ✍️ Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. ✅ Verify the test fails for the right reason
+   ↓
+4. 🔧 Fix the bug (make the test pass)
+   ↓
+5. 🟢 Verify the test now PASSES
+   ↓
+6. 📝 Document the bug in test comments (include bug ID)
+   ↓
+7. 📊 PROFILE to ensure fix doesn't hurt performance
+   ↓
+8. 🚀 Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix: Incorrect Results
+
+```cpp
+// Bug Report #2341: reduce_sum gives wrong results for large arrays
+
+// Step 1-2: Write test that reproduces the bug
+// tests/test_reduce.cu
+#include <gtest/gtest.h>
+#include <cuda_runtime.h>
+#include <numeric>
+
+// CPU reference
+float reduce_sum_cpu(const float* data, int n) {
+    return std::accumulate(data, data + n, 0.0f);
+}
+
+// Forward declaration
+__global__ void reduce_sum_gpu(float* output, const float* input, int n);
+
+TEST(Reduce, LargeArray_Bug2341) {
+    // Bug #2341: reduce_sum gives wrong results for n > 1024
+    // Discovered: 2026-01-18
+    // This test prevents regression
+    
+    const int n = 4096;  // Larger than single block
+    std::vector<float> h_input(n, 1.0f);
+    
+    float *d_input, *d_output;
+    cudaMalloc(&d_input, n * sizeof(float));
+    cudaMalloc(&d_output, sizeof(float));
+    
+    cudaMemcpy(d_input, h_input.data(), n * sizeof(float), cudaMemcpyHostToDevice);
+    
+    // Run GPU kernel
+    int block_size = 256;
+    int grid_size = (n + block_size - 1) / block_size;
+    reduce_sum_gpu<<<grid_size, block_size>>>(d_output, d_input, n);
+    cudaDeviceSynchronize();
+    
+    float h_output_gpu;
+    cudaMemcpy(&h_output_gpu, d_output, sizeof(float), cudaMemcpyDeviceToHost);
+    
+    // CPU reference
+    float h_output_cpu = reduce_sum_cpu(h_input.data(), n);
+    
+    // Compare
+    float error = std::abs(h_output_gpu - h_output_cpu);
+    EXPECT_LT(error, 1e-3f) << "GPU: " << h_output_gpu << ", CPU: " << h_output_cpu;
+    
+    cudaFree(d_input);
+    cudaFree(d_output);
+}
+
+// Run: ctest
+// ❌ FAILS - GPU returns wrong value (only sums first 1024 elements)
+
+// Step 3: Fix the bug
+/**
+ * @brief Two-stage reduction for arrays larger than block size.
+ * 
+ * Stage 1: Each block reduces its portion to a single value
+ * Stage 2: Reduce the per-block results (if needed)
+ * 
+ * @param output Output sum (device pointer)
+ * @param input Input array (device pointer)
+ * @param n Number of elements
+ * 
+ * @note Handles arrays of any size
+ * @note Uses shared memory for efficient reduction
+ * 
+ * @par Bug Fix
+ * Fixed Bug #2341: Now correctly handles arrays > 1024 elements
+ * by using multi-block reduction instead of assuming single block.
+ */
+__global__ void reduce_sum_gpu_stage1(float* block_sums, const float* input, int n) {
+    extern __shared__ float sdata[];
+    
+    int tid = threadIdx.x;
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    
+    // Load data into shared memory
+    sdata[tid] = (idx < n) ? input[idx] : 0.0f;
+    __syncthreads();
+    
+    // Reduction in shared memory
+    for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+        if (tid < s) {
+            sdata[tid] += sdata[tid + s];
+        }
+        __syncthreads();
+    }
+    
+    // Write block result
+    if (tid == 0) {
+        block_sums[blockIdx.x] = sdata[0];
+    }
+}
+
+__global__ void reduce_sum_gpu_stage2(float* output, const float* block_sums, int num_blocks) {
+    extern __shared__ float sdata[];
+    
+    int tid = threadIdx.x;
+    
+    // Load block sums
+    sdata[tid] = (tid < num_blocks) ? block_sums[tid] : 0.0f;
+    __syncthreads();
+    
+    // Final reduction
+    for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+        if (tid < s) {
+            sdata[tid] += sdata[tid + s];
+        }
+        __syncthreads();
+    }
+    
+    if (tid == 0) {
+        *output = sdata[0];
+    }
+}
+
+// Wrapper function
+void reduce_sum_gpu(float* output, const float* input, int n) {
+    int block_size = 256;
+    int grid_size = (n + block_size - 1) / block_size;
+    
+    // Allocate temporary storage for block sums
+    float* d_block_sums;
+    cudaMalloc(&d_block_sums, grid_size * sizeof(float));
+    
+    // Stage 1: Reduce each block
+    reduce_sum_gpu_stage1<<<grid_size, block_size, block_size * sizeof(float)>>>(
+        d_block_sums, input, n
+    );
+    
+    // Stage 2: Reduce block sums
+    reduce_sum_gpu_stage2<<<1, block_size, block_size * sizeof(float)>>>(
+        output, d_block_sums, grid_size
+    );
+    
+    cudaFree(d_block_sums);
+}
+
+// Run: ctest
+// ✅ PASSES - bug fixed, regression prevented ✓
+```
+
+### Example Bug Fix: Memory Corruption
+
+```cpp
+// Bug Report #2342: Kernel crashes with large input sizes
+
+// Step 1-2: Write test that reproduces the bug
+TEST(Convolution, LargeImage_Bug2342) {
+    // Bug #2342: Kernel crashes for images > 2048x2048
+    // Discovered: 2026-01-18
+    // This test prevents regression
+    
+    const int width = 4096;
+    const int height = 4096;
+    const int kernel_size = 5;
+    
+    std::vector<float> h_input(width * height, 1.0f);
+    std::vector<float> h_output(width * height);
+    
+    float *d_input, *d_output;
+    cudaMalloc(&d_input, width * height * sizeof(float));
+    cudaMalloc(&d_output, width * height * sizeof(float));
+    
+    cudaMemcpy(d_input, h_input.data(), width * height * sizeof(float), 
+               cudaMemcpyHostToDevice);
+    
+    dim3 block(16, 16);
+    dim3 grid((width + block.x - 1) / block.x, (height + block.y - 1) / block.y);
+    
+    // This should not crash
+    EXPECT_NO_THROW({
+        convolution_2d<<<grid, block>>>(d_output, d_input, width, height, kernel_size);
+        cudaError_t err = cudaDeviceSynchronize();
+        EXPECT_EQ(err, cudaSuccess) << cudaGetErrorString(err);
+    });
+    
+    cudaFree(d_input);
+    cudaFree(d_output);
+}
+
+// Run: ctest
+// ❌ FAILS - Kernel crashes with "illegal memory access"
+
+// Step 3: Fix the bug
+/**
+ * @brief 2D convolution with bounds checking.
+ * 
+ * @param output Output image (device pointer)
+ * @param input Input image (device pointer)
+ * @param width Image width
+ * @param height Image height
+ * @param kernel_size Convolution kernel size (must be odd)
+ * 
+ * @par Bug Fix
+ * Fixed Bug #2342: Added proper bounds checking to prevent
+ * out-of-bounds memory access for large images.
+ * 
+ * @note Now handles images of any size safely
+ */
+__global__ void convolution_2d(float* output, const float* input,
+                                int width, int height, int kernel_size) {
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    
+    // FIX: Add bounds check BEFORE accessing memory
+    if (x >= width || y >= height) {
+        return;  // Out of bounds, exit early
+    }
+    
+    int half_kernel = kernel_size / 2;
+    float sum = 0.0f;
+    
+    for (int ky = -half_kernel; ky <= half_kernel; ++ky) {
+        for (int kx = -half_kernel; kx <= half_kernel; ++kx) {
+            int nx = x + kx;
+            int ny = y + ky;
+            
+            // FIX: Check bounds for each neighbor access
+            if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                sum += input[ny * width + nx];
+            }
+        }
+    }
+    
+    output[y * width + x] = sum / (kernel_size * kernel_size);
+}
+
+// Run: ctest
+// ✅ PASSES - bug fixed, no crashes, regression prevented ✓
+```
+
+### Prohibited Practices for CUDA Bug Fixes
+
+**NEVER:**
+- ❌ Fix a CUDA bug without adding a regression test first
+- ❌ Write kernel implementation before writing tests (violates TDD)
+- ❌ Skip the Red-Green-Refactor cycle
+- ❌ Commit code with failing tests
+- ❌ Remove tests to make code pass
+- ❌ Disable CUDA error checking to hide bugs
+- ❌ Ignore cuda-memcheck or compute-sanitizer warnings
+
+**ALWAYS:**
+- ✅ Write a test that reproduces the bug first (CPU reference + GPU test)
+- ✅ Verify the test fails before fixing
+- ✅ Document bug ID in test comments
+- ✅ Run with cuda-memcheck or compute-sanitizer
+- ✅ Profile after fix to ensure no performance regression
+- ✅ Keep tests in codebase permanently
+- ✅ Test with multiple input sizes and edge cases
 
 ---
 

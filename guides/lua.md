@@ -15,6 +15,8 @@ This document provides mandatory coding standards and development practices for 
 
 The agent must adhere to the **MODERN-LUA** standard for every Lua implementation:
 
+- **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory)
+- **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression
 - **M**inimalistic Code: Clean, concise, readable Lua code
 - **O**ptimized Performance: Local variables, table pre-allocation, efficient algorithms
 - **D**ocumentation as Code: API documentation auto-generatable from code
@@ -153,6 +155,416 @@ If verification fails:
 2. **Unit tests are ALWAYS required** - All new/modified code MUST have unit tests
 3. **Tests MUST pass** - All unit tests MUST pass before code delivery
 4. **Re-verify after changes** - After ANY code modification, re-check syntax and re-run tests
+5. **TDD is MANDATORY** - Write tests BEFORE implementation (Red-Green-Refactor)
+6. **Bug regression tests MANDATORY** - Every bug MUST get a test BEFORE fixing
+
+---
+
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new Lua code.**
+
+### TDD Cycle for Lua
+
+```
+1. 🔴 RED: Write a failing test first
+   ↓
+2. 🟢 GREEN: Write minimal code to make it pass
+   ↓
+3. 🔵 REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for Lua Function
+
+```lua
+-- Step 1: RED - Write failing test first
+-- test/email_validator_spec.lua
+local validator = require("email_validator")
+
+describe("email validator", function()
+    -- Test will fail - module doesn't exist yet
+    it("accepts valid email addresses", function()
+        assert.is_true(validator.is_valid("user@example.com"))
+        assert.is_true(validator.is_valid("test.user@domain.co.uk"))
+    end)
+
+    it("rejects invalid email addresses", function()
+        assert.is_false(validator.is_valid("invalid"))
+        assert.is_false(validator.is_valid("user@"))
+        assert.is_false(validator.is_valid("@domain.com"))
+    end)
+
+    it("rejects empty strings", function()
+        assert.is_false(validator.is_valid(""))
+        assert.is_false(validator.is_valid(nil))
+    end)
+end)
+
+-- Run: busted test/
+-- ❌ FAILS - email_validator module doesn't exist yet
+
+-- Step 2: GREEN - Write minimal implementation
+-- src/email_validator.lua
+--- Validates email address formats.
+-- @module email_validator
+
+local M = {}
+
+--- Validates an email address format.
+-- @param email the email address to validate
+-- @return true if the email is valid, false otherwise
+-- @usage
+-- local validator = require("email_validator")
+-- if validator.is_valid("user@example.com") then
+--     print("Valid email")
+-- end
+function M.is_valid(email)
+    if not email or email == "" then
+        return false
+    end
+    return email:match("^[^%s@]+@[^%s@]+%.[^%s@]+$") ~= nil
+end
+
+return M
+
+-- Run: busted test/
+-- ✅ PASSES - tests pass
+
+-- Step 3: REFACTOR - Improve with more robust validation
+--- Validates email address formats according to RFC 5322.
+--
+-- Performs comprehensive email validation including:
+-- - Basic format check (user@domain.tld)
+-- - Length constraints (3-254 characters)
+-- - RFC 5322 compliant pattern
+--
+-- @module email_validator
+
+local M = {}
+
+local EMAIL_PATTERN = "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+%.[a-zA-Z][a-zA-Z]+$"
+local MIN_LENGTH = 3
+local MAX_LENGTH = 254
+
+--- Validates an email address format.
+-- @param email the email address to validate
+-- @return true if the email is valid, false otherwise
+-- @see https://tools.ietf.org/html/rfc5322
+function M.is_valid(email)
+    if not email or type(email) ~= "string" then
+        return false
+    end
+
+    if #email < MIN_LENGTH or #email > MAX_LENGTH then
+        return false
+    end
+
+    return email:match(EMAIL_PATTERN) ~= nil
+end
+
+return M
+-- Tests still pass ✓
+```
+
+### Example TDD for Lua Module
+
+```lua
+-- Step 1: RED - Write failing test first
+-- test/user_spec.lua
+local User = require("user")
+
+describe("User", function()
+    -- Test will fail - User module doesn't exist yet
+    it("creates user with valid data", function()
+        local user = User.new("user-123", "John Doe", "john@example.com")
+        
+        assert.equals("user-123", user.id)
+        assert.equals("John Doe", user.name)
+        assert.equals("john@example.com", user.email)
+    end)
+
+    it("throws on invalid email", function()
+        assert.has_error(function()
+            User.new("user-123", "John", "invalid-email")
+        end, "Invalid email format")
+    end)
+end)
+
+-- Run: busted test/
+-- ❌ FAILS - User module doesn't exist yet
+
+-- Step 2: GREEN - Write minimal implementation
+-- src/user.lua
+--- User data model.
+-- @module user
+
+local M = {}
+
+--- Creates a new user.
+-- @param id the unique user identifier
+-- @param name the user's full name
+-- @param email the user's email address
+-- @return a new user table
+function M.new(id, name, email)
+    if not email:match("^[^%s@]+@[^%s@]+%.[^%s@]+$") then
+        error("Invalid email format: " .. email)
+    end
+
+    return {
+        id = id,
+        name = name,
+        email = email
+    }
+end
+
+return M
+
+-- Run: busted test/
+-- ✅ PASSES - tests pass
+
+-- Step 3: REFACTOR - Add validation and methods
+--- User data model with validation.
+--
+-- Represents an immutable user in the system.
+-- Enforces validation rules:
+-- - ID must not be empty
+-- - Name must not be empty
+-- - Email must be valid format
+--
+-- @module user
+
+local M = {}
+
+local EMAIL_PATTERN = "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+%.[a-zA-Z][a-zA-Z]+$"
+
+--- Creates a new user.
+-- @param id the unique user identifier (non-empty)
+-- @param name the user's full name (non-empty)
+-- @param email the user's email address (valid format)
+-- @return a new user table
+-- @raise error if validation fails
+function M.new(id, name, email)
+    assert(id and id ~= "", "id cannot be empty")
+    assert(name and name ~= "", "name cannot be empty")
+    assert(email and email:match(EMAIL_PATTERN), "Invalid email format: " .. tostring(email))
+
+    local self = {
+        id = id,
+        name = name,
+        email = email
+    }
+
+    --- Creates a copy of this user with updated name.
+    -- @param new_name the new name
+    -- @return a new user table with the updated name
+    function self.with_name(new_name)
+        return M.new(id, new_name, email)
+    end
+
+    return self
+end
+
+return M
+-- Tests still pass ✓
+```
+
+---
+
+## 2B. Bug Fix Protocol for Lua (MANDATORY)
+
+**CRITICAL: Every Lua bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow for Lua
+
+```
+1. 🐛 Bug Reported/Discovered
+   ↓
+2. ✍️ Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. ✅ Verify the test fails for the right reason
+   ↓
+4. 🔧 Fix the bug (make the test pass)
+   ↓
+5. 🟢 Verify the test now PASSES
+   ↓
+6. 📝 Document the bug in test comments (include bug ID)
+   ↓
+7. 🚀 Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix: Nil Handling
+
+```lua
+-- Bug Report #5431: get_user_name crashes when user is nil
+
+-- Step 1-2: Write test that reproduces the bug
+-- test/user_service_spec.lua
+local UserService = require("user_service")
+
+describe("UserService", function()
+    --- Bug #5431: get_user_name crashes when user is nil.
+    -- Discovered: 2026-01-18
+    -- This test prevents regression.
+    it("get_user_name returns nil when user is nil - Bug #5431", function()
+        local service = UserService.new()
+        
+        -- Should return nil, not crash
+        local result = service.get_user_name(nil)
+        assert.is_nil(result)
+    end)
+
+    it("get_user_name returns name when user exists", function()
+        local service = UserService.new()
+        local user = { id = "123", name = "John Doe", email = "john@example.com" }
+        
+        local result = service.get_user_name(user)
+        assert.equals("John Doe", result)
+    end)
+end)
+
+-- Run: busted test/
+-- ❌ FAILS - Crashes with "attempt to index a nil value"
+
+-- Step 3: Fix the bug
+-- src/user_service.lua
+--- Service for user-related operations.
+-- @module user_service
+
+local M = {}
+
+function M.new()
+    local self = {}
+
+    --- Gets the user's name.
+    --
+    -- Bug Fix #5431: Now properly handles nil users by returning
+    -- nil instead of crashing.
+    --
+    -- @param user the user (may be nil)
+    -- @return the user's name, or nil if user is nil
+    function self.get_user_name(user)
+        -- FIX: Check for nil before accessing user
+        if not user then
+            return nil
+        end
+        return user.name
+    end
+
+    return self
+end
+
+return M
+
+-- Run: busted test/
+-- ✅ PASSES - bug fixed, regression prevented ✓
+```
+
+### Example Bug Fix: Table Modification During Iteration
+
+```lua
+-- Bug Report #5432: remove_inactive_users crashes with "invalid key to 'next'"
+
+-- Step 1-2: Write test that reproduces the bug
+-- test/user_manager_spec.lua
+local UserManager = require("user_manager")
+
+describe("UserManager", function()
+    --- Bug #5432: remove_inactive_users crashes during iteration.
+    -- Discovered: 2026-01-18
+    -- This test prevents regression.
+    it("remove_inactive_users does not crash - Bug #5432", function()
+        local manager = UserManager.new()
+        
+        -- Add multiple users
+        manager.add_user({ id = "1", name = "John", active = false })
+        manager.add_user({ id = "2", name = "Jane", active = true })
+        manager.add_user({ id = "3", name = "Bob", active = false })
+        
+        -- Should not crash
+        assert.has_no_errors(function()
+            manager.remove_inactive_users()
+        end)
+        
+        -- Should only have active users left
+        assert.equals(1, manager.get_user_count())
+    end)
+end)
+
+-- Run: busted test/
+-- ❌ FAILS - Crashes with "invalid key to 'next'"
+
+-- Step 3: Fix the bug
+-- src/user_manager.lua
+--- Manages a collection of users.
+-- @module user_manager
+
+local M = {}
+
+function M.new()
+    local self = {}
+    local users = {}
+
+    function self.add_user(user)
+        table.insert(users, user)
+    end
+
+    --- Removes all inactive users from the collection.
+    --
+    -- Bug Fix #5432: Now safely removes users during iteration
+    -- by building a new table instead of modifying during iteration.
+    function self.remove_inactive_users()
+        -- FIX: Build new table instead of modifying during iteration
+        -- OLD (buggy) code:
+        -- for i, user in ipairs(users) do
+        --     if not user.active then
+        --         table.remove(users, i)  -- Crash!
+        --     end
+        -- end
+        
+        -- NEW (fixed) code:
+        local active_users = {}
+        for _, user in ipairs(users) do
+            if user.active then
+                table.insert(active_users, user)
+            end
+        end
+        users = active_users
+    end
+
+    function self.get_user_count()
+        return #users
+    end
+
+    return self
+end
+
+return M
+
+-- Run: busted test/
+-- ✅ PASSES - bug fixed, regression prevented ✓
+```
+
+### Prohibited Practices for Lua Bug Fixes
+
+**NEVER:**
+- ❌ Fix a bug without adding a regression test first
+- ❌ Write implementation before writing tests (violates TDD)
+- ❌ Skip the Red-Green-Refactor cycle
+- ❌ Commit code with failing tests
+- ❌ Remove tests to make code pass
+- ❌ Use `pending()` to ignore failing tests
+- ❌ Suppress luacheck warnings instead of fixing root cause
+
+**ALWAYS:**
+- ✅ Write a test that reproduces the bug first
+- ✅ Verify the test fails before fixing
+- ✅ Document bug ID in test comments
+- ✅ Run `busted test/` after fix
+- ✅ Ensure fix doesn't introduce new issues
+- ✅ Keep tests in codebase permanently
+- ✅ Test with both Lua and LuaJIT if applicable
 
 ---
 

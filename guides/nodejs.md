@@ -10,6 +10,8 @@ Tools: Node.js 22.x LTS, TypeScript 5.x, ESM modules, TypeDoc, Modern tooling (B
 ## 1. Core Philosophies
 The agent must adhere to the "MASTER" principles for every Node.js/TypeScript project:
 
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
 **Modern**: Use latest LTS Node.js (22.x+), ESM modules, top-level await, native fetch.
 **Async-First**: Embrace async/await, avoid callbacks, leverage concurrency.
 **Strict**: TypeScript strict mode, no `any`, comprehensive type coverage.
@@ -1041,6 +1043,213 @@ export class AuthService {
   }
 }
 ```
+
+---
+
+## 3A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. 🔴 RED: Write a failing test first
+   ↓
+2. 🟢 GREEN: Write minimal code to make it pass
+   ↓
+3. 🔵 REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for Node.js
+
+```typescript
+// Step 1: RED - Write failing test first
+import { describe, it, expect } from 'vitest';
+import { rateLimit } from './middleware.js';
+
+describe('rateLimit middleware', () => {
+  it('allows requests under the rate limit', async () => {
+    const middleware = rateLimit({ maxRequests: 5, window: 60000 });
+    const req = { ip: '127.0.0.1' };
+    const res = { status: vi.fn(), json: vi.fn() };
+    const next = vi.fn();
+    
+    await middleware(req, res, next);
+    
+    expect(next).toHaveBeenCalled();
+    expect(res.status).not.toHaveBeenCalled();
+  });
+  
+  it('blocks requests over the rate limit', async () => {
+    const middleware = rateLimit({ maxRequests: 2, window: 60000 });
+    const req = { ip: '127.0.0.1' };
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+    const next = vi.fn();
+    
+    // Make 3 requests (2 allowed, 1 blocked)
+    await middleware(req, res, next);
+    await middleware(req, res, next);
+    await middleware(req, res, next);
+    
+    expect(res.status).toHaveBeenCalledWith(429);
+  });
+});
+
+// Run: npm test
+// ❌ FAILS - rateLimit doesn't exist yet
+
+// Step 2: GREEN - Write minimal implementation
+const requestCounts = new Map<string, { count: number; resetTime: number }>();
+
+export function rateLimit(options: { maxRequests: number; window: number }) {
+  return async (req: any, res: any, next: () => void) => {
+    const ip = req.ip;
+    const now = Date.now();
+    const record = requestCounts.get(ip);
+    
+    if (!record || now > record.resetTime) {
+      requestCounts.set(ip, { count: 1, resetTime: now + options.window });
+      return next();
+    }
+    
+    if (record.count < options.maxRequests) {
+      record.count++;
+      return next();
+    }
+    
+    res.status(429).json({ error: 'Too many requests' });
+  };
+}
+
+// Run: npm test
+// ✅ PASSES - tests pass
+
+// Step 3: REFACTOR - Add cleanup, better types
+interface RateLimitOptions {
+  maxRequests: number;
+  window: number;
+}
+
+interface RequestRecord {
+  count: number;
+  resetTime: number;
+}
+
+export function rateLimit(options: RateLimitOptions) {
+  const requestCounts = new Map<string, RequestRecord>();
+  
+  // Cleanup old records every minute
+  setInterval(() => {
+    const now = Date.now();
+    for (const [ip, record] of requestCounts.entries()) {
+      if (now > record.resetTime) {
+        requestCounts.delete(ip);
+      }
+    }
+  }, 60000);
+  
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const ip = req.ip;
+    const now = Date.now();
+    const record = requestCounts.get(ip);
+    
+    if (!record || now > record.resetTime) {
+      requestCounts.set(ip, { count: 1, resetTime: now + options.window });
+      return next();
+    }
+    
+    if (record.count < options.maxRequests) {
+      record.count++;
+      return next();
+    }
+    
+    res.status(429).json({ error: 'Too many requests' });
+  };
+}
+// Tests still pass ✓
+```
+
+---
+
+## 3B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. 🐛 Bug Reported/Discovered
+   ↓
+2. ✍️ Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. ✅ Verify the test fails for the right reason
+   ↓
+4. 🔧 Fix the bug (make the test pass)
+   ↓
+5. 🟢 Verify the test now PASSES
+   ↓
+6. 📝 Document the bug in test comments (include bug ID)
+   ↓
+7. 🚀 Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix
+
+```typescript
+// Bug Report #4721: JWT verification fails for tokens with URL-safe base64
+
+// Step 1-2: Write test that reproduces the bug
+import { describe, it, expect } from 'vitest';
+import { verifyToken } from './auth.js';
+
+describe('verifyToken - Bug #4721', () => {
+  it('verifies tokens with URL-safe base64 - Bug #4721', async () => {
+    // Bug: verifyToken failed for tokens containing _ or -
+    // Discovered: 2026-01-18
+    // This test prevents regression
+    
+    const tokenWithUrlSafeChars = 'eyJhbGciOi_VzI1NiIsInR5cCI6IkpXVCJ9...';
+    
+    await expect(verifyToken(tokenWithUrlSafeChars)).resolves.toMatchObject({
+      valid: true,
+    });
+  });
+});
+
+// Run: npm test
+// ❌ FAILS - verifyToken crashes on _ and - characters
+
+// Step 3: Fix the bug
+import { jwtVerify, importSPKI } from 'jose';
+
+export async function verifyToken(token: string) {
+  try {
+    // FIX: URL-safe base64 is standard for JWT
+    // No need to replace _ or -, jose handles it correctly
+    const publicKey = await importSPKI(process.env.JWT_PUBLIC_KEY!, 'RS256');
+    const { payload } = await jwtVerify(token, publicKey);
+    
+    return { valid: true, payload };
+  } catch (error) {
+    return { valid: false, error: error.message };
+  }
+}
+
+// Run: npm test
+// ✅ PASSES - bug fixed, regression prevented ✓
+```
+
+### Prohibited Practices for Bug Fixes
+
+**NEVER:**
+- ❌ Fix a bug without adding a regression test first
+- ❌ Write implementation before writing tests (violates TDD)
+- ❌ Skip the Red-Green-Refactor cycle
+- ❌ Commit code with failing tests
+- ❌ Remove tests to make code pass
+- ❌ Use test.skip() to ignore failing tests
 
 ---
 
