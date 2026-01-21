@@ -11,9 +11,9 @@ This document provides mandatory coding standards and development practices for 
 
 ---
 
-## 1. Core Philosophies: CLEAN-SHELL
+## 1. Core Philosophies: BASH-FIRST
 
-The agent must adhere to the **CLEAN-SHELL** standard for every bash script implementation:
+The agent must adhere to the **BASH-FIRST** principles for every bash script implementation:
 
 - **C**lean Code: Minimalistic, single-purpose functions
 - **L**ogical Organization: Hexagonal architecture, modular structure

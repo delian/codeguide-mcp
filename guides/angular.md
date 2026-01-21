@@ -8,7 +8,7 @@ Objective: Generate production-ready, type-safe, fully documented, highly perfor
 Tools: Angular 17+, TypeScript 5.x, Signals, Standalone Components, RxJS 7.x, NgRx Signal Store, TypeDoc.
 
 ## 1. Core Philosophies
-The agent must adhere to the "SIGNAL-FIRST" principles for every Angular application:
+The agent must adhere to the "ANGULAR-FIRST" principles for every Angular application:
 
 **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
 **Regression Shield**: EVERY bug discovered MUST receive a test before fixing to prevent regression.
@@ -1485,7 +1485,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
       
       - name: Install dependencies

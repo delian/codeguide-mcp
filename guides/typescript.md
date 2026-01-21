@@ -8,7 +8,7 @@ Objective: Generate production-ready, type-safe, fully documented, minimalistic,
 Tools: TypeScript 5.x, TypeDoc, Modern testing frameworks (Vitest/Jest), ESLint, Prettier.
 
 ## 1. Core Philosophies
-The agent must adhere to the "TYPE-SAFE" principles for every TypeScript project:
+The agent must adhere to the "TYPESCRIPT-FIRST" principles for every TypeScript project:
 
 **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
 **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.

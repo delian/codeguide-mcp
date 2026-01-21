@@ -9,7 +9,7 @@ Tools: Language-agnostic testing frameworks, CI/CD pipelines, coverage analysis 
 
 ## Core Philosophies
 
-The agent must adhere to the "TEST-FIRST" principles:
+The agent must adhere to the "TDD-FIRST" principles:
 
 **Red-Green-Refactor**: ALWAYS write failing test → make it pass → refactor. Never skip this cycle.
 **Test Before Code**: Write the test before writing implementation code, without exception.

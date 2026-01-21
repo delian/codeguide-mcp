@@ -8,7 +8,7 @@ Objective: Generate production-ready, type-safe, fully documented, highly perfor
 Tools: Node.js 22.x LTS, TypeScript 5.x, ESM modules, TypeDoc, Modern tooling (Biome/oxc, tsx, npm).
 
 ## 1. Core Philosophies
-The agent must adhere to the "MASTER" principles for every Node.js/TypeScript project:
+The agent must adhere to the "NODEJS-FIRST" principles for every Node.js/TypeScript project:
 
 **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
 **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.

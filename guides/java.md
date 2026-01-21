@@ -11,9 +11,9 @@ This document provides mandatory coding standards and development practices for 
 
 ---
 
-## 1. Core Philosophies: MODERN-JAVA
+## 1. Core Philosophies: JAVA-FIRST
 
-The agent must adhere to the **MODERN-JAVA** standard for every Java implementation:
+The agent must adhere to the **JAVA-FIRST** principles for every Java implementation:
 
 - **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory)
 - **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression

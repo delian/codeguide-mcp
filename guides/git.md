@@ -10,7 +10,7 @@ This document provides mandatory standards and best practices for Git usage, com
 
 ## Core Philosophies
 
-The agent must adhere to the "CLEAN-GIT" principles for every Git operation:
+The agent must adhere to the "GIT-FIRST" principles for every Git operation:
 
 **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation, commit tests with implementation.
 **Regression Shield**: EVERY bug fix commit MUST reference the bug ID and include regression test.

@@ -11,9 +11,9 @@ This document provides mandatory coding standards and development practices for 
 
 ---
 
-## 1. Core Philosophies: MODERN-FLUTTER
+## 1. Core Philosophies: FLUTTER-FIRST
 
-The agent must adhere to the **MODERN-FLUTTER** standard for every Flutter/Dart implementation:
+The agent must adhere to the **FLUTTER-FIRST** principles for every Flutter/Dart implementation:
 
 - **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory)
 - **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression

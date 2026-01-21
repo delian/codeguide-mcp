@@ -8,7 +8,7 @@ Objective: Generate production-ready, type-safe, fully documented, highly perfor
 Tools: React 19.x, TypeScript 5.x, Vite 5.x, TypeDoc, Modern Hooks, TanStack ecosystem.
 
 ## 1. Core Philosophies
-The agent must adhere to the "REACT-PRO" principles for every React application:
+The agent must adhere to the "REACT-FIRST" principles for every React application:
 
 **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
 **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.

@@ -11,9 +11,9 @@ This document provides mandatory coding standards and development practices for 
 
 ---
 
-## 1. Core Philosophies: MODERN-REST
+## 1. Core Philosophies: REST-FIRST
 
-The agent must adhere to the **MODERN-REST** standard for every REST API design:
+The agent must adhere to the **REST-FIRST** principles for every REST API design:
 
 - **M**inimalistic Design: Clean, concise, well-structured API endpoints
 - **O**penAPI First: Always use OpenAPI for API specification

@@ -10,7 +10,7 @@ This document provides mandatory coding standards and development practices for 
 
 ## Core Philosophies
 
-The agent must adhere to the "MODERN-PHP" principles for every PHP implementation:
+The agent must adhere to the "PHP-FIRST" principles for every PHP implementation:
 
 **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
 **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.

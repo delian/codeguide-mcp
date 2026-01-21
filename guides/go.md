@@ -11,9 +11,9 @@ This document provides mandatory coding style and practices for Go (Golang) prog
 
 ---
 
-## 1. Core Philosophies: MODULAR-GO
+## 1. Core Philosophies: GO-FIRST
 
-The agent must adhere to the **MODULAR-GO** standard for every Go implementation:
+The agent must adhere to the **GO-FIRST** principles for every Go implementation:
 
 **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
 **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
