@@ -2416,6 +2416,114 @@ mod tests {
 
 ---
 
+## 16. Quick Reference
+
+### Common Commands
+
+```bash
+# Build
+cargo build
+cargo build --release
+
+# Test
+cargo test
+cargo test --no-fail-fast
+cargo test -- --nocapture
+
+# Lint & Format
+cargo fmt --check
+cargo fmt
+cargo clippy
+cargo clippy -- -D warnings
+
+# Run
+cargo run
+cargo run --release
+
+# Documentation
+cargo doc --open
+cargo doc --no-deps
+
+# Dependencies
+cargo add <crate>
+cargo update
+cargo tree
+
+# Check (fast compilation check)
+cargo check
+
+# Coverage
+cargo tarpaulin --out Html
+```
+
+### Common Patterns Cheat Sheet
+
+```rust
+// Result handling
+let value = result?;                    // Early return on error
+let value = result.unwrap_or(default);  // Default on error
+let value = result.ok();                // Convert to Option
+
+// Option handling
+let value = option?;                    // Early return on None
+let value = option.unwrap_or(default);  // Default on None
+let value = option.ok_or(Error::new())?; // Convert to Result
+
+// Iterators
+items.iter().map(|x| x * 2).collect::<Vec<_>>();
+items.iter().filter(|x| x > &0).sum::<i32>();
+items.iter().find(|x| x.id == target_id);
+
+// Error creation (thiserror)
+#[derive(Error, Debug)]
+enum MyError {
+    #[error("not found: {0}")]
+    NotFound(String),
+    #[error("validation failed")]
+    Validation,
+}
+```
+
+### Project Structure
+
+```
+my_project/
+├── Cargo.toml
+├── src/
+│   ├── lib.rs           # Library root
+│   ├── main.rs          # Binary entry
+│   ├── domain/          # Domain models
+│   ├── ports/           # Traits/interfaces
+│   └── adapters/        # Implementations
+└── tests/
+    └── integration_test.rs
+```
+
+### Cargo.toml Essentials
+
+```toml
+[package]
+name = "my_project"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "1"
+
+[dev-dependencies]
+mockall = "0.11"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"
+```
+
+---
+
 ## References
 
 - [The Rust Programming Language](https://doc.rust-lang.org/book/)

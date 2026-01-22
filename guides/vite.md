@@ -664,6 +664,725 @@ export default defineConfig({
 
 ---
 
+## 2A. TDD Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code in Vite projects.**
+
+### TDD Cycle Diagram
+
+```
+    ┌─────────────────────────────────────────────────────────────┐
+    │                    TDD CYCLE FOR VITE                       │
+    └─────────────────────────────────────────────────────────────┘
+
+                           ┌──────────┐
+                           │  START   │
+                           └────┬─────┘
+                                │
+                                ▼
+           ┌────────────────────────────────────────┐
+           │  🔴 RED: Write a Failing Test First    │
+           │  ─────────────────────────────────────  │
+           │  • Create test file (*.test.ts)        │
+           │  • Define expected behavior            │
+           │  • Run: npm test -- --watch           │
+           │  • Verify test FAILS                   │
+           └────────────────────┬───────────────────┘
+                                │
+                                ▼
+           ┌────────────────────────────────────────┐
+           │  🟢 GREEN: Make the Test Pass          │
+           │  ─────────────────────────────────────  │
+           │  • Write MINIMAL implementation        │
+           │  • No optimization yet                 │
+           │  • Just enough to pass the test        │
+           │  • Run: npm test                       │
+           │  • Verify test PASSES                  │
+           └────────────────────┬───────────────────┘
+                                │
+                                ▼
+           ┌────────────────────────────────────────┐
+           │  🔵 REFACTOR: Improve the Code         │
+           │  ─────────────────────────────────────  │
+           │  • Clean up implementation             │
+           │  • Add TypeDoc comments                │
+           │  • Optimize if needed                  │
+           │  • Run: npm test                       │
+           │  • Verify tests STILL PASS             │
+           └────────────────────┬───────────────────┘
+                                │
+                                ▼
+                    ┌───────────────────┐
+                    │  More features?   │
+                    └─────────┬─────────┘
+                              │
+                   ┌──────────┴──────────┐
+                   │ YES                 │ NO
+                   ▼                     ▼
+              [Go to RED]          ┌──────────┐
+                                   │   DONE   │
+                                   └──────────┘
+```
+
+### Example TDD Workflow for Vite with Vitest
+
+**Scenario: Building a URL utility for a Vite application**
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ STEP 1: 🔴 RED - Write the Failing Test                             │
+├─────────────────────────────────────────────────────────────────────┤
+│ File: src/utils/url.test.ts                                         │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+```typescript
+// src/utils/url.test.ts
+import { describe, it, expect } from 'vitest';
+import { buildUrl, parseQueryString, joinPaths } from './url';
+
+describe('URL Utilities', () => {
+  describe('buildUrl', () => {
+    it('builds URL with base and path', () => {
+      expect(buildUrl('https://api.example.com', '/users')).toBe(
+        'https://api.example.com/users'
+      );
+    });
+
+    it('builds URL with query parameters', () => {
+      expect(
+        buildUrl('https://api.example.com', '/search', { q: 'vite', page: '1' })
+      ).toBe('https://api.example.com/search?q=vite&page=1');
+    });
+
+    it('handles trailing slashes in base URL', () => {
+      expect(buildUrl('https://api.example.com/', '/users')).toBe(
+        'https://api.example.com/users'
+      );
+    });
+  });
+
+  describe('parseQueryString', () => {
+    it('parses query string into object', () => {
+      expect(parseQueryString('?name=john&age=30')).toEqual({
+        name: 'john',
+        age: '30'
+      });
+    });
+
+    it('handles empty query string', () => {
+      expect(parseQueryString('')).toEqual({});
+    });
+  });
+
+  describe('joinPaths', () => {
+    it('joins multiple path segments', () => {
+      expect(joinPaths('api', 'v1', 'users')).toBe('api/v1/users');
+    });
+
+    it('handles leading/trailing slashes', () => {
+      expect(joinPaths('/api/', '/v1/', '/users/')).toBe('/api/v1/users/');
+    });
+  });
+});
+```
+
+```bash
+# Run the test
+npm test -- src/utils/url.test.ts
+
+# Output: ❌ FAILS
+# Error: Cannot find module './url'
+# This is EXPECTED - we haven't written the implementation yet!
+```
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ STEP 2: 🟢 GREEN - Write Minimal Implementation                     │
+├─────────────────────────────────────────────────────────────────────┤
+│ File: src/utils/url.ts                                              │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+```typescript
+// src/utils/url.ts - Minimal implementation to pass tests
+
+export function buildUrl(
+  base: string,
+  path: string,
+  params?: Record<string, string>
+): string {
+  // Remove trailing slash from base, ensure path starts with /
+  const normalizedBase = base.replace(/\/$/, '');
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+
+  let url = `${normalizedBase}${normalizedPath}`;
+
+  if (params && Object.keys(params).length > 0) {
+    const queryString = Object.entries(params)
+      .map(([key, value]) => `${key}=${value}`)
+      .join('&');
+    url += `?${queryString}`;
+  }
+
+  return url;
+}
+
+export function parseQueryString(query: string): Record<string, string> {
+  if (!query || query === '?') return {};
+
+  const cleanQuery = query.startsWith('?') ? query.slice(1) : query;
+
+  return cleanQuery.split('&').reduce((acc, pair) => {
+    const [key, value] = pair.split('=');
+    if (key) acc[key] = value || '';
+    return acc;
+  }, {} as Record<string, string>);
+}
+
+export function joinPaths(...paths: string[]): string {
+  return paths
+    .map((path, index) => {
+      if (index === 0) return path.replace(/\/$/, '');
+      if (index === paths.length - 1) return path.replace(/^\//, '');
+      return path.replace(/^\/|\/$/g, '');
+    })
+    .filter(Boolean)
+    .join('/');
+}
+```
+
+```bash
+# Run the tests again
+npm test -- src/utils/url.test.ts
+
+# Output: ✅ PASSES
+# All 7 tests pass!
+```
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ STEP 3: 🔵 REFACTOR - Improve Code Quality                          │
+├─────────────────────────────────────────────────────────────────────┤
+│ File: src/utils/url.ts (refactored)                                 │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+```typescript
+// src/utils/url.ts - Refactored with TypeDoc and improvements
+
+/**
+ * Query parameters as key-value pairs.
+ */
+export type QueryParams = Record<string, string>;
+
+/**
+ * Builds a complete URL from base, path, and optional query parameters.
+ *
+ * Handles normalization of slashes and proper URL encoding.
+ *
+ * @param base - Base URL (e.g., 'https://api.example.com')
+ * @param path - Path to append (e.g., '/users')
+ * @param params - Optional query parameters
+ * @returns Complete URL string
+ *
+ * @example
+ * ```typescript
+ * buildUrl('https://api.example.com', '/users');
+ * // Returns: 'https://api.example.com/users'
+ *
+ * buildUrl('https://api.example.com', '/search', { q: 'vite' });
+ * // Returns: 'https://api.example.com/search?q=vite'
+ * ```
+ */
+export function buildUrl(
+  base: string,
+  path: string,
+  params?: QueryParams
+): string {
+  const normalizedBase = base.replace(/\/+$/, '');
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+
+  const url = new URL(`${normalizedBase}${normalizedPath}`);
+
+  if (params) {
+    Object.entries(params).forEach(([key, value]) => {
+      url.searchParams.append(key, value);
+    });
+  }
+
+  return url.toString();
+}
+
+/**
+ * Parses a query string into a key-value object.
+ *
+ * @param query - Query string (with or without leading '?')
+ * @returns Object containing parsed parameters
+ *
+ * @example
+ * ```typescript
+ * parseQueryString('?name=john&age=30');
+ * // Returns: { name: 'john', age: '30' }
+ * ```
+ */
+export function parseQueryString(query: string): QueryParams {
+  if (!query) return {};
+
+  const params = new URLSearchParams(query);
+  const result: QueryParams = {};
+
+  params.forEach((value, key) => {
+    result[key] = value;
+  });
+
+  return result;
+}
+
+/**
+ * Joins multiple path segments into a single path.
+ *
+ * Preserves leading slash of first segment and trailing slash of last segment.
+ *
+ * @param paths - Path segments to join
+ * @returns Joined path string
+ *
+ * @example
+ * ```typescript
+ * joinPaths('api', 'v1', 'users');
+ * // Returns: 'api/v1/users'
+ *
+ * joinPaths('/api/', '/v1/', '/users/');
+ * // Returns: '/api/v1/users/'
+ * ```
+ */
+export function joinPaths(...paths: string[]): string {
+  if (paths.length === 0) return '';
+
+  const hasLeadingSlash = paths[0].startsWith('/');
+  const hasTrailingSlash = paths[paths.length - 1].endsWith('/');
+
+  const joined = paths
+    .map(p => p.replace(/^\/+|\/+$/g, ''))
+    .filter(Boolean)
+    .join('/');
+
+  return `${hasLeadingSlash ? '/' : ''}${joined}${hasTrailingSlash ? '/' : ''}`;
+}
+```
+
+```bash
+# Run tests to ensure refactoring didn't break anything
+npm test -- src/utils/url.test.ts
+
+# Output: ✅ PASSES
+# All 7 tests still pass!
+
+# Run type check
+npm run type-check
+# ✅ No errors
+
+# Check coverage
+npm run test:coverage -- src/utils/url.test.ts
+# ✅ 100% coverage
+```
+
+### Visual Step-by-Step TDD Example
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    TDD TIMELINE FOR VITE PROJECT                    │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  TIME ──────────────────────────────────────────────────────────►   │
+│                                                                     │
+│  ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐          │
+│  │  TEST   │    │  CODE   │    │ REFACTOR│    │  DONE   │          │
+│  │  FILE   │    │  FILE   │    │  CODE   │    │   ✓     │          │
+│  └────┬────┘    └────┬────┘    └────┬────┘    └─────────┘          │
+│       │              │              │                               │
+│       ▼              ▼              ▼                               │
+│  ┌─────────┐    ┌─────────┐    ┌─────────┐                         │
+│  │ npm test│    │ npm test│    │ npm test│                         │
+│  │   ❌    │    │   ✅    │    │   ✅    │                         │
+│  └─────────┘    └─────────┘    └─────────┘                         │
+│                                                                     │
+│  ◄── RED ────►  ◄── GREEN ─►  ◄─ REFACTOR ─►                       │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+VITEST WATCH MODE WORKFLOW:
+
+  Terminal 1 (Vitest Watch):          Terminal 2 (Editor):
+  ┌──────────────────────────┐        ┌──────────────────────────┐
+  │ $ npm test -- --watch    │        │ 1. Write test            │
+  │                          │        │    ↓                     │
+  │ RERUN  url.test.ts       │◄───────│ 2. Save file             │
+  │                          │        │                          │
+  │ ❌ 3 tests failed        │        │ 3. See failure           │
+  │                          │        │    ↓                     │
+  │ RERUN  url.test.ts       │◄───────│ 4. Write implementation  │
+  │                          │        │    ↓                     │
+  │ ✅ 3 tests passed        │        │ 5. Save file             │
+  │                          │        │                          │
+  │ Watching for changes...  │        │ 6. See success!          │
+  └──────────────────────────┘        └──────────────────────────┘
+```
+
+### TDD Commands Reference for Vite/Vitest
+
+```bash
+# Start TDD workflow with watch mode
+npm test -- --watch
+
+# Run specific test file
+npm test -- src/utils/url.test.ts
+
+# Run tests matching pattern
+npm test -- --grep "buildUrl"
+
+# Run with coverage (check after GREEN phase)
+npm test -- --coverage
+
+# Run with UI (visual test runner)
+npm test -- --ui
+
+# Type check in parallel (separate terminal)
+npx tsc --noEmit --watch
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    BUG FIX WORKFLOW FOR VITE                        │
+└─────────────────────────────────────────────────────────────────────┘
+
+    ┌──────────────────┐
+    │  🐛 BUG REPORTED │
+    │   (Issue #1234)  │
+    └────────┬─────────┘
+             │
+             ▼
+    ┌──────────────────────────────────────────────────────────────┐
+    │  STEP 1: Reproduce the Bug                                   │
+    │  ────────────────────────────────────────────────────────── │
+    │  • Understand the bug report                                 │
+    │  • Identify the failing scenario                             │
+    │  • Note the expected vs actual behavior                      │
+    └────────┬─────────────────────────────────────────────────────┘
+             │
+             ▼
+    ┌──────────────────────────────────────────────────────────────┐
+    │  STEP 2: Write a Failing Test (BEFORE fixing!)               │
+    │  ────────────────────────────────────────────────────────── │
+    │  • Create test that reproduces the bug                       │
+    │  • Include bug ID in test name/comment                       │
+    │  • Run test to confirm it FAILS                              │
+    │  ┌────────────────────────────────────────────────────────┐  │
+    │  │ it('handles empty array input - Bug #1234', () => {   │  │
+    │  │   // This test reproduces Bug #1234                    │  │
+    │  │   expect(processItems([])).toEqual([]);                │  │
+    │  │ });                                                     │  │
+    │  └────────────────────────────────────────────────────────┘  │
+    └────────┬─────────────────────────────────────────────────────┘
+             │
+             ▼
+    ┌──────────────────────────────────────────────────────────────┐
+    │  STEP 3: Verify Test Fails for the Right Reason              │
+    │  ────────────────────────────────────────────────────────── │
+    │  • Run: npm test                                             │
+    │  • Confirm test fails with expected error                    │
+    │  • If test passes → bug is already fixed or test is wrong    │
+    └────────┬─────────────────────────────────────────────────────┘
+             │
+             ▼
+    ┌──────────────────────────────────────────────────────────────┐
+    │  STEP 4: Fix the Bug                                         │
+    │  ────────────────────────────────────────────────────────── │
+    │  • Make the minimal change to fix the bug                    │
+    │  • Add defensive checks if needed                            │
+    │  • Add TypeDoc comments explaining the fix                   │
+    └────────┬─────────────────────────────────────────────────────┘
+             │
+             ▼
+    ┌──────────────────────────────────────────────────────────────┐
+    │  STEP 5: Verify All Tests Pass                               │
+    │  ────────────────────────────────────────────────────────── │
+    │  • Run: npm test                                             │
+    │  • New regression test PASSES                                │
+    │  • All existing tests STILL PASS                             │
+    │  • Run: npm run type-check                                   │
+    └────────┬─────────────────────────────────────────────────────┘
+             │
+             ▼
+    ┌──────────────────────────────────────────────────────────────┐
+    │  STEP 6: Document and Commit                                 │
+    │  ────────────────────────────────────────────────────────── │
+    │  • Commit message: "fix: handle empty array (Bug #1234)"     │
+    │  • Reference bug ID in commit                                │
+    │  • Bug can never regress (test protects it forever!)         │
+    └────────┬─────────────────────────────────────────────────────┘
+             │
+             ▼
+    ┌──────────────────┐
+    │  ✅ BUG FIXED    │
+    │  🛡️ PROTECTED    │
+    └──────────────────┘
+```
+
+### Example Bug Fix with Regression Test
+
+**Bug Report #4521**: `formatPrice` function crashes when price is undefined
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ STEP 1: Understand the Bug                                          │
+├─────────────────────────────────────────────────────────────────────┤
+│ Reporter: "When fetching product data, sometimes price is           │
+│ undefined and the formatPrice function throws an error"             │
+│                                                                     │
+│ Expected: Should return '$0.00' or handle gracefully                │
+│ Actual: TypeError: Cannot read properties of undefined              │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ STEP 2: Write Failing Regression Test                               │
+├─────────────────────────────────────────────────────────────────────┤
+│ File: src/utils/pricing.test.ts                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+```typescript
+// src/utils/pricing.test.ts
+import { describe, it, expect } from 'vitest';
+import { formatPrice } from './pricing';
+
+describe('formatPrice', () => {
+  // Existing tests...
+  it('formats positive prices', () => {
+    expect(formatPrice(19.99)).toBe('$19.99');
+  });
+
+  it('formats zero', () => {
+    expect(formatPrice(0)).toBe('$0.00');
+  });
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // REGRESSION TEST - Bug #4521
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  describe('Bug #4521 - undefined price handling', () => {
+    it('handles undefined price - Bug #4521', () => {
+      // Bug: formatPrice(undefined) threw TypeError
+      // Expected: Should return '$0.00' for undefined input
+      // Discovered: 2026-01-22
+      expect(formatPrice(undefined as unknown as number)).toBe('$0.00');
+    });
+
+    it('handles null price - Bug #4521', () => {
+      // Related edge case discovered during investigation
+      expect(formatPrice(null as unknown as number)).toBe('$0.00');
+    });
+
+    it('handles NaN price - Bug #4521', () => {
+      // Related edge case discovered during investigation
+      expect(formatPrice(NaN)).toBe('$0.00');
+    });
+  });
+});
+```
+
+```bash
+# Run the test
+npm test -- src/utils/pricing.test.ts
+
+# Output:
+# ❌ FAIL  src/utils/pricing.test.ts
+#   formatPrice
+#     Bug #4521 - undefined price handling
+#       ✕ handles undefined price - Bug #4521
+#         TypeError: Cannot read properties of undefined
+#
+# This is EXPECTED - we've reproduced the bug!
+```
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ STEP 3: Verify Test Fails for Right Reason                          │
+├─────────────────────────────────────────────────────────────────────┤
+│ ✅ Test fails with: TypeError: Cannot read properties of undefined  │
+│ ✅ This matches the reported bug behavior                           │
+│ ✅ Proceed to fix                                                   │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ STEP 4: Fix the Bug                                                 │
+├─────────────────────────────────────────────────────────────────────┤
+│ File: src/utils/pricing.ts                                          │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+```typescript
+// src/utils/pricing.ts
+
+/**
+ * Formats a price as a USD currency string.
+ *
+ * @param price - The price to format
+ * @returns Formatted price string (e.g., '$19.99')
+ *
+ * @remarks
+ * FIX for Bug #4521: Now handles undefined, null, and NaN values
+ * by returning '$0.00' instead of throwing an error.
+ *
+ * @example
+ * ```typescript
+ * formatPrice(19.99);     // '$19.99'
+ * formatPrice(0);         // '$0.00'
+ * formatPrice(undefined); // '$0.00' (Bug #4521 fix)
+ * ```
+ */
+export function formatPrice(price: number): string {
+  // FIX: Bug #4521 - Handle undefined, null, and NaN gracefully
+  if (price === undefined || price === null || Number.isNaN(price)) {
+    return '$0.00';
+  }
+
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+  }).format(price);
+}
+```
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ STEP 5: Verify All Tests Pass                                       │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+```bash
+# Run all tests
+npm test -- src/utils/pricing.test.ts
+
+# Output:
+# ✅ PASS  src/utils/pricing.test.ts
+#   formatPrice
+#     ✓ formats positive prices
+#     ✓ formats zero
+#     Bug #4521 - undefined price handling
+#       ✓ handles undefined price - Bug #4521
+#       ✓ handles null price - Bug #4521
+#       ✓ handles NaN price - Bug #4521
+#
+# Test Files: 1 passed
+# Tests:      5 passed
+
+# Type check
+npm run type-check
+# ✅ No errors
+
+# Run full test suite to ensure no regressions
+npm test
+# ✅ All tests pass
+```
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ STEP 6: Commit with Bug Reference                                   │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+```bash
+git add src/utils/pricing.ts src/utils/pricing.test.ts
+git commit -m "fix(pricing): handle undefined/null/NaN in formatPrice
+
+- Add defensive checks for undefined, null, and NaN values
+- Return '\$0.00' for invalid inputs instead of throwing
+- Add regression tests to prevent future recurrence
+
+Fixes #4521"
+```
+
+### Bug Fix Decision Tree
+
+```
+                        ┌─────────────────┐
+                        │  Bug Reported   │
+                        └────────┬────────┘
+                                 │
+                                 ▼
+                    ┌────────────────────────┐
+                    │  Can you reproduce it? │
+                    └────────────┬───────────┘
+                                 │
+              ┌──────────────────┼──────────────────┐
+              │ YES              │ NO               │
+              ▼                  ▼                  │
+    ┌─────────────────┐  ┌─────────────────────┐   │
+    │  Write failing  │  │  Request more info  │   │
+    │  test FIRST     │  │  from reporter      │   │
+    └────────┬────────┘  └─────────────────────┘   │
+             │                                      │
+             ▼                                      │
+    ┌─────────────────┐                            │
+    │  Test fails?    │                            │
+    └────────┬────────┘                            │
+             │                                      │
+    ┌────────┼────────┐                            │
+    │ YES    │ NO     │                            │
+    ▼        ▼        │                            │
+  ┌────┐  ┌────────────────────┐                   │
+  │Fix │  │ Bug already fixed  │                   │
+  │bug │  │ or test is wrong   │                   │
+  └─┬──┘  └────────────────────┘                   │
+    │                                              │
+    ▼                                              │
+  ┌──────────────────┐                             │
+  │ All tests pass?  │                             │
+  └────────┬─────────┘                             │
+           │                                       │
+  ┌────────┼────────┐                              │
+  │ YES    │ NO     │                              │
+  ▼        ▼        │                              │
+┌────┐  ┌────────────────┐                         │
+│Done│  │ Fix regressions│                         │
+└────┘  │ you introduced │                         │
+        └────────────────┘                         │
+```
+
+### Prohibited Bug Fix Practices
+
+**NEVER:**
+```
+❌ Fix a bug without adding a regression test first
+   → Future changes may reintroduce the bug
+
+❌ Delete or skip tests to make the bug "go away"
+   → The bug is not fixed, just hidden
+
+❌ Merge bug fixes without all tests passing
+   → You may be introducing new bugs
+
+❌ Forget to reference the bug ID in tests and commits
+   → Traceability is lost
+
+❌ Write the fix first, then add tests
+   → Violates TDD, tests might not actually test the bug
+```
+
+---
+
 ## 3. Project Structure
 
 ```
@@ -1545,6 +2264,454 @@ const worker = new Worker();
 11. **Dependency Pre-bundling**: Vite automatically pre-bundles dependencies for optimal performance.
 
 12. **Regression Tests for Bugs**: Every bug gets a test, creating a safety net that prevents regression.
+
+---
+
+## Quick Reference
+
+### Common Commands
+
+```bash
+# ─────────────────────────────────────────────────────────────────────
+# DEVELOPMENT
+# ─────────────────────────────────────────────────────────────────────
+
+# Start development server with HMR
+npm run dev
+# OR: npx vite
+
+# Start dev server on specific port
+npx vite --port 3000
+
+# Start dev server and open browser
+npx vite --open
+
+# Start dev server with HTTPS
+npx vite --https
+
+# ─────────────────────────────────────────────────────────────────────
+# BUILDING
+# ─────────────────────────────────────────────────────────────────────
+
+# Production build
+npm run build
+# OR: npx vite build
+
+# Build with specific mode
+npx vite build --mode staging
+
+# Build and analyze bundle
+npx vite build --mode analyze
+
+# Preview production build locally
+npm run preview
+# OR: npx vite preview
+
+# Preview on specific port
+npx vite preview --port 4173
+
+# ─────────────────────────────────────────────────────────────────────
+# TESTING (Vitest)
+# ─────────────────────────────────────────────────────────────────────
+
+# Run all tests once
+npm test
+# OR: npx vitest run
+
+# Run tests in watch mode (TDD workflow)
+npm test -- --watch
+# OR: npx vitest
+
+# Run specific test file
+npx vitest run src/utils/validation.test.ts
+
+# Run tests matching pattern
+npx vitest run --grep "formatPrice"
+
+# Run tests with coverage
+npm run test:coverage
+# OR: npx vitest run --coverage
+
+# Run tests with UI
+npm run test:ui
+# OR: npx vitest --ui
+
+# Update snapshots
+npx vitest run --update
+
+# ─────────────────────────────────────────────────────────────────────
+# TYPE CHECKING & LINTING
+# ─────────────────────────────────────────────────────────────────────
+
+# Type check without emitting
+npm run type-check
+# OR: npx tsc --noEmit
+
+# Type check in watch mode
+npx tsc --noEmit --watch
+
+# Lint code
+npm run lint
+# OR: npx eslint . --ext ts,tsx
+
+# Lint and fix
+npx eslint . --ext ts,tsx --fix
+
+# ─────────────────────────────────────────────────────────────────────
+# DOCUMENTATION
+# ─────────────────────────────────────────────────────────────────────
+
+# Generate TypeDoc documentation
+npm run docs
+# OR: npx typedoc --out docs src
+
+# Serve documentation locally
+npx http-server docs -p 8080
+
+# ─────────────────────────────────────────────────────────────────────
+# DEPENDENCY MANAGEMENT
+# ─────────────────────────────────────────────────────────────────────
+
+# Install dependencies
+npm install
+
+# Add production dependency
+npm install package-name
+
+# Add dev dependency
+npm install -D package-name
+
+# Update dependencies
+npm update
+
+# Check for outdated packages
+npm outdated
+
+# Security audit
+npm audit
+
+# Fix security issues
+npm audit fix
+```
+
+### Vite Configuration Patterns
+
+```typescript
+// vite.config.ts - Common Configuration Patterns
+
+import { defineConfig, loadEnv } from 'vite';
+import { resolve } from 'path';
+
+export default defineConfig(({ command, mode }) => {
+  // Load environment variables
+  const env = loadEnv(mode, process.cwd(), '');
+
+  return {
+    // ───────────────────────────────────────────────────────────────
+    // PATH ALIASES
+    // ───────────────────────────────────────────────────────────────
+    resolve: {
+      alias: {
+        '@': resolve(__dirname, './src'),
+        '@components': resolve(__dirname, './src/components'),
+        '@utils': resolve(__dirname, './src/utils'),
+        '@stores': resolve(__dirname, './src/stores'),
+        '@features': resolve(__dirname, './src/features'),
+      },
+    },
+
+    // ───────────────────────────────────────────────────────────────
+    // DEV SERVER
+    // ───────────────────────────────────────────────────────────────
+    server: {
+      port: 5173,
+      strictPort: false,
+      host: true,
+      open: false,
+      cors: true,
+      // Proxy API requests in development
+      proxy: {
+        '/api': {
+          target: env.VITE_API_URL || 'http://localhost:3000',
+          changeOrigin: true,
+          secure: false,
+        },
+      },
+    },
+
+    // ───────────────────────────────────────────────────────────────
+    // BUILD OPTIONS
+    // ───────────────────────────────────────────────────────────────
+    build: {
+      target: 'esnext',
+      outDir: 'dist',
+      assetsDir: 'assets',
+      sourcemap: mode !== 'production',
+      minify: 'esbuild',
+
+      // Rollup options for code splitting
+      rollupOptions: {
+        output: {
+          // Manual chunks for better caching
+          manualChunks: {
+            // Vendor chunk for framework
+            'vendor-framework': ['react', 'react-dom'],
+            // Vendor chunk for utilities
+            'vendor-utils': ['lodash-es', 'date-fns'],
+          },
+          // Asset naming
+          assetFileNames: 'assets/[name]-[hash][extname]',
+          chunkFileNames: 'chunks/[name]-[hash].js',
+          entryFileNames: '[name]-[hash].js',
+        },
+      },
+
+      // Chunk size warning
+      chunkSizeWarningLimit: 1000,
+    },
+
+    // ───────────────────────────────────────────────────────────────
+    // DEPENDENCY OPTIMIZATION
+    // ───────────────────────────────────────────────────────────────
+    optimizeDeps: {
+      // Pre-bundle these dependencies
+      include: [
+        '@preact/signals-core',
+        'lodash-es',
+      ],
+      // Exclude from pre-bundling
+      exclude: ['@vite/client'],
+    },
+
+    // ───────────────────────────────────────────────────────────────
+    // VITEST CONFIGURATION
+    // ───────────────────────────────────────────────────────────────
+    test: {
+      globals: true,
+      environment: 'jsdom',
+      setupFiles: './src/test/setup.ts',
+      include: ['src/**/*.{test,spec}.{ts,tsx}'],
+      exclude: ['node_modules', 'dist'],
+      coverage: {
+        provider: 'v8',
+        reporter: ['text', 'json', 'html'],
+        exclude: [
+          'node_modules/',
+          'src/test/',
+          '**/*.test.ts',
+          '**/*.spec.ts',
+          '**/*.d.ts',
+        ],
+        thresholds: {
+          global: {
+            branches: 80,
+            functions: 80,
+            lines: 80,
+            statements: 80,
+          },
+        },
+      },
+    },
+
+    // ───────────────────────────────────────────────────────────────
+    // ENVIRONMENT VARIABLES
+    // ───────────────────────────────────────────────────────────────
+    define: {
+      __APP_VERSION__: JSON.stringify(process.env.npm_package_version),
+      __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+    },
+
+    // ───────────────────────────────────────────────────────────────
+    // CONDITIONAL CONFIG BY MODE
+    // ───────────────────────────────────────────────────────────────
+    ...(mode === 'development' && {
+      // Development-only options
+    }),
+    ...(mode === 'production' && {
+      // Production-only options
+      build: {
+        sourcemap: false,
+        minify: 'terser',
+      },
+    }),
+  };
+});
+```
+
+### Project Structure
+
+```
+my-vite-app/
+├── src/
+│   ├── main.ts                    # Application entry point
+│   ├── vite-env.d.ts             # Vite type definitions
+│   │
+│   ├── components/                # Reusable UI components
+│   │   ├── Button/
+│   │   │   ├── Button.tsx
+│   │   │   ├── Button.test.tsx
+│   │   │   ├── Button.module.css
+│   │   │   └── index.ts
+│   │   └── index.ts               # Barrel export
+│   │
+│   ├── features/                  # Feature-based modules
+│   │   ├── auth/
+│   │   │   ├── api.ts            # API calls
+│   │   │   ├── api.test.ts
+│   │   │   ├── store.ts          # State management
+│   │   │   ├── store.test.ts
+│   │   │   ├── types.ts          # TypeScript types
+│   │   │   └── index.ts
+│   │   ├── users/
+│   │   │   ├── api.ts
+│   │   │   ├── api.test.ts
+│   │   │   ├── store.ts
+│   │   │   ├── store.test.ts
+│   │   │   ├── types.ts
+│   │   │   └── index.ts
+│   │   └── index.ts
+│   │
+│   ├── utils/                     # Shared utility functions
+│   │   ├── validation.ts
+│   │   ├── validation.test.ts
+│   │   ├── formatting.ts
+│   │   ├── formatting.test.ts
+│   │   ├── url.ts
+│   │   ├── url.test.ts
+│   │   └── index.ts
+│   │
+│   ├── stores/                    # Global state (signals)
+│   │   ├── app-state.ts
+│   │   ├── app-state.test.ts
+│   │   └── index.ts
+│   │
+│   ├── hooks/                     # Custom hooks (if using React/Vue)
+│   │   ├── useAuth.ts
+│   │   ├── useAuth.test.ts
+│   │   └── index.ts
+│   │
+│   ├── types/                     # Shared TypeScript types
+│   │   ├── api.ts
+│   │   ├── models.ts
+│   │   └── index.ts
+│   │
+│   ├── test/                      # Test utilities and setup
+│   │   ├── setup.ts              # Vitest setup
+│   │   ├── mocks/                # Mock data and services
+│   │   │   └── handlers.ts
+│   │   └── utils.ts              # Test helpers
+│   │
+│   ├── styles/                    # Global styles
+│   │   ├── main.css
+│   │   ├── variables.css
+│   │   └── reset.css
+│   │
+│   └── assets/                    # Static assets (processed by Vite)
+│       ├── images/
+│       └── fonts/
+│
+├── public/                        # Static assets (copied as-is)
+│   ├── favicon.ico
+│   └── robots.txt
+│
+├── dist/                          # Build output (gitignored)
+├── docs/                          # Generated TypeDoc (gitignored)
+├── coverage/                      # Test coverage (gitignored)
+│
+├── .env                           # Environment variables (gitignored)
+├── .env.example                   # Environment template
+├── .env.development               # Dev environment
+├── .env.production                # Prod environment
+│
+├── vite.config.ts                 # Vite configuration
+├── vitest.config.ts               # Vitest configuration (if separate)
+├── tsconfig.json                  # TypeScript configuration
+├── tsconfig.node.json             # Node TypeScript config
+├── typedoc.json                   # TypeDoc configuration
+├── .eslintrc.cjs                  # ESLint configuration
+├── .prettierrc                    # Prettier configuration
+├── package.json                   # Dependencies and scripts
+└── README.md                      # Project documentation
+```
+
+### Environment Variables Pattern
+
+```typescript
+// src/vite-env.d.ts
+
+/// <reference types="vite/client" />
+
+interface ImportMetaEnv {
+  // API Configuration
+  readonly VITE_API_URL: string;
+  readonly VITE_API_KEY: string;
+  readonly VITE_API_TIMEOUT: string;
+
+  // Feature Flags
+  readonly VITE_ENABLE_ANALYTICS: string;
+  readonly VITE_ENABLE_DEBUG: string;
+
+  // Application Settings
+  readonly VITE_APP_NAME: string;
+  readonly VITE_APP_VERSION: string;
+
+  // Built-in Vite variables
+  readonly DEV: boolean;
+  readonly PROD: boolean;
+  readonly MODE: string;
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv;
+}
+```
+
+```bash
+# .env.example
+
+# API Configuration
+VITE_API_URL=https://api.example.com
+VITE_API_KEY=your-api-key-here
+VITE_API_TIMEOUT=30000
+
+# Feature Flags
+VITE_ENABLE_ANALYTICS=false
+VITE_ENABLE_DEBUG=true
+
+# Application Settings
+VITE_APP_NAME=My Vite App
+```
+
+```typescript
+// src/config/env.ts - Type-safe environment access
+
+/**
+ * Application configuration from environment variables.
+ *
+ * @example
+ * ```typescript
+ * import { config } from '@/config/env';
+ *
+ * console.log(config.apiUrl);
+ * console.log(config.isDev);
+ * ```
+ */
+export const config = {
+  // API
+  apiUrl: import.meta.env.VITE_API_URL,
+  apiKey: import.meta.env.VITE_API_KEY,
+  apiTimeout: parseInt(import.meta.env.VITE_API_TIMEOUT || '30000', 10),
+
+  // Feature Flags
+  enableAnalytics: import.meta.env.VITE_ENABLE_ANALYTICS === 'true',
+  enableDebug: import.meta.env.VITE_ENABLE_DEBUG === 'true',
+
+  // Environment
+  isDev: import.meta.env.DEV,
+  isProd: import.meta.env.PROD,
+  mode: import.meta.env.MODE,
+} as const;
+```
 
 ---
 

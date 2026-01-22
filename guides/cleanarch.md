@@ -136,6 +136,522 @@ With Dependency Inversion (CORRECT):
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code across all Clean Architecture layers.**
+
+### A. TDD Cycle
+
+```
+TDD CYCLE FOR CLEAN ARCHITECTURE:
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                                                                     │
+│    ┌─────────┐         ┌─────────┐         ┌──────────┐            │
+│    │   RED   │────────▶│  GREEN  │────────▶│ REFACTOR │            │
+│    │  Write  │         │  Write  │         │ Improve  │            │
+│    │ Failing │         │ Minimal │         │  Code    │            │
+│    │  Test   │         │  Code   │         │          │            │
+│    └─────────┘         └─────────┘         └────┬─────┘            │
+│         ▲                                       │                   │
+│         │                                       │                   │
+│         └───────────────────────────────────────┘                   │
+│                        Repeat                                       │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+Layer-Specific TDD Approach:
+
+  ENTITIES (innermost):
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ 1. RED: Write test for business rule                            │
+  │ 2. GREEN: Implement entity behavior                             │
+  │ 3. REFACTOR: Extract value objects, enforce invariants          │
+  │                                                                 │
+  │ Tests: Pure unit tests, NO mocks needed                         │
+  └─────────────────────────────────────────────────────────────────┘
+           │
+           ▼
+  USE CASES (application rules):
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ 1. RED: Write test for use case behavior                        │
+  │ 2. GREEN: Implement interactor with mocked dependencies         │
+  │ 3. REFACTOR: Extract boundaries, improve orchestration          │
+  │                                                                 │
+  │ Tests: Mock repositories, gateways, presenters                  │
+  └─────────────────────────────────────────────────────────────────┘
+           │
+           ▼
+  ADAPTERS (interface adapters):
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ 1. RED: Write integration test for adapter                      │
+  │ 2. GREEN: Implement adapter (controller, repository, etc.)      │
+  │ 3. REFACTOR: Improve mapping, error handling                    │
+  │                                                                 │
+  │ Tests: Integration tests with real/test infrastructure          │
+  └─────────────────────────────────────────────────────────────────┘
+```
+
+### B. TDD Example: Entity Layer (Order Entity)
+
+```
+ENTITY TDD EXAMPLE:
+
+Step 1: RED - Write Failing Test for Order Creation
+┌─────────────────────────────────────────────────────────────────────┐
+│ describe Order                                                      │
+│   describe create                                                   │
+│     it rejects empty item list                                     │
+│       // Arrange                                                    │
+│       emptyItems = []                                               │
+│                                                                     │
+│       // Act & Assert                                               │
+│       expect(() => Order.create(customerId, emptyItems))           │
+│         .toThrow(EmptyOrderError)                                  │
+│                                                                     │
+│ RUN TESTS → FAILS (Order.create not implemented)                   │
+└─────────────────────────────────────────────────────────────────────┘
+
+Step 2: GREEN - Minimal Implementation
+┌─────────────────────────────────────────────────────────────────────┐
+│ class Order                                                         │
+│   static create(customerId, items)                                 │
+│     if (items.length === 0)                                        │
+│       throw new EmptyOrderError()                                  │
+│     return new Order(customerId, items)                            │
+│                                                                     │
+│ RUN TESTS → PASSES                                                 │
+└─────────────────────────────────────────────────────────────────────┘
+
+Step 3: REFACTOR - Add Invariants and Value Objects
+┌─────────────────────────────────────────────────────────────────────┐
+│ class Order                                                         │
+│   private constructor(customerId, items)                           │
+│     this.id = OrderId.generate()                                   │
+│     this.customerId = customerId                                   │
+│     this.items = items                                             │
+│     this.total = this.calculateTotal()                             │
+│     this.status = OrderStatus.DRAFT                                │
+│                                                                     │
+│   static create(customerId, items)                                 │
+│     this.validateNotEmpty(items)                                   │
+│     return new Order(customerId, items)                            │
+│                                                                     │
+│   private static validateNotEmpty(items)                           │
+│     if (items.length === 0)                                        │
+│       throw new EmptyOrderError("Order must have at least one item")│
+│                                                                     │
+│ RUN TESTS → STILL PASSES                                           │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### C. TDD Example: Use Case Layer (PlaceOrderUseCase)
+
+```
+USE CASE TDD EXAMPLE:
+
+Step 1: RED - Write Failing Test for Use Case
+┌─────────────────────────────────────────────────────────────────────┐
+│ describe PlaceOrderUseCase                                          │
+│   describe execute                                                  │
+│     it places order for valid customer                             │
+│       // Arrange                                                    │
+│       mockCustomerRepo = createMock(CustomerRepository)            │
+│       mockOrderRepo = createMock(OrderRepository)                  │
+│       mockPresenter = createMock(PlaceOrderOutputBoundary)         │
+│                                                                     │
+│       mockCustomerRepo.findById.returns(validCustomer)             │
+│                                                                     │
+│       useCase = new PlaceOrderInteractor(                          │
+│         mockCustomerRepo, mockOrderRepo, mockPresenter             │
+│       )                                                             │
+│                                                                     │
+│       request = PlaceOrderRequest(                                 │
+│         customerId: "cust-123",                                    │
+│         items: [{ productId: "prod-1", quantity: 2, price: 100 }]  │
+│       )                                                             │
+│                                                                     │
+│       // Act                                                        │
+│       useCase.execute(request)                                     │
+│                                                                     │
+│       // Assert                                                     │
+│       expect(mockOrderRepo.save).toHaveBeenCalled()                │
+│       expect(mockPresenter.presentSuccess).toHaveBeenCalled()      │
+│                                                                     │
+│ RUN TESTS → FAILS (PlaceOrderInteractor not implemented)           │
+└─────────────────────────────────────────────────────────────────────┘
+
+Step 2: GREEN - Implement Interactor
+┌─────────────────────────────────────────────────────────────────────┐
+│ class PlaceOrderInteractor implements PlaceOrderInputBoundary       │
+│   constructor(customerRepo, orderRepo, presenter)                  │
+│     this.customerRepo = customerRepo                               │
+│     this.orderRepo = orderRepo                                     │
+│     this.presenter = presenter                                     │
+│                                                                     │
+│   execute(request)                                                 │
+│     customer = this.customerRepo.findById(request.customerId)      │
+│     items = request.items.map(i => OrderItem.create(...))          │
+│     order = Order.create(customer.id, items)                       │
+│     this.orderRepo.save(order)                                     │
+│     response = PlaceOrderResponse(orderId: order.id.value, ...)    │
+│     this.presenter.presentSuccess(response)                        │
+│                                                                     │
+│ RUN TESTS → PASSES                                                 │
+└─────────────────────────────────────────────────────────────────────┘
+
+Step 3: REFACTOR - Add Validation and Error Handling
+┌─────────────────────────────────────────────────────────────────────┐
+│ class PlaceOrderInteractor implements PlaceOrderInputBoundary       │
+│   execute(request)                                                 │
+│     // Validate input                                               │
+│     validation = this.validate(request)                            │
+│     if (validation.hasErrors())                                    │
+│       this.presenter.presentValidationError(validation.errors)     │
+│       return                                                        │
+│                                                                     │
+│     // Load customer                                                │
+│     customer = this.customerRepo.findById(request.customerId)      │
+│     if (customer == null)                                          │
+│       this.presenter.presentNotFound("Customer not found")         │
+│       return                                                        │
+│                                                                     │
+│     // Create and persist order                                     │
+│     items = request.items.map(i => OrderItem.create(...))          │
+│     order = Order.create(customer.id, items)                       │
+│     this.orderRepo.save(order)                                     │
+│                                                                     │
+│     // Present success                                              │
+│     response = this.buildResponse(order)                           │
+│     this.presenter.presentSuccess(response)                        │
+│                                                                     │
+│ RUN TESTS → STILL PASSES (add more tests for new paths)            │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### D. TDD Rules for Clean Architecture
+
+```
+TDD RULES:
+
+1. Test from the Inside Out
+   ┌─────────────────────────────────────────────────────────────────┐
+   │ Order of TDD:                                                   │
+   │   1. Entities FIRST (pure business rules)                       │
+   │   2. Use Cases SECOND (orchestration)                           │
+   │   3. Adapters THIRD (infrastructure)                            │
+   │                                                                 │
+   │ This ensures inner layers are stable before outer layers        │
+   │ depend on them                                                  │
+   └─────────────────────────────────────────────────────────────────┘
+
+2. Test Boundaries, Not Implementations
+   ┌─────────────────────────────────────────────────────────────────┐
+   │ ✅ CORRECT: Test through boundaries                             │
+   │    - Test entity behavior through public methods                │
+   │    - Test use cases through input boundary                      │
+   │    - Test adapters through interface contracts                  │
+   │                                                                 │
+   │ ❌ WRONG: Test internal implementation                          │
+   │    - Don't test private methods directly                        │
+   │    - Don't verify internal state changes                        │
+   └─────────────────────────────────────────────────────────────────┘
+
+3. Mock at Layer Boundaries Only
+   ┌─────────────────────────────────────────────────────────────────┐
+   │ Entity Tests:   NO mocks (pure business logic)                  │
+   │ Use Case Tests: Mock repositories, gateways (outer interfaces)  │
+   │ Adapter Tests:  Mock use cases OR use real infrastructure       │
+   └─────────────────────────────────────────────────────────────────┘
+
+4. Every Layer Has Its Own Test Suite
+   ┌─────────────────────────────────────────────────────────────────┐
+   │ tests/                                                          │
+   │ ├── unit/                                                       │
+   │ │   ├── domain/          # Entity tests (fast, pure)           │
+   │ │   └── application/     # Use case tests (fast, mocked)       │
+   │ ├── integration/                                                │
+   │ │   └── adapters/        # Adapter tests (slower, real infra)  │
+   │ └── e2e/                 # Full system tests (slowest)         │
+   └─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing. This prevents the same bug from recurring.**
+
+### A. Bug Fix Workflow
+
+```
+BUG FIX WORKFLOW:
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                                                                     │
+│  1. Bug Reported/Discovered                                         │
+│     │                                                               │
+│     ▼                                                               │
+│  2. Identify the Layer                                              │
+│     │  - Is it a business rule bug? → Entity layer                 │
+│     │  - Is it an orchestration bug? → Use Case layer              │
+│     │  - Is it a mapping/integration bug? → Adapter layer          │
+│     │                                                               │
+│     ▼                                                               │
+│  3. Write Regression Test that REPRODUCES the Bug                   │
+│     │  - Test MUST FAIL initially                                  │
+│     │  - Test should clearly demonstrate the bug                   │
+│     │                                                               │
+│     ▼                                                               │
+│  4. Verify Test Fails for the RIGHT Reason                          │
+│     │  - Error message should match bug description                │
+│     │  - Test should fail consistently                             │
+│     │                                                               │
+│     ▼                                                               │
+│  5. Fix the Bug in the Appropriate Layer                            │
+│     │  - Respect the Dependency Rule                               │
+│     │  - Don't introduce new violations                            │
+│     │                                                               │
+│     ▼                                                               │
+│  6. Verify Test Now PASSES                                          │
+│     │  - Run ALL tests to ensure no regressions                    │
+│     │                                                               │
+│     ▼                                                               │
+│  7. Document Bug in Test Comments                                   │
+│     │  - Include bug ID/ticket number                              │
+│     │  - Describe the root cause                                   │
+│     │                                                               │
+│     ▼                                                               │
+│  8. Deploy with Confidence                                          │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### B. Bug Fix Example: Entity Layer Bug
+
+```
+BUG FIX EXAMPLE - ENTITY LAYER:
+
+Bug Report #1234:
+  "Order total calculation is incorrect when items have
+   different currencies. System should reject mixed currencies."
+
+Step 1: Identify Layer
+  → Business rule violation → Entity layer bug
+
+Step 2-3: Write Regression Test
+┌─────────────────────────────────────────────────────────────────────┐
+│ describe Order                                                      │
+│   describe Bug #1234: Mixed currency handling                      │
+│     it rejects items with different currencies                     │
+│       // Arrange                                                    │
+│       itemUSD = OrderItem.create(productId, 2, Money.USD(100))     │
+│       itemEUR = OrderItem.create(productId, 1, Money.EUR(50))      │
+│       mixedItems = [itemUSD, itemEUR]                              │
+│                                                                     │
+│       // Act & Assert                                               │
+│       expect(() => Order.create(customerId, mixedItems))           │
+│         .toThrow(MixedCurrencyError)                               │
+│                                                                     │
+│ RUN TESTS → FAILS (Order accepts mixed currencies)                 │
+└─────────────────────────────────────────────────────────────────────┘
+
+Step 4: Verify Failure Reason
+  - Test fails because Order.create does NOT throw
+  - Bug confirmed: mixed currencies are incorrectly accepted
+
+Step 5: Fix the Bug
+┌─────────────────────────────────────────────────────────────────────┐
+│ class Order                                                         │
+│   static create(customerId, items)                                 │
+│     this.validateNotEmpty(items)                                   │
+│     this.validateSameCurrency(items)  // ← NEW: Fix for bug #1234  │
+│     return new Order(customerId, items)                            │
+│                                                                     │
+│   private static validateSameCurrency(items)                       │
+│     currencies = items.map(i => i.price.currency).unique()         │
+│     if (currencies.length > 1)                                     │
+│       throw new MixedCurrencyError(                                │
+│         "All items must have the same currency"                    │
+│       )                                                             │
+│                                                                     │
+│ RUN TESTS → PASSES                                                 │
+└─────────────────────────────────────────────────────────────────────┘
+
+Step 6-7: Verify and Document
+┌─────────────────────────────────────────────────────────────────────┐
+│ // Bug #1234: Mixed currency handling                               │
+│ // Root cause: Order.create did not validate currency consistency  │
+│ // Fix: Added validateSameCurrency check in Order.create           │
+│ // This test prevents regression of the mixed currency bug         │
+│                                                                     │
+│ RUN ALL TESTS → ALL PASS                                           │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### C. Bug Fix Example: Use Case Layer Bug
+
+```
+BUG FIX EXAMPLE - USE CASE LAYER:
+
+Bug Report #1235:
+  "Orders are saved even when payment fails. System should
+   NOT persist order if payment processing fails."
+
+Step 1: Identify Layer
+  → Orchestration logic bug → Use Case layer bug
+
+Step 2-3: Write Regression Test
+┌─────────────────────────────────────────────────────────────────────┐
+│ describe PlaceOrderUseCase                                          │
+│   describe Bug #1235: Order saved despite payment failure          │
+│     it does NOT save order when payment fails                      │
+│       // Arrange                                                    │
+│       mockPaymentGateway.processPayment.returns(                   │
+│         PaymentResult.failure("Card declined")                     │
+│       )                                                             │
+│                                                                     │
+│       // Act                                                        │
+│       useCase.execute(validRequest)                                │
+│                                                                     │
+│       // Assert                                                     │
+│       expect(mockOrderRepo.save).NOT.toHaveBeenCalled()            │
+│       expect(mockPresenter.presentError).toHaveBeenCalledWith(     │
+│         ErrorResponse("Payment failed: Card declined")             │
+│       )                                                             │
+│                                                                     │
+│ RUN TESTS → FAILS (orderRepo.save WAS called)                      │
+└─────────────────────────────────────────────────────────────────────┘
+
+Step 4-5: Fix the Bug
+┌─────────────────────────────────────────────────────────────────────┐
+│ class PlaceOrderInteractor                                          │
+│   execute(request)                                                 │
+│     // ... validation and customer loading ...                     │
+│                                                                     │
+│     order = Order.create(customer.id, items)                       │
+│                                                                     │
+│     // Process payment BEFORE saving order (Fix for bug #1235)     │
+│     paymentResult = this.paymentGateway.processPayment(            │
+│       customer.paymentMethod, order.totalAmount                    │
+│     )                                                               │
+│                                                                     │
+│     if (!paymentResult.success)                                    │
+│       this.presenter.presentError(                                 │
+│         ErrorResponse("Payment failed: " + paymentResult.message)  │
+│       )                                                             │
+│       return  // ← Do NOT save order on payment failure            │
+│                                                                     │
+│     // Only save order after successful payment                     │
+│     order.submit()                                                 │
+│     this.orderRepo.save(order)                                     │
+│     this.presenter.presentSuccess(response)                        │
+│                                                                     │
+│ RUN TESTS → PASSES                                                 │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### D. Bug Fix Example: Adapter Layer Bug
+
+```
+BUG FIX EXAMPLE - ADAPTER LAYER:
+
+Bug Report #1236:
+  "Order status shows as 'SUBMITTED' in API response but
+   database stores 'submitted' (lowercase). Causes lookup failures."
+
+Step 1: Identify Layer
+  → Data mapping bug → Adapter layer bug
+
+Step 2-3: Write Regression Test
+┌─────────────────────────────────────────────────────────────────────┐
+│ describe SqlOrderRepository                                         │
+│   describe Bug #1236: Status case mismatch                         │
+│     it persists status in uppercase format                         │
+│       // Arrange                                                    │
+│       order = Order.create(customerId, items)                      │
+│       order.submit()  // status = OrderStatus.SUBMITTED            │
+│                                                                     │
+│       // Act                                                        │
+│       repository.save(order)                                       │
+│       row = database.query("SELECT status FROM orders WHERE id=?") │
+│                                                                     │
+│       // Assert                                                     │
+│       expect(row.status).toBe("SUBMITTED")  // uppercase           │
+│                                                                     │
+│ RUN TESTS → FAILS (status is 'submitted' lowercase)                │
+└─────────────────────────────────────────────────────────────────────┘
+
+Step 4-5: Fix the Bug
+┌─────────────────────────────────────────────────────────────────────┐
+│ class SqlOrderRepository implements OrderRepository                 │
+│   private toRow(order)                                             │
+│     return {                                                        │
+│       id: order.id.value,                                          │
+│       customer_id: order.customerId.value,                         │
+│       status: order.status.name.toUpperCase(),  // ← Fix #1236    │
+│       total: order.totalAmount.value,                              │
+│       // ...                                                        │
+│     }                                                               │
+│                                                                     │
+│   private toEntity(row)                                            │
+│     return Order.reconstitute({                                    │
+│       id: OrderId.from(row.id),                                    │
+│       customerId: CustomerId.from(row.customer_id),                │
+│       status: OrderStatus.fromString(row.status),  // handles case │
+│       // ...                                                        │
+│     })                                                              │
+│                                                                     │
+│ RUN TESTS → PASSES                                                 │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### E. Bug Fix Rules for Clean Architecture
+
+```
+BUG FIX RULES:
+
+1. Always Identify the Correct Layer
+   ┌─────────────────────────────────────────────────────────────────┐
+   │ Bug Type                    │ Layer to Fix                      │
+   ├─────────────────────────────────────────────────────────────────┤
+   │ Business rule incorrect     │ Entity                            │
+   │ Validation missing          │ Entity (if business rule)         │
+   │                             │ Use Case (if application rule)    │
+   │ Workflow/orchestration      │ Use Case                          │
+   │ Data mapping/conversion     │ Adapter                           │
+   │ Integration/infrastructure  │ Adapter or Framework              │
+   └─────────────────────────────────────────────────────────────────┘
+
+2. Never Fix Across Layer Boundaries
+   ┌─────────────────────────────────────────────────────────────────┐
+   │ ❌ WRONG: Fix entity bug in controller                         │
+   │    Controller adding validation that belongs in entity         │
+   │                                                                 │
+   │ ✅ CORRECT: Fix bug in the appropriate layer                   │
+   │    Entity validation stays in entity                           │
+   │    Controller only calls entity methods                        │
+   └─────────────────────────────────────────────────────────────────┘
+
+3. Test at the Same Layer as the Fix
+   ┌─────────────────────────────────────────────────────────────────┐
+   │ Entity bug    → Unit test in entity test suite                 │
+   │ Use case bug  → Unit test with mocks in use case test suite    │
+   │ Adapter bug   → Integration test in adapter test suite         │
+   └─────────────────────────────────────────────────────────────────┘
+
+4. Document the Dependency Rule Impact
+   ┌─────────────────────────────────────────────────────────────────┐
+   │ When fixing bugs, verify:                                       │
+   │   □ Fix does not introduce new outer→inner dependencies        │
+   │   □ Fix does not leak framework types into inner layers        │
+   │   □ Fix maintains testability of the layer                     │
+   │   □ All existing tests still pass                               │
+   └─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## 3. The Concentric Layers (MANDATORY)
 
 ### A. Layer Overview
@@ -1545,6 +2061,218 @@ When to Use Hexagonal Architecture:
 
 > "The architecture should scream the intent of the system."
 > — Robert C. Martin
+
+---
+
+## 14. Quick Reference
+
+### A. Common Patterns by Layer
+
+```
+QUICK REFERENCE - PATTERNS BY LAYER:
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ LAYER            │ PATTERNS                │ TESTING               │
+├─────────────────────────────────────────────────────────────────────┤
+│ Entities         │ Entity, Value Object,   │ Unit tests,           │
+│                  │ Domain Event, Factory,  │ No mocks              │
+│                  │ Aggregate Root          │                       │
+├─────────────────────────────────────────────────────────────────────┤
+│ Use Cases        │ Interactor,             │ Unit tests,           │
+│                  │ Input/Output Boundary,  │ Mock dependencies     │
+│                  │ Request/Response DTO    │                       │
+├─────────────────────────────────────────────────────────────────────┤
+│ Adapters         │ Controller, Presenter,  │ Integration tests,    │
+│                  │ Repository Impl,        │ Real/test infra       │
+│                  │ Gateway Impl, Mapper    │                       │
+├─────────────────────────────────────────────────────────────────────┤
+│ Frameworks       │ Dependency Injection,   │ E2E tests,            │
+│                  │ Configuration, Routes,  │ Full system           │
+│                  │ ORM Setup, Server       │                       │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### B. Dependency Rule Quick Check
+
+```
+DEPENDENCY RULE - QUICK CHECK:
+
+Allowed Imports:
+  Frameworks    → can import from → Adapters, Use Cases, Entities
+  Adapters      → can import from → Use Cases, Entities
+  Use Cases     → can import from → Entities
+  Entities      → can import from → NOTHING (zero dependencies)
+
+Forbidden Imports:
+  Entities      → CANNOT import → Use Cases, Adapters, Frameworks
+  Use Cases     → CANNOT import → Adapters, Frameworks
+  Adapters      → CANNOT import → Frameworks (implementation details)
+
+Visual Check:
+  ✅ Inner layer importing inner layer = OK
+  ❌ Inner layer importing outer layer = VIOLATION
+```
+
+### C. Layer Responsibilities Cheat Sheet
+
+```
+LAYER RESPONSIBILITIES:
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ ENTITIES (Enterprise Business Rules)                                │
+│   ✅ DO: Encapsulate critical business rules                       │
+│   ✅ DO: Enforce invariants                                        │
+│   ✅ DO: Contain domain logic                                      │
+│   ❌ DON'T: Import frameworks, databases, or external services     │
+│   ❌ DON'T: Know about use cases or presentation                   │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ USE CASES (Application Business Rules)                              │
+│   ✅ DO: Orchestrate entity operations                             │
+│   ✅ DO: Define input/output boundaries                            │
+│   ✅ DO: Implement application-specific rules                      │
+│   ❌ DON'T: Contain presentation logic                             │
+│   ❌ DON'T: Depend on specific frameworks or databases             │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ ADAPTERS (Interface Adapters)                                       │
+│   ✅ DO: Convert data between layers                               │
+│   ✅ DO: Implement repository/gateway interfaces                   │
+│   ✅ DO: Handle external format conversion                         │
+│   ❌ DON'T: Contain business logic                                 │
+│   ❌ DON'T: Make business decisions                                │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ FRAMEWORKS (Frameworks & Drivers)                                   │
+│   ✅ DO: Configure and wire dependencies                           │
+│   ✅ DO: Setup infrastructure (web, database, etc.)                │
+│   ✅ DO: Contain framework-specific code                           │
+│   ❌ DON'T: Leak into inner layers                                 │
+│   ❌ DON'T: Contain any business logic                             │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### D. TDD Quick Reference
+
+```
+TDD QUICK REFERENCE:
+
+Red-Green-Refactor Cycle:
+  1. RED    → Write failing test FIRST
+  2. GREEN  → Write minimal code to pass
+  3. REFACTOR → Improve code, keep tests green
+
+TDD by Layer:
+  Entities:   Test business rules → Implement entity → Refactor
+  Use Cases:  Test orchestration → Implement interactor → Refactor
+  Adapters:   Test integration → Implement adapter → Refactor
+
+Bug Fix Protocol:
+  1. Write test that reproduces bug (MUST FAIL)
+  2. Verify test fails for right reason
+  3. Fix the bug
+  4. Verify test passes
+  5. Run ALL tests (no regressions)
+  6. Document bug ID in test comment
+```
+
+### E. Directory Structure Quick Reference
+
+```
+STANDARD CLEAN ARCHITECTURE LAYOUT:
+
+project/
+├── src/
+│   ├── domain/              # ENTITIES
+│   │   ├── entities/        # Business objects
+│   │   ├── value-objects/   # Immutable values
+│   │   ├── services/        # Domain services
+│   │   └── events/          # Domain events
+│   │
+│   ├── application/         # USE CASES
+│   │   ├── use-cases/       # Interactors
+│   │   ├── boundaries/      # Input/Output interfaces
+│   │   ├── dto/             # Data transfer objects
+│   │   └── interfaces/      # Repository/Gateway interfaces
+│   │
+│   ├── adapters/            # INTERFACE ADAPTERS
+│   │   ├── controllers/     # HTTP, CLI, GraphQL
+│   │   ├── presenters/      # Output formatters
+│   │   ├── gateways/        # External service impls
+│   │   └── persistence/     # Repository impls
+│   │
+│   └── infrastructure/      # FRAMEWORKS & DRIVERS
+│       ├── web/             # Web framework
+│       ├── database/        # Database setup
+│       └── config/          # DI, environment
+│
+└── tests/
+    ├── unit/
+    │   ├── domain/          # Entity tests (no mocks)
+    │   └── application/     # Use case tests (mocked)
+    ├── integration/
+    │   └── adapters/        # Adapter tests (real infra)
+    └── e2e/                 # End-to-end tests
+```
+
+### F. Common Commands
+
+```bash
+# Verify dependency rule (example using dependency analysis tools)
+# Check that inner layers don't import from outer layers
+dependency-check --rule "domain -> (nothing)"
+dependency-check --rule "application -> domain"
+dependency-check --rule "adapters -> application, domain"
+
+# Run tests by layer
+test-runner --path tests/unit/domain       # Entity tests (fast)
+test-runner --path tests/unit/application  # Use case tests (fast)
+test-runner --path tests/integration       # Adapter tests (slower)
+test-runner --path tests/e2e               # E2E tests (slowest)
+
+# Run all tests
+test-runner --all
+
+# Generate architecture documentation
+arch-doc --format diagram --output docs/architecture.png
+```
+
+### G. Code Review Checklist
+
+```
+CLEAN ARCHITECTURE CODE REVIEW CHECKLIST:
+
+□ DEPENDENCY RULE
+  □ Entities have zero external imports
+  □ Use cases only import entities
+  □ No framework types in business logic
+  □ Interfaces defined in inner layers
+
+□ LAYER SEPARATION
+  □ Business logic in entities, not adapters
+  □ Controllers are thin (no logic)
+  □ Presenters only format output
+  □ Repositories only handle persistence
+
+□ TDD COMPLIANCE
+  □ Tests exist for new functionality
+  □ Bug fixes include regression tests
+  □ Entity tests have no mocks
+  □ Use case tests mock only outer interfaces
+
+□ TESTABILITY
+  □ Dependencies injected (not instantiated)
+  □ Interfaces used for external dependencies
+  □ Each layer testable in isolation
+
+□ ARCHITECTURE SCREAMS
+  □ Structure reveals domain concepts
+  □ Use cases clearly visible
+  □ Feature organization preferred over type organization
+```
 
 ---
 

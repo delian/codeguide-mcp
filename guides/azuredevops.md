@@ -725,6 +725,653 @@ steps:
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new pipeline and infrastructure code.**
+
+### TDD Cycle
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    TDD CYCLE FOR AZURE DEVOPS               │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│    ┌───────────┐                                            │
+│    │   RED     │  1. Write failing test/validation          │
+│    │  (FAIL)   │     - Define expected pipeline behavior    │
+│    └─────┬─────┘     - Create test that verifies output     │
+│          │                                                  │
+│          ▼                                                  │
+│    ┌───────────┐                                            │
+│    │  GREEN    │  2. Write minimal code to pass             │
+│    │  (PASS)   │     - Implement pipeline/template          │
+│    └─────┬─────┘     - Make validation succeed              │
+│          │                                                  │
+│          ▼                                                  │
+│    ┌───────────┐                                            │
+│    │ REFACTOR  │  3. Improve while keeping tests green      │
+│    │ (IMPROVE) │     - Optimize pipeline performance        │
+│    └─────┬─────┘     - Extract reusable templates           │
+│          │                                                  │
+│          └──────────────► Repeat                            │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Example TDD Workflow for Azure DevOps Pipelines
+
+**Step 1: RED - Define Expected Behavior First**
+
+```yaml
+# tests/pipeline-validation.yml - Test template for pipeline validation
+# Write this BEFORE implementing the actual pipeline
+
+parameters:
+  - name: pipelinePath
+    type: string
+  - name: expectedStages
+    type: object
+    default: ['Build', 'Test', 'Deploy']
+  - name: expectedJobs
+    type: object
+    default: []
+
+steps:
+  # Test 1: Verify pipeline YAML is valid
+  - task: PowerShell@2
+    displayName: 'RED: Validate pipeline syntax'
+    inputs:
+      targetType: 'inline'
+      script: |
+        # This test will FAIL until we create the pipeline
+        $pipelinePath = "${{ parameters.pipelinePath }}"
+
+        if (-not (Test-Path $pipelinePath)) {
+          Write-Error "❌ Pipeline file not found: $pipelinePath"
+          exit 1
+        }
+
+        # Validate YAML syntax
+        try {
+          $yaml = ConvertFrom-Yaml (Get-Content $pipelinePath -Raw)
+          Write-Host "✓ YAML syntax valid"
+        } catch {
+          Write-Error "❌ Invalid YAML syntax: $_"
+          exit 1
+        }
+
+  # Test 2: Verify required stages exist
+  - task: PowerShell@2
+    displayName: 'RED: Verify required stages'
+    inputs:
+      targetType: 'inline'
+      script: |
+        $yaml = ConvertFrom-Yaml (Get-Content "${{ parameters.pipelinePath }}" -Raw)
+        $expectedStages = @(${{ join(',', parameters.expectedStages) }})
+
+        $actualStages = $yaml.stages | ForEach-Object { $_.stage }
+
+        foreach ($stage in $expectedStages) {
+          if ($actualStages -notcontains $stage) {
+            Write-Error "❌ Missing required stage: $stage"
+            exit 1
+          }
+        }
+        Write-Host "✓ All required stages present"
+
+  # Test 3: Verify test stage runs before deploy
+  - task: PowerShell@2
+    displayName: 'RED: Verify stage order'
+    inputs:
+      targetType: 'inline'
+      script: |
+        $yaml = ConvertFrom-Yaml (Get-Content "${{ parameters.pipelinePath }}" -Raw)
+
+        $testIndex = -1
+        $deployIndex = -1
+        $index = 0
+
+        foreach ($stage in $yaml.stages) {
+          if ($stage.stage -eq 'Test') { $testIndex = $index }
+          if ($stage.stage -match 'Deploy') { $deployIndex = $index }
+          $index++
+        }
+
+        if ($deployIndex -lt $testIndex) {
+          Write-Error "❌ Deploy stage must come AFTER Test stage"
+          exit 1
+        }
+        Write-Host "✓ Stage order correct: Test before Deploy"
+```
+
+**Step 2: GREEN - Implement Pipeline to Pass Tests**
+
+```yaml
+# azure-pipelines.yml - Implement to make tests pass
+# Created AFTER writing the validation tests
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+
+stages:
+  # Stage 1: Build (required by test)
+  - stage: Build
+    displayName: 'Build Application'
+    jobs:
+      - job: BuildJob
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: DotNetCoreCLI@2
+            displayName: 'Build'
+            inputs:
+              command: 'build'
+
+  # Stage 2: Test (required by test, must come before Deploy)
+  - stage: Test
+    displayName: 'Run Tests'
+    dependsOn: Build
+    jobs:
+      - job: TestJob
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: DotNetCoreCLI@2
+            displayName: 'Run Tests'
+            inputs:
+              command: 'test'
+
+  # Stage 3: Deploy (required by test, must come after Test)
+  - stage: Deploy
+    displayName: 'Deploy Application'
+    dependsOn: Test
+    jobs:
+      - deployment: DeployJob
+        environment: 'production'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - script: echo "Deploying..."
+```
+
+**Step 3: REFACTOR - Extract Reusable Templates**
+
+```yaml
+# templates/validated-pipeline.yml - Refactored reusable template
+# Extracted after tests pass, tests still validate behavior
+
+parameters:
+  - name: buildConfiguration
+    type: string
+    default: 'Release'
+  - name: deployEnvironments
+    type: object
+    default:
+      - name: 'dev'
+        requires: []
+      - name: 'staging'
+        requires: ['dev']
+      - name: 'production'
+        requires: ['staging']
+
+stages:
+  - stage: Build
+    displayName: 'Build Application'
+    jobs:
+      - template: jobs/build-job.yml
+        parameters:
+          configuration: ${{ parameters.buildConfiguration }}
+
+  - stage: Test
+    displayName: 'Run Tests'
+    dependsOn: Build
+    jobs:
+      - template: jobs/test-job.yml
+
+  - ${{ each env in parameters.deployEnvironments }}:
+    - stage: Deploy_${{ env.name }}
+      displayName: 'Deploy to ${{ env.name }}'
+      dependsOn:
+        - Test
+        - ${{ each req in env.requires }}:
+          - Deploy_${{ req }}
+      jobs:
+        - template: jobs/deploy-job.yml
+          parameters:
+            environment: ${{ env.name }}
+```
+
+### Visual TDD Workflow Example
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     TDD PIPELINE DEVELOPMENT FLOW                       │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  ╔═══════════════════════════════════════════════════════════════════╗  │
+│  ║ STEP 1: RED - Write Validation Test First                        ║  │
+│  ╠═══════════════════════════════════════════════════════════════════╣  │
+│  ║                                                                   ║  │
+│  ║  tests/validate-pipeline.ps1:                                     ║  │
+│  ║  ┌─────────────────────────────────────────────────────────────┐  ║  │
+│  ║  │ # Expected: Pipeline has 'Build', 'Test', 'Deploy' stages   │  ║  │
+│  ║  │ # Expected: Test stage depends on Build                     │  ║  │
+│  ║  │ # Expected: Deploy stage depends on Test                    │  ║  │
+│  ║  │ # Expected: Security scan runs before deployment            │  ║  │
+│  ║  └─────────────────────────────────────────────────────────────┘  ║  │
+│  ║                                                                   ║  │
+│  ║  Run: ./tests/validate-pipeline.ps1                               ║  │
+│  ║  Result: ❌ FAILS - Pipeline does not exist yet                   ║  │
+│  ╚═══════════════════════════════════════════════════════════════════╝  │
+│                              │                                          │
+│                              ▼                                          │
+│  ╔═══════════════════════════════════════════════════════════════════╗  │
+│  ║ STEP 2: GREEN - Create Pipeline to Pass Tests                    ║  │
+│  ╠═══════════════════════════════════════════════════════════════════╣  │
+│  ║                                                                   ║  │
+│  ║  azure-pipelines.yml:                                             ║  │
+│  ║  ┌─────────────────────────────────────────────────────────────┐  ║  │
+│  ║  │ stages:                                                     │  ║  │
+│  ║  │   - stage: Build                                            │  ║  │
+│  ║  │   - stage: Test                                             │  ║  │
+│  ║  │     dependsOn: Build                                        │  ║  │
+│  ║  │   - stage: SecurityScan                                     │  ║  │
+│  ║  │     dependsOn: Test                                         │  ║  │
+│  ║  │   - stage: Deploy                                           │  ║  │
+│  ║  │     dependsOn: SecurityScan                                 │  ║  │
+│  ║  └─────────────────────────────────────────────────────────────┘  ║  │
+│  ║                                                                   ║  │
+│  ║  Run: ./tests/validate-pipeline.ps1                               ║  │
+│  ║  Result: ✓ PASSES - All validations successful                    ║  │
+│  ╚═══════════════════════════════════════════════════════════════════╝  │
+│                              │                                          │
+│                              ▼                                          │
+│  ╔═══════════════════════════════════════════════════════════════════╗  │
+│  ║ STEP 3: REFACTOR - Improve While Tests Stay Green                ║  │
+│  ╠═══════════════════════════════════════════════════════════════════╣  │
+│  ║                                                                   ║  │
+│  ║  Improvements made:                                               ║  │
+│  ║  • Extract stage templates for reuse                              ║  │
+│  ║  • Add caching for faster builds                                  ║  │
+│  ║  • Parallelize independent jobs                                   ║  │
+│  ║  • Add conditional deployment logic                               ║  │
+│  ║                                                                   ║  │
+│  ║  Run: ./tests/validate-pipeline.ps1                               ║  │
+│  ║  Result: ✓ PASSES - Refactoring didn't break behavior             ║  │
+│  ╚═══════════════════════════════════════════════════════════════════╝  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### TDD for Pipeline Templates
+
+```yaml
+# templates/tdd-pipeline-test.yml - Meta-template for testing pipelines
+
+parameters:
+  - name: targetPipeline
+    type: string
+  - name: testCases
+    type: object
+
+jobs:
+  - job: ValidatePipeline
+    displayName: 'TDD: Validate Pipeline Structure'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+      - checkout: self
+
+      # RED/GREEN: Run each test case
+      - ${{ each test in parameters.testCases }}:
+        - task: PowerShell@2
+          displayName: 'Test: ${{ test.name }}'
+          inputs:
+            targetType: 'inline'
+            script: |
+              $pipeline = Get-Content "${{ parameters.targetPipeline }}" -Raw
+              $yaml = ConvertFrom-Yaml $pipeline
+
+              # Execute test assertion
+              $result = ${{ test.assertion }}
+
+              if (-not $result) {
+                Write-Error "❌ ${{ test.name }}: ${{ test.errorMessage }}"
+                exit 1
+              }
+              Write-Host "✓ ${{ test.name }}"
+
+      # Verify all tests passed
+      - task: PowerShell@2
+        displayName: 'TDD: All tests passed'
+        inputs:
+          targetType: 'inline'
+          script: |
+            Write-Host "✓ All TDD validations passed for ${{ parameters.targetPipeline }}"
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every pipeline bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    BUG FIX WORKFLOW FOR AZURE DEVOPS                    │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  ┌─────────────────┐                                                    │
+│  │  1. BUG         │  Bug reported: Pipeline fails intermittently       │
+│  │  REPORTED       │  Work Item: AB#12345                               │
+│  └────────┬────────┘                                                    │
+│           │                                                             │
+│           ▼                                                             │
+│  ┌─────────────────┐                                                    │
+│  │  2. REPRODUCE   │  Write test that reproduces the bug                │
+│  │  (Write Test)   │  Test MUST fail with current code                  │
+│  └────────┬────────┘                                                    │
+│           │                                                             │
+│           ▼                                                             │
+│  ┌─────────────────┐                                                    │
+│  │  3. VERIFY      │  Confirm test fails for the right reason           │
+│  │  FAILURE        │  Document failure in test comments                 │
+│  └────────┬────────┘                                                    │
+│           │                                                             │
+│           ▼                                                             │
+│  ┌─────────────────┐                                                    │
+│  │  4. FIX BUG     │  Implement the fix                                 │
+│  │  (Code Change)  │  Keep changes minimal and focused                  │
+│  └────────┬────────┘                                                    │
+│           │                                                             │
+│           ▼                                                             │
+│  ┌─────────────────┐                                                    │
+│  │  5. VERIFY      │  Run regression test - MUST pass now               │
+│  │  PASS           │  Run all other tests - no regressions              │
+│  └────────┬────────┘                                                    │
+│           │                                                             │
+│           ▼                                                             │
+│  ┌─────────────────┐                                                    │
+│  │  6. DOCUMENT    │  Add bug ID to test comments                       │
+│  │  & LINK         │  Link commit to work item AB#12345                 │
+│  └────────┬────────┘                                                    │
+│           │                                                             │
+│           ▼                                                             │
+│  ┌─────────────────┐                                                    │
+│  │  7. DEPLOY      │  Deploy with confidence                            │
+│  │  SAFELY         │  Regression is permanently prevented               │
+│  └─────────────────┘                                                    │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Example Bug Fix with Regression Test
+
+**Bug Report AB#12345**: Pipeline deployment fails when artifact name contains spaces
+
+```yaml
+# templates/regression-tests/ab-12345-artifact-spaces.yml
+# Bug #AB12345: Pipeline fails when artifact name contains spaces
+#
+# Root Cause: Artifact path not properly quoted in deployment step
+# Fix: Add quotes around artifact path in deploy-steps.yml
+# Regression Test: Verify pipeline handles artifact names with spaces
+
+parameters:
+  - name: artifactName
+    type: string
+    default: 'My Application Build'  # Contains spaces - triggers bug
+
+steps:
+  # Step 1-2: Regression test that reproduces the bug
+  - task: PowerShell@2
+    displayName: 'Regression Test AB#12345: Artifact names with spaces'
+    inputs:
+      targetType: 'inline'
+      script: |
+        # Bug #AB12345: Artifact path with spaces caused deployment failure
+        # This test verifies the fix works correctly
+
+        $artifactName = "${{ parameters.artifactName }}"
+        Write-Host "Testing artifact name: '$artifactName'"
+
+        # Simulate artifact path construction (the buggy behavior)
+        $artifactPath = "$(Pipeline.Workspace)/$artifactName/drop"
+
+        # BEFORE FIX: This would fail because path wasn't quoted
+        # AFTER FIX: This succeeds because path is properly handled
+
+        # Test 1: Verify path can be constructed
+        if ($artifactName -match '\s' -and $artifactPath -notmatch '"') {
+          # Verify our template properly quotes the path
+          $templateContent = Get-Content "templates/deploy-steps.yml" -Raw
+
+          if ($templateContent -notmatch '\$\(Pipeline\.Workspace\)/.*\$\{\{.*\}\}.*' -or
+              $templateContent -notmatch 'quote|"') {
+            Write-Warning "Path may not be properly quoted"
+          }
+        }
+
+        # Test 2: Verify artifact handling works
+        try {
+          # Create test directory with spaces
+          $testDir = Join-Path $env:TEMP $artifactName
+          New-Item -ItemType Directory -Path $testDir -Force | Out-Null
+
+          # Verify we can work with it
+          $resolved = Resolve-Path $testDir
+          Write-Host "✓ Successfully resolved path with spaces: $resolved"
+
+          # Cleanup
+          Remove-Item $testDir -Force
+
+          Write-Host "✓ Regression test AB#12345 PASSED"
+        } catch {
+          Write-Error "❌ Regression test AB#12345 FAILED: $_"
+          exit 1
+        }
+```
+
+**The Fix (with work item link):**
+
+```yaml
+# templates/deploy-steps.yml - Fixed version
+# Fix for AB#12345: Properly quote artifact paths
+
+parameters:
+  - name: artifactName
+    type: string
+  - name: environment
+    type: string
+
+steps:
+  - download: current
+    artifact: ${{ parameters.artifactName }}
+    displayName: 'Download artifact: ${{ parameters.artifactName }}'
+
+  # FIXED: AB#12345 - Quote the path to handle spaces in artifact names
+  - task: AzureWebApp@1
+    displayName: 'Deploy to ${{ parameters.environment }}'
+    inputs:
+      azureSubscription: 'Azure-Service-Connection'
+      appName: 'myapp-${{ parameters.environment }}'
+      # BEFORE (buggy): package: $(Pipeline.Workspace)/${{ parameters.artifactName }}/**/*.zip
+      # AFTER (fixed): Properly quoted path
+      package: '"$(Pipeline.Workspace)/${{ parameters.artifactName }}/**/*.zip"'
+```
+
+### Regression Test Pipeline Integration
+
+```yaml
+# azure-pipelines-regression.yml - Run regression tests on every PR
+
+trigger: none
+
+pr:
+  branches:
+    include:
+      - main
+      - develop
+
+stages:
+  - stage: RegressionTests
+    displayName: 'Run Regression Tests'
+    jobs:
+      - job: RunRegressionTests
+        displayName: 'Execute All Regression Tests'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - checkout: self
+
+          # Discover and run all regression tests
+          - task: PowerShell@2
+            displayName: 'Run all regression tests'
+            inputs:
+              targetType: 'inline'
+              script: |
+                $regressionTests = Get-ChildItem -Path "templates/regression-tests" -Filter "*.yml" -Recurse
+
+                Write-Host "Found $($regressionTests.Count) regression tests"
+
+                $failed = @()
+                foreach ($test in $regressionTests) {
+                  Write-Host "`n=========================================="
+                  Write-Host "Running: $($test.Name)"
+                  Write-Host "==========================================`n"
+
+                  # Extract bug ID from filename (e.g., ab-12345-description.yml)
+                  if ($test.Name -match 'ab-(\d+)') {
+                    $bugId = $matches[1]
+                    Write-Host "Bug ID: AB#$bugId"
+                  }
+
+                  # Run the test (in real scenario, use Azure DevOps API to run template)
+                  # For now, validate the YAML is valid
+                  try {
+                    $content = Get-Content $test.FullName -Raw
+                    # Validate YAML syntax
+                    $null = ConvertFrom-Yaml $content
+                    Write-Host "✓ $($test.Name) - PASSED"
+                  } catch {
+                    Write-Error "❌ $($test.Name) - FAILED: $_"
+                    $failed += $test.Name
+                  }
+                }
+
+                if ($failed.Count -gt 0) {
+                  Write-Error "`n❌ $($failed.Count) regression test(s) failed:"
+                  $failed | ForEach-Object { Write-Error "  - $_" }
+                  exit 1
+                }
+
+                Write-Host "`n✓ All $($regressionTests.Count) regression tests passed"
+
+          # Verify bug fixes have regression tests
+          - task: PowerShell@2
+            displayName: 'Verify bug fixes include regression tests'
+            env:
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+            inputs:
+              targetType: 'inline'
+              script: |
+                # Get commits in this PR
+                $prId = "$(System.PullRequest.PullRequestId)"
+                $commits = git log --oneline origin/main..HEAD
+
+                foreach ($commit in $commits) {
+                  # Check if commit references a bug
+                  if ($commit -match 'AB#(\d+)' -and $commit -match '(fix|bug|resolve)') {
+                    $bugId = $matches[1]
+
+                    # Verify regression test exists for this bug
+                    $testFile = Get-ChildItem -Path "templates/regression-tests" -Filter "*$bugId*" -Recurse
+
+                    if (-not $testFile) {
+                      Write-Error "❌ Bug fix AB#$bugId missing regression test"
+                      Write-Error "   Create: templates/regression-tests/ab-$bugId-description.yml"
+                      exit 1
+                    }
+
+                    Write-Host "✓ Bug AB#$bugId has regression test: $($testFile.Name)"
+                  }
+                }
+
+                Write-Host "✓ All bug fixes have regression tests"
+```
+
+### Bug Fix Documentation Template
+
+```yaml
+# templates/regression-tests/TEMPLATE.yml
+# Copy this template when creating regression tests for bug fixes
+
+# ============================================================================
+# REGRESSION TEST TEMPLATE
+# ============================================================================
+# Bug ID: AB#[WORK_ITEM_ID]
+# Bug Title: [Brief description of the bug]
+# Reported Date: [YYYY-MM-DD]
+# Fixed Date: [YYYY-MM-DD]
+# Fixed By: [Developer name/email]
+#
+# Root Cause:
+#   [Detailed explanation of what caused the bug]
+#
+# Fix Description:
+#   [What was changed to fix the bug]
+#
+# Files Modified:
+#   - [file1.yml]: [what was changed]
+#   - [file2.yml]: [what was changed]
+#
+# Reproduction Steps (before fix):
+#   1. [Step 1]
+#   2. [Step 2]
+#   3. [Expected vs Actual behavior]
+#
+# Verification Steps (after fix):
+#   1. Run this regression test
+#   2. Verify test passes
+#   3. Verify original issue no longer occurs
+# ============================================================================
+
+parameters:
+  - name: testScenario
+    type: string
+    default: 'default'
+
+steps:
+  - task: PowerShell@2
+    displayName: 'Regression Test AB#[WORK_ITEM_ID]: [Short description]'
+    inputs:
+      targetType: 'inline'
+      script: |
+        # Bug AB#[WORK_ITEM_ID]: [Bug title]
+        # This test ensures the bug does not regress
+
+        Write-Host "Running regression test for AB#[WORK_ITEM_ID]"
+
+        # Test setup
+        # [Setup code here]
+
+        # Test execution - reproduce the scenario that caused the bug
+        # [Test code here]
+
+        # Assertions - verify the bug is fixed
+        # [Assertion code here]
+
+        Write-Host "✓ Regression test AB#[WORK_ITEM_ID] PASSED"
+```
+
+---
+
 ## 3. Branch Policies & Git Integration (MANDATORY)
 
 ### A. Branch Policy Configuration
@@ -1800,6 +2447,602 @@ steps:
 11. **Template Reuse**: Shared templates reduce duplication, improve consistency across pipelines.
 
 12. **Automated Testing**: Every commit is tested, every deployment is verified, quality is never compromised.
+
+---
+
+## 12. Quick Reference
+
+### Common az devops CLI Commands
+
+```bash
+# ============================================================================
+# AZURE DEVOPS CLI QUICK REFERENCE
+# ============================================================================
+
+# ------------------------------
+# AUTHENTICATION & CONFIGURATION
+# ------------------------------
+
+# Login to Azure DevOps
+az devops login --organization https://dev.azure.com/myorg
+
+# Configure defaults
+az devops configure --defaults organization=https://dev.azure.com/myorg project=MyProject
+
+# List configured defaults
+az devops configure --list
+
+# ------------------------------
+# PIPELINES
+# ------------------------------
+
+# List all pipelines
+az pipelines list --output table
+
+# Show pipeline details
+az pipelines show --name "CI-Pipeline" --output yaml
+
+# Run a pipeline
+az pipelines run --name "CI-Pipeline" --branch main
+
+# Run pipeline with variables
+az pipelines run --name "CI-Pipeline" --variables key1=value1 key2=value2
+
+# Run pipeline with parameters
+az pipelines run --name "CI-Pipeline" --parameters "environment=production"
+
+# List pipeline runs
+az pipelines runs list --pipeline-name "CI-Pipeline" --output table
+
+# Show run details
+az pipelines runs show --id 12345
+
+# Cancel a running pipeline
+az pipelines run cancel --run-id 12345
+
+# Create pipeline from YAML
+az pipelines create --name "New-Pipeline" --yaml-path azure-pipelines.yml --repository myrepo --branch main
+
+# Update pipeline
+az pipelines update --name "CI-Pipeline" --yaml-path new-pipeline.yml
+
+# Delete pipeline
+az pipelines delete --name "Old-Pipeline" --yes
+
+# ------------------------------
+# PIPELINE VARIABLES & GROUPS
+# ------------------------------
+
+# List variable groups
+az pipelines variable-group list --output table
+
+# Create variable group
+az pipelines variable-group create --name "build-variables" --variables key1=value1 key2=value2
+
+# Add variable to group
+az pipelines variable-group variable create --group-id 1 --name "NEW_VAR" --value "value"
+
+# Update variable (secret)
+az pipelines variable-group variable update --group-id 1 --name "SECRET_VAR" --value "secret" --secret true
+
+# Link variable group to Key Vault
+az pipelines variable-group create --name "keyvault-secrets" --authorize true \
+  --type AzureKeyVault --azure-key-vault-name "mykeyvault"
+
+# ------------------------------
+# WORK ITEMS
+# ------------------------------
+
+# List work items by query
+az boards query --wiql "SELECT [Id], [Title], [State] FROM WorkItems WHERE [State] = 'Active'"
+
+# Create work item
+az boards work-item create --type "Bug" --title "Fix login issue" \
+  --assigned-to "user@company.com" --area "MyProject\\Backend"
+
+# Update work item
+az boards work-item update --id 12345 --state "Resolved" --discussion "Fixed in PR #456"
+
+# Show work item details
+az boards work-item show --id 12345
+
+# Add work item link
+az boards work-item relation add --id 12345 --relation-type "Parent" --target-id 12340
+
+# Delete work item
+az boards work-item delete --id 12345 --yes
+
+# ------------------------------
+# REPOSITORIES
+# ------------------------------
+
+# List repositories
+az repos list --output table
+
+# Create repository
+az repos create --name "new-repo"
+
+# Show repository details
+az repos show --repository "myrepo"
+
+# Clone repository
+az repos clone --repository "myrepo"
+
+# Create branch
+az repos ref create --name "refs/heads/feature/new-feature" --repository "myrepo" \
+  --object-id $(az repos ref list --repository "myrepo" --filter heads/main --query "[0].objectId" -o tsv)
+
+# Delete branch
+az repos ref delete --name "refs/heads/feature/old-feature" --repository "myrepo"
+
+# ------------------------------
+# PULL REQUESTS
+# ------------------------------
+
+# List pull requests
+az repos pr list --output table
+
+# Create pull request
+az repos pr create --source-branch "feature/new-feature" --target-branch "main" \
+  --title "Add new feature" --description "Implements AB#12345"
+
+# Create PR with work item link
+az repos pr create --source-branch "feature/AB12345-fix" --target-branch "main" \
+  --title "Fix: Resolve login issue AB#12345" --work-items 12345
+
+# Show PR details
+az repos pr show --id 456
+
+# Update PR
+az repos pr update --id 456 --title "Updated title" --status active
+
+# Complete PR (merge)
+az repos pr update --id 456 --status completed --delete-source-branch true
+
+# Set PR auto-complete
+az repos pr update --id 456 --auto-complete true --merge-commit-message "Merged PR #456"
+
+# Add PR reviewer
+az repos pr reviewer add --id 456 --reviewers "user@company.com"
+
+# Approve PR
+az repos pr set-vote --id 456 --vote approve
+
+# List PR comments
+az repos pr list --id 456
+
+# ------------------------------
+# ARTIFACTS
+# ------------------------------
+
+# List feeds
+az artifacts feed list --output table
+
+# Create feed
+az artifacts feed create --name "my-feed" --description "Internal packages"
+
+# List packages in feed
+az artifacts package list --feed "my-feed" --output table
+
+# Publish package (NuGet example)
+az artifacts universal publish --feed "my-feed" --name "mypackage" --version "1.0.0" --path ./package
+
+# Download package
+az artifacts universal download --feed "my-feed" --name "mypackage" --version "1.0.0" --path ./download
+
+# ------------------------------
+# ENVIRONMENTS & APPROVALS
+# ------------------------------
+
+# List environments
+az devops invoke --area environments --resource environments --api-version 6.0-preview.1 --http-method GET
+
+# Check pipeline permissions
+az devops security permission show --namespace-id "Pipeline" --token "Project/Pipeline/12345"
+
+# ------------------------------
+# SERVICE CONNECTIONS
+# ------------------------------
+
+# List service connections
+az devops service-endpoint list --output table
+
+# Create Azure service connection
+az devops service-endpoint azurerm create --name "Azure-Subscription" \
+  --azure-rm-subscription-id "subscription-id" \
+  --azure-rm-subscription-name "My Subscription" \
+  --azure-rm-tenant-id "tenant-id" \
+  --azure-rm-service-principal-id "sp-id"
+```
+
+### Azure DevOps Pipeline Patterns Cheat Sheet
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    AZURE DEVOPS PIPELINE PATTERNS                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  TRIGGER PATTERNS                                                           │
+│  ────────────────                                                           │
+│                                                                             │
+│  # Branch triggers                    # Path triggers                       │
+│  trigger:                             trigger:                              │
+│    branches:                            paths:                              │
+│      include:                             include:                          │
+│        - main                               - src/*                         │
+│        - release/*                          - tests/*                       │
+│      exclude:                             exclude:                          │
+│        - feature/*-wip                      - docs/*                        │
+│                                             - '*.md'                        │
+│                                                                             │
+│  # Tag triggers                       # Batch triggers                      │
+│  trigger:                             trigger:                              │
+│    tags:                                batch: true  # Wait for run         │
+│      include:                           branches:                           │
+│        - v*                               include: [main]                   │
+│                                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  CONDITION PATTERNS                                                         │
+│  ──────────────────                                                         │
+│                                                                             │
+│  # Always run                         # Run on specific branch              │
+│  condition: always()                  condition: eq(variables['Build.      │
+│                                         SourceBranch'], 'refs/heads/main') │
+│                                                                             │
+│  # Run only if previous succeeded     # Run on PR only                      │
+│  condition: succeeded()               condition: eq(variables['Build.      │
+│                                         Reason'], 'PullRequest')            │
+│                                                                             │
+│  # Complex conditions                 # Variable-based                      │
+│  condition: |                         condition: and(                       │
+│    and(                                 succeeded(),                        │
+│      succeeded(),                       eq(variables['deploy'], 'true')    │
+│      ne(variables['skip'], 'true'),   )                                     │
+│      or(                                                                    │
+│        eq(variables['Build.SourceBranch'], 'refs/heads/main'),             │
+│        startsWith(variables['Build.SourceBranch'], 'refs/heads/release')   │
+│      )                                                                      │
+│    )                                                                        │
+│                                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  DEPENDENCY PATTERNS                                                        │
+│  ───────────────────                                                        │
+│                                                                             │
+│  # Sequential stages                  # Parallel stages                     │
+│  stages:                              stages:                               │
+│    - stage: A                           - stage: A                          │
+│    - stage: B                           - stage: B                          │
+│      dependsOn: A                         dependsOn: []  # No deps          │
+│    - stage: C                           - stage: C                          │
+│      dependsOn: B                         dependsOn: []  # No deps          │
+│                                                                             │
+│  # Fan-out/Fan-in                     # Conditional dependency              │
+│  stages:                              stages:                               │
+│    - stage: Build                       - stage: Build                      │
+│    - stage: Test_Unit                   - stage: Deploy                     │
+│      dependsOn: Build                     dependsOn: Build                  │
+│    - stage: Test_Integration              condition: |                      │
+│      dependsOn: Build                       and(                            │
+│    - stage: Deploy                            succeeded('Build'),           │
+│      dependsOn:                               eq(variables['deploy'],       │
+│        - Test_Unit                              'true')                     │
+│        - Test_Integration                   )                               │
+│                                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  TEMPLATE PATTERNS                                                          │
+│  ─────────────────                                                          │
+│                                                                             │
+│  # Step template                      # Job template                        │
+│  steps:                               jobs:                                 │
+│    - template: steps/build.yml          - template: jobs/build-job.yml     │
+│      parameters:                          parameters:                       │
+│        config: Release                      config: Release                 │
+│                                                                             │
+│  # Stage template                     # Variable template                   │
+│  stages:                              variables:                            │
+│    - template: stages/deploy.yml        - template: vars/common.yml        │
+│      parameters:                        - name: localVar                    │
+│        environment: prod                  value: 'local'                    │
+│                                                                             │
+│  # Extends template                   # Insert template                     │
+│  extends:                             steps:                                │
+│    template: base-pipeline.yml          - script: echo "Before"            │
+│    parameters:                          - template: steps/common.yml       │
+│      buildConfig: Release               - script: echo "After"             │
+│                                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  DEPLOYMENT PATTERNS                                                        │
+│  ───────────────────                                                        │
+│                                                                             │
+│  # RunOnce (simple)                   # Rolling deployment                  │
+│  strategy:                            strategy:                             │
+│    runOnce:                             rolling:                            │
+│      deploy:                              maxParallel: 2                    │
+│        steps:                             deploy:                           │
+│          - script: deploy.sh                steps:                          │
+│                                               - script: deploy.sh           │
+│                                                                             │
+│  # Canary deployment                  # Blue-Green (via slots)              │
+│  strategy:                            steps:                                │
+│    canary:                              - task: AzureWebApp@1              │
+│      increments: [10, 20, 50]             inputs:                           │
+│      deploy:                                deployToSlotOrASE: true         │
+│        steps:                               slotName: 'staging'             │
+│          - script: deploy.sh            - task: AzureAppServiceManage@0    │
+│      on:                                    inputs:                         │
+│        success:                               action: 'Swap Slots'          │
+│          steps:                               sourceSlot: 'staging'         │
+│            - script: promote.sh                                             │
+│                                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  VARIABLE PATTERNS                                                          │
+│  ─────────────────                                                          │
+│                                                                             │
+│  # Compile-time variables (${{ }})    # Runtime variables ($( ))            │
+│  variables:                           variables:                            │
+│    staticVar: 'compile-time'            runtimeVar: 'set-later'             │
+│  steps:                               steps:                                │
+│    - script: echo ${{ variables.        - script: |                        │
+│        staticVar }}                         echo "##vso[task.setvariable    │
+│                                               variable=runtimeVar]new"      │
+│                                         - script: echo $(runtimeVar)        │
+│                                                                             │
+│  # Secret variables                   # Output variables                    │
+│  variables:                           jobs:                                 │
+│    - group: secrets-group               - job: JobA                         │
+│  steps:                                   steps:                            │
+│    - script: |                              - script: |                     │
+│        echo $(SecretVar)                        echo "##vso[task.           │
+│      env:                                         setvariable variable=     │
+│        SECRET: $(SecretVar)                       myOutput;isOutput=true]   │
+│                                                   value"                    │
+│                                           - job: JobB                       │
+│                                             dependsOn: JobA                 │
+│                                             variables:                      │
+│                                               inherited: $[dependencies.    │
+│                                                 JobA.outputs['step.         │
+│                                                 myOutput']]                 │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Pipeline Structure
+
+```yaml
+# ============================================================================
+# COMPLETE AZURE DEVOPS PIPELINE STRUCTURE
+# ============================================================================
+
+# Pipeline name (build number format)
+name: $(BuildDefinitionName)_$(Date:yyyyMMdd)$(Rev:.r)
+
+# --------------------
+# TRIGGERS
+# --------------------
+trigger:
+  batch: true                          # Batch changes while build runs
+  branches:
+    include: [main, develop, release/*]
+    exclude: [feature/*-wip]
+  paths:
+    include: [src/*, tests/*]
+    exclude: [docs/*, '*.md']
+  tags:
+    include: [v*]
+
+# PR trigger
+pr:
+  branches:
+    include: [main, develop]
+  paths:
+    include: [src/*, tests/*]
+  drafts: false                        # Don't trigger on draft PRs
+
+# --------------------
+# RESOURCES
+# --------------------
+resources:
+  # Repository resources
+  repositories:
+    - repository: templates
+      type: git
+      name: DevOps/pipeline-templates
+      ref: refs/heads/main
+    - repository: external
+      type: github
+      endpoint: GitHub-Connection
+      name: org/repo
+
+  # Pipeline resources (artifacts from other pipelines)
+  pipelines:
+    - pipeline: buildPipeline
+      source: 'Build-Pipeline'
+      trigger:
+        branches: [main]
+
+  # Container resources
+  containers:
+    - container: build-container
+      image: mcr.microsoft.com/dotnet/sdk:8.0
+
+# --------------------
+# VARIABLES
+# --------------------
+variables:
+  # Variable groups (from Azure DevOps)
+  - group: build-variables
+  - group: keyvault-secrets
+
+  # Template variables
+  - template: variables/common.yml
+
+  # Inline variables
+  - name: buildConfiguration
+    value: 'Release'
+  - name: isMain
+    value: $[eq(variables['Build.SourceBranch'], 'refs/heads/main')]
+
+# --------------------
+# PARAMETERS
+# --------------------
+parameters:
+  - name: environment
+    displayName: 'Deployment Environment'
+    type: string
+    default: 'dev'
+    values: [dev, staging, production]
+
+  - name: runTests
+    displayName: 'Run Tests'
+    type: boolean
+    default: true
+
+  - name: regions
+    displayName: 'Deployment Regions'
+    type: object
+    default:
+      - eastus
+      - westus
+
+# --------------------
+# STAGES
+# --------------------
+stages:
+  # Stage 1: Build
+  - stage: Build
+    displayName: 'Build Application'
+    jobs:
+      - job: BuildJob
+        displayName: 'Build'
+        pool:
+          vmImage: 'ubuntu-latest'        # Microsoft-hosted
+          # OR
+          # name: 'Self-Hosted-Pool'      # Self-hosted
+
+        # Container job
+        container: build-container
+
+        # Job timeout
+        timeoutInMinutes: 60
+        cancelTimeoutInMinutes: 5
+
+        # Job variables
+        variables:
+          jobVar: 'job-level'
+
+        steps:
+          # Checkout
+          - checkout: self
+            fetchDepth: 0
+            submodules: true
+            persistCredentials: true
+
+          # Use template
+          - template: templates/build-steps.yml@templates
+            parameters:
+              configuration: $(buildConfiguration)
+
+          # Task step
+          - task: DotNetCoreCLI@2
+            displayName: 'Build'
+            inputs:
+              command: 'build'
+              projects: '**/*.csproj'
+
+          # Script step
+          - script: |
+              echo "Building..."
+              dotnet build
+            displayName: 'Build Script'
+
+          # PowerShell step
+          - powershell: |
+              Write-Host "PowerShell step"
+            displayName: 'PowerShell'
+
+          # Bash step
+          - bash: |
+              echo "Bash step"
+            displayName: 'Bash'
+
+          # Publish artifacts
+          - publish: $(Build.ArtifactStagingDirectory)
+            artifact: drop
+            displayName: 'Publish Artifact'
+
+  # Stage 2: Test (conditional)
+  - stage: Test
+    displayName: 'Run Tests'
+    dependsOn: Build
+    condition: and(succeeded(), eq('${{ parameters.runTests }}', true))
+    jobs:
+      - job: UnitTests
+        steps:
+          - download: current
+            artifact: drop
+
+          - task: DotNetCoreCLI@2
+            inputs:
+              command: 'test'
+
+  # Stage 3: Deploy (deployment job)
+  - stage: Deploy_${{ parameters.environment }}
+    displayName: 'Deploy to ${{ parameters.environment }}'
+    dependsOn: Test
+    condition: succeeded()
+    jobs:
+      - deployment: DeployJob
+        displayName: 'Deploy'
+        environment: ${{ parameters.environment }}
+        pool:
+          vmImage: 'ubuntu-latest'
+
+        strategy:
+          runOnce:
+            preDeploy:
+              steps:
+                - script: echo "Pre-deploy checks"
+            deploy:
+              steps:
+                - download: current
+                  artifact: drop
+                - task: AzureWebApp@1
+                  inputs:
+                    azureSubscription: 'Azure-Connection'
+                    appName: 'myapp-${{ parameters.environment }}'
+            routeTraffic:
+              steps:
+                - script: echo "Route traffic"
+            postRouteTraffic:
+              steps:
+                - script: echo "Post-route traffic"
+            on:
+              success:
+                steps:
+                  - script: echo "Deployment succeeded"
+              failure:
+                steps:
+                  - script: echo "Deployment failed - rollback"
+
+  # Stage 4: Manual approval
+  - stage: ApproveProduction
+    displayName: 'Production Approval'
+    dependsOn: Deploy_staging
+    jobs:
+      - job: WaitForApproval
+        pool: server
+        steps:
+          - task: ManualValidation@0
+            inputs:
+              notifyUsers: 'approvers@company.com'
+              instructions: 'Please validate staging deployment'
+              timeoutInMinutes: 1440
+```
 
 ---
 

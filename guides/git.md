@@ -326,6 +326,498 @@ branch_protection:
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Integrate TDD practices with Git workflows for reliable, traceable development.**
+
+### TDD Cycle with Git Integration
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    TDD-GIT INTEGRATED WORKFLOW                      │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│   1. RED PHASE                    2. GREEN PHASE                    │
+│   ┌─────────────────┐            ┌─────────────────┐               │
+│   │ Write failing   │            │ Write minimal   │               │
+│   │ test first      │───────────>│ implementation  │               │
+│   │                 │            │                 │               │
+│   │ git add tests   │            │ git add src+    │               │
+│   │ (stage only)    │            │ tests (atomic)  │               │
+│   └─────────────────┘            └────────┬────────┘               │
+│          │                                │                         │
+│          │ verify test fails              │ verify all tests pass   │
+│          │ for right reason               │                         │
+│          ↓                                ↓                         │
+│   ┌─────────────────┐            ┌─────────────────┐               │
+│   │ DO NOT COMMIT   │            │ COMMIT:         │               │
+│   │ failing tests   │            │ feat(scope):    │               │
+│   │ alone           │            │ description     │               │
+│   └─────────────────┘            │ [#issue]        │               │
+│                                  └────────┬────────┘               │
+│                                           │                         │
+│   3. REFACTOR PHASE                       │                         │
+│   ┌─────────────────┐                     │                         │
+│   │ Improve code    │<────────────────────┘                         │
+│   │ quality         │                                               │
+│   │                 │                                               │
+│   │ Tests must      │                                               │
+│   │ remain GREEN    │                                               │
+│   └────────┬────────┘                                               │
+│            │                                                        │
+│            ↓                                                        │
+│   ┌─────────────────┐                                               │
+│   │ COMMIT:         │                                               │
+│   │ refactor(scope):│───────> Push to feature branch               │
+│   │ description     │         Create PR                             │
+│   │ [#issue]        │                                               │
+│   └─────────────────┘                                               │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Branch Naming for TDD Workflow
+
+**Use descriptive branch names that reflect TDD stages:**
+
+```bash
+# Feature development with TDD
+feature/<issue-id>-<feature-description>
+# Example: feature/1234-user-authentication
+
+# Experimental/spike branches (exploratory TDD)
+spike/<issue-id>-<exploration-topic>
+# Example: spike/5678-payment-gateway-integration
+
+# Refactoring branches
+refactor/<issue-id>-<refactor-description>
+# Example: refactor/9012-extract-validation-service
+```
+
+### TDD Commit Strategy
+
+**Option 1: Single Atomic Commit (Recommended for small changes)**
+
+```bash
+# Complete TDD cycle in one atomic commit
+# Tests + Implementation together
+git add src/user-service.js test/user-service.test.js
+git commit -m "feat(auth): implement password reset flow [#1234]
+
+Implements #1234
+
+TDD Implementation:
+- Added failing tests for password reset functionality
+- Implemented reset token generation with 24hr expiry
+- Added email service integration for reset links
+- All tests pass (12 new tests added)
+
+Test coverage: 94% for user-service module"
+```
+
+**Option 2: Multi-Commit TDD (For complex features)**
+
+```bash
+# Commit 1: RED - Tests that define behavior (may include stub)
+git checkout -b feature/1234-payment-processing
+git add test/payment.test.js src/payment.js  # stub with NotImplementedError
+git commit -m "test(payment): define payment processing behavior [#1234]
+
+Part 1/3: RED phase - Define expected behavior
+
+- Add unit tests for payment validation
+- Add integration tests for payment gateway
+- Add edge case tests (insufficient funds, invalid card)
+- Implementation stubs throw NotImplementedError
+- Tests currently fail as expected
+
+Related to #1234"
+
+# Commit 2: GREEN - Minimal implementation
+git add src/payment.js src/payment-gateway.js test/payment.test.js
+git commit -m "feat(payment): implement payment processing [#1234]
+
+Part 2/3: GREEN phase - Minimal implementation
+
+Implements #1234
+
+- Implement PaymentService with validation
+- Add Stripe gateway integration
+- Handle error cases with proper exceptions
+- All 15 tests now pass
+
+Related to #1234"
+
+# Commit 3: REFACTOR - Clean up
+git add src/payment.js src/payment-validator.js
+git commit -m "refactor(payment): extract validation logic [#1234]
+
+Part 3/3: REFACTOR phase - Code improvement
+
+- Extract PaymentValidator to separate module
+- Add builder pattern for PaymentRequest
+- Reduce cyclomatic complexity
+- All tests still pass (no behavior change)
+
+Completes #1234"
+```
+
+### TDD Branch Workflow Example
+
+```bash
+# 1. Create feature branch from develop
+git checkout develop
+git pull origin develop
+git checkout -b feature/2345-user-profile-api
+
+# 2. RED: Write failing tests
+# Edit test/user-profile.test.js
+npm test -- --grep "UserProfile"  # Verify tests fail
+# DO NOT commit failing tests alone
+
+# 3. GREEN: Implement feature
+# Edit src/user-profile.js
+npm test -- --grep "UserProfile"  # Verify tests pass
+
+# 4. Stage both files atomically
+git add src/user-profile.js test/user-profile.test.js
+
+# 5. Commit with proper message
+git commit -m "feat(api): add user profile CRUD endpoints [#2345]
+
+Implements #2345
+
+- GET /api/users/:id/profile - Retrieve profile
+- PUT /api/users/:id/profile - Update profile
+- Profile validation with JSON Schema
+- Rate limiting (100 req/min per user)
+
+Tests: 8 unit tests, 4 integration tests
+Coverage: 96% for user-profile module"
+
+# 6. REFACTOR: Improve code quality
+# Edit src/user-profile.js, src/profile-validator.js
+npm test  # Verify all tests still pass
+
+git add src/user-profile.js src/profile-validator.js
+git commit -m "refactor(api): extract profile validation [#2345]
+
+- Extract ProfileValidator for reuse
+- Add custom validation decorators
+- Improve error messages
+- All tests pass, no behavior change
+
+Related to #2345"
+
+# 7. Push and create PR
+git push -u origin feature/2345-user-profile-api
+```
+
+### TDD Commit Message Patterns
+
+```bash
+# For RED+GREEN combined (single commit)
+git commit -m "feat(<scope>): <description> [#<issue>]
+
+Implements #<issue>
+
+TDD Implementation:
+- <test 1 description>
+- <test 2 description>
+- <implementation summary>
+- All tests pass (<N> tests)"
+
+# For REFACTOR phase
+git commit -m "refactor(<scope>): <description> [#<issue>]
+
+- <refactoring change 1>
+- <refactoring change 2>
+- All tests pass (no behavior change)
+
+Related to #<issue>"
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug fix MUST include a regression test. Test BEFORE fix.**
+
+### Bug Fix Git Workflow
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                     BUG FIX GIT WORKFLOW                            │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│   1. BUG REPORTED                                                   │
+│   ┌─────────────────┐                                               │
+│   │ Issue created   │                                               │
+│   │ #<bug-id>       │                                               │
+│   │                 │                                               │
+│   │ Reproduce bug   │                                               │
+│   │ locally         │                                               │
+│   └────────┬────────┘                                               │
+│            │                                                        │
+│            ↓                                                        │
+│   2. CREATE BUG FIX BRANCH                                          │
+│   ┌─────────────────────────────────────────────────────┐           │
+│   │ git checkout main  # or develop                     │           │
+│   │ git pull origin main                                │           │
+│   │ git checkout -b bugfix/<bug-id>-<description>       │           │
+│   │                                                     │           │
+│   │ For critical bugs (production):                     │           │
+│   │ git checkout -b hotfix/<bug-id>-<description>       │           │
+│   └────────┬────────────────────────────────────────────┘           │
+│            │                                                        │
+│            ↓                                                        │
+│   3. WRITE REGRESSION TEST FIRST                                    │
+│   ┌─────────────────────────────────────────────────────┐           │
+│   │ // test/regression/bug-<id>.test.js                 │           │
+│   │ describe('Bug #<id>: <description>', () => {        │           │
+│   │   it('should <expected behavior>', () => {          │           │
+│   │     // Reproduce bug scenario                       │           │
+│   │     // Assert correct behavior                      │           │
+│   │   });                                               │           │
+│   │ });                                                 │           │
+│   │                                                     │           │
+│   │ npm test -- test will FAIL (expected)               │           │
+│   └────────┬────────────────────────────────────────────┘           │
+│            │                                                        │
+│            ↓                                                        │
+│   4. FIX THE BUG                                                    │
+│   ┌─────────────────────────────────────────────────────┐           │
+│   │ // Implement fix in source code                     │           │
+│   │                                                     │           │
+│   │ npm test -- test now PASSES                         │           │
+│   │ npm test -- ALL tests still pass                    │           │
+│   └────────┬────────────────────────────────────────────┘           │
+│            │                                                        │
+│            ↓                                                        │
+│   5. ATOMIC COMMIT (Test + Fix together)                            │
+│   ┌─────────────────────────────────────────────────────┐           │
+│   │ git add src/<file>.js test/regression/bug-<id>.js   │           │
+│   │ git commit -m "fix(<scope>): <description> [#<id>]  │           │
+│   │                                                     │           │
+│   │ Fixes #<id>                                         │           │
+│   │                                                     │           │
+│   │ Bug: <what was happening>                           │           │
+│   │ Root Cause: <why it was happening>                  │           │
+│   │ Solution: <how it was fixed>                        │           │
+│   │                                                     │           │
+│   │ Regression test: test/regression/bug-<id>.test.js"  │           │
+│   └────────┬────────────────────────────────────────────┘           │
+│            │                                                        │
+│            ↓                                                        │
+│   6. MERGE STRATEGY                                                 │
+│   ┌─────────────────────────────────────────────────────┐           │
+│   │ For bugfix/* branches:                              │           │
+│   │   → PR to develop → squash merge                    │           │
+│   │                                                     │           │
+│   │ For hotfix/* branches (critical):                   │           │
+│   │   → Merge to main with --no-ff                      │           │
+│   │   → Tag release (v1.2.3)                            │           │
+│   │   → Cherry-pick to develop                          │           │
+│   └─────────────────────────────────────────────────────┘           │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Bug Fix Branch Naming
+
+```bash
+# Regular bug fixes (non-critical)
+bugfix/<bug-id>-<short-description>
+# Examples:
+bugfix/3456-login-validation-error
+bugfix/7890-null-pointer-user-service
+bugfix/1122-timezone-calculation
+
+# Critical/production bugs (hotfix)
+hotfix/<bug-id>-<short-description>
+# Examples:
+hotfix/9999-payment-data-corruption
+hotfix/8888-security-vulnerability
+hotfix/7777-database-connection-leak
+```
+
+### Complete Bug Fix Example
+
+```bash
+# Bug Report #4567: Users cannot login with email containing '+'
+# Example: user+tag@example.com fails validation
+
+# 1. Create bug fix branch
+git checkout develop
+git pull origin develop
+git checkout -b bugfix/4567-plus-sign-email-validation
+
+# 2. Write regression test FIRST
+cat > test/regression/bug-4567-email-plus-sign.test.js << 'EOF'
+/**
+ * Regression test for Bug #4567
+ * Issue: Users cannot login with email containing '+' character
+ * Example: user+tag@example.com fails validation incorrectly
+ */
+describe('Bug #4567: Email validation with + character', () => {
+  it('should accept valid email with + in local part', async () => {
+    const email = 'user+tag@example.com';
+    const result = await authService.validateEmail(email);
+    expect(result.valid).toBe(true);
+  });
+
+  it('should allow login with + email', async () => {
+    const user = await userService.create({
+      email: 'test+login@example.com',
+      password: 'SecurePass123!'
+    });
+
+    const loginResult = await authService.login({
+      email: 'test+login@example.com',
+      password: 'SecurePass123!'
+    });
+
+    expect(loginResult.success).toBe(true);
+    expect(loginResult.user.id).toBe(user.id);
+  });
+});
+EOF
+
+# 3. Run test - verify it FAILS
+npm test -- --grep "Bug #4567"
+# ✗ should accept valid email with + in local part
+# ✗ should allow login with + email
+
+# 4. Fix the bug
+# Edit src/validators/email-validator.js
+# Change: /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/
+# The regex was missing proper escaping
+
+# 5. Run test - verify it PASSES
+npm test -- --grep "Bug #4567"
+# ✓ should accept valid email with + in local part
+# ✓ should allow login with + email
+
+# 6. Run ALL tests - verify no regressions
+npm test
+# All 234 tests pass
+
+# 7. Atomic commit - test AND fix together
+git add src/validators/email-validator.js \
+        test/regression/bug-4567-email-plus-sign.test.js
+
+git commit -m "fix(auth): accept plus sign in email validation [#4567]
+
+Fixes #4567
+
+Bug: Users with '+' in their email (e.g., user+tag@example.com)
+could not register or login. The validation incorrectly rejected
+these valid email addresses.
+
+Root Cause: Email validation regex did not properly handle the '+'
+character in the local part of email addresses, despite '+' being
+a valid character per RFC 5321.
+
+Solution: Updated email validation regex to correctly allow '+'
+character: /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/
+
+Changes:
+- Update EMAIL_REGEX in email-validator.js
+- Add regression tests for + character handling
+
+Regression test: test/regression/bug-4567-email-plus-sign.test.js
+Test verifies both validation and full login flow with + emails."
+
+# 8. Push and create PR
+git push -u origin bugfix/4567-plus-sign-email-validation
+
+# Create PR: bugfix/4567-plus-sign-email-validation → develop
+```
+
+### Hotfix Workflow (Critical Bugs)
+
+```bash
+# CRITICAL: Payment processing corrupting transaction amounts
+# Bug #9999 - Production impact
+
+# 1. Create hotfix from main (production)
+git checkout main
+git pull origin main
+git checkout -b hotfix/9999-payment-amount-corruption
+
+# 2. Write regression test
+git add test/regression/bug-9999-payment-corruption.test.js
+# Test reproduces the corruption scenario
+
+# 3. Fix the bug
+git add src/payment/transaction-processor.js \
+        test/regression/bug-9999-payment-corruption.test.js
+
+git commit -m "fix(payment): prevent amount corruption in transactions [#9999]
+
+Fixes #9999 - CRITICAL HOTFIX
+
+Bug: Transaction amounts were being corrupted during currency
+conversion, resulting in incorrect charges (e.g., $10.00 became $1000).
+
+Root Cause: Integer overflow when multiplying amount by 100 for
+cents conversion on amounts > $21,474,836.47.
+
+Solution: Use BigInt for all currency calculations, add overflow
+protection, validate amounts before processing.
+
+Impact: Affected ~50 transactions over past 24 hours.
+Remediation: Finance team to issue refunds for affected users.
+
+Changes:
+- Convert transaction-processor to use BigInt
+- Add amount overflow validation
+- Add regression test with large amounts
+
+Regression test: test/regression/bug-9999-payment-corruption.test.js"
+
+# 4. Merge to main (production)
+git checkout main
+git merge --no-ff hotfix/9999-payment-amount-corruption
+
+# 5. Tag the release
+git tag -a v2.3.1 -m "Hotfix v2.3.1: Fix payment amount corruption [#9999]"
+git push origin main --tags
+
+# 6. Cherry-pick to develop
+git checkout develop
+git cherry-pick <hotfix-commit-sha>
+git push origin develop
+
+# 7. Delete hotfix branch
+git branch -d hotfix/9999-payment-amount-corruption
+git push origin --delete hotfix/9999-payment-amount-corruption
+```
+
+### Bug Fix Commit Message Template
+
+```bash
+git commit -m "fix(<scope>): <imperative description> [#<bug-id>]
+
+Fixes #<bug-id>
+
+Bug: <What was the observable problem?>
+
+Root Cause: <Why was this happening? What was the underlying issue?>
+
+Solution: <How did you fix it? What approach was taken?>
+
+Changes:
+- <Specific change 1>
+- <Specific change 2>
+- <Specific change 3>
+
+Regression test: <path/to/test/file.js>
+<Brief description of what the test verifies>"
+```
+
+---
+
 ## 3. Atomic Commits & TDD Integration (MANDATORY)
 
 ### A. Atomic Commit Principles
@@ -1233,6 +1725,245 @@ git push origin develop
 11. **Security First**: GPG signing, secrets detection, and proper .gitignore prevent security issues.
 
 12. **Traceable Deployments**: Every production change linked to issue, PR, and responsible developer.
+
+---
+
+## Quick Reference
+
+### Common Git Commands
+
+```bash
+# ═══════════════════════════════════════════════════════════════════
+# BRANCH OPERATIONS
+# ═══════════════════════════════════════════════════════════════════
+
+# Create feature branch
+git checkout develop && git pull origin develop
+git checkout -b feature/<issue-id>-<description>
+
+# Create bugfix branch
+git checkout develop && git pull origin develop
+git checkout -b bugfix/<issue-id>-<description>
+
+# Create hotfix branch (from main)
+git checkout main && git pull origin main
+git checkout -b hotfix/<issue-id>-<description>
+
+# Update branch with latest changes
+git fetch origin
+git rebase origin/develop  # or origin/main
+
+# Delete local branch
+git branch -d <branch-name>
+
+# Delete remote branch
+git push origin --delete <branch-name>
+
+# ═══════════════════════════════════════════════════════════════════
+# COMMIT OPERATIONS
+# ═══════════════════════════════════════════════════════════════════
+
+# Stage specific files (atomic commit)
+git add src/file.js test/file.test.js
+
+# Commit with conventional format
+git commit -m "feat(scope): description [#123]"
+
+# Commit with body (use heredoc for multiline)
+git commit -m "$(cat <<'EOF'
+fix(auth): prevent null pointer in login [#456]
+
+Fixes #456
+
+Bug: Application crashed on login with expired token.
+Root Cause: Missing null check on user object.
+Solution: Added null check with appropriate error.
+
+Regression test: test/auth/login.test.js:142
+EOF
+)"
+
+# Amend last commit (ONLY if not pushed)
+git commit --amend -m "new message"
+
+# ═══════════════════════════════════════════════════════════════════
+# HISTORY OPERATIONS
+# ═══════════════════════════════════════════════════════════════════
+
+# Interactive rebase (clean up commits)
+git rebase -i HEAD~<n>
+
+# Squash merge (for PRs)
+git checkout develop
+git merge --squash feature/123-feature
+git commit -m "feat(scope): complete feature [#123]"
+
+# Cherry-pick commit
+git cherry-pick <commit-sha>
+
+# Find bug-introducing commit
+git bisect start
+git bisect bad HEAD
+git bisect good <known-good-commit>
+# Test each checkout, mark good/bad
+git bisect reset
+
+# ═══════════════════════════════════════════════════════════════════
+# RELEASE OPERATIONS
+# ═══════════════════════════════════════════════════════════════════
+
+# Create annotated tag
+git tag -a v1.2.3 -m "Release v1.2.3: Description"
+
+# Push with tags
+git push origin main --tags
+
+# Create release branch
+git checkout -b release/v1.2.0 develop
+
+# Merge release to main
+git checkout main
+git merge --no-ff release/v1.2.0
+git tag -a v1.2.0 -m "Release v1.2.0"
+```
+
+### Branch Naming Patterns
+
+| Type | Pattern | Example |
+|------|---------|---------|
+| Feature | `feature/<issue>-<description>` | `feature/1234-user-auth` |
+| Bug Fix | `bugfix/<issue>-<description>` | `bugfix/5678-login-crash` |
+| Hotfix | `hotfix/<issue>-<description>` | `hotfix/9012-security-fix` |
+| Release | `release/v<version>` | `release/v1.2.0` |
+| Refactor | `refactor/<issue>-<description>` | `refactor/3456-api-cleanup` |
+
+### Commit Message Format
+
+```
+<type>(<scope>): <description> [#<issue>]
+
+[optional body]
+
+[optional footer]
+```
+
+| Type | Description | SemVer |
+|------|-------------|--------|
+| `feat` | New feature | MINOR |
+| `fix` | Bug fix | PATCH |
+| `docs` | Documentation only | - |
+| `style` | Formatting, no code change | - |
+| `refactor` | Code change, no feature/fix | - |
+| `perf` | Performance improvement | PATCH |
+| `test` | Adding/updating tests | - |
+| `build` | Build system changes | - |
+| `ci` | CI/CD changes | - |
+| `chore` | Maintenance tasks | - |
+| `revert` | Reverting commits | - |
+
+### TDD Commit Patterns
+
+```bash
+# Single atomic commit (recommended for small changes)
+git add src/feature.js test/feature.test.js
+git commit -m "feat(scope): implement feature [#123]
+
+Implements #123
+
+- Test coverage for all scenarios
+- Implementation passes all tests"
+
+# Multi-commit TDD (for complex features)
+# Commit 1: Tests + stubs
+git commit -m "test(scope): define feature behavior [#123]
+
+Part 1/3: RED phase - Tests defined"
+
+# Commit 2: Implementation
+git commit -m "feat(scope): implement feature [#123]
+
+Part 2/3: GREEN phase - All tests pass"
+
+# Commit 3: Refactor
+git commit -m "refactor(scope): improve code quality [#123]
+
+Part 3/3: REFACTOR phase - No behavior change"
+```
+
+### Bug Fix Commit Template
+
+```bash
+git commit -m "fix(scope): description [#<bug-id>]
+
+Fixes #<bug-id>
+
+Bug: <observable problem>
+Root Cause: <underlying issue>
+Solution: <how it was fixed>
+
+Regression test: <test/path/file.test.js>"
+```
+
+### Pre-Commit Checklist
+
+```bash
+# Before every commit, verify:
+npm test                    # All tests pass
+npm run lint                # No linting errors
+npm run build               # Build succeeds
+git diff --staged           # Review changes
+```
+
+### Git Aliases (Recommended)
+
+```bash
+# Add to ~/.gitconfig
+[alias]
+    # Branch operations
+    co = checkout
+    cb = checkout -b
+    bd = branch -d
+
+    # Status and log
+    st = status -sb
+    lg = log --oneline --graph --decorate -20
+
+    # Commit operations
+    cm = commit -m
+    ca = commit --amend
+
+    # Sync operations
+    fp = fetch --prune
+    rb = rebase
+
+    # TDD workflow
+    wip = "!git add -A && git commit -m 'WIP: work in progress [skip ci]'"
+    unwip = reset HEAD~1
+
+    # Feature workflow
+    feature = "!f() { git checkout develop && git pull && git checkout -b feature/$1; }; f"
+    bugfix = "!f() { git checkout develop && git pull && git checkout -b bugfix/$1; }; f"
+    hotfix = "!f() { git checkout main && git pull && git checkout -b hotfix/$1; }; f"
+```
+
+### Workflow Decision Tree
+
+```
+Is it a new feature?
+├── YES → feature/<issue>-<description> branch
+│         └── TDD: Write tests → Implement → Refactor → PR to develop
+│
+├── Is it a bug fix?
+│   ├── Critical (production)? → hotfix/<issue>-<description> from main
+│   │                           └── Regression test → Fix → Merge main → Tag → Cherry-pick develop
+│   │
+│   └── Non-critical? → bugfix/<issue>-<description> from develop
+│                       └── Regression test → Fix → PR to develop
+│
+└── Is it a refactor?
+    └── refactor/<issue>-<description> branch
+        └── No behavior change → All tests must pass → PR to develop
+```
 
 ---
 

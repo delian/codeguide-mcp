@@ -591,6 +591,512 @@ labels:
   com.example.service: "service-name"
 ```
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new Docker Compose configurations.**
+
+### TDD Cycle for Docker Compose
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    TDD CYCLE FOR DOCKER COMPOSE                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+    ┌──────────────────────┐
+    │      1. RED          │
+    │  Write failing test  │
+    │  (service won't      │
+    │   start/connect)     │
+    └──────────┬───────────┘
+               │
+               ▼
+    ┌──────────────────────┐
+    │      2. GREEN        │
+    │  Write minimal       │
+    │  compose config to   │
+    │  make test pass      │
+    └──────────┬───────────┘
+               │
+               ▼
+    ┌──────────────────────┐
+    │    3. REFACTOR       │
+    │  Add health checks,  │
+    │  resource limits,    │
+    │  security hardening  │
+    └──────────┬───────────┘
+               │
+               ▼
+          [Repeat]
+```
+
+### Example TDD Workflow for Docker Compose
+
+**Scenario: Adding a new PostgreSQL service with health checks**
+
+#### Step 1: RED - Write Failing Test First
+
+```bash
+#!/bin/bash
+# tests/test_postgres_service.sh
+# Test that PostgreSQL service is healthy and accepting connections
+
+set -e
+
+echo "Testing PostgreSQL service health..."
+
+# Test 1: Service exists in compose config
+docker compose config --services | grep -q "postgres" || {
+    echo "FAIL: postgres service not found in compose config"
+    exit 1
+}
+
+# Test 2: Service starts and becomes healthy
+docker compose up -d postgres
+sleep 5
+
+# Test 3: Health check passes
+HEALTH=$(docker inspect --format='{{.State.Health.Status}}' $(docker compose ps -q postgres) 2>/dev/null || echo "no-healthcheck")
+if [ "$HEALTH" != "healthy" ]; then
+    echo "FAIL: postgres health check not passing (status: $HEALTH)"
+    docker compose down
+    exit 1
+fi
+
+# Test 4: Can connect and run query
+docker compose exec -T postgres pg_isready -U appuser -d appdb || {
+    echo "FAIL: Cannot connect to PostgreSQL"
+    docker compose down
+    exit 1
+}
+
+# Test 5: Resource limits are set
+MEMORY_LIMIT=$(docker compose config | grep -A 20 "postgres:" | grep -A 5 "limits:" | grep "memory:" | head -1)
+if [ -z "$MEMORY_LIMIT" ]; then
+    echo "FAIL: No memory limit set for postgres"
+    docker compose down
+    exit 1
+fi
+
+echo "PASS: All PostgreSQL service tests passed"
+docker compose down
+```
+
+```bash
+# Run the test - it will FAIL because service doesn't exist yet
+./tests/test_postgres_service.sh
+# Output: FAIL: postgres service not found in compose config
+```
+
+#### Step 2: GREEN - Write Minimal Configuration
+
+```yaml
+# compose/infrastructure/databases.yml
+name: infrastructure-databases
+
+services:
+  postgres:
+    image: postgres:16.1-alpine3.19
+    environment:
+      - POSTGRES_DB=appdb
+      - POSTGRES_USER=appuser
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser -d appdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    networks:
+      - database
+
+networks:
+  database:
+    driver: bridge
+```
+
+```bash
+# Run the test again - it should PASS now
+./tests/test_postgres_service.sh
+# Output: PASS: All PostgreSQL service tests passed
+```
+
+#### Step 3: REFACTOR - Add Production-Ready Features
+
+```yaml
+# compose/infrastructure/databases.yml (refactored)
+name: infrastructure-databases
+
+services:
+  postgres:
+    image: postgres:16.1-alpine3.19
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${DB_NAME:-appdb}
+      - POSTGRES_USER=${DB_USER:-appuser}
+      - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
+      - POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=en_US.UTF-8
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d:ro
+    networks:
+      - database
+    secrets:
+      - db_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-appuser} -d ${DB_NAME:-appdb}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      com.example.layer: "infrastructure"
+      com.example.component: "database"
+      com.example.service: "postgres"
+
+volumes:
+  postgres-data:
+    driver: local
+
+networks:
+  database:
+    driver: bridge
+    internal: true
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
+```
+
+```bash
+# Run tests again - they should still PASS
+./tests/test_postgres_service.sh
+# Output: PASS: All PostgreSQL service tests passed
+
+# Run full validation
+docker compose config --quiet && echo "✅ Configuration valid"
+```
+
+### Visual TDD Step-by-Step Example
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  ITERATION 1: Basic Service                                         │
+├─────────────────────────────────────────────────────────────────────┤
+│  RED:    Test "service exists" → FAILS (no postgres service)        │
+│  GREEN:  Add minimal postgres service → PASSES                      │
+│  REFACTOR: Add restart policy → Tests still PASS                    │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  ITERATION 2: Health Checks                                         │
+├─────────────────────────────────────────────────────────────────────┤
+│  RED:    Test "health check passes" → FAILS (no healthcheck)        │
+│  GREEN:  Add healthcheck config → PASSES                            │
+│  REFACTOR: Tune intervals, add start_period → Tests still PASS      │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  ITERATION 3: Security                                              │
+├─────────────────────────────────────────────────────────────────────┤
+│  RED:    Test "secrets not in environment" → FAILS (plain text)     │
+│  GREEN:  Use POSTGRES_PASSWORD_FILE with secrets → PASSES           │
+│  REFACTOR: Add security_opt, internal network → Tests still PASS    │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  ITERATION 4: Resource Management                                   │
+├─────────────────────────────────────────────────────────────────────┤
+│  RED:    Test "resource limits set" → FAILS (no limits)             │
+│  GREEN:  Add deploy.resources.limits → PASSES                       │
+│  REFACTOR: Add reservations, tune values → Tests still PASS         │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### TDD Test Categories for Docker Compose
+
+| Test Category | What to Test | Example Test |
+|---------------|--------------|--------------|
+| **Service Existence** | Service defined in config | `docker compose config --services \| grep service-name` |
+| **Health Checks** | Service reaches healthy state | `docker inspect --format='{{.State.Health.Status}}'` |
+| **Network Connectivity** | Services can communicate | `docker compose exec svc1 ping svc2` |
+| **Volume Persistence** | Data survives restarts | Write data → restart → verify data exists |
+| **Secret Management** | Secrets mounted correctly | `docker compose exec svc cat /run/secrets/name` |
+| **Resource Limits** | Limits applied | `docker stats --no-stream` |
+| **Dependencies** | Startup order correct | Verify dependent services wait for healthy deps |
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every Docker Compose bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                 BUG FIX WORKFLOW FOR DOCKER COMPOSE                 │
+└─────────────────────────────────────────────────────────────────────┘
+
+    ┌──────────────────────┐
+    │  1. BUG REPORTED     │
+    │  Service fails to    │
+    │  start/connect       │
+    └──────────┬───────────┘
+               │
+               ▼
+    ┌──────────────────────┐
+    │  2. WRITE TEST       │
+    │  Create test that    │
+    │  REPRODUCES the bug  │
+    │  (test will FAIL)    │
+    └──────────┬───────────┘
+               │
+               ▼
+    ┌──────────────────────┐
+    │  3. VERIFY FAILURE   │
+    │  Confirm test fails  │
+    │  for the RIGHT       │
+    │  reason              │
+    └──────────┬───────────┘
+               │
+               ▼
+    ┌──────────────────────┐
+    │  4. FIX THE BUG      │
+    │  Modify compose      │
+    │  configuration       │
+    └──────────┬───────────┘
+               │
+               ▼
+    ┌──────────────────────┐
+    │  5. VERIFY FIX       │
+    │  Test now PASSES     │
+    │  All other tests     │
+    │  still pass          │
+    └──────────┬───────────┘
+               │
+               ▼
+    ┌──────────────────────┐
+    │  6. DOCUMENT         │
+    │  Add bug ID to test  │
+    │  Update changelog    │
+    └──────────────────────┘
+```
+
+### Example Bug Fix: Redis Connection Timeout Issue
+
+**Bug Report #DC-142**: Backend service intermittently fails to connect to Redis on startup.
+
+#### Step 1-2: Write Test That Reproduces the Bug
+
+```bash
+#!/bin/bash
+# tests/regression/test_dc142_redis_connection.sh
+# Bug #DC-142: Backend fails to connect to Redis on startup
+# Regression test to ensure backend waits for Redis to be healthy
+
+set -e
+
+echo "Regression Test DC-142: Redis Connection on Startup"
+
+# Clean state
+docker compose down -v 2>/dev/null || true
+
+# Start only Redis first
+docker compose up -d redis
+echo "Waiting for Redis to start..."
+sleep 2
+
+# Now start backend
+docker compose up -d backend
+
+# Wait for backend to attempt connection
+sleep 10
+
+# Check if backend is healthy (should have connected to Redis)
+BACKEND_STATUS=$(docker compose ps backend --format json | jq -r '.[0].Health // "unknown"')
+
+if [ "$BACKEND_STATUS" != "healthy" ]; then
+    echo "FAIL: Backend not healthy (status: $BACKEND_STATUS)"
+    echo "Logs:"
+    docker compose logs backend | tail -20
+    docker compose down -v
+    exit 1
+fi
+
+# Verify backend can actually communicate with Redis
+docker compose exec -T backend redis-cli -h redis ping | grep -q "PONG" || {
+    echo "FAIL: Backend cannot ping Redis"
+    docker compose down -v
+    exit 1
+}
+
+echo "PASS: Bug DC-142 regression test passed"
+docker compose down -v
+```
+
+```bash
+# Run the test - it FAILS because backend doesn't wait for Redis
+./tests/regression/test_dc142_redis_connection.sh
+# Output: FAIL: Backend not healthy (status: starting)
+# Logs: Error: ECONNREFUSED 172.18.0.2:6379
+```
+
+#### Step 3: Verify Test Fails for the Right Reason
+
+```bash
+# The test fails because:
+# 1. Backend starts before Redis is healthy
+# 2. Backend's Redis connection attempt fails
+# 3. Backend enters unhealthy state
+
+# Check the logs confirm this
+docker compose logs backend 2>&1 | grep -E "(ECONNREFUSED|Connection refused|Redis)"
+# Output: Error: connect ECONNREFUSED 172.18.0.2:6379
+```
+
+#### Step 4: Fix the Bug
+
+**Before (buggy configuration):**
+```yaml
+# compose/domain/api-services.yml
+services:
+  backend:
+    image: mycompany/backend:1.0
+    depends_on:
+      - redis  # ❌ Only waits for container to start, not for Redis to be ready
+    environment:
+      - REDIS_HOST=redis
+```
+
+**After (fixed configuration):**
+```yaml
+# compose/domain/api-services.yml
+services:
+  backend:
+    image: mycompany/backend:1.0
+    depends_on:
+      redis:
+        condition: service_healthy  # ✅ Waits for Redis health check to pass
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_CONNECT_TIMEOUT=30
+      - REDIS_RETRY_ATTEMPTS=5
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  redis:
+    image: redis:7.2-alpine3.19
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]  # ✅ Redis health check required
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+```
+
+#### Step 5: Verify the Fix
+
+```bash
+# Run the regression test again - it should PASS now
+./tests/regression/test_dc142_redis_connection.sh
+# Output: PASS: Bug DC-142 regression test passed
+
+# Run all other tests to ensure no regressions
+./tests/run_all_tests.sh
+# Output: All 15 tests passed
+```
+
+#### Step 6: Document the Bug Fix
+
+```yaml
+# compose/domain/api-services.yml
+services:
+  backend:
+    image: mycompany/backend:1.0
+    # FIX: Bug #DC-142 - Backend must wait for Redis health check
+    # Before: depends_on: [redis] (only waited for container start)
+    # After: depends_on with service_healthy condition
+    # Regression test: tests/regression/test_dc142_redis_connection.sh
+    depends_on:
+      redis:
+        condition: service_healthy
+```
+
+### Common Docker Compose Bugs and Regression Tests
+
+| Bug Type | Symptom | Regression Test Strategy |
+|----------|---------|-------------------------|
+| **Startup Order** | Service A can't connect to Service B | Test that A becomes healthy after B |
+| **Health Check Failure** | Service never becomes healthy | Test health endpoint directly, verify timeout values |
+| **Volume Mount Issues** | Data not persisted or permission denied | Write data, restart, verify data exists |
+| **Network Isolation** | Services can reach unintended networks | Test connectivity matrix between services |
+| **Resource Exhaustion** | Container OOM killed | Monitor memory usage under load |
+| **Secret Access** | App can't read secrets | Test secret file exists and is readable |
+| **Environment Variable** | Wrong config applied | Test environment variable values in container |
+| **Port Conflicts** | Multiple services on same port | Test all exposed ports are accessible |
+
+### Regression Test Script Template
+
+```bash
+#!/bin/bash
+# tests/regression/test_[BUG_ID]_[description].sh
+# Bug #[BUG_ID]: [Brief description of the bug]
+#
+# Root Cause: [What caused the bug]
+# Fix: [How it was fixed]
+# Date Fixed: [YYYY-MM-DD]
+
+set -e
+
+BUG_ID="[BUG_ID]"
+echo "Regression Test ${BUG_ID}: [Description]"
+
+# Setup: Clean state
+docker compose down -v 2>/dev/null || true
+
+# Reproduce the scenario that triggered the bug
+docker compose up -d [services]
+
+# Wait for services
+sleep [appropriate_time]
+
+# Test that the bug is fixed
+# [Specific test commands]
+
+if [ [failure_condition] ]; then
+    echo "FAIL: Bug ${BUG_ID} regression - [failure description]"
+    docker compose logs [relevant_service]
+    docker compose down -v
+    exit 1
+fi
+
+# Additional verification
+# [More test commands]
+
+echo "PASS: Bug ${BUG_ID} regression test passed"
+docker compose down -v
+exit 0
+```
+
 ## 3. Mandatory Structure Requirements
 
 ### A. File Format & Versioning
@@ -1751,6 +2257,467 @@ services:
    - **Independent Scaling**: Scale domain services without affecting infrastructure capacity
    - **Technology Flexibility**: Swap infrastructure components (e.g., PostgreSQL → MySQL) without touching domain services
    - **Security by Design**: Adapters act as security boundaries, domain core never exposed directly
+
+---
+
+## 13. Quick Reference
+
+### Common Commands
+
+```bash
+# ═══════════════════════════════════════════════════════════════════
+# DOCKER COMPOSE COMMON COMMANDS
+# ═══════════════════════════════════════════════════════════════════
+
+# ─────────────────────────────────────────────────────────────────────
+# STARTING & STOPPING
+# ─────────────────────────────────────────────────────────────────────
+
+# Start all services in detached mode
+docker compose up -d
+
+# Start specific services only
+docker compose up -d postgres redis backend
+
+# Start with build (rebuild images first)
+docker compose up -d --build
+
+# Start with fresh containers (remove orphans)
+docker compose up -d --remove-orphans
+
+# Stop all services (keeps volumes)
+docker compose down
+
+# Stop and remove volumes (DESTRUCTIVE)
+docker compose down -v
+
+# Stop and remove everything including images
+docker compose down -v --rmi all
+
+# Restart all services
+docker compose restart
+
+# Restart specific service
+docker compose restart backend
+
+# ─────────────────────────────────────────────────────────────────────
+# BUILDING IMAGES
+# ─────────────────────────────────────────────────────────────────────
+
+# Build all services
+docker compose build
+
+# Build specific service
+docker compose build backend
+
+# Build without cache (fresh build)
+docker compose build --no-cache
+
+# Build with parallel workers
+docker compose build --parallel
+
+# Pull latest images
+docker compose pull
+
+# ─────────────────────────────────────────────────────────────────────
+# VIEWING LOGS
+# ─────────────────────────────────────────────────────────────────────
+
+# View logs for all services (follow mode)
+docker compose logs -f
+
+# View logs for specific service
+docker compose logs -f backend
+
+# View last 100 lines
+docker compose logs --tail=100
+
+# View logs with timestamps
+docker compose logs -f -t
+
+# View logs since specific time
+docker compose logs --since="2024-01-01T00:00:00"
+
+# ─────────────────────────────────────────────────────────────────────
+# EXECUTING COMMANDS
+# ─────────────────────────────────────────────────────────────────────
+
+# Execute command in running container
+docker compose exec backend sh
+
+# Execute command as specific user
+docker compose exec -u root backend sh
+
+# Execute non-interactive command
+docker compose exec -T backend npm test
+
+# Run one-off command in new container
+docker compose run --rm backend npm test
+
+# ─────────────────────────────────────────────────────────────────────
+# STATUS & INSPECTION
+# ─────────────────────────────────────────────────────────────────────
+
+# List running services
+docker compose ps
+
+# List all services (including stopped)
+docker compose ps -a
+
+# View service resource usage
+docker compose top
+
+# View configuration
+docker compose config
+
+# Validate configuration
+docker compose config --quiet && echo "✅ Valid"
+
+# List services defined
+docker compose config --services
+
+# List volumes defined
+docker compose config --volumes
+
+# ─────────────────────────────────────────────────────────────────────
+# SCALING & UPDATES
+# ─────────────────────────────────────────────────────────────────────
+
+# Scale service to multiple instances
+docker compose up -d --scale backend=3
+
+# Update single service (no downtime for others)
+docker compose up -d --no-deps backend
+
+# Force recreate containers
+docker compose up -d --force-recreate
+
+# ─────────────────────────────────────────────────────────────────────
+# ENVIRONMENT-SPECIFIC
+# ─────────────────────────────────────────────────────────────────────
+
+# Use specific compose file
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+# Use specific env file
+docker compose --env-file .env.production up -d
+
+# Use specific project name
+docker compose -p myproject up -d
+
+# Use profile
+docker compose --profile debug up -d
+```
+
+### Docker Compose Patterns Cheat Sheet
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                  DOCKER COMPOSE PATTERNS CHEAT SHEET                │
+└─────────────────────────────────────────────────────────────────────┘
+
+╔═══════════════════════════════════════════════════════════════════╗
+║ HEALTH CHECK PATTERNS                                              ║
+╠═══════════════════════════════════════════════════════════════════╣
+║                                                                    ║
+║ PostgreSQL:                                                        ║
+║   healthcheck:                                                     ║
+║     test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]               ║
+║     interval: 10s                                                  ║
+║     timeout: 5s                                                    ║
+║     retries: 5                                                     ║
+║     start_period: 30s                                              ║
+║                                                                    ║
+║ Redis:                                                             ║
+║   healthcheck:                                                     ║
+║     test: ["CMD", "redis-cli", "ping"]                            ║
+║     interval: 10s                                                  ║
+║     timeout: 3s                                                    ║
+║     retries: 3                                                     ║
+║                                                                    ║
+║ HTTP Service:                                                      ║
+║   healthcheck:                                                     ║
+║     test: ["CMD", "curl", "-f", "http://localhost:3000/health"]   ║
+║     interval: 15s                                                  ║
+║     timeout: 5s                                                    ║
+║     retries: 3                                                     ║
+║                                                                    ║
+║ MongoDB:                                                           ║
+║   healthcheck:                                                     ║
+║     test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"] ║
+║     interval: 10s                                                  ║
+║     timeout: 5s                                                    ║
+║     retries: 5                                                     ║
+║                                                                    ║
+║ RabbitMQ:                                                          ║
+║   healthcheck:                                                     ║
+║     test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]           ║
+║     interval: 30s                                                  ║
+║     timeout: 10s                                                   ║
+║     retries: 3                                                     ║
+╚═══════════════════════════════════════════════════════════════════╝
+
+╔═══════════════════════════════════════════════════════════════════╗
+║ DEPENDENCY PATTERNS                                                ║
+╠═══════════════════════════════════════════════════════════════════╣
+║                                                                    ║
+║ Wait for healthy (RECOMMENDED):                                    ║
+║   depends_on:                                                      ║
+║     db:                                                            ║
+║       condition: service_healthy                                   ║
+║                                                                    ║
+║ Wait for started only:                                             ║
+║   depends_on:                                                      ║
+║     db:                                                            ║
+║       condition: service_started                                   ║
+║                                                                    ║
+║ Wait for completed (init containers):                              ║
+║   depends_on:                                                      ║
+║     migration:                                                     ║
+║       condition: service_completed_successfully                    ║
+╚═══════════════════════════════════════════════════════════════════╝
+
+╔═══════════════════════════════════════════════════════════════════╗
+║ NETWORK PATTERNS                                                   ║
+╠═══════════════════════════════════════════════════════════════════╣
+║                                                                    ║
+║ Public network (exposed to host):                                  ║
+║   networks:                                                        ║
+║     public:                                                        ║
+║       driver: bridge                                               ║
+║                                                                    ║
+║ Internal network (isolated, no internet):                          ║
+║   networks:                                                        ║
+║     database:                                                      ║
+║       driver: bridge                                               ║
+║       internal: true                                               ║
+║                                                                    ║
+║ Service network assignment:                                        ║
+║   frontend:                                                        ║
+║     networks: [public, backend]      # Can reach both              ║
+║   api:                                                             ║
+║     networks: [backend, database]    # Backend + DB access         ║
+║   db:                                                              ║
+║     networks: [database]             # Isolated, API only          ║
+╚═══════════════════════════════════════════════════════════════════╝
+
+╔═══════════════════════════════════════════════════════════════════╗
+║ VOLUME PATTERNS                                                    ║
+╠═══════════════════════════════════════════════════════════════════╣
+║                                                                    ║
+║ Named volume (production):                                         ║
+║   volumes:                                                         ║
+║     - postgres-data:/var/lib/postgresql/data                       ║
+║                                                                    ║
+║ Bind mount (development):                                          ║
+║   volumes:                                                         ║
+║     - ./src:/app/src:ro                                           ║
+║                                                                    ║
+║ tmpfs (ephemeral/fast):                                            ║
+║   volumes:                                                         ║
+║     - type: tmpfs                                                  ║
+║       target: /tmp                                                 ║
+║       tmpfs:                                                       ║
+║         size: 100M                                                 ║
+║                                                                    ║
+║ Read-only mount:                                                   ║
+║   volumes:                                                         ║
+║     - ./config:/etc/app/config:ro                                  ║
+╚═══════════════════════════════════════════════════════════════════╝
+
+╔═══════════════════════════════════════════════════════════════════╗
+║ SECRETS PATTERNS                                                   ║
+╠═══════════════════════════════════════════════════════════════════╣
+║                                                                    ║
+║ File-based secret:                                                 ║
+║   secrets:                                                         ║
+║     db_password:                                                   ║
+║       file: ./secrets/db_password.txt                              ║
+║                                                                    ║
+║ External secret (Docker Swarm):                                    ║
+║   secrets:                                                         ║
+║     api_key:                                                       ║
+║       external: true                                               ║
+║       name: production_api_key                                     ║
+║                                                                    ║
+║ Using in service:                                                  ║
+║   services:                                                        ║
+║     db:                                                            ║
+║       environment:                                                 ║
+║         POSTGRES_PASSWORD_FILE: /run/secrets/db_password           ║
+║       secrets:                                                     ║
+║         - db_password                                              ║
+╚═══════════════════════════════════════════════════════════════════╝
+
+╔═══════════════════════════════════════════════════════════════════╗
+║ RESOURCE LIMITS PATTERN                                            ║
+╠═══════════════════════════════════════════════════════════════════╣
+║                                                                    ║
+║ deploy:                                                            ║
+║   resources:                                                       ║
+║     limits:           # Maximum resources                          ║
+║       cpus: '2.0'     # Max 2 CPU cores                           ║
+║       memory: 2G      # Max 2GB RAM                                ║
+║     reservations:     # Guaranteed resources                       ║
+║       cpus: '0.5'     # Reserved 0.5 CPU cores                    ║
+║       memory: 512M    # Reserved 512MB RAM                         ║
+╚═══════════════════════════════════════════════════════════════════╝
+
+╔═══════════════════════════════════════════════════════════════════╗
+║ SECURITY HARDENING PATTERN                                         ║
+╠═══════════════════════════════════════════════════════════════════╣
+║                                                                    ║
+║ services:                                                          ║
+║   app:                                                             ║
+║     user: "1001:1001"                  # Non-root user             ║
+║     read_only: true                    # Read-only filesystem      ║
+║     security_opt:                                                  ║
+║       - no-new-privileges:true         # Prevent privilege esc     ║
+║     cap_drop:                                                      ║
+║       - ALL                            # Drop all capabilities     ║
+║     cap_add:                                                       ║
+║       - NET_BIND_SERVICE               # Add only what's needed    ║
+║     tmpfs:                                                         ║
+║       - /tmp                           # Writable temp directory   ║
+╚═══════════════════════════════════════════════════════════════════╝
+
+╔═══════════════════════════════════════════════════════════════════╗
+║ EXTENSION FIELDS (DRY PATTERN)                                     ║
+╠═══════════════════════════════════════════════════════════════════╣
+║                                                                    ║
+║ # Define reusable configurations                                   ║
+║ x-common-healthcheck: &common-healthcheck                          ║
+║   interval: 10s                                                    ║
+║   timeout: 5s                                                      ║
+║   retries: 3                                                       ║
+║   start_period: 30s                                                ║
+║                                                                    ║
+║ x-logging: &default-logging                                        ║
+║   driver: json-file                                                ║
+║   options:                                                         ║
+║     max-size: "10m"                                                ║
+║     max-file: "3"                                                  ║
+║                                                                    ║
+║ # Use in services                                                  ║
+║ services:                                                          ║
+║   app:                                                             ║
+║     healthcheck:                                                   ║
+║       <<: *common-healthcheck                                      ║
+║       test: ["CMD", "curl", "-f", "http://localhost/health"]       ║
+║     logging: *default-logging                                      ║
+╚═══════════════════════════════════════════════════════════════════╝
+```
+
+### Project Structure
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│               RECOMMENDED PROJECT STRUCTURE                          │
+└─────────────────────────────────────────────────────────────────────┘
+
+project/
+├── docker-compose.yml              # Main entry point (uses include)
+├── docker-compose.dev.yml          # Development overrides
+├── docker-compose.prod.yml         # Production overrides
+├── docker-compose.test.yml         # Testing configuration
+│
+├── compose/                        # Modular compose files
+│   ├── domain/                     # Core business services
+│   │   ├── api-services.yml        # REST/GraphQL APIs
+│   │   ├── worker-services.yml     # Background workers
+│   │   └── scheduler-services.yml  # Cron jobs
+│   │
+│   ├── infrastructure/             # External dependencies
+│   │   ├── databases.yml           # PostgreSQL, MongoDB, etc.
+│   │   ├── caches.yml              # Redis, Memcached
+│   │   ├── messaging.yml           # RabbitMQ, Kafka
+│   │   └── storage.yml             # MinIO, S3
+│   │
+│   ├── adapters/                   # Gateways & proxies
+│   │   ├── gateway.yml             # Traefik, Kong
+│   │   ├── proxy.yml               # Nginx
+│   │   └── auth.yml                # Keycloak
+│   │
+│   ├── observability/              # Monitoring stack
+│   │   ├── monitoring.yml          # Prometheus, Grafana
+│   │   ├── logging.yml             # Loki, ELK
+│   │   └── tracing.yml             # Jaeger, Tempo
+│   │
+│   └── shared/                     # Shared resources
+│       ├── networks.yml            # Network definitions
+│       ├── volumes.yml             # Volume definitions
+│       └── secrets.yml             # Secrets definitions
+│
+├── services/                       # Service source code
+│   ├── api/
+│   │   ├── Dockerfile
+│   │   ├── Dockerfile.dev
+│   │   └── src/
+│   └── worker/
+│       ├── Dockerfile
+│       └── src/
+│
+├── config/                         # Configuration files
+│   ├── nginx/
+│   │   └── nginx.conf
+│   ├── prometheus/
+│   │   └── prometheus.yml
+│   └── grafana/
+│       └── dashboards/
+│
+├── scripts/                        # Automation scripts
+│   ├── init-db/                    # Database init scripts
+│   │   └── 01-schema.sql
+│   └── healthcheck/                # Custom health check scripts
+│       └── check-api.sh
+│
+├── secrets/                        # Secret files (git-ignored)
+│   ├── db_password.txt
+│   ├── jwt_secret.txt
+│   └── api_key.txt
+│
+├── tests/                          # Docker Compose tests
+│   ├── test_services.sh            # Service tests
+│   ├── test_networks.sh            # Network tests
+│   └── regression/                 # Regression tests
+│       └── test_dc142_redis.sh
+│
+├── .env                            # Default environment variables
+├── .env.example                    # Example env file (committed)
+├── .env.development                # Development overrides
+├── .env.production                 # Production overrides
+├── .dockerignore                   # Docker build exclusions
+├── Makefile                        # Build automation
+└── README.md                       # Documentation
+
+# ─────────────────────────────────────────────────────────────────────
+# LAYER RESPONSIBILITIES
+# ─────────────────────────────────────────────────────────────────────
+
+DOMAIN LAYER (compose/domain/)
+  └── Core business services that implement application logic
+      - APIs, workers, schedulers
+      - Use 'expose:' (not 'ports:')
+      - Connect to 'backend' network
+
+INFRASTRUCTURE LAYER (compose/infrastructure/)
+  └── External dependencies that domain services use
+      - Databases, caches, message queues
+      - Use 'internal: true' networks
+      - Health checks MANDATORY
+
+ADAPTERS LAYER (compose/adapters/)
+  └── Entry points that route external traffic
+      - Reverse proxies, API gateways
+      - Use 'ports:' for external access
+      - Connect to 'public' network
+
+OBSERVABILITY LAYER (compose/observability/)
+  └── Monitoring, logging, and tracing
+      - Prometheus, Grafana, Jaeger
+      - Optional in development
+      - Connect to all service networks
+```
 
 ---
 

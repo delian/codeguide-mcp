@@ -1748,3 +1748,102 @@ inline fun <T> measureTime(block: () -> T): T {
 - Only present working, tested, documented code to the user
 
 **Remember**: Minimalistic, clean, readable, well-documented, functional, immutable, coroutine-based code with hexagonal architecture, nullable safety, extension functions, and focus on performance and scalability. Keep it simple, keep it Kotlin, keep it working.
+
+---
+
+## 15. Quick Reference
+
+### Common Commands
+
+```bash
+# Build
+./gradlew build
+./gradlew compileKotlin
+
+# Test
+./gradlew test
+./gradlew test --tests "MyTest"
+
+# Lint & Format
+./gradlew ktlintCheck
+./gradlew ktlintFormat
+
+# Documentation
+./gradlew dokkaHtml
+
+# Run
+./gradlew run
+
+# Dependencies
+./gradlew dependencies
+```
+
+### Kotlin Patterns Cheat Sheet
+
+```kotlin
+// Null safety
+val name = user?.name ?: "Unknown"
+val length = str?.length ?: 0
+val result = nullable?.let { process(it) }
+
+// Collections
+items.map { it * 2 }
+items.filter { it > 0 }
+items.firstOrNull { it.id == targetId }
+items.groupBy { it.category }
+
+// Coroutines
+suspend fun fetch(): Result = coroutineScope {
+    val a = async { fetchA() }
+    val b = async { fetchB() }
+    combine(a.await(), b.await())
+}
+
+// Data class
+data class User(val id: String, val name: String)
+
+// Sealed class
+sealed class Result {
+    data class Success(val data: Data) : Result()
+    data class Error(val message: String) : Result()
+}
+```
+
+### build.gradle.kts Template
+
+```kotlin
+plugins {
+    kotlin("jvm") version "1.9.0"
+    id("org.jetbrains.dokka") version "1.9.0"
+}
+
+dependencies {
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
+    testImplementation(kotlin("test"))
+    testImplementation("io.mockk:mockk:1.13.8")
+}
+
+tasks.test { useJUnitPlatform() }
+```
+
+### Project Structure
+
+```
+my_project/
+├── build.gradle.kts
+├── src/
+│   ├── main/kotlin/
+│   │   ├── domain/       # Domain models
+│   │   ├── ports/        # Interfaces
+│   │   └── adapters/     # Implementations
+│   └── test/kotlin/
+└── docs/
+```
+
+---
+
+## References
+
+- [Kotlin Documentation](https://kotlinlang.org/docs/)
+- [Kotlin Coroutines Guide](https://kotlinlang.org/docs/coroutines-guide.html)
+- [Dokka Documentation](https://kotlin.github.io/dokka/)

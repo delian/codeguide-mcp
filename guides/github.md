@@ -832,6 +832,741 @@ After a vulnerability is fixed:
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new GitHub Actions workflows and automation code.**
+
+### TDD Cycle Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    TDD CYCLE FOR GITHUB ACTIONS                  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│    ┌───────────┐                                                │
+│    │   RED     │  Write a failing workflow test first           │
+│    │  (FAIL)   │  - Define expected behavior                    │
+│    └─────┬─────┘  - Create test workflow that validates         │
+│          │                                                       │
+│          ▼                                                       │
+│    ┌───────────┐                                                │
+│    │  GREEN    │  Write minimal workflow to pass                │
+│    │  (PASS)   │  - Implement just enough to satisfy tests      │
+│    └─────┬─────┘  - Avoid over-engineering                      │
+│          │                                                       │
+│          ▼                                                       │
+│    ┌───────────┐                                                │
+│    │ REFACTOR  │  Improve while keeping tests green             │
+│    │ (IMPROVE) │  - Optimize workflow steps                     │
+│    └─────┬─────┘  - Remove duplication                          │
+│          │        - Improve caching                              │
+│          │                                                       │
+│          └──────────────── Repeat ──────────────────────────────│
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Example TDD Workflow for GitHub Actions
+
+**Scenario**: Creating a workflow to validate Terraform configurations
+
+```yaml
+# Step 1: RED - Write failing test workflow first
+# .github/workflows/test-terraform-validation.yml
+
+name: Test Terraform Validation Workflow
+
+on:
+  push:
+    paths:
+      - '.github/workflows/terraform-*.yml'
+      - 'test-fixtures/terraform/**'
+
+jobs:
+  test-workflow:
+    name: Test Terraform Workflow
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Test 1: Verify workflow validates valid Terraform
+      - name: Test valid Terraform passes
+        run: |
+          cd test-fixtures/terraform/valid
+          # This will FAIL until we create the workflow
+          act -j validate-terraform --dryrun
+          if [ $? -ne 0 ]; then
+            echo "::error::Valid Terraform should pass validation"
+            exit 1
+          fi
+          echo "✓ Valid Terraform test passed"
+
+      # Test 2: Verify workflow catches invalid Terraform
+      - name: Test invalid Terraform fails
+        run: |
+          cd test-fixtures/terraform/invalid
+          # Should return non-zero exit code
+          act -j validate-terraform --dryrun 2>&1 || EXIT_CODE=$?
+          if [ ${EXIT_CODE:-0} -eq 0 ]; then
+            echo "::error::Invalid Terraform should fail validation"
+            exit 1
+          fi
+          echo "✓ Invalid Terraform correctly fails"
+
+# Run: Test workflow FAILS - terraform validation workflow doesn't exist yet
+```
+
+```yaml
+# Step 2: GREEN - Write minimal workflow to make tests pass
+# .github/workflows/terraform-validate.yml
+
+name: Terraform Validation
+
+on:
+  push:
+    paths:
+      - '**/*.tf'
+      - '**/*.tfvars'
+  pull_request:
+    paths:
+      - '**/*.tf'
+      - '**/*.tfvars'
+
+jobs:
+  validate-terraform:
+    name: Validate Terraform
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0
+
+      - name: Terraform Init
+        run: terraform init -backend=false
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+
+# Run: Tests now PASS - workflow validates Terraform correctly
+```
+
+```yaml
+# Step 3: REFACTOR - Improve workflow while keeping tests green
+# .github/workflows/terraform-validate.yml (improved)
+
+name: Terraform Validation
+
+on:
+  push:
+    paths:
+      - '**/*.tf'
+      - '**/*.tfvars'
+  pull_request:
+    paths:
+      - '**/*.tf'
+      - '**/*.tfvars'
+
+concurrency:
+  group: terraform-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-terraform:
+    name: Validate Terraform
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    strategy:
+      matrix:
+        directory: [infrastructure, modules/vpc, modules/eks]
+      fail-fast: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0
+
+      # Improved: Cache Terraform plugins
+      - name: Cache Terraform plugins
+        uses: actions/cache@v4
+        with:
+          path: ~/.terraform.d/plugin-cache
+          key: terraform-${{ runner.os }}-${{ hashFiles('**/.terraform.lock.hcl') }}
+          restore-keys: terraform-${{ runner.os }}-
+
+      - name: Terraform Init
+        working-directory: ${{ matrix.directory }}
+        run: terraform init -backend=false
+        env:
+          TF_PLUGIN_CACHE_DIR: ~/.terraform.d/plugin-cache
+
+      - name: Terraform Validate
+        working-directory: ${{ matrix.directory }}
+        run: terraform validate
+
+      - name: Terraform Format Check
+        working-directory: ${{ matrix.directory }}
+        run: terraform fmt -check -recursive
+
+      # Improved: Add tflint for additional validation
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v4
+
+      - name: Run TFLint
+        working-directory: ${{ matrix.directory }}
+        run: tflint --format=compact
+
+# Tests still PASS - workflow is now more robust with caching and matrix builds
+```
+
+### Visual Step-by-Step TDD Example
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ STEP 1: RED - Write Failing Test                                        │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  📝 Create test-deploy-workflow.yml:                                    │
+│                                                                          │
+│  ┌────────────────────────────────────────┐                             │
+│  │ jobs:                                   │                             │
+│  │   test-deployment:                      │                             │
+│  │     steps:                              │                             │
+│  │       - name: Verify deploy runs        │                             │
+│  │         run: |                          │                             │
+│  │           # Assert deployment workflow  │                             │
+│  │           # exists and functions        │   ❌ FAILS                  │
+│  │           gh workflow run deploy.yml    │   (workflow missing)        │
+│  └────────────────────────────────────────┘                             │
+│                                                                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│ STEP 2: GREEN - Write Minimal Implementation                            │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  📝 Create deploy.yml:                                                  │
+│                                                                          │
+│  ┌────────────────────────────────────────┐                             │
+│  │ jobs:                                   │                             │
+│  │   deploy:                               │                             │
+│  │     steps:                              │                             │
+│  │       - uses: actions/checkout@v4       │                             │
+│  │       - run: echo "Deploying..."        │   ✅ PASSES                 │
+│  └────────────────────────────────────────┘   (test satisfied)          │
+│                                                                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│ STEP 3: REFACTOR - Improve While Tests Pass                             │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  📝 Enhance deploy.yml:                                                 │
+│                                                                          │
+│  ┌────────────────────────────────────────┐                             │
+│  │ jobs:                                   │                             │
+│  │   deploy:                               │                             │
+│  │     environment: production             │                             │
+│  │     concurrency: deploy-${{ ref }}      │                             │
+│  │     steps:                              │                             │
+│  │       - uses: actions/checkout@v4       │                             │
+│  │       - name: Build                     │                             │
+│  │         run: npm run build              │                             │
+│  │       - name: Deploy                    │   ✅ STILL PASSES           │
+│  │         run: ./deploy.sh                │   (tests green)             │
+│  │       - name: Notify                    │                             │
+│  │         run: ./notify.sh                │                             │
+│  └────────────────────────────────────────┘                             │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### TDD Testing Strategies for GitHub Actions
+
+```yaml
+# .github/workflows/workflow-tests.yml - Meta-testing for workflows
+
+name: Workflow Tests
+
+on:
+  push:
+    paths:
+      - '.github/workflows/**'
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+
+jobs:
+  # Test 1: Syntax validation
+  syntax-validation:
+    name: Validate Workflow Syntax
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate all workflows
+        run: |
+          for workflow in .github/workflows/*.yml; do
+            echo "Validating: $workflow"
+            # Use actionlint to validate syntax
+            actionlint "$workflow"
+            if [ $? -ne 0 ]; then
+              echo "::error::Invalid workflow syntax in $workflow"
+              exit 1
+            fi
+          done
+          echo "✓ All workflows have valid syntax"
+
+  # Test 2: Security checks
+  security-checks:
+    name: Workflow Security Checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for pinned action versions
+        run: |
+          # Ensure all actions use SHA or version tags
+          if grep -rE "uses: [^@]+@(main|master)" .github/workflows/; then
+            echo "::error::Found actions using main/master branch"
+            echo "All actions must be pinned to a version or SHA"
+            exit 1
+          fi
+          echo "✓ All actions are properly pinned"
+
+      - name: Check for secret exposure risks
+        run: |
+          # Ensure secrets aren't echoed
+          if grep -rE "echo.*\\\$\{\{ secrets\." .github/workflows/; then
+            echo "::error::Found potential secret exposure via echo"
+            exit 1
+          fi
+          echo "✓ No secret exposure risks found"
+
+  # Test 3: Best practices
+  best-practices:
+    name: Workflow Best Practices
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for timeout settings
+        run: |
+          for workflow in .github/workflows/*.yml; do
+            if ! grep -q "timeout-minutes:" "$workflow"; then
+              echo "::warning::$workflow missing timeout-minutes"
+            fi
+          done
+          echo "✓ Timeout check complete"
+
+      - name: Check for concurrency settings
+        run: |
+          for workflow in .github/workflows/*.yml; do
+            if ! grep -q "concurrency:" "$workflow"; then
+              echo "::warning::$workflow missing concurrency settings"
+            fi
+          done
+          echo "✓ Concurrency check complete"
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug in GitHub Actions workflows MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                  BUG FIX WORKFLOW FOR GITHUB                     │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │  1. BUG REPORTED                                            │ │
+│  │     - Issue #123: "Deploy workflow fails on ARM runners"    │ │
+│  └─────────────────────────────┬──────────────────────────────┘ │
+│                                │                                 │
+│                                ▼                                 │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │  2. WRITE REGRESSION TEST                                   │ │
+│  │     - Create test that reproduces the bug                   │ │
+│  │     - Test MUST fail before fix                             │ │
+│  │     - Reference issue ID in test comments                   │ │
+│  └─────────────────────────────┬──────────────────────────────┘ │
+│                                │                                 │
+│                                ▼                                 │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │  3. VERIFY TEST FAILS                                       │ │
+│  │     ❌ Test fails for the expected reason                   │ │
+│  │     - Confirms we're testing the right thing                │ │
+│  └─────────────────────────────┬──────────────────────────────┘ │
+│                                │                                 │
+│                                ▼                                 │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │  4. FIX THE BUG                                             │ │
+│  │     - Apply minimal fix to resolve the issue                │ │
+│  │     - Don't add unrelated changes                           │ │
+│  └─────────────────────────────┬──────────────────────────────┘ │
+│                                │                                 │
+│                                ▼                                 │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │  5. VERIFY TEST PASSES                                      │ │
+│  │     ✅ Test now passes                                      │ │
+│  │     - Bug is fixed                                          │ │
+│  │     - Regression prevented forever                          │ │
+│  └─────────────────────────────┬──────────────────────────────┘ │
+│                                │                                 │
+│                                ▼                                 │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │  6. DOCUMENT & DEPLOY                                       │ │
+│  │     - PR references issue: "Fixes #123"                     │ │
+│  │     - Commit message follows format                         │ │
+│  │     - Deploy with confidence                                │ │
+│  └────────────────────────────────────────────────────────────┘ │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Example Bug Fix: Workflow Fails on Matrix Builds
+
+```yaml
+# Bug Report #456: Matrix build fails when node version contains 'x'
+# Example: node-version: '20.x' causes setup-node to fail
+
+# ─────────────────────────────────────────────────────────────────
+# Step 1-2: Write test that reproduces the bug
+# ─────────────────────────────────────────────────────────────────
+
+# .github/workflows/test-regression-456.yml
+name: Regression Test - Bug #456
+
+on:
+  push:
+    paths:
+      - '.github/workflows/ci.yml'
+
+jobs:
+  # Bug #456: Verify matrix builds work with 'x' notation
+  test-node-version-notation:
+    name: "Test Node Version Notation (Bug #456)"
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        # These notations caused failures before fix
+        node-version: ['18.x', '20.x', '22.x']
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # This step would FAIL before the fix
+      - name: Setup Node.js ${{ matrix.node-version }}
+        id: setup-node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Verify Node.js version
+        run: |
+          # Bug #456: Version check would fail on 'x' notation
+          NODE_VERSION=$(node --version)
+          echo "Installed Node.js version: $NODE_VERSION"
+
+          # Extract major version from matrix input (e.g., '20.x' -> '20')
+          EXPECTED_MAJOR=$(echo "${{ matrix.node-version }}" | cut -d'.' -f1)
+          ACTUAL_MAJOR=$(echo "$NODE_VERSION" | sed 's/v//' | cut -d'.' -f1)
+
+          if [ "$EXPECTED_MAJOR" != "$ACTUAL_MAJOR" ]; then
+            echo "::error::Expected Node.js $EXPECTED_MAJOR.x but got $NODE_VERSION"
+            exit 1
+          fi
+
+          echo "✓ Node.js version matches expected major version $EXPECTED_MAJOR"
+
+# Run: gh workflow run test-regression-456.yml
+# Result: ❌ FAILS on matrix builds (confirms bug exists)
+```
+
+```yaml
+# ─────────────────────────────────────────────────────────────────
+# Step 3-4: Fix the bug in the main CI workflow
+# ─────────────────────────────────────────────────────────────────
+
+# .github/workflows/ci.yml (FIXED)
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        # Bug #456 Fix: Use explicit version strings instead of 'x' notation
+        # when actions/setup-node has issues with wildcard versions
+        node-version: ['18', '20', '22']  # Changed from '18.x', '20.x', '22.x'
+      fail-fast: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          # Bug #456 Fix: Explicitly check for version file first
+          node-version-file: '.nvmrc'
+          check-latest: true  # Ensure we get the latest patch version
+
+      - name: Verify Node.js setup
+        run: |
+          echo "Node.js version: $(node --version)"
+          echo "npm version: $(npm --version)"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+# Run: gh workflow run ci.yml
+# Result: ✅ PASSES - Bug #456 is fixed
+```
+
+### Example Bug Fix: Secret Exposure in Logs
+
+```yaml
+# Bug Report #789: Secrets accidentally exposed in workflow logs
+# Environment variables containing secrets were being echoed
+
+# ─────────────────────────────────────────────────────────────────
+# Step 1-2: Write regression test
+# ─────────────────────────────────────────────────────────────────
+
+# .github/workflows/test-regression-789.yml
+name: Regression Test - Bug #789 (Secret Exposure)
+
+on:
+  push:
+    paths:
+      - '.github/workflows/deploy.yml'
+
+jobs:
+  test-secret-safety:
+    name: "Verify Secrets Not Exposed (Bug #789)"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Bug #789: Check that deploy workflow doesn't echo secrets
+      - name: Scan for secret exposure patterns
+        run: |
+          DEPLOY_WORKFLOW=".github/workflows/deploy.yml"
+
+          # Pattern 1: Direct echo of secrets
+          if grep -E "echo.*\\\$\{\{ secrets\." "$DEPLOY_WORKFLOW"; then
+            echo "::error::Bug #789: Found direct echo of secrets"
+            exit 1
+          fi
+
+          # Pattern 2: Secrets in run commands that might log
+          if grep -E "printenv|env \|" "$DEPLOY_WORKFLOW" | grep -v "::add-mask::"; then
+            echo "::error::Bug #789: Found env dump without masking"
+            exit 1
+          fi
+
+          # Pattern 3: Secrets passed to commands that log verbosely
+          if grep -E "curl.*-v.*\\\$\{\{ secrets\." "$DEPLOY_WORKFLOW"; then
+            echo "::error::Bug #789: Found verbose curl with secrets"
+            exit 1
+          fi
+
+          echo "✓ No secret exposure patterns found (Bug #789 prevented)"
+
+      - name: Verify secret masking is used
+        run: |
+          DEPLOY_WORKFLOW=".github/workflows/deploy.yml"
+
+          # Check that add-mask is used for dynamic secrets
+          if grep -E "\\\$\{\{ steps\.[^}]+\.outputs\." "$DEPLOY_WORKFLOW" | grep -v "::add-mask::"; then
+            echo "::warning::Consider masking sensitive step outputs"
+          fi
+
+          echo "✓ Secret masking check complete"
+
+# Run: This would FAIL on the old workflow that had secret exposure
+```
+
+```yaml
+# ─────────────────────────────────────────────────────────────────
+# Step 3-4: Fix the deployment workflow
+# ─────────────────────────────────────────────────────────────────
+
+# .github/workflows/deploy.yml (FIXED - Bug #789)
+name: Deploy
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Bug #789 Fix: Mask all sensitive values
+      - name: Configure deployment
+        run: |
+          # FIXED: Use add-mask to prevent logging
+          echo "::add-mask::${{ secrets.DEPLOY_TOKEN }}"
+          echo "::add-mask::${{ secrets.AWS_ACCESS_KEY_ID }}"
+          echo "::add-mask::${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+
+      # Bug #789 Fix: Don't echo environment for debugging
+      - name: Deploy application
+        env:
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          # FIXED: Removed "echo $DEPLOY_TOKEN" debugging line
+          # FIXED: Using --silent instead of --verbose for curl
+
+          curl --silent --fail \
+            -H "Authorization: Bearer $DEPLOY_TOKEN" \
+            -X POST \
+            https://api.example.com/deploy
+
+          echo "✓ Deployment triggered successfully"
+
+      # Bug #789 Fix: Safe status check without exposing secrets
+      - name: Verify deployment
+        run: |
+          # FIXED: Don't log the full response which might contain secrets
+          RESPONSE=$(curl --silent --fail \
+            -H "Authorization: Bearer ${{ secrets.DEPLOY_TOKEN }}" \
+            https://api.example.com/status)
+
+          # Only log safe portions
+          STATUS=$(echo "$RESPONSE" | jq -r '.status')
+          echo "Deployment status: $STATUS"
+
+          if [ "$STATUS" != "success" ]; then
+            echo "::error::Deployment failed"
+            exit 1
+          fi
+
+# Result: ✅ Regression test passes - secrets are properly protected
+```
+
+### Bug Fix Verification Checklist
+
+```yaml
+# .github/workflows/verify-bug-fixes.yml
+name: Verify Bug Fixes
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  verify-regression-tests:
+    name: Verify Bug Fix Has Regression Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if PR is a bug fix
+        id: check-bug-fix
+        run: |
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          PR_BODY="${{ github.event.pull_request.body }}"
+
+          # Check for bug fix indicators
+          if echo "$PR_TITLE" | grep -iE "(fix|bug|issue|closes|fixes|resolves) #[0-9]+"; then
+            echo "is_bug_fix=true" >> $GITHUB_OUTPUT
+
+            # Extract issue number
+            ISSUE_NUM=$(echo "$PR_TITLE" | grep -oE "#[0-9]+" | head -1 | tr -d '#')
+            echo "issue_number=$ISSUE_NUM" >> $GITHUB_OUTPUT
+            echo "Found bug fix for issue #$ISSUE_NUM"
+          else
+            echo "is_bug_fix=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Verify regression test exists
+        if: steps.check-bug-fix.outputs.is_bug_fix == 'true'
+        run: |
+          ISSUE_NUM="${{ steps.check-bug-fix.outputs.issue_number }}"
+
+          # Check for test file referencing the bug
+          if grep -rE "(Bug|Issue|Regression).*#?$ISSUE_NUM" tests/ .github/workflows/test-*.yml; then
+            echo "✓ Found regression test for bug #$ISSUE_NUM"
+          else
+            echo "::error::Bug fix for #$ISSUE_NUM is missing a regression test"
+            echo ""
+            echo "REQUIRED: Add a test that:"
+            echo "  1. Reproduces the bug (would fail before fix)"
+            echo "  2. References the issue number in comments"
+            echo "  3. Passes after the fix is applied"
+            echo ""
+            echo "Example test comment:"
+            echo "  // Bug #$ISSUE_NUM: Description of the bug"
+            echo "  // This test prevents regression"
+            exit 1
+          fi
+
+      - name: Verify test was added in this PR
+        if: steps.check-bug-fix.outputs.is_bug_fix == 'true'
+        run: |
+          ISSUE_NUM="${{ steps.check-bug-fix.outputs.issue_number }}"
+
+          # Check that the regression test was added in this PR
+          git diff origin/main...HEAD --name-only | grep -E "test.*\.yml$|test.*\.(ts|js|py)$" || {
+            echo "::warning::No test files were modified in this PR"
+            echo "Ensure the regression test is included in this PR, not a separate one"
+          }
+```
+
+---
+
 ## 3. Issue and Bug Tracking (MANDATORY)
 
 ### A. Issue Templates
@@ -2231,6 +2966,803 @@ Thank you for contributing! 🎉
 10. **Community Standards**: Clear templates, guidelines, and processes.
 11. **Observability**: Metrics, coverage, security alerts provide visibility.
 12. **Automation**: Reduces manual work, ensures consistency.
+
+---
+
+## Quick Reference
+
+### Common gh CLI Commands
+
+```bash
+# ─────────────────────────────────────────────────────────────────
+# REPOSITORY MANAGEMENT
+# ─────────────────────────────────────────────────────────────────
+
+# Clone repository
+gh repo clone owner/repo
+
+# Create new repository
+gh repo create my-repo --public --clone
+
+# Fork repository
+gh repo fork owner/repo --clone
+
+# View repository
+gh repo view owner/repo
+
+# List repositories
+gh repo list owner --limit 20
+
+# ─────────────────────────────────────────────────────────────────
+# PULL REQUESTS
+# ─────────────────────────────────────────────────────────────────
+
+# Create PR (interactive)
+gh pr create
+
+# Create PR with title and body
+gh pr create --title "feat: add new feature" --body "Description here"
+
+# Create PR from current branch
+gh pr create --fill  # Auto-fill from commits
+
+# Create draft PR
+gh pr create --draft
+
+# List PRs
+gh pr list
+gh pr list --state open --author @me
+
+# View PR
+gh pr view 123
+gh pr view 123 --web  # Open in browser
+
+# Checkout PR locally
+gh pr checkout 123
+
+# Review PR
+gh pr review 123 --approve
+gh pr review 123 --request-changes --body "Please fix X"
+gh pr review 123 --comment --body "LGTM"
+
+# Merge PR
+gh pr merge 123
+gh pr merge 123 --squash --delete-branch
+gh pr merge 123 --rebase
+
+# Close PR
+gh pr close 123
+
+# ─────────────────────────────────────────────────────────────────
+# ISSUES
+# ─────────────────────────────────────────────────────────────────
+
+# Create issue
+gh issue create --title "Bug: something broken" --body "Details"
+
+# Create issue with labels
+gh issue create --title "Feature request" --label "enhancement,needs-triage"
+
+# List issues
+gh issue list
+gh issue list --state open --label "bug"
+gh issue list --assignee @me
+
+# View issue
+gh issue view 123
+gh issue view 123 --comments
+
+# Close issue
+gh issue close 123
+
+# Reopen issue
+gh issue reopen 123
+
+# Add comment
+gh issue comment 123 --body "Working on this"
+
+# Edit issue
+gh issue edit 123 --add-label "in-progress"
+gh issue edit 123 --add-assignee @me
+
+# ─────────────────────────────────────────────────────────────────
+# WORKFLOWS & ACTIONS
+# ─────────────────────────────────────────────────────────────────
+
+# List workflows
+gh workflow list
+
+# View workflow
+gh workflow view ci.yml
+
+# Run workflow
+gh workflow run ci.yml
+gh workflow run deploy.yml --ref main
+
+# Run workflow with inputs
+gh workflow run deploy.yml -f environment=production -f version=1.2.3
+
+# List workflow runs
+gh run list
+gh run list --workflow=ci.yml --status=failure
+
+# View run details
+gh run view 12345
+gh run view 12345 --log
+
+# Watch run in progress
+gh run watch 12345
+
+# Rerun failed jobs
+gh run rerun 12345 --failed
+
+# Cancel run
+gh run cancel 12345
+
+# Download artifacts
+gh run download 12345
+
+# ─────────────────────────────────────────────────────────────────
+# RELEASES
+# ─────────────────────────────────────────────────────────────────
+
+# Create release
+gh release create v1.0.0
+
+# Create release with notes
+gh release create v1.0.0 --title "Release 1.0.0" --notes "Release notes here"
+
+# Create release from tag
+gh release create v1.0.0 --generate-notes
+
+# Upload assets
+gh release upload v1.0.0 ./dist/*.zip
+
+# List releases
+gh release list
+
+# View release
+gh release view v1.0.0
+
+# Download release assets
+gh release download v1.0.0
+
+# Delete release
+gh release delete v1.0.0
+
+# ─────────────────────────────────────────────────────────────────
+# SECRETS & VARIABLES
+# ─────────────────────────────────────────────────────────────────
+
+# Set secret
+gh secret set MY_SECRET
+
+# Set secret from file
+gh secret set MY_SECRET < secret.txt
+
+# Set secret for environment
+gh secret set MY_SECRET --env production
+
+# List secrets
+gh secret list
+
+# Delete secret
+gh secret delete MY_SECRET
+
+# Set variable
+gh variable set MY_VAR --body "value"
+
+# List variables
+gh variable list
+
+# ─────────────────────────────────────────────────────────────────
+# GISTS
+# ─────────────────────────────────────────────────────────────────
+
+# Create gist
+gh gist create file.txt
+
+# Create public gist with description
+gh gist create file.txt --public --desc "My gist"
+
+# Create gist from multiple files
+gh gist create file1.txt file2.txt
+
+# List gists
+gh gist list
+
+# View gist
+gh gist view abc123
+
+# Edit gist
+gh gist edit abc123
+
+# ─────────────────────────────────────────────────────────────────
+# API CALLS
+# ─────────────────────────────────────────────────────────────────
+
+# GET request
+gh api repos/owner/repo
+
+# POST request
+gh api repos/owner/repo/issues --method POST -f title="New issue" -f body="Body"
+
+# GraphQL query
+gh api graphql -f query='{ viewer { login } }'
+
+# Paginated results
+gh api repos/owner/repo/issues --paginate
+
+# With jq processing
+gh api repos/owner/repo/pulls --jq '.[].title'
+```
+
+### GitHub Actions Patterns Cheat Sheet
+
+```yaml
+# ─────────────────────────────────────────────────────────────────
+# TRIGGER PATTERNS
+# ─────────────────────────────────────────────────────────────────
+
+# Multiple triggers
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * 1'  # Monday 6 AM UTC
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [dev, staging, prod]
+
+# Path filtering
+on:
+  push:
+    paths:
+      - 'src/**'
+      - '!src/**/*.md'  # Exclude markdown
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+
+# Tag filtering
+on:
+  push:
+    tags:
+      - 'v*'
+      - '!v*-beta*'  # Exclude beta tags
+
+# ─────────────────────────────────────────────────────────────────
+# JOB PATTERNS
+# ─────────────────────────────────────────────────────────────────
+
+# Matrix builds
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: [18, 20, 22]
+        exclude:
+          - os: windows-latest
+            node: 18
+        include:
+          - os: ubuntu-latest
+            node: 22
+            experimental: true
+      fail-fast: false
+      max-parallel: 4
+
+# Job dependencies
+jobs:
+  build:
+    runs-on: ubuntu-latest
+  test:
+    needs: build
+  deploy:
+    needs: [build, test]
+    if: success()
+
+# Conditional execution
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+  notify:
+    if: always()  # Run even if previous jobs fail
+    needs: [deploy]
+
+  production:
+    if: startsWith(github.ref, 'refs/tags/v')
+
+# ─────────────────────────────────────────────────────────────────
+# STEP PATTERNS
+# ─────────────────────────────────────────────────────────────────
+
+# Conditional steps
+steps:
+  - name: Deploy to production
+    if: github.ref == 'refs/heads/main'
+    run: ./deploy.sh
+
+  - name: Run on failure
+    if: failure()
+    run: ./notify-failure.sh
+
+  - name: Always run
+    if: always()
+    run: ./cleanup.sh
+
+# Continue on error
+steps:
+  - name: Optional step
+    continue-on-error: true
+    run: ./optional.sh
+
+# Timeout
+steps:
+  - name: Long running task
+    timeout-minutes: 30
+    run: ./long-task.sh
+
+# Working directory
+steps:
+  - name: Build frontend
+    working-directory: ./frontend
+    run: npm run build
+
+# ─────────────────────────────────────────────────────────────────
+# OUTPUT & ARTIFACTS
+# ─────────────────────────────────────────────────────────────────
+
+# Set output
+steps:
+  - name: Set output
+    id: vars
+    run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+  - name: Use output
+    run: echo "Short SHA: ${{ steps.vars.outputs.sha_short }}"
+
+# Upload artifact
+steps:
+  - name: Upload build
+    uses: actions/upload-artifact@v4
+    with:
+      name: build-${{ github.sha }}
+      path: dist/
+      retention-days: 7
+
+# Download artifact
+steps:
+  - name: Download build
+    uses: actions/download-artifact@v4
+    with:
+      name: build-${{ github.sha }}
+      path: dist/
+
+# Pass data between jobs
+jobs:
+  build:
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - id: version
+        run: echo "value=1.2.3" >> $GITHUB_OUTPUT
+
+  deploy:
+    needs: build
+    steps:
+      - run: echo "Deploying version ${{ needs.build.outputs.version }}"
+
+# ─────────────────────────────────────────────────────────────────
+# CACHING PATTERNS
+# ─────────────────────────────────────────────────────────────────
+
+# npm cache
+- uses: actions/cache@v4
+  with:
+    path: ~/.npm
+    key: npm-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
+    restore-keys: npm-${{ runner.os }}-
+
+# pip cache
+- uses: actions/cache@v4
+  with:
+    path: ~/.cache/pip
+    key: pip-${{ runner.os }}-${{ hashFiles('**/requirements.txt') }}
+
+# Gradle cache
+- uses: actions/cache@v4
+  with:
+    path: |
+      ~/.gradle/caches
+      ~/.gradle/wrapper
+    key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*') }}
+
+# Docker layer cache
+- uses: docker/build-push-action@v5
+  with:
+    cache-from: type=gha
+    cache-to: type=gha,mode=max
+
+# ─────────────────────────────────────────────────────────────────
+# SECURITY PATTERNS
+# ─────────────────────────────────────────────────────────────────
+
+# Minimal permissions
+permissions:
+  contents: read
+  pull-requests: write
+
+# Job-level permissions
+jobs:
+  deploy:
+    permissions:
+      contents: read
+      packages: write
+      id-token: write  # For OIDC
+
+# Secret masking
+steps:
+  - run: |
+      echo "::add-mask::${{ secrets.API_KEY }}"
+      ./deploy.sh
+
+# Environment protection
+jobs:
+  deploy:
+    environment:
+      name: production
+      url: https://example.com
+    steps:
+      - run: ./deploy.sh
+        env:
+          API_KEY: ${{ secrets.PROD_API_KEY }}
+
+# ─────────────────────────────────────────────────────────────────
+# REUSABLE WORKFLOWS
+# ─────────────────────────────────────────────────────────────────
+
+# Define reusable workflow
+# .github/workflows/deploy-template.yml
+name: Deploy Template
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+    secrets:
+      deploy_token:
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Deploying to ${{ inputs.environment }}"
+
+# Use reusable workflow
+# .github/workflows/deploy-prod.yml
+jobs:
+  deploy:
+    uses: ./.github/workflows/deploy-template.yml
+    with:
+      environment: production
+    secrets:
+      deploy_token: ${{ secrets.DEPLOY_TOKEN }}
+
+# ─────────────────────────────────────────────────────────────────
+# COMPOSITE ACTIONS
+# ─────────────────────────────────────────────────────────────────
+
+# .github/actions/setup-project/action.yml
+name: Setup Project
+description: Setup project dependencies
+inputs:
+  node-version:
+    description: Node.js version
+    default: '20'
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+    - run: npm ci
+      shell: bash
+
+# Usage
+steps:
+  - uses: ./.github/actions/setup-project
+    with:
+      node-version: '20'
+```
+
+### Workflow Structure Template
+
+```yaml
+# .github/workflows/comprehensive-ci.yml
+# Template for a comprehensive CI/CD workflow
+
+name: CI/CD Pipeline
+
+# ─────────────────────────────────────────────────────────────────
+# TRIGGERS
+# ─────────────────────────────────────────────────────────────────
+on:
+  push:
+    branches: [main, develop]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: 'Skip tests'
+        type: boolean
+        default: false
+
+# ─────────────────────────────────────────────────────────────────
+# CONCURRENCY CONTROL
+# ─────────────────────────────────────────────────────────────────
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# ─────────────────────────────────────────────────────────────────
+# GLOBAL ENVIRONMENT
+# ─────────────────────────────────────────────────────────────────
+env:
+  NODE_VERSION: '20'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+# ─────────────────────────────────────────────────────────────────
+# PERMISSIONS (principle of least privilege)
+# ─────────────────────────────────────────────────────────────────
+permissions:
+  contents: read
+
+# ─────────────────────────────────────────────────────────────────
+# JOBS
+# ─────────────────────────────────────────────────────────────────
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # STAGE 1: Quality Gates
+  # ─────────────────────────────────────────────────────────────
+  lint:
+    name: Lint & Format
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linter
+        run: npm run lint
+
+      - name: Check formatting
+        run: npm run format:check
+
+  # ─────────────────────────────────────────────────────────────
+  # STAGE 2: Testing (TDD Verification)
+  # ─────────────────────────────────────────────────────────────
+  test:
+    name: Test
+    if: ${{ !inputs.skip_tests }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    strategy:
+      matrix:
+        node: [18, 20, 22]
+      fail-fast: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Upload coverage
+        if: matrix.node == env.NODE_VERSION
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  # ─────────────────────────────────────────────────────────────
+  # STAGE 3: Security Scanning
+  # ─────────────────────────────────────────────────────────────
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      security-events: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+
+      - name: Perform analysis
+        uses: github/codeql-action/analyze@v3
+
+      - name: Run npm audit
+        run: npm audit --audit-level=moderate
+
+  # ─────────────────────────────────────────────────────────────
+  # STAGE 4: Build
+  # ─────────────────────────────────────────────────────────────
+  build:
+    name: Build
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Get version
+        id: version
+        run: echo "value=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ github.sha }}
+          path: dist/
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────
+  # STAGE 5: Container Build
+  # ─────────────────────────────────────────────────────────────
+  container:
+    name: Build Container
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-${{ github.sha }}
+          path: dist/
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=sha,prefix=
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ─────────────────────────────────────────────────────────────
+  # STAGE 6: Deploy
+  # ─────────────────────────────────────────────────────────────
+  deploy-staging:
+    name: Deploy to Staging
+    needs: [container, security]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://staging.example.com
+
+    steps:
+      - name: Deploy to staging
+        run: echo "Deploying version ${{ needs.build.outputs.version }} to staging"
+
+  deploy-production:
+    name: Deploy to Production
+    needs: deploy-staging
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://example.com
+
+    steps:
+      - name: Deploy to production
+        run: echo "Deploying to production"
+
+  # ─────────────────────────────────────────────────────────────
+  # FINAL: Status Check
+  # ─────────────────────────────────────────────────────────────
+  status:
+    name: Pipeline Status
+    needs: [lint, test, security, build, container]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check status
+        run: |
+          if [[ "${{ needs.lint.result }}" != "success" ]] || \
+             [[ "${{ needs.test.result }}" != "success" && "${{ needs.test.result }}" != "skipped" ]] || \
+             [[ "${{ needs.build.result }}" != "success" ]]; then
+            echo "::error::Pipeline failed"
+            exit 1
+          fi
+          echo "✓ All checks passed"
+```
 
 ---
 

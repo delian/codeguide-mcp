@@ -3578,6 +3578,94 @@ echo "✅ All validation checks passed!"
 
 ---
 
+## Quick Reference
+
+### Common Commands
+
+```bash
+# Configure & Build
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+
+# Test
+ctest --test-dir build --output-on-failure
+cmake --build build --target test
+
+# Format & Lint
+clang-format -i src/**/*.cpp src/**/*.hpp
+clang-tidy src/**/*.cpp --fix
+
+# Documentation
+doxygen Doxyfile
+cmake --build build --target docs
+
+# Conan dependencies
+conan install . --build=missing
+conan lock create .
+```
+
+### CMakeLists.txt Template
+
+```cmake
+cmake_minimum_required(VERSION 3.20)
+project(MyProject VERSION 1.0.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+find_package(GTest REQUIRED)
+
+add_executable(${PROJECT_NAME} src/main.cpp)
+target_include_directories(${PROJECT_NAME} PRIVATE include)
+
+enable_testing()
+add_executable(tests tests/test_main.cpp)
+target_link_libraries(tests PRIVATE GTest::gtest_main)
+add_test(NAME unit_tests COMMAND tests)
+```
+
+### Modern C++ Patterns
+
+```cpp
+// Smart pointers
+auto ptr = std::make_unique<MyClass>(args...);
+auto shared = std::make_shared<MyClass>(args...);
+
+// Optional
+std::optional<T> findById(int id);
+if (auto result = findById(1)) { use(*result); }
+
+// Expected (C++23)
+std::expected<T, Error> process();
+
+// Ranges
+auto result = items | std::views::filter(pred)
+                    | std::views::transform(fn);
+
+// Structured bindings
+auto [key, value] = std::pair{1, "one"};
+```
+
+### Project Structure
+
+```
+my_project/
+├── CMakeLists.txt
+├── conanfile.txt
+├── include/
+│   └── myproject/
+│       └── *.hpp
+├── src/
+│   └── *.cpp
+├── tests/
+│   └── test_*.cpp
+└── docs/
+    └── Doxyfile
+```
+
+---
+
 ## References
 
 - [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/)

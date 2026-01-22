@@ -70,6 +70,568 @@ DESIGN PATTERN TAXONOMY:
 
 ---
 
+## 2A. TDD Protocol for Design Patterns
+
+Test-Driven Development ensures that design patterns are implemented correctly and remain testable. The TDD cycle helps validate that patterns solve the actual problem without over-engineering.
+
+```
+TDD CYCLE FOR PATTERN IMPLEMENTATION:
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                                                                         │
+│            ┌──────────────────────────────────────────┐                 │
+│            │                                          │                 │
+│            ▼                                          │                 │
+│     ┌─────────────┐                                   │                 │
+│     │    RED      │  Write a failing test that        │                 │
+│     │             │  describes desired behavior       │                 │
+│     └──────┬──────┘                                   │                 │
+│            │                                          │                 │
+│            │  Test fails (expected)                   │                 │
+│            ▼                                          │                 │
+│     ┌─────────────┐                                   │                 │
+│     │   GREEN     │  Write minimal code to pass       │                 │
+│     │             │  (implement pattern if needed)    │                 │
+│     └──────┬──────┘                                   │                 │
+│            │                                          │                 │
+│            │  Test passes                             │                 │
+│            ▼                                          │                 │
+│     ┌─────────────┐                                   │                 │
+│     │  REFACTOR   │  Improve design, extract pattern  │                 │
+│     │             │  Keep tests green                 │                 │
+│     └──────┬──────┘                                   │                 │
+│            │                                          │                 │
+│            └──────────────────────────────────────────┘                 │
+│                                                                         │
+│  KEY INSIGHT: Patterns EMERGE from refactoring, not upfront design      │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+PATTERN-SPECIFIC TDD WORKFLOW:
+
+Phase 1: RED - Define Behavior Through Tests
+├── Write test for the PROBLEM, not the pattern
+├── Focus on what the code should DO
+├── Use interfaces/abstractions in test setup
+└── Test should fail for the right reason
+
+Phase 2: GREEN - Minimal Implementation
+├── Write simplest code that passes
+├── May use inline/hardcoded logic initially
+├── Avoid premature pattern application
+└── Get the behavior correct first
+
+Phase 3: REFACTOR - Extract Pattern
+├── Identify code smells (duplication, complexity)
+├── Recognize pattern opportunity
+├── Extract pattern incrementally
+├── Keep tests passing throughout
+└── Verify pattern improves design
+```
+
+### TDD Example: Implementing Strategy Pattern
+
+```
+SCENARIO: Payment processing system needs multiple payment methods
+
+═══════════════════════════════════════════════════════════════════════════
+STEP 1: RED - Write failing test for the behavior
+═══════════════════════════════════════════════════════════════════════════
+
+// Test file: payment_processor_test
+describe("PaymentProcessor", () => {
+    it("should process credit card payment", () => {
+        const processor = new PaymentProcessor()
+        const result = processor.process({
+            amount: 100.00,
+            method: "credit_card",
+            cardNumber: "4111111111111111"
+        })
+
+        expect(result.success).toBe(true)
+        expect(result.transactionId).toBeDefined()
+    })
+})
+
+// RUN TEST → FAILS (PaymentProcessor doesn't exist)
+
+═══════════════════════════════════════════════════════════════════════════
+STEP 2: GREEN - Minimal implementation (no pattern yet)
+═══════════════════════════════════════════════════════════════════════════
+
+class PaymentProcessor {
+    process(payment) {
+        if (payment.method === "credit_card") {
+            // Process credit card
+            return {
+                success: true,
+                transactionId: generateId()
+            }
+        }
+    }
+}
+
+// RUN TEST → PASSES ✅
+
+═══════════════════════════════════════════════════════════════════════════
+STEP 3: RED - Add another payment method test
+═══════════════════════════════════════════════════════════════════════════
+
+it("should process PayPal payment", () => {
+    const processor = new PaymentProcessor()
+    const result = processor.process({
+        amount: 100.00,
+        method: "paypal",
+        email: "user@example.com"
+    })
+
+    expect(result.success).toBe(true)
+})
+
+// RUN TEST → FAILS
+
+═══════════════════════════════════════════════════════════════════════════
+STEP 4: GREEN - Add PayPal handling (code smell emerging)
+═══════════════════════════════════════════════════════════════════════════
+
+class PaymentProcessor {
+    process(payment) {
+        if (payment.method === "credit_card") {
+            // Credit card logic
+            return { success: true, transactionId: generateId() }
+        }
+        if (payment.method === "paypal") {
+            // PayPal logic
+            return { success: true, transactionId: generateId() }
+        }
+    }
+}
+
+// RUN TEST → PASSES ✅
+// CODE SMELL: Growing if/else, Open-Closed Principle violation
+
+═══════════════════════════════════════════════════════════════════════════
+STEP 5: REFACTOR - Extract Strategy Pattern
+═══════════════════════════════════════════════════════════════════════════
+
+// Strategy interface
+interface PaymentStrategy {
+    process(payment: Payment): PaymentResult
+    supports(method: string): boolean
+}
+
+// Concrete strategies
+class CreditCardStrategy implements PaymentStrategy {
+    supports(method) { return method === "credit_card" }
+    process(payment) {
+        // Credit card specific logic
+        return { success: true, transactionId: generateId() }
+    }
+}
+
+class PayPalStrategy implements PaymentStrategy {
+    supports(method) { return method === "paypal" }
+    process(payment) {
+        // PayPal specific logic
+        return { success: true, transactionId: generateId() }
+    }
+}
+
+// Context (uses strategy)
+class PaymentProcessor {
+    constructor(private strategies: PaymentStrategy[]) {}
+
+    process(payment) {
+        const strategy = this.strategies.find(s => s.supports(payment.method))
+        if (!strategy) {
+            throw new Error(`Unsupported payment method: ${payment.method}`)
+        }
+        return strategy.process(payment)
+    }
+}
+
+// RUN ALL TESTS → STILL PASS ✅
+// Pattern extracted, Open-Closed Principle satisfied
+
+═══════════════════════════════════════════════════════════════════════════
+STEP 6: Update tests to use DI (better test isolation)
+═══════════════════════════════════════════════════════════════════════════
+
+describe("PaymentProcessor with Strategy", () => {
+    it("should delegate to correct strategy", () => {
+        const mockStrategy = {
+            supports: (m) => m === "test_method",
+            process: jest.fn().mockReturnValue({ success: true })
+        }
+
+        const processor = new PaymentProcessor([mockStrategy])
+        processor.process({ method: "test_method", amount: 100 })
+
+        expect(mockStrategy.process).toHaveBeenCalled()
+    })
+
+    it("should throw for unsupported method", () => {
+        const processor = new PaymentProcessor([])
+
+        expect(() => processor.process({ method: "unknown" }))
+            .toThrow("Unsupported payment method")
+    })
+})
+```
+
+### TDD Pattern Guidelines
+
+```
+WHEN TO INTRODUCE A PATTERN (TDD Signals):
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                                                                         │
+│  DUPLICATION SIGNAL (Rule of Three)                                     │
+│  ─────────────────────────────────────                                  │
+│  • First occurrence: Write simple code                                  │
+│  • Second occurrence: Note the similarity                               │
+│  • Third occurrence: REFACTOR → Extract pattern                         │
+│                                                                         │
+│  COMPLEXITY SIGNAL                                                      │
+│  ─────────────────                                                      │
+│  • Long switch/if-else chains → Strategy Pattern                        │
+│  • Complex object construction → Builder Pattern                        │
+│  • Nested conditionals for state → State Pattern                        │
+│  • Multiple similar notifications → Observer Pattern                    │
+│                                                                         │
+│  TEST DIFFICULTY SIGNAL                                                 │
+│  ─────────────────────                                                  │
+│  • Hard to isolate for testing → Extract interface, use DI              │
+│  • Can't mock dependencies → Apply Dependency Inversion                 │
+│  • Test setup is complex → Facade or Builder for test helpers           │
+│                                                                         │
+│  CHANGE FREQUENCY SIGNAL                                                │
+│  ─────────────────────────                                              │
+│  • Same area changes repeatedly → Stabilize with pattern                │
+│  • New variants needed often → Strategy or Factory                      │
+│  • Behavior needs runtime changes → Strategy or State                   │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+TDD + PATTERN ANTI-PATTERNS TO AVOID:
+
+❌ PATTERN-FIRST THINKING
+   Don't: "I'll use Factory pattern here"
+   Do:    "Tests reveal I need flexible object creation"
+
+❌ PREMATURE ABSTRACTION
+   Don't: Create interfaces before you have two implementations
+   Do:    Extract interface when second implementation is needed
+
+❌ TESTING THE PATTERN, NOT THE BEHAVIOR
+   Don't: "Test that Observer notifies all subscribers"
+   Do:    "Test that price change updates all price displays"
+
+❌ OVER-MOCKING
+   Don't: Mock every collaborator
+   Do:    Mock external dependencies, use real objects for value types
+```
+
+---
+
+## 2B. Bug Fix Protocol for Design Patterns
+
+When bugs occur in pattern-based code, systematic diagnosis prevents both quick fixes that break the pattern and unnecessary pattern changes.
+
+```
+BUG FIX WORKFLOW FOR PATTERN-BASED CODE:
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │ STEP 1: REPRODUCE                                                │   │
+│  │ Write a failing test that captures the bug                       │   │
+│  └──────────────────────────────┬──────────────────────────────────┘   │
+│                                 │                                       │
+│                                 ▼                                       │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │ STEP 2: DIAGNOSE - Identify bug location                         │   │
+│  │ ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐   │   │
+│  │ │ Pattern     │  │ Pattern     │  │ Integration             │   │   │
+│  │ │ Interface   │  │ Implementation│ │ Between Patterns       │   │   │
+│  │ │ (contract)  │  │ (concrete)  │  │ (wiring)                │   │   │
+│  │ └─────────────┘  └─────────────┘  └─────────────────────────┘   │   │
+│  └──────────────────────────────┬──────────────────────────────────┘   │
+│                                 │                                       │
+│                                 ▼                                       │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │ STEP 3: FIX - Apply minimal fix preserving pattern integrity     │   │
+│  └──────────────────────────────┬──────────────────────────────────┘   │
+│                                 │                                       │
+│                                 ▼                                       │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │ STEP 4: VERIFY - All tests pass, no pattern degradation          │   │
+│  └──────────────────────────────┬──────────────────────────────────┘   │
+│                                 │                                       │
+│                                 ▼                                       │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │ STEP 5: REVIEW - Consider if pattern itself needs improvement    │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+DIAGNOSIS DECISION TREE:
+
+Is the bug in...
+
+├── The Pattern Contract (Interface)?
+│   ├── Missing method in interface?
+│   ├── Wrong return type specification?
+│   ├── Incomplete abstraction?
+│   └── FIX: Modify interface carefully, update ALL implementations
+│
+├── A Specific Implementation?
+│   ├── Logic error in one concrete class?
+│   ├── Missing edge case handling?
+│   ├── Wrong algorithm in strategy/state?
+│   └── FIX: Fix that implementation only, add tests for the case
+│
+├── Pattern Wiring/Integration?
+│   ├── Wrong dependency injected?
+│   ├── Incorrect pattern composition?
+│   ├── Missing registration in factory/container?
+│   └── FIX: Fix composition root or factory configuration
+│
+└── Pattern Selection (wrong pattern)?
+    ├── Pattern doesn't fit the problem?
+    ├── Over-engineered solution?
+    ├── Missing pattern where needed?
+    └── FIX: Refactor to appropriate pattern (larger change)
+```
+
+### Bug Fix Example: Observer Pattern Issue
+
+```
+SCENARIO: Notification system not updating all subscribers
+
+═══════════════════════════════════════════════════════════════════════════
+STEP 1: REPRODUCE - Write failing test
+═══════════════════════════════════════════════════════════════════════════
+
+// Bug report: "Price changes don't update the mobile app display"
+
+describe("PriceSubject - Bug #1234", () => {
+    it("should notify all observers including late subscribers", () => {
+        const subject = new PriceSubject()
+        const webDisplay = new MockObserver()
+        const mobileDisplay = new MockObserver()
+
+        subject.subscribe(webDisplay)
+        subject.setPrice(100)  // First update
+        subject.subscribe(mobileDisplay)  // Late subscriber
+        subject.setPrice(200)  // Second update
+
+        // Bug: mobileDisplay only has [200], expected [200]
+        // But investigation shows it has [] - never notified!
+        expect(mobileDisplay.updates).toEqual([200])
+    })
+})
+
+// RUN TEST → FAILS (reproduces the bug)
+
+═══════════════════════════════════════════════════════════════════════════
+STEP 2: DIAGNOSE - Locate the bug
+═══════════════════════════════════════════════════════════════════════════
+
+// Check 1: Is the interface correct?
+interface Observer {
+    update(value: any): void  // ✅ Looks correct
+}
+
+// Check 2: Is the Subject implementation correct?
+class PriceSubject {
+    private observers: Observer[] = []
+    private price: number = 0
+
+    subscribe(observer: Observer) {
+        this.observers.push(observer)
+    }
+
+    setPrice(price: number) {
+        this.price = price
+        this.notify()
+    }
+
+    private notify() {
+        // 🔍 FOUND IT: Using forEach with potential mutation issue
+        this.observers.forEach((obs, index) => {
+            obs.update(this.price)
+            // BUG: Some observer's update() is removing itself,
+            // which mutates array during iteration
+        })
+    }
+}
+
+// Check 3: Is there an observer with problematic behavior?
+class AutoUnsubscribeObserver implements Observer {
+    update(value) {
+        this.processValue(value)
+        if (this.shouldUnsubscribe(value)) {
+            subject.unsubscribe(this)  // ❌ Mutates during iteration!
+        }
+    }
+}
+
+═══════════════════════════════════════════════════════════════════════════
+STEP 3: FIX - Preserve pattern, fix implementation
+═══════════════════════════════════════════════════════════════════════════
+
+class PriceSubject {
+    private observers: Observer[] = []
+    private price: number = 0
+
+    subscribe(observer: Observer) {
+        this.observers.push(observer)
+    }
+
+    unsubscribe(observer: Observer) {
+        const index = this.observers.indexOf(observer)
+        if (index > -1) {
+            this.observers.splice(index, 1)
+        }
+    }
+
+    setPrice(price: number) {
+        this.price = price
+        this.notify()
+    }
+
+    private notify() {
+        // FIX: Copy array before iterating to handle mutations safely
+        const observersCopy = [...this.observers]
+        observersCopy.forEach(obs => {
+            obs.update(this.price)
+        })
+    }
+}
+
+// RUN TEST → PASSES ✅
+
+═══════════════════════════════════════════════════════════════════════════
+STEP 4: VERIFY - Run full test suite
+═══════════════════════════════════════════════════════════════════════════
+
+// Run all Observer-related tests
+// ✅ Original functionality preserved
+// ✅ New edge case (late subscribers) handled
+// ✅ Unsubscribe during notification now safe
+
+═══════════════════════════════════════════════════════════════════════════
+STEP 5: REVIEW - Pattern improvement considerations
+═══════════════════════════════════════════════════════════════════════════
+
+// Consider: Should we add this to our Observer template?
+// Document the pattern gotcha for future implementations
+
+/*
+ * OBSERVER PATTERN NOTE:
+ * Always copy observer list before notification iteration
+ * to safely handle observers that unsubscribe during update.
+ */
+```
+
+### Common Bug Categories by Pattern
+
+```
+PATTERN-SPECIFIC BUG CHECKLIST:
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ CREATIONAL PATTERNS                                                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│ Factory/Abstract Factory:                                               │
+│   □ Wrong product type returned for given input                         │
+│   □ Missing case in factory switch/map                                  │
+│   □ Factory not updated when new product type added                     │
+│   □ Null returned instead of throwing for unknown type                  │
+│                                                                         │
+│ Builder:                                                                │
+│   □ Build() called with incomplete required fields                      │
+│   □ Builder state not reset between builds                              │
+│   □ Method chaining returns wrong builder instance                      │
+│   □ Validation missing in build step                                    │
+│                                                                         │
+│ Singleton:                                                              │
+│   □ Race condition in lazy initialization                               │
+│   □ State persists unexpectedly between tests                           │
+│   □ Serialization creates new instances                                 │
+│                                                                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│ STRUCTURAL PATTERNS                                                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│ Adapter:                                                                │
+│   □ Data lost or transformed incorrectly in adaptation                  │
+│   □ Adapter doesn't handle all methods of target interface              │
+│   □ Error mapping between different error types                         │
+│                                                                         │
+│ Decorator:                                                              │
+│   □ Decorator order matters but not enforced                            │
+│   □ Decorator breaks when wrapped object returns null                   │
+│   □ State shared incorrectly between decorator and wrapped              │
+│                                                                         │
+│ Facade:                                                                 │
+│   □ Facade exposes subsystem errors without translation                 │
+│   □ Facade method doing too much (hidden complexity)                    │
+│   □ Subsystem state changes not reflected through facade                │
+│                                                                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│ BEHAVIORAL PATTERNS                                                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│ Strategy:                                                               │
+│   □ Context doesn't validate strategy before use                        │
+│   □ Strategy assumes context state not guaranteed                       │
+│   □ Runtime strategy change leaves system in bad state                  │
+│                                                                         │
+│ Observer:                                                               │
+│   □ Memory leak from unremoved subscriptions                            │
+│   □ Notification order dependencies not handled                         │
+│   □ Observer exception breaks notification chain                        │
+│   □ Concurrent modification during notification                         │
+│                                                                         │
+│ State:                                                                  │
+│   □ Invalid state transition allowed                                    │
+│   □ State entry/exit actions not called correctly                       │
+│   □ Shared state between state objects                                  │
+│                                                                         │
+│ Command:                                                                │
+│   □ Undo doesn't fully reverse execute                                  │
+│   □ Command captures stale references                                   │
+│   □ Command queue processing error handling                             │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+BUG FIX PRINCIPLES FOR PATTERNS:
+
+1. FIX THE IMPLEMENTATION, NOT AROUND THE PATTERN
+   ❌ Adding special case outside the pattern
+   ✅ Fixing the specific implementation within the pattern
+
+2. MAINTAIN PATTERN CONTRACTS
+   ❌ Quick fix that violates Liskov Substitution
+   ✅ Fix that keeps all implementations interchangeable
+
+3. ADD REGRESSION TESTS
+   ❌ Fix without test (bug will return)
+   ✅ Failing test first, then fix, then verify
+
+4. CONSIDER PATTERN ENHANCEMENT
+   After fix: Is this a common case that needs pattern-level handling?
+   Example: Observer copy-before-iterate as standard practice
+
+5. DOCUMENT PATTERN PITFALLS
+   Add comments explaining non-obvious pattern constraints
+   Update team pattern guidelines if widely applicable
+```
+
+---
+
 ## 3. Foundational Techniques
 
 These are not classic "patterns" but fundamental techniques and principles that enable good design and make patterns work effectively.

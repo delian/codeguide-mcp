@@ -135,6 +135,463 @@ If verification fails:
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new CMake configurations.**
+
+### TDD Cycle
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    TDD Cycle for CMake                       │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│    ┌─────────┐                                              │
+│    │  RED    │  1. Write a failing CTest                    │
+│    │  (Fail) │     that expresses desired behavior          │
+│    └────┬────┘                                              │
+│         │                                                   │
+│         ▼                                                   │
+│    ┌─────────┐                                              │
+│    │  GREEN  │  2. Write minimal CMake config               │
+│    │  (Pass) │     to make the test pass                    │
+│    └────┬────┘                                              │
+│         │                                                   │
+│         ▼                                                   │
+│    ┌─────────┐                                              │
+│    │REFACTOR │  3. Improve CMake structure                  │
+│    │(Improve)│     while keeping tests green                │
+│    └────┬────┘                                              │
+│         │                                                   │
+│         └──────────────► Repeat                             │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Example TDD Workflow for CMake
+
+**Scenario**: Add a new library target with dependencies
+
+#### Step 1: RED - Write a failing test first
+
+```cmake
+# tests/core/CMakeLists.txt - Write test BEFORE implementation
+
+cmake_minimum_required(VERSION 3.15)
+
+# Test that core library exists and links correctly
+add_executable(test_core_exists test_core_exists.cpp)
+
+# This will FAIL - core library doesn't exist yet
+target_link_libraries(test_core_exists PRIVATE core)
+
+# Register test
+add_test(NAME core_library_exists COMMAND test_core_exists)
+```
+
+```cpp
+// tests/core/test_core_exists.cpp
+#include "core/types.h"  // Will fail - header doesn't exist yet
+
+int main() {
+    // Minimal test to verify library links
+    return 0;
+}
+```
+
+```bash
+# Run: cmake .. && cmake --build .
+# FAILS - target 'core' does not exist
+# CMake Error: Cannot specify link libraries for target "test_core_exists"
+# which is not built by this project.
+```
+
+#### Step 2: GREEN - Write minimal implementation
+
+```cmake
+# src/core/CMakeLists.txt - Minimal implementation to pass
+
+cmake_minimum_required(VERSION 3.15)
+
+# Minimal library to satisfy test
+add_library(core
+    src/types.cpp
+)
+
+target_include_directories(core
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+)
+```
+
+```bash
+# Run: cmake .. && cmake --build . && ctest
+# PASSES - tests pass, library links correctly
+# Test project /build
+#     Start 1: core_library_exists
+# 1/1 Test #1: core_library_exists ..........   Passed    0.01 sec
+```
+
+#### Step 3: REFACTOR - Improve CMake structure
+
+```cmake
+# src/core/CMakeLists.txt - Refactored with proper structure
+
+# CMakeLists.txt - Core module
+# Purpose: Builds the core library with fundamental types and utilities
+
+cmake_minimum_required(VERSION 3.15)
+
+# Include CMake modules from separate directory
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+include(CompilerWarnings)
+
+# Library target with all sources
+add_library(core
+    src/types.cpp
+    src/utils.cpp
+)
+
+# Public include directory
+target_include_directories(core
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+)
+
+# Apply compiler warnings
+set_target_warnings(core)
+
+# C++ standard
+target_compile_features(core PUBLIC cxx_std_17)
+```
+
+```bash
+# Run: cmake .. && cmake --build . && ctest
+# PASSES - tests still pass, structure improved
+```
+
+### Visual Step-by-Step TDD Example
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ TDD Example: Adding FetchContent Dependency                          │
+├──────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│ STEP 1: RED - Write test expecting fmt library                       │
+│ ─────────────────────────────────────────────                        │
+│ tests/CMakeLists.txt:                                                │
+│   add_executable(test_fmt test_fmt.cpp)                              │
+│   target_link_libraries(test_fmt fmt::fmt)  # ❌ FAILS               │
+│                                                                      │
+│ $ cmake .. && cmake --build .                                        │
+│ CMake Error: Target 'fmt::fmt' not found                             │
+│                                                                      │
+├──────────────────────────────────────────────────────────────────────┤
+│ STEP 2: GREEN - Add minimal FetchContent                             │
+│ ─────────────────────────────────────────────                        │
+│ cmake/DependencyManagement.cmake:                                    │
+│   include(FetchContent)                                              │
+│   FetchContent_Declare(fmt                                           │
+│       GIT_REPOSITORY https://github.com/fmtlib/fmt.git               │
+│       GIT_TAG 10.2.0)                                                │
+│   FetchContent_MakeAvailable(fmt)                                    │
+│                                                                      │
+│ $ cmake .. && cmake --build . && ctest                               │
+│ ✓ All tests pass                                                     │
+│                                                                      │
+├──────────────────────────────────────────────────────────────────────┤
+│ STEP 3: REFACTOR - Improve with find_package fallback                │
+│ ─────────────────────────────────────────────────────                │
+│ cmake/DependencyManagement.cmake:                                    │
+│   # Try system first, fallback to FetchContent                       │
+│   find_package(fmt QUIET)                                            │
+│   if(NOT fmt_FOUND)                                                  │
+│       include(FetchContent)                                          │
+│       FetchContent_Declare(fmt ...)                                  │
+│       FetchContent_MakeAvailable(fmt)                                │
+│   endif()                                                            │
+│                                                                      │
+│ $ cmake .. && cmake --build . && ctest                               │
+│ ✓ Tests still pass, better dependency management                     │
+│                                                                      │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### TDD Verification Checklist
+
+Before completing each TDD cycle:
+
+1. **RED Phase**:
+   - [ ] Test is written before implementation
+   - [ ] Test clearly expresses expected behavior
+   - [ ] Test FAILS for the right reason (not syntax errors)
+   - [ ] `ctest --output-on-failure` shows expected failure
+
+2. **GREEN Phase**:
+   - [ ] Implementation is minimal (just enough to pass)
+   - [ ] `cmake --build .` succeeds (exit code 0)
+   - [ ] `ctest` passes (exit code 0)
+   - [ ] No warnings in build output
+
+3. **REFACTOR Phase**:
+   - [ ] Code structure improved
+   - [ ] All tests still pass after refactoring
+   - [ ] No duplicate CMake code
+   - [ ] Follows hexagonal architecture principles
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every CMake bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                  Bug Fix Workflow for CMake                  │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│    ┌──────────────────┐                                     │
+│    │  1. BUG REPORTED │                                     │
+│    │  Build fails on  │                                     │
+│    │  certain config  │                                     │
+│    └────────┬─────────┘                                     │
+│             │                                               │
+│             ▼                                               │
+│    ┌──────────────────┐                                     │
+│    │ 2. WRITE TEST    │                                     │
+│    │ That REPRODUCES  │  ← Test MUST fail                   │
+│    │ the bug          │                                     │
+│    └────────┬─────────┘                                     │
+│             │                                               │
+│             ▼                                               │
+│    ┌──────────────────┐                                     │
+│    │ 3. VERIFY TEST   │                                     │
+│    │ Fails for the    │  ← Confirms bug exists              │
+│    │ RIGHT reason     │                                     │
+│    └────────┬─────────┘                                     │
+│             │                                               │
+│             ▼                                               │
+│    ┌──────────────────┐                                     │
+│    │ 4. FIX THE BUG   │                                     │
+│    │ Minimal change   │  ← Test now passes                  │
+│    │ to CMake files   │                                     │
+│    └────────┬─────────┘                                     │
+│             │                                               │
+│             ▼                                               │
+│    ┌──────────────────┐                                     │
+│    │ 5. VERIFY ALL    │                                     │
+│    │ Run full test    │  ← No regressions                   │
+│    │ suite with ctest │                                     │
+│    └────────┬─────────┘                                     │
+│             │                                               │
+│             ▼                                               │
+│    ┌──────────────────┐                                     │
+│    │ 6. DOCUMENT      │                                     │
+│    │ Add bug ID to    │  ← Prevents future issues           │
+│    │ test comments    │                                     │
+│    └──────────────────┘                                     │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Example Bug Fix: Missing Include Directory
+
+**Bug Report #42**: Build fails when using core library headers from another module.
+
+#### Step 1-2: Write test that reproduces the bug
+
+```cmake
+# tests/integration/CMakeLists.txt
+# Regression test for Bug #42: Missing include directory propagation
+
+cmake_minimum_required(VERSION 3.15)
+
+# Test that core headers are accessible when linking
+add_executable(test_bug_42_include_propagation
+    test_include_propagation.cpp
+)
+
+# Link to core - should automatically get include directories
+target_link_libraries(test_bug_42_include_propagation
+    PRIVATE
+        core
+)
+
+# Register regression test
+add_test(
+    NAME regression_bug_42_include_propagation
+    COMMAND test_bug_42_include_propagation
+)
+```
+
+```cpp
+// tests/integration/test_include_propagation.cpp
+// Regression test for Bug #42
+
+#include "core/types.h"  // Should work via target_link_libraries
+
+int main() {
+    // If this compiles, the bug is fixed
+    return 0;
+}
+```
+
+```bash
+# Run: cmake .. && cmake --build .
+# FAILS - fatal error: 'core/types.h' file not found
+# This confirms Bug #42 exists
+```
+
+#### Step 3: Verify test fails for the right reason
+
+```bash
+# The error message confirms the bug:
+# fatal error: 'core/types.h' file not found
+# This is exactly what Bug #42 reported
+```
+
+#### Step 4: Fix the bug
+
+```cmake
+# src/core/CMakeLists.txt - BEFORE (buggy)
+add_library(core src/types.cpp)
+# ❌ Missing: include directories not propagated
+
+# src/core/CMakeLists.txt - AFTER (fixed)
+add_library(core src/types.cpp)
+
+# ✅ Fix Bug #42: Properly propagate include directories
+target_include_directories(core
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+)
+```
+
+```bash
+# Run: cmake .. && cmake --build . && ctest
+# PASSES - Bug #42 fixed
+# Test #1: regression_bug_42_include_propagation ... Passed
+```
+
+#### Step 5-6: Verify and document
+
+```cmake
+# tests/integration/CMakeLists.txt
+# Updated with documentation
+
+# Regression test for Bug #42: Missing include directory propagation
+# Bug: When linking to 'core', include directories were not propagated
+# Fix: Added PUBLIC target_include_directories to src/core/CMakeLists.txt
+# Date: 2024-01-15
+# Verified: Test passes after fix
+```
+
+### Example Bug Fix: Generator-Specific Build Failure
+
+**Bug Report #87**: Build fails with Ninja but works with Make.
+
+#### Step 1-2: Write test that reproduces the bug
+
+```cmake
+# tests/generator/CMakeLists.txt
+# Regression test for Bug #87: Ninja generator failure
+
+cmake_minimum_required(VERSION 3.15)
+
+# Test custom command works with all generators
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/generated_config.h
+    COMMAND ${CMAKE_COMMAND} -E echo "// Generated" > ${CMAKE_CURRENT_BINARY_DIR}/generated_config.h
+    COMMENT "Generating config header"
+)
+
+add_custom_target(generate_config
+    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/generated_config.h
+)
+
+# Test executable that depends on generated file
+add_executable(test_bug_87_generator test_generator.cpp)
+add_dependencies(test_bug_87_generator generate_config)
+target_include_directories(test_bug_87_generator
+    PRIVATE ${CMAKE_CURRENT_BINARY_DIR}
+)
+
+add_test(NAME regression_bug_87_generator COMMAND test_bug_87_generator)
+```
+
+```bash
+# Run with Ninja: cmake -G Ninja .. && cmake --build .
+# FAILS with Ninja - dependency not tracked correctly
+# ninja: error: 'generated_config.h', needed by 'test_bug_87_generator', missing
+```
+
+#### Step 4: Fix the bug
+
+```cmake
+# BEFORE (buggy) - Custom command output not properly linked
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/generated_config.h
+    COMMAND ${CMAKE_COMMAND} -E echo "// Generated" > generated_config.h
+    # ❌ Missing: WORKING_DIRECTORY and proper dependency chain
+)
+
+# AFTER (fixed) - Proper dependency tracking for all generators
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/generated_config.h
+    COMMAND ${CMAKE_COMMAND} -E echo "// Generated" > ${CMAKE_CURRENT_BINARY_DIR}/generated_config.h
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    VERBATIM  # ✅ Fix Bug #87: Ensures command works across generators
+    COMMENT "Generating config header"
+)
+
+# ✅ Properly link generated file to target
+target_sources(test_bug_87_generator
+    PRIVATE
+        ${CMAKE_CURRENT_BINARY_DIR}/generated_config.h
+)
+```
+
+```bash
+# Run with both generators:
+# cmake -G Ninja .. && cmake --build . && ctest
+# cmake -G "Unix Makefiles" .. && cmake --build . && ctest
+# PASSES - Bug #87 fixed for all generators
+```
+
+### Bug Fix Verification Checklist
+
+Before completing a bug fix:
+
+1. **Reproduction**:
+   - [ ] Bug is clearly documented (ID, description, steps to reproduce)
+   - [ ] Regression test written BEFORE attempting fix
+   - [ ] Test fails and reproduces the exact bug behavior
+   - [ ] Failure message matches reported bug symptoms
+
+2. **Fix**:
+   - [ ] Fix is minimal and targeted
+   - [ ] Fix addresses root cause, not just symptoms
+   - [ ] Fix works with both Ninja and Make generators
+   - [ ] Fix doesn't break existing functionality
+
+3. **Verification**:
+   - [ ] Regression test now passes
+   - [ ] All existing tests still pass (`ctest`)
+   - [ ] Build works with all supported generators
+   - [ ] No new warnings introduced
+
+4. **Documentation**:
+   - [ ] Bug ID referenced in test comments
+   - [ ] Fix description added to test file
+   - [ ] Date of fix recorded
+   - [ ] Related CMake files documented
+
+---
+
 ## 3. Hexagonal Architecture for CMake (MANDATORY)
 
 ### A. Architecture Principles
@@ -1271,7 +1728,409 @@ target_compile_features(core PUBLIC cxx_std_20)
 
 ---
 
-## 18. Summary
+## 18. Quick Reference
+
+### Common Commands
+
+```bash
+# ═══════════════════════════════════════════════════════════════════
+# CMake Configuration
+# ═══════════════════════════════════════════════════════════════════
+
+# Basic configuration (creates build files)
+cmake -B build                          # Configure in 'build' directory
+cmake -B build -S .                     # Explicit source directory
+cmake -B build -G Ninja                 # Use Ninja generator (preferred)
+cmake -B build -G "Unix Makefiles"      # Use Make generator
+
+# Configuration with options
+cmake -B build -DCMAKE_BUILD_TYPE=Release           # Release build
+cmake -B build -DCMAKE_BUILD_TYPE=Debug             # Debug build
+cmake -B build -DBUILD_TESTING=ON                   # Enable tests
+cmake -B build -DCMAKE_INSTALL_PREFIX=/usr/local    # Set install path
+cmake -B build -DCMAKE_VERBOSE_MAKEFILE=ON          # Verbose output
+
+# ═══════════════════════════════════════════════════════════════════
+# Building
+# ═══════════════════════════════════════════════════════════════════
+
+# Build all targets
+cmake --build build                     # Build using default config
+cmake --build build --config Release    # Build Release configuration
+cmake --build build --config Debug      # Build Debug configuration
+cmake --build build -j $(nproc)         # Parallel build (all cores)
+cmake --build build --verbose           # Verbose build output
+
+# Build specific target
+cmake --build build --target mylib      # Build specific target
+cmake --build build --target clean      # Clean build artifacts
+cmake --build build --target all        # Build all targets
+
+# ═══════════════════════════════════════════════════════════════════
+# Testing with CTest
+# ═══════════════════════════════════════════════════════════════════
+
+# Run tests
+ctest --test-dir build                  # Run all tests
+ctest --test-dir build --output-on-failure    # Show output on failure
+ctest --test-dir build -V               # Verbose test output
+ctest --test-dir build -VV              # Extra verbose output
+ctest --test-dir build -j $(nproc)      # Parallel test execution
+
+# Test filtering
+ctest --test-dir build -R "unit_"       # Run tests matching pattern
+ctest --test-dir build -E "integration" # Exclude tests matching pattern
+ctest --test-dir build -L "fast"        # Run tests with label
+ctest --test-dir build --rerun-failed   # Rerun only failed tests
+
+# Test reporting
+ctest --test-dir build --progress       # Show progress
+ctest --test-dir build --output-junit result.xml  # JUnit XML output
+
+# ═══════════════════════════════════════════════════════════════════
+# Installation
+# ═══════════════════════════════════════════════════════════════════
+
+cmake --install build                   # Install to CMAKE_INSTALL_PREFIX
+cmake --install build --prefix /opt/myapp   # Install to custom prefix
+cmake --install build --config Release  # Install Release build
+cmake --install build --component Runtime   # Install specific component
+
+# ═══════════════════════════════════════════════════════════════════
+# Interactive Configuration
+# ═══════════════════════════════════════════════════════════════════
+
+ccmake -B build                         # Curses-based configuration UI
+cmake-gui -B build                      # Qt-based configuration GUI
+
+# ═══════════════════════════════════════════════════════════════════
+# Debugging & Inspection
+# ═══════════════════════════════════════════════════════════════════
+
+# Print variables and properties
+cmake -B build -LAH                     # List all cached variables
+cmake -B build --trace                  # Trace CMake execution
+cmake -B build --trace-expand           # Trace with variable expansion
+cmake -B build --debug-output           # Debug output
+
+# Graphviz dependency graph
+cmake -B build --graphviz=deps.dot      # Generate dependency graph
+dot -Tpng deps.dot -o deps.png          # Convert to PNG
+
+# ═══════════════════════════════════════════════════════════════════
+# Package Management
+# ═══════════════════════════════════════════════════════════════════
+
+# Conan (preferred for C++ dependencies)
+conan install . --output-folder=build --build=missing
+cmake -B build -DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake
+
+# vcpkg
+cmake -B build -DCMAKE_TOOLCHAIN_FILE=[vcpkg-root]/scripts/buildsystems/vcpkg.cmake
+```
+
+### CMake Patterns Cheat Sheet
+
+```cmake
+# ═══════════════════════════════════════════════════════════════════
+# TARGET PATTERNS
+# ═══════════════════════════════════════════════════════════════════
+
+# Library target (most common)
+add_library(mylib
+    src/file1.cpp
+    src/file2.cpp
+)
+
+# Library types
+add_library(mylib_static STATIC src/lib.cpp)    # Static library (.a)
+add_library(mylib_shared SHARED src/lib.cpp)    # Shared library (.so)
+add_library(mylib_object OBJECT src/lib.cpp)    # Object library
+add_library(mylib_interface INTERFACE)           # Header-only library
+
+# Executable target
+add_executable(myapp
+    src/main.cpp
+)
+
+# Alias target (for namespaced exports)
+add_library(MyProject::mylib ALIAS mylib)
+
+# ═══════════════════════════════════════════════════════════════════
+# INCLUDE DIRECTORIES
+# ═══════════════════════════════════════════════════════════════════
+
+# Modern generator expressions (CORRECT)
+target_include_directories(mylib
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+# ═══════════════════════════════════════════════════════════════════
+# LINKING LIBRARIES
+# ═══════════════════════════════════════════════════════════════════
+
+# Link visibility
+target_link_libraries(mylib
+    PUBLIC      # Propagates to consumers
+        fmt::fmt
+    PRIVATE     # Only for this target
+        spdlog::spdlog
+    INTERFACE   # Only for consumers, not this target
+        Boost::headers
+)
+
+# ═══════════════════════════════════════════════════════════════════
+# VARIABLES
+# ═══════════════════════════════════════════════════════════════════
+
+# Important built-in variables
+CMAKE_SOURCE_DIR          # Top-level source directory
+CMAKE_BINARY_DIR          # Top-level build directory
+CMAKE_CURRENT_SOURCE_DIR  # Current CMakeLists.txt source directory
+CMAKE_CURRENT_BINARY_DIR  # Current CMakeLists.txt build directory
+PROJECT_SOURCE_DIR        # Current project source directory
+PROJECT_BINARY_DIR        # Current project build directory
+
+# Setting variables
+set(MY_VAR "value")                     # Set variable
+set(MY_LIST "a" "b" "c")                # Set list
+set(MY_CACHE "default" CACHE STRING "Description")  # Cache variable
+option(MY_OPTION "Description" ON)      # Boolean option
+
+# ═══════════════════════════════════════════════════════════════════
+# FIND_PACKAGE PATTERNS
+# ═══════════════════════════════════════════════════════════════════
+
+# Basic find_package
+find_package(fmt REQUIRED)              # Required dependency
+find_package(Boost QUIET)               # Optional, no error if missing
+find_package(OpenSSL 1.1 REQUIRED)      # Version requirement
+
+# Find package with components
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
+target_link_libraries(myapp Qt6::Core Qt6::Widgets)
+
+# Config vs Module mode
+find_package(MyLib CONFIG REQUIRED)     # Use MyLibConfig.cmake
+find_package(MyLib MODULE REQUIRED)     # Use FindMyLib.cmake
+
+# Fallback pattern
+find_package(fmt QUIET)
+if(NOT fmt_FOUND)
+    include(FetchContent)
+    FetchContent_Declare(fmt
+        GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+        GIT_TAG 10.2.0
+    )
+    FetchContent_MakeAvailable(fmt)
+endif()
+
+# ═══════════════════════════════════════════════════════════════════
+# FETCHCONTENT PATTERNS
+# ═══════════════════════════════════════════════════════════════════
+
+include(FetchContent)
+
+# From Git repository
+FetchContent_Declare(json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG v3.11.3
+)
+
+# From URL archive
+FetchContent_Declare(catch2
+    URL https://github.com/catchorg/Catch2/archive/v3.4.0.tar.gz
+    URL_HASH SHA256=...
+)
+
+# Make available (downloads and configures)
+FetchContent_MakeAvailable(json catch2)
+
+# ═══════════════════════════════════════════════════════════════════
+# COMPILER FEATURES & OPTIONS
+# ═══════════════════════════════════════════════════════════════════
+
+# C++ standard (modern approach)
+target_compile_features(mylib PUBLIC cxx_std_17)
+target_compile_features(mylib PUBLIC cxx_std_20)
+
+# Compiler warnings
+target_compile_options(mylib PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>
+    $<$<CXX_COMPILER_ID:MSVC>:/W4>
+)
+
+# Preprocessor definitions
+target_compile_definitions(mylib
+    PUBLIC
+        MY_PUBLIC_DEFINE
+    PRIVATE
+        MY_PRIVATE_DEFINE=1
+        $<$<CONFIG:Debug>:DEBUG_MODE>
+)
+
+# ═══════════════════════════════════════════════════════════════════
+# TESTING PATTERNS
+# ═══════════════════════════════════════════════════════════════════
+
+# Enable testing
+enable_testing()
+
+# Basic test
+add_test(NAME my_test COMMAND my_test_exe)
+
+# Test with arguments
+add_test(NAME my_test COMMAND my_test_exe --arg1 --arg2)
+
+# Test with working directory
+add_test(NAME my_test COMMAND my_test_exe)
+set_tests_properties(my_test PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
+)
+
+# GoogleTest integration
+include(GoogleTest)
+gtest_discover_tests(my_test_exe)
+
+# Catch2 integration
+include(Catch)
+catch_discover_tests(my_test_exe)
+
+# ═══════════════════════════════════════════════════════════════════
+# INSTALL PATTERNS
+# ═══════════════════════════════════════════════════════════════════
+
+# Install targets
+install(TARGETS mylib myapp
+    EXPORT MyProjectTargets
+    LIBRARY DESTINATION lib
+    ARCHIVE DESTINATION lib
+    RUNTIME DESTINATION bin
+    INCLUDES DESTINATION include
+)
+
+# Install headers
+install(DIRECTORY include/
+    DESTINATION include
+    FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+)
+
+# Install CMake config
+install(EXPORT MyProjectTargets
+    FILE MyProjectTargets.cmake
+    NAMESPACE MyProject::
+    DESTINATION lib/cmake/MyProject
+)
+```
+
+### Project Structure
+
+```
+# ═══════════════════════════════════════════════════════════════════
+# RECOMMENDED CMAKE PROJECT STRUCTURE
+# ═══════════════════════════════════════════════════════════════════
+
+project/
+├── CMakeLists.txt              # Root orchestrator (minimal)
+│
+├── cmake/                      # CMake modules (MANDATORY separate dir)
+│   ├── BuildOptions.cmake      # Build configuration options
+│   ├── CompilerWarnings.cmake  # Compiler warning configuration
+│   ├── DependencyManagement.cmake  # Dependency resolution
+│   ├── ConanIntegration.cmake  # Conan package manager
+│   ├── Testing.cmake           # CTest configuration
+│   ├── Install.cmake           # Installation rules
+│   └── Performance.cmake       # Parallel builds, ccache
+│
+├── src/                        # Source modules
+│   ├── core/                   # Core module
+│   │   ├── CMakeLists.txt     # Module build file
+│   │   ├── include/           # Public headers
+│   │   │   └── core/
+│   │   │       ├── types.h
+│   │   │       └── utils.h
+│   │   └── src/               # Implementation
+│   │       ├── types.cpp
+│   │       └── utils.cpp
+│   │
+│   ├── parser/                 # Parser module
+│   │   ├── CMakeLists.txt
+│   │   ├── include/parser/
+│   │   └── src/
+│   │
+│   └── network/                # Network module
+│       ├── CMakeLists.txt
+│       ├── include/network/
+│       └── src/
+│
+├── apps/                       # Applications
+│   └── main/
+│       ├── CMakeLists.txt
+│       └── main.cpp
+│
+├── tests/                      # Tests (mirror src structure)
+│   ├── CMakeLists.txt         # Test configuration
+│   ├── core/
+│   │   ├── CMakeLists.txt
+│   │   └── test_types.cpp
+│   ├── parser/
+│   │   └── CMakeLists.txt
+│   └── integration/            # Integration tests
+│       └── CMakeLists.txt
+│
+├── docs/                       # Documentation
+│   ├── CMakeLists.txt         # Doxygen config
+│   └── Doxyfile.in
+│
+├── examples/                   # Example programs
+│   └── CMakeLists.txt
+│
+├── conanfile.txt              # Conan dependencies (if using Conan)
+├── CMakePresets.json          # CMake presets (optional)
+└── README.md
+
+# ═══════════════════════════════════════════════════════════════════
+# KEY FILES EXPLAINED
+# ═══════════════════════════════════════════════════════════════════
+
+# Root CMakeLists.txt (minimal orchestrator)
+cmake_minimum_required(VERSION 3.15...3.27)
+project(MyProject VERSION 1.0.0 LANGUAGES CXX)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+include(cmake/BuildOptions.cmake)
+include(cmake/CompilerWarnings.cmake)
+include(cmake/DependencyManagement.cmake)
+add_subdirectory(src/core)
+add_subdirectory(src/parser)
+add_subdirectory(apps/main)
+if(BUILD_TESTING)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+
+# Module CMakeLists.txt (single purpose)
+# src/core/CMakeLists.txt
+add_library(core src/types.cpp src/utils.cpp)
+target_include_directories(core PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>)
+target_compile_features(core PUBLIC cxx_std_17)
+
+# Test CMakeLists.txt
+# tests/core/CMakeLists.txt
+add_executable(test_core test_types.cpp)
+target_link_libraries(test_core PRIVATE core GTest::gtest_main)
+include(GoogleTest)
+gtest_discover_tests(test_core)
+```
+
+---
+
+## 19. Summary
 
 **CRITICAL Requirements for All CMake Files:**
 

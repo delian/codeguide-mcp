@@ -544,6 +544,431 @@ help:
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    TDD Red-Green-Refactor Cycle                 │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│    ┌──────────┐         ┌──────────┐         ┌──────────┐      │
+│    │   RED    │         │  GREEN   │         │ REFACTOR │      │
+│    │  Write   │ ──────► │  Write   │ ──────► │ Improve  │      │
+│    │ Failing  │         │ Minimal  │         │  Code    │      │
+│    │  Test    │         │   Code   │         │          │      │
+│    └──────────┘         └──────────┘         └────┬─────┘      │
+│         ▲                                         │            │
+│         │                                         │            │
+│         └─────────────────────────────────────────┘            │
+│                         Repeat                                 │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+Step 1: RED    → Write a test that fails (test doesn't exist yet)
+Step 2: GREEN  → Write minimal code to make the test pass
+Step 3: REFACTOR → Improve code quality while keeping tests green
+Step 4: REPEAT → Continue with next feature/requirement
+```
+
+### Example TDD Workflow for Python with Poetry
+
+```python
+# =============================================================================
+# Step 1: RED - Write failing test first
+# =============================================================================
+# packages/domain/tests/test_calculator.py
+
+import pytest
+from myapp_domain.services.calculator import Calculator
+
+
+def test_add_two_positive_numbers() -> None:
+    """Test adding two positive numbers."""
+    calc = Calculator()
+    result = calc.add(2, 3)
+    assert result == 5
+
+
+def test_add_negative_numbers() -> None:
+    """Test adding negative numbers."""
+    calc = Calculator()
+    result = calc.add(-1, -1)
+    assert result == -2
+
+
+def test_add_with_zero() -> None:
+    """Test adding with zero."""
+    calc = Calculator()
+    assert calc.add(0, 5) == 5
+    assert calc.add(5, 0) == 5
+```
+
+```bash
+# Run: poetry run pytest tests/test_calculator.py
+# ❌ FAILS - ModuleNotFoundError: No module named 'myapp_domain.services.calculator'
+```
+
+```python
+# =============================================================================
+# Step 2: GREEN - Write minimal implementation to pass
+# =============================================================================
+# packages/domain/myapp_domain/services/calculator.py
+
+class Calculator:
+    """Basic calculator service."""
+
+    def add(self, a: int, b: int) -> int:
+        """Add two numbers."""
+        return a + b
+```
+
+```bash
+# Run: poetry run pytest tests/test_calculator.py -v
+# ✅ PASSES
+# tests/test_calculator.py::test_add_two_positive_numbers PASSED
+# tests/test_calculator.py::test_add_negative_numbers PASSED
+# tests/test_calculator.py::test_add_with_zero PASSED
+```
+
+```python
+# =============================================================================
+# Step 3: REFACTOR - Improve while keeping tests green
+# =============================================================================
+# packages/domain/myapp_domain/services/calculator.py
+
+from typing import Union
+
+Number = Union[int, float]
+
+
+class Calculator:
+    """
+    Basic calculator service.
+
+    Provides arithmetic operations with type safety.
+    """
+
+    def add(self, a: Number, b: Number) -> Number:
+        """
+        Add two numbers.
+
+        Args:
+            a: First number
+            b: Second number
+
+        Returns:
+            Sum of a and b
+        """
+        return a + b
+```
+
+```bash
+# Run: poetry run pytest tests/test_calculator.py -v
+# ✅ PASSES - Tests still pass after refactoring
+```
+
+### Visual TDD Step-by-Step Example
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    TDD Example: Implementing Email Validator                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  STEP 1: RED - Write Failing Test                                          │
+│  ────────────────────────────────────────────────────────────────────────   │
+│  $ poetry run pytest tests/test_email.py                                    │
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ def test_valid_email_returns_true():                                │   │
+│  │     validator = EmailValidator()                                    │   │
+│  │     assert validator.is_valid("user@example.com") is True          │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+│  Result: ❌ FAILED - ImportError: cannot import 'EmailValidator'            │
+│                                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  STEP 2: GREEN - Write Minimal Code                                        │
+│  ────────────────────────────────────────────────────────────────────────   │
+│  $ poetry run pytest tests/test_email.py                                    │
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ class EmailValidator:                                               │   │
+│  │     def is_valid(self, email: str) -> bool:                        │   │
+│  │         return "@" in email and "." in email                       │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+│  Result: ✅ PASSED - 1 passed in 0.02s                                      │
+│                                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  STEP 3: REFACTOR - Improve Implementation                                  │
+│  ────────────────────────────────────────────────────────────────────────   │
+│  $ poetry run pytest tests/test_email.py && poetry run mypy .               │
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ import re                                                           │   │
+│  │ from dataclasses import dataclass                                   │   │
+│  │                                                                     │   │
+│  │ @dataclass                                                          │   │
+│  │ class EmailValidator:                                               │   │
+│  │     _pattern: str = r'^[\w\.-]+@[\w\.-]+\.\w+$'                    │   │
+│  │                                                                     │   │
+│  │     def is_valid(self, email: str) -> bool:                        │   │
+│  │         return bool(re.match(self._pattern, email))                │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+│  Result: ✅ PASSED - Tests pass, types check                                │
+│                                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  STEP 4: REPEAT - Add More Tests, Continue Cycle                            │
+│  ────────────────────────────────────────────────────────────────────────   │
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ def test_invalid_email_missing_at():                                │   │
+│  │     assert validator.is_valid("userexample.com") is False          │   │
+│  │                                                                     │   │
+│  │ def test_invalid_email_missing_domain():                            │   │
+│  │     assert validator.is_valid("user@") is False                    │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+│  Continue the Red-Green-Refactor cycle...                                   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### TDD Commands with Poetry
+
+```bash
+# Watch mode for TDD (install pytest-watch)
+poetry add --group dev pytest-watch
+poetry run ptw tests/  # Auto-runs tests on file changes
+
+# Run specific test during TDD
+poetry run pytest tests/test_calculator.py::test_add_two_positive_numbers -v
+
+# Run with coverage to track progress
+poetry run pytest --cov=myapp_domain --cov-report=term-missing
+
+# Run only tests matching pattern
+poetry run pytest -k "test_add" -v
+
+# Run tests with verbose failure output
+poetry run pytest -vvs --tb=short
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         Bug Fix Workflow Diagram                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   ┌──────────────┐                                                          │
+│   │ Bug Reported │                                                          │
+│   │   (#123)     │                                                          │
+│   └──────┬───────┘                                                          │
+│          │                                                                  │
+│          ▼                                                                  │
+│   ┌──────────────────────────────────────────────────────────────────┐     │
+│   │  1. REPRODUCE: Write test that demonstrates the bug              │     │
+│   │     poetry run pytest tests/test_bug_123.py                      │     │
+│   │     Result: ❌ FAILS (confirms bug exists)                        │     │
+│   └──────────────────────────────────────────────────────────────────┘     │
+│          │                                                                  │
+│          ▼                                                                  │
+│   ┌──────────────────────────────────────────────────────────────────┐     │
+│   │  2. VERIFY: Ensure test fails for the RIGHT reason               │     │
+│   │     Check error message matches expected bug behavior            │     │
+│   └──────────────────────────────────────────────────────────────────┘     │
+│          │                                                                  │
+│          ▼                                                                  │
+│   ┌──────────────────────────────────────────────────────────────────┐     │
+│   │  3. FIX: Implement the bug fix                                   │     │
+│   │     Modify the code to correct the behavior                      │     │
+│   └──────────────────────────────────────────────────────────────────┘     │
+│          │                                                                  │
+│          ▼                                                                  │
+│   ┌──────────────────────────────────────────────────────────────────┐     │
+│   │  4. VERIFY FIX: Run the regression test                          │     │
+│   │     poetry run pytest tests/test_bug_123.py                      │     │
+│   │     Result: ✅ PASSES (bug is fixed)                              │     │
+│   └──────────────────────────────────────────────────────────────────┘     │
+│          │                                                                  │
+│          ▼                                                                  │
+│   ┌──────────────────────────────────────────────────────────────────┐     │
+│   │  5. FULL SUITE: Run all tests to prevent regressions             │     │
+│   │     poetry run pytest                                            │     │
+│   │     Result: ✅ ALL PASS (no regressions introduced)               │     │
+│   └──────────────────────────────────────────────────────────────────┘     │
+│          │                                                                  │
+│          ▼                                                                  │
+│   ┌──────────────────────────────────────────────────────────────────┐     │
+│   │  6. DOCUMENT: Add bug ID to test docstring                       │     │
+│   │     """Bug #123: Description of what was fixed"""                │     │
+│   └──────────────────────────────────────────────────────────────────┘     │
+│          │                                                                  │
+│          ▼                                                                  │
+│   ┌──────────────┐                                                          │
+│   │   Deploy     │  Regression test prevents bug from returning             │
+│   │   Safely     │                                                          │
+│   └──────────────┘                                                          │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Example Bug Fix with Regression Test
+
+```python
+# =============================================================================
+# Bug Report #456: Division by zero not handled in Calculator.divide()
+#
+# Reported: 2026-01-20
+# Severity: High
+# Description: Calculator.divide(10, 0) crashes with unhandled ZeroDivisionError
+# Expected: Should raise a descriptive ValueError
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Step 1: Write test that REPRODUCES the bug (test will FAIL)
+# -----------------------------------------------------------------------------
+# packages/domain/tests/test_calculator_bug_456.py
+
+import pytest
+from myapp_domain.services.calculator import Calculator
+
+
+def test_divide_by_zero_raises_value_error_bug_456() -> None:
+    """
+    Bug #456: Division by zero should raise ValueError.
+
+    Regression test to prevent bug from returning.
+    Discovered: 2026-01-20
+    """
+    calc = Calculator()
+
+    with pytest.raises(ValueError, match="Cannot divide by zero"):
+        calc.divide(10, 0)
+
+
+def test_divide_by_zero_with_float_bug_456() -> None:
+    """
+    Bug #456: Division by zero should also handle 0.0.
+
+    Edge case discovered during bug investigation.
+    """
+    calc = Calculator()
+
+    with pytest.raises(ValueError, match="Cannot divide by zero"):
+        calc.divide(10.5, 0.0)
+```
+
+```bash
+# Run: poetry run pytest tests/test_calculator_bug_456.py -v
+# ❌ FAILS - ZeroDivisionError: division by zero
+# (Confirms bug exists - this is expected!)
+```
+
+```python
+# -----------------------------------------------------------------------------
+# Step 2: Current broken implementation (before fix)
+# -----------------------------------------------------------------------------
+# packages/domain/myapp_domain/services/calculator.py
+
+class Calculator:
+    """Calculator service."""
+
+    def divide(self, a: float, b: float) -> float:
+        """Divide a by b."""
+        return a / b  # BUG: No handling for b == 0
+
+
+# -----------------------------------------------------------------------------
+# Step 3: Fix the bug
+# -----------------------------------------------------------------------------
+# packages/domain/myapp_domain/services/calculator.py
+
+class Calculator:
+    """Calculator service."""
+
+    def divide(self, a: float, b: float) -> float:
+        """
+        Divide a by b.
+
+        Args:
+            a: Dividend
+            b: Divisor (must not be zero)
+
+        Returns:
+            Result of a / b
+
+        Raises:
+            ValueError: If b is zero
+        """
+        if b == 0:
+            raise ValueError("Cannot divide by zero")
+        return a / b
+```
+
+```bash
+# Run: poetry run pytest tests/test_calculator_bug_456.py -v
+# ✅ PASSES
+# tests/test_calculator_bug_456.py::test_divide_by_zero_raises_value_error_bug_456 PASSED
+# tests/test_calculator_bug_456.py::test_divide_by_zero_with_float_bug_456 PASSED
+
+# Run full test suite to check for regressions
+# poetry run pytest
+# ✅ ALL TESTS PASS - Safe to deploy
+```
+
+### Bug Fix Checklist
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           Bug Fix Checklist                                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Before Fix:                                                                │
+│  □ Bug ticket/issue created with clear description                          │
+│  □ Bug reproduced locally                                                   │
+│  □ Regression test written that FAILS                                       │
+│  □ Test failure message matches bug description                             │
+│                                                                             │
+│  During Fix:                                                                │
+│  □ Minimal code change to fix the issue                                     │
+│  □ No unrelated changes mixed in                                            │
+│  □ Code follows existing patterns                                           │
+│                                                                             │
+│  After Fix:                                                                 │
+│  □ Regression test now PASSES                                               │
+│  □ All existing tests still PASS                                            │
+│  □ Type checking passes: poetry run mypy .                                  │
+│  □ Linting passes: poetry run ruff check .                                  │
+│  □ Bug ID documented in test docstring                                      │
+│  □ Commit message references bug ID                                         │
+│                                                                             │
+│  Commands:                                                                  │
+│  $ poetry run pytest tests/test_bug_XXX.py -v  # Run regression test        │
+│  $ poetry run pytest                            # Full suite                │
+│  $ poetry run mypy .                           # Type check                 │
+│  $ poetry run ruff check .                     # Lint                       │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## 3. Poetry Workflow (MANDATORY)
 
 ### A. Installing Dependencies
@@ -1471,6 +1896,330 @@ CMD ["python", "-m", "uvicorn", "myapp_api.main:app", "--host", "0.0.0.0", "--po
 10. **Scripts**: pyproject.toml scripts provide consistent task running.
 11. **Virtual Environments**: Automatic isolation per project.
 12. **Community**: Large ecosystem, extensive plugin support.
+
+---
+
+## 9. Quick Reference
+
+### Common Commands
+
+```bash
+# =============================================================================
+# Project Initialization
+# =============================================================================
+poetry new my-project              # Create new project with standard structure
+poetry init                        # Initialize poetry in existing project
+
+# =============================================================================
+# Dependency Management
+# =============================================================================
+poetry install                     # Install dependencies from pyproject.toml
+poetry install --without dev       # Install without dev dependencies
+poetry install --with docs         # Install with optional docs group
+poetry install --only test         # Install only test dependencies
+
+poetry add requests                # Add runtime dependency
+poetry add --group dev pytest      # Add dev dependency
+poetry add --group test faker      # Add test dependency
+poetry add "fastapi>=0.109.0"      # Add with version constraint
+poetry add "pydantic^2.6.0"        # Add with caret constraint
+
+poetry remove requests             # Remove dependency
+poetry update                      # Update all dependencies
+poetry update fastapi              # Update specific package
+
+poetry show                        # Show installed packages
+poetry show --tree                 # Show dependency tree
+poetry show --outdated             # Show outdated packages
+
+# =============================================================================
+# Running Commands (Recommended - no activation needed)
+# =============================================================================
+poetry run python script.py        # Run Python script
+poetry run pytest                  # Run tests
+poetry run pytest -v --cov         # Run tests with coverage
+poetry run mypy .                  # Type checking
+poetry run ruff check .            # Linting
+poetry run ruff format .           # Formatting
+
+# =============================================================================
+# Virtual Environment
+# =============================================================================
+poetry env info                    # Show venv information
+poetry env info --path             # Show venv path
+poetry env list                    # List available environments
+poetry env use 3.12                # Use specific Python version
+poetry env remove python           # Remove virtual environment
+
+# Manual activation (if needed)
+source $(poetry env info --path)/bin/activate  # Linux/macOS
+# .venv\Scripts\activate           # Windows
+
+# =============================================================================
+# Lock File & Export
+# =============================================================================
+poetry lock                        # Generate/update lock file
+poetry lock --no-update            # Regenerate without updating deps
+poetry check                       # Verify pyproject.toml and lock file
+poetry export -f requirements.txt -o requirements.txt  # Export to requirements.txt
+
+# =============================================================================
+# Building & Publishing
+# =============================================================================
+poetry build                       # Build package (sdist + wheel)
+poetry publish                     # Publish to PyPI
+poetry publish --build             # Build and publish
+poetry publish -r private          # Publish to private repo
+
+# =============================================================================
+# Configuration
+# =============================================================================
+poetry config --list                           # Show all config
+poetry config virtualenvs.in-project true      # Create .venv in project
+poetry config virtualenvs.prefer-active-python true
+poetry config pypi-token.pypi <token>          # Set PyPI token
+```
+
+### Poetry Patterns Cheat Sheet
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        Poetry Patterns Cheat Sheet                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Version Constraints:                                                       │
+│  ────────────────────────────────────────────────────────────────────────   │
+│  ^2.6.0    →  >=2.6.0, <3.0.0    (caret - recommended for most cases)      │
+│  ~2.6.0    →  >=2.6.0, <2.7.0    (tilde - patch updates only)              │
+│  >=2.6.0   →  >=2.6.0            (minimum version)                          │
+│  ==2.6.0   →  exactly 2.6.0      (exact version - use sparingly)           │
+│  >=2.6,<3  →  >=2.6.0, <3.0.0    (range constraint)                        │
+│  *         →  any version         (wildcard - avoid in production)          │
+│                                                                             │
+│  Dependency Groups:                                                         │
+│  ────────────────────────────────────────────────────────────────────────   │
+│  [tool.poetry.dependencies]           # Runtime dependencies                │
+│  [tool.poetry.group.dev.dependencies] # Development tools                   │
+│  [tool.poetry.group.test.dependencies]# Testing libraries                   │
+│  [tool.poetry.group.docs.dependencies]# Documentation tools                 │
+│                                                                             │
+│  Path Dependencies (Hexagonal Architecture):                                │
+│  ────────────────────────────────────────────────────────────────────────   │
+│  myapp-domain = {path = "../domain", develop = true}                       │
+│  myapp-application = {path = "../application", develop = true}             │
+│                                                                             │
+│  Optional Dependencies:                                                     │
+│  ────────────────────────────────────────────────────────────────────────   │
+│  sqlalchemy = {extras = ["asyncio"], version = "^2.0.0"}                   │
+│  uvicorn = {extras = ["standard"], version = "^0.27.0"}                    │
+│                                                                             │
+│  Scripts (Entry Points):                                                    │
+│  ────────────────────────────────────────────────────────────────────────   │
+│  [tool.poetry.scripts]                                                      │
+│  serve = "myapp_api.main:serve"        # poetry run serve                  │
+│  migrate = "myapp_db.migrations:run"   # poetry run migrate                │
+│                                                                             │
+│  TDD Workflow:                                                              │
+│  ────────────────────────────────────────────────────────────────────────   │
+│  1. poetry run pytest tests/test_new.py  →  ❌ RED (fails)                  │
+│  2. Write implementation                                                    │
+│  3. poetry run pytest tests/test_new.py  →  ✅ GREEN (passes)               │
+│  4. Refactor, poetry run pytest          →  ✅ Still passes                 │
+│                                                                             │
+│  Bug Fix Workflow:                                                          │
+│  ────────────────────────────────────────────────────────────────────────   │
+│  1. poetry run pytest tests/test_bug_N.py  →  ❌ Reproduces bug             │
+│  2. Fix the bug                                                             │
+│  3. poetry run pytest tests/test_bug_N.py  →  ✅ Bug fixed                  │
+│  4. poetry run pytest                      →  ✅ No regressions             │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### pyproject.toml Template
+
+```toml
+# =============================================================================
+# pyproject.toml - Complete Poetry Configuration Template
+# =============================================================================
+
+[tool.poetry]
+name = "myapp"
+version = "1.0.0"
+description = "A production-ready Python application"
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+license = "MIT"
+repository = "https://github.com/username/myapp"
+documentation = "https://myapp.readthedocs.io"
+keywords = ["python", "poetry", "hexagonal"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+]
+packages = [{include = "myapp"}]
+
+# =============================================================================
+# Dependencies
+# =============================================================================
+
+[tool.poetry.dependencies]
+python = "^3.12"
+pydantic = "^2.6.0"
+pydantic-settings = "^2.1.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+pytest-cov = "^4.1.0"
+pytest-asyncio = "^0.23.0"
+pytest-mock = "^3.12.0"
+pytest-watch = "^4.2.0"
+pytest-xdist = "^3.5.0"
+ruff = "^0.3.0"
+mypy = "^1.8.0"
+pre-commit = "^3.6.0"
+
+[tool.poetry.group.test.dependencies]
+faker = "^22.0.0"
+httpx = "^0.26.0"
+aiosqlite = "^0.19.0"
+
+[tool.poetry.group.docs]
+optional = true
+
+[tool.poetry.group.docs.dependencies]
+mkdocs = "^1.5.0"
+mkdocs-material = "^9.5.0"
+
+# =============================================================================
+# Scripts (Entry Points)
+# =============================================================================
+
+[tool.poetry.scripts]
+serve = "myapp.main:serve"
+serve-dev = "myapp.main:serve_dev"
+migrate = "myapp.db.migrations:run"
+
+# =============================================================================
+# Build System
+# =============================================================================
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+# =============================================================================
+# Ruff Configuration (Linting & Formatting)
+# =============================================================================
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = [".venv", "__pycache__", ".git", "dist", "build"]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes
+    "I",      # isort
+    "N",      # pep8-naming
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "SIM",    # flake8-simplify
+    "TCH",    # flake8-type-checking
+    "PTH",    # flake8-use-pathlib
+    "RUF",    # Ruff-specific rules
+]
+ignore = ["E501"]  # Line too long (handled by formatter)
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101"]  # Allow assert in tests
+
+[tool.ruff.lint.isort]
+known-first-party = ["myapp"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
+# =============================================================================
+# Mypy Configuration (Type Checking)
+# =============================================================================
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+show_error_codes = true
+namespace_packages = true
+explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+
+# =============================================================================
+# Pytest Configuration
+# =============================================================================
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+filterwarnings = ["ignore::DeprecationWarning"]
+markers = [
+    "unit: Unit tests (fast, no I/O)",
+    "integration: Integration tests (may require external services)",
+    "slow: Slow tests (>1s)",
+]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--strict-config",
+    "--cov=myapp",
+    "--cov-report=term-missing",
+    "--cov-report=html:htmlcov",
+    "--cov-fail-under=80",
+]
+
+# =============================================================================
+# Coverage Configuration
+# =============================================================================
+
+[tool.coverage.run]
+source = ["myapp"]
+branch = true
+omit = ["*/tests/*", "*/__pycache__/*", "*/.venv/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+    "@overload",
+]
+show_missing = true
+fail_under = 80
+```
 
 ---
 

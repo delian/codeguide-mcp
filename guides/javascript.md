@@ -1705,6 +1705,86 @@ export class UserService {
 
 ---
 
+## 12. Quick Reference
+
+### Common Commands
+
+```bash
+# Test
+npm test
+npm run test:watch
+npm run test:coverage
+
+# Lint & Format
+npm run lint
+npm run lint:fix
+npx prettier --check .
+npx prettier --write .
+
+# Documentation
+npx jsdoc -c jsdoc.json
+
+# Type check (with JSDoc)
+npx tsc --checkJs --allowJs --noEmit
+```
+
+### Functional Patterns Cheat Sheet
+
+```javascript
+// Array methods
+items.map(x => x * 2);
+items.filter(x => x > 0);
+items.reduce((acc, x) => acc + x, 0);
+items.find(x => x.id === targetId);
+items.some(x => x.active);
+items.every(x => x.valid);
+
+// Immutable updates
+const updated = { ...obj, key: newValue };
+const filtered = arr.filter(x => x.id !== id);
+const added = [...arr, newItem];
+
+// Async patterns
+const results = await Promise.all(items.map(fetch));
+const settled = await Promise.allSettled(promises);
+
+// Result pattern
+const ok = value => ({ ok: true, value });
+const err = error => ({ ok: false, error });
+```
+
+### ESLint Config (.eslintrc.cjs)
+
+```javascript
+module.exports = {
+  env: { es2022: true, node: true },
+  extends: ['eslint:recommended'],
+  parserOptions: { ecmaVersion: 'latest', sourceType: 'module' },
+  rules: {
+    'no-var': 'error',
+    'prefer-const': 'error',
+    'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+  },
+};
+```
+
+### Project Structure
+
+```
+my_project/
+├── src/
+│   ├── index.js          # Entry point
+│   ├── domain/           # Business logic
+│   ├── services/         # Application services
+│   └── utils/            # Utilities
+├── tests/
+├── .eslintrc.cjs
+├── jsdoc.json
+└── package.json
+```
+
+---
+
 ## References
 
 - [MDN Web Docs - JavaScript](https://developer.mozilla.org/en-US/docs/Web/JavaScript)

@@ -326,6 +326,660 @@ CMD ["node", "dist/index.js"]
 
 ---
 
+## 2A. TDD Protocol for Dockerfiles
+
+### Test-Driven Dockerfile Development
+
+**Apply TDD principles to container development for reliable, secure, and optimized images.**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    DOCKERFILE TDD CYCLE                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│    ┌──────────┐     ┌──────────┐     ┌──────────┐              │
+│    │  RED     │────▶│  GREEN   │────▶│ REFACTOR │              │
+│    │  Write   │     │  Build   │     │ Optimize │              │
+│    │  Tests   │     │  Image   │     │  Layers  │              │
+│    └──────────┘     └──────────┘     └──────────┘              │
+│         ▲                                   │                   │
+│         │                                   │                   │
+│         └───────────────────────────────────┘                   │
+│                                                                 │
+│    RED:     Define structure tests (container-structure-test)   │
+│             Define lint rules (hadolint)                        │
+│                                                                 │
+│    GREEN:   Write Dockerfile that passes all tests              │
+│             Verify build succeeds, container runs               │
+│                                                                 │
+│    REFACTOR: Optimize layers, reduce size                       │
+│              Improve cache efficiency                           │
+│              Re-run tests to verify no regressions              │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### A. Testing Tools
+
+**1. Hadolint (Static Analysis)**
+
+Hadolint is a Dockerfile linter that validates best practices and security rules.
+
+```bash
+# Install hadolint
+brew install hadolint  # macOS
+# OR download binary from https://github.com/hadolint/hadolint/releases
+
+# Run linter
+hadolint Dockerfile
+
+# With specific rules
+hadolint --ignore DL3008 --ignore DL3018 Dockerfile
+
+# Output as JSON for CI integration
+hadolint -f json Dockerfile
+```
+
+**2. Container Structure Test (Runtime Validation)**
+
+Google's container-structure-test validates the actual container contents.
+
+```bash
+# Install container-structure-test
+curl -LO https://storage.googleapis.com/container-structure-test/latest/container-structure-test-linux-amd64
+chmod +x container-structure-test-linux-amd64
+sudo mv container-structure-test-linux-amd64 /usr/local/bin/container-structure-test
+
+# Run tests
+container-structure-test test --image myapp:latest --config tests/container-structure.yaml
+```
+
+### B. TDD Workflow Example
+
+**Step 1: RED - Write Tests First**
+
+Create `tests/container-structure.yaml`:
+
+```yaml
+schemaVersion: 2.0.0
+
+# Test 1: Verify non-root user
+commandTests:
+  - name: "Must run as non-root user"
+    command: "id"
+    expectedOutput: ["uid=1000"]
+    excludedOutput: ["uid=0(root)"]
+
+  - name: "Application binary exists and is executable"
+    command: "which"
+    args: ["node"]
+    expectedOutput: ["/usr/local/bin/node"]
+    exitCode: 0
+
+  - name: "Application responds to --version"
+    command: "node"
+    args: ["--version"]
+    expectedOutput: ["v20"]
+    exitCode: 0
+
+# Test 2: Verify file structure
+fileExistenceTests:
+  - name: "Application source exists"
+    path: "/app/src/index.js"
+    shouldExist: true
+    permissions: "-rw-r--r--"
+
+  - name: "node_modules exists"
+    path: "/app/node_modules"
+    shouldExist: true
+    isDirectory: true
+
+  - name: "No .git directory in image"
+    path: "/app/.git"
+    shouldExist: false
+
+  - name: "No secrets in image"
+    path: "/app/.env"
+    shouldExist: false
+
+# Test 3: Verify metadata
+metadataTest:
+  envVars:
+    - key: "NODE_ENV"
+      value: "production"
+    - key: "PORT"
+      value: "3000"
+  exposedPorts: ["3000"]
+  workdir: "/app"
+  user: "node"
+
+# Test 4: Verify no development dependencies
+fileContentTests:
+  - name: "No dev dependencies in node_modules"
+    path: "/app/package.json"
+    excludedContents: ["devDependencies"]
+```
+
+Create `.hadolint.yaml` for lint rules:
+
+```yaml
+ignored:
+  - DL3008  # Pin versions in apt-get (may be intentional for security updates)
+
+trustedRegistries:
+  - docker.io
+  - gcr.io
+
+failure-threshold: warning
+
+override:
+  error:
+    - DL3000  # Use absolute WORKDIR
+    - DL3001  # No relative WORKDIR
+    - DL3002  # No switching to root after USER
+    - DL3003  # Use WORKDIR instead of cd
+    - DL3004  # No sudo
+    - DL3006  # Pin image versions
+    - DL3007  # No :latest tag
+    - DL3045  # COPY --link
+  warning:
+    - DL3025  # Use JSON array for CMD
+```
+
+**Step 2: RED - Run Tests (They Should Fail)**
+
+```bash
+# Lint empty/minimal Dockerfile - expect failures
+hadolint Dockerfile
+# Output: Errors about missing USER, unpinned versions, etc.
+
+# Structure test on placeholder image - expect failures
+docker build -t myapp:test .
+container-structure-test test --image myapp:test --config tests/container-structure.yaml
+# Output: FAIL - user is root, files missing, etc.
+```
+
+**Step 3: GREEN - Write Dockerfile to Pass Tests**
+
+```dockerfile
+# syntax=docker/dockerfile:1.6
+
+FROM node:20.10-alpine AS base
+WORKDIR /app
+ENV NODE_ENV=production \
+    PORT=3000
+
+FROM base AS deps
+RUN --mount=type=bind,source=package.json,target=package.json \
+    --mount=type=bind,source=package-lock.json,target=package-lock.json \
+    --mount=type=cache,target=/root/.npm \
+    npm ci --omit=dev
+
+FROM base AS runner
+USER node
+COPY --from=deps --chown=node:node /app/node_modules ./node_modules
+COPY --chown=node:node src/ ./src/
+COPY --chown=node:node package.json ./
+
+EXPOSE 3000
+CMD ["node", "src/index.js"]
+```
+
+**Step 4: GREEN - Verify Tests Pass**
+
+```bash
+# Lint passes
+hadolint Dockerfile
+# No output = success
+
+# Build image
+docker build -t myapp:test .
+
+# Structure tests pass
+container-structure-test test --image myapp:test --config tests/container-structure.yaml
+# Output: PASS
+
+# Manual verification
+docker run --rm myapp:test id
+# uid=1000(node) gid=1000(node)
+```
+
+**Step 5: REFACTOR - Optimize**
+
+```dockerfile
+# syntax=docker/dockerfile:1.6
+
+# Optimized with labels and health check
+FROM node:20.10-alpine AS base
+WORKDIR /app
+ENV NODE_ENV=production \
+    PORT=3000
+
+LABEL org.opencontainers.image.source="https://github.com/org/repo" \
+      org.opencontainers.image.description="Production Node.js app" \
+      org.opencontainers.image.version="1.0.0"
+
+FROM base AS deps
+RUN --mount=type=bind,source=package.json,target=package.json \
+    --mount=type=bind,source=package-lock.json,target=package-lock.json \
+    --mount=type=cache,target=/root/.npm \
+    npm ci --omit=dev
+
+FROM base AS runner
+USER node
+COPY --from=deps --chown=node:node /app/node_modules ./node_modules
+COPY --chown=node:node src/ ./src/
+COPY --chown=node:node package.json ./
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+
+EXPOSE 3000
+CMD ["node", "src/index.js"]
+```
+
+**Step 6: REFACTOR - Verify Tests Still Pass**
+
+```bash
+# Re-run all tests after refactoring
+hadolint Dockerfile && \
+docker build -t myapp:test . && \
+container-structure-test test --image myapp:test --config tests/container-structure.yaml
+# All tests should still pass
+```
+
+### C. CI Integration Example
+
+```yaml
+# .github/workflows/docker.yml
+name: Docker CI
+
+on: [push, pull_request]
+
+jobs:
+  test-dockerfile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: warning
+
+      - name: Build image
+        run: docker build -t myapp:test .
+
+      - name: Run structure tests
+        uses: plexsystems/container-structure-test-action@v0.3.0
+        with:
+          image: myapp:test
+          config: tests/container-structure.yaml
+```
+
+---
+
+## 2B. Bug Fix Protocol for Dockerfiles
+
+### Systematic Approach to Debugging Container Issues
+
+**Follow this workflow to diagnose and fix Dockerfile problems methodically.**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                  DOCKERFILE BUG FIX WORKFLOW                    │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  1. REPRODUCE        2. ISOLATE         3. DIAGNOSE             │
+│  ┌──────────┐       ┌──────────┐       ┌──────────┐            │
+│  │ Build &  │──────▶│ Identify │──────▶│ Analyze  │            │
+│  │  Run     │       │  Layer   │       │  Logs    │            │
+│  └──────────┘       └──────────┘       └──────────┘            │
+│                                              │                  │
+│                                              ▼                  │
+│  6. VERIFY          5. TEST FIX        4. IMPLEMENT             │
+│  ┌──────────┐       ┌──────────┐       ┌──────────┐            │
+│  │ Run Full │◀──────│ Targeted │◀──────│ Minimal  │            │
+│  │  Suite   │       │  Tests   │       │  Change  │            │
+│  └──────────┘       └──────────┘       └──────────┘            │
+│                                                                 │
+│  REPRODUCE:  Capture exact error, build logs, runtime logs      │
+│  ISOLATE:    Find failing layer/stage using --target            │
+│  DIAGNOSE:   Use docker history, inspect, shell access          │
+│  IMPLEMENT:  Make smallest fix, document reasoning              │
+│  TEST:       Add regression test for the specific bug           │
+│  VERIFY:     Full test suite passes, cache still works          │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### A. Bug Diagnosis Commands
+
+**1. Build Failure Diagnosis**
+
+```bash
+# Show full build output
+docker build --progress=plain -t myapp:debug . 2>&1 | tee build.log
+
+# Build up to a specific stage
+docker build --target deps -t myapp:deps .
+
+# Build without cache to see fresh errors
+docker build --no-cache -t myapp:debug .
+
+# Show detailed layer information
+docker history --no-trunc myapp:debug
+```
+
+**2. Runtime Failure Diagnosis**
+
+```bash
+# Get shell access to debug
+docker run -it --rm myapp:debug /bin/sh
+
+# Override entrypoint to debug startup
+docker run -it --rm --entrypoint /bin/sh myapp:debug
+
+# View container logs
+docker logs <container-id>
+docker logs --follow <container-id>
+
+# Inspect container state
+docker inspect <container-id>
+
+# Check file permissions
+docker run --rm myapp:debug ls -la /app
+
+# Check running processes
+docker run --rm myapp:debug ps aux
+
+# Check environment variables
+docker run --rm myapp:debug env
+```
+
+**3. Layer Analysis**
+
+```bash
+# Inspect image layers
+docker history myapp:debug
+
+# Export and inspect filesystem
+docker save myapp:debug | tar -xf - -C /tmp/image-layers
+ls /tmp/image-layers
+
+# Check image size by layer
+docker history --format "{{.Size}}\t{{.CreatedBy}}" myapp:debug
+
+# Use dive for interactive layer analysis
+dive myapp:debug
+```
+
+### B. Common Bug Patterns and Fixes
+
+**Bug Pattern 1: Permission Denied Errors**
+
+```
+# SYMPTOM
+EACCES: permission denied, open '/app/data/file.txt'
+
+# DIAGNOSIS
+docker run --rm myapp:debug ls -la /app
+# Shows: drwxr-xr-x root root /app/data
+
+# ROOT CAUSE
+Files copied as root, but running as non-root user
+
+# FIX
+```
+
+```dockerfile
+# ❌ BEFORE (Bug)
+COPY . /app
+USER node
+CMD ["node", "index.js"]
+
+# ✅ AFTER (Fixed)
+COPY --chown=node:node . /app
+USER node
+CMD ["node", "index.js"]
+```
+
+**Bug Pattern 2: Missing Dependencies at Runtime**
+
+```
+# SYMPTOM
+Error: Cannot find module 'express'
+
+# DIAGNOSIS
+docker run --rm myapp:debug ls /app/node_modules
+# Shows: empty or missing directory
+
+# ROOT CAUSE
+node_modules not copied from deps stage OR wrong stage order
+
+# FIX
+```
+
+```dockerfile
+# ❌ BEFORE (Bug)
+FROM base AS runner
+COPY . .  # Missing node_modules!
+CMD ["node", "index.js"]
+
+# ✅ AFTER (Fixed)
+FROM base AS runner
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+CMD ["node", "index.js"]
+```
+
+**Bug Pattern 3: Cache Invalidation Issues**
+
+```
+# SYMPTOM
+Every build reinstalls all dependencies even when package.json unchanged
+
+# DIAGNOSIS
+docker build -t myapp:test . 2>&1 | grep -E "(CACHED|RUN)"
+# Shows: No CACHED layers for dependency installation
+
+# ROOT CAUSE
+COPY . . before dependency installation invalidates cache
+
+# FIX
+```
+
+```dockerfile
+# ❌ BEFORE (Bug - poor cache ordering)
+FROM node:20-alpine
+WORKDIR /app
+COPY . .  # Invalidates cache on ANY file change
+RUN npm ci
+CMD ["node", "index.js"]
+
+# ✅ AFTER (Fixed - optimal cache ordering)
+FROM node:20-alpine
+WORKDIR /app
+COPY package.json package-lock.json ./  # Only dependency files
+RUN npm ci
+COPY . .  # Source code last
+CMD ["node", "index.js"]
+```
+
+**Bug Pattern 4: Multi-Stage Build Artifacts Missing**
+
+```
+# SYMPTOM
+Error: /app/dist/index.js: No such file or directory
+
+# DIAGNOSIS
+docker build --target build -t myapp:build .
+docker run --rm myapp:build ls -la /app/dist
+# Verify build output exists in build stage
+
+# ROOT CAUSE
+Wrong path in COPY --from or build output path changed
+
+# FIX
+```
+
+```dockerfile
+# ❌ BEFORE (Bug)
+FROM base AS build
+RUN npm run build  # Outputs to /app/build
+
+FROM base AS runner
+COPY --from=build /app/dist ./dist  # Wrong path!
+
+# ✅ AFTER (Fixed)
+FROM base AS build
+RUN npm run build  # Outputs to /app/build
+
+FROM base AS runner
+COPY --from=build /app/build ./dist  # Correct path
+```
+
+**Bug Pattern 5: Health Check Failures**
+
+```
+# SYMPTOM
+Container marked unhealthy, constant restarts
+
+# DIAGNOSIS
+docker inspect <container-id> | jq '.[0].State.Health'
+# Shows: "Status": "unhealthy", "FailingStreak": 3
+
+# ROOT CAUSE
+Health check command fails due to missing tools or wrong endpoint
+
+# FIX
+```
+
+```dockerfile
+# ❌ BEFORE (Bug - curl not installed in alpine)
+FROM node:20-alpine
+HEALTHCHECK CMD curl -f http://localhost:3000/health || exit 1
+
+# ✅ AFTER (Fixed - use wget which is available in alpine)
+FROM node:20-alpine
+HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+```
+
+### C. Bug Fix Workflow Example
+
+**Scenario: Container fails to start with "ENOENT: no such file or directory"**
+
+**Step 1: REPRODUCE - Capture the error**
+
+```bash
+docker build -t myapp:debug .
+docker run --rm myapp:debug
+
+# Output:
+# Error: ENOENT: no such file or directory, open '/app/config/default.json'
+```
+
+**Step 2: ISOLATE - Find the problem layer**
+
+```bash
+# Check if file exists in build context
+ls -la config/default.json
+# EXISTS locally
+
+# Check if file exists in image
+docker run --rm --entrypoint /bin/sh myapp:debug -c "ls -la /app/config/"
+# Output: No such file or directory
+
+# Check .dockerignore
+cat .dockerignore
+# Found: config/  # <-- This is excluding the config directory!
+```
+
+**Step 3: DIAGNOSE - Understand the root cause**
+
+```bash
+# The config directory is in .dockerignore
+# This prevents it from being copied into the image
+```
+
+**Step 4: IMPLEMENT - Make minimal fix**
+
+```bash
+# Option A: Remove config/ from .dockerignore
+# Option B: Copy config explicitly before the ignore takes effect
+```
+
+Update `.dockerignore`:
+
+```
+# ❌ BEFORE
+config/
+
+# ✅ AFTER
+config/*.local.json
+config/*.secret.json
+# Keep default.json but exclude sensitive configs
+```
+
+**Step 5: TEST - Add regression test**
+
+Add to `tests/container-structure.yaml`:
+
+```yaml
+fileExistenceTests:
+  - name: "Config file must exist"
+    path: "/app/config/default.json"
+    shouldExist: true
+```
+
+**Step 6: VERIFY - Full test suite**
+
+```bash
+# Rebuild
+docker build -t myapp:debug .
+
+# Test the fix
+docker run --rm myapp:debug
+# Application starts successfully
+
+# Run structure tests
+container-structure-test test --image myapp:debug --config tests/container-structure.yaml
+# PASS
+
+# Verify cache still works
+docker build -t myapp:debug .
+# Uses cached layers appropriately
+```
+
+### D. Bug Fix Documentation Template
+
+When fixing Dockerfile bugs, document using this template:
+
+```markdown
+## Bug Fix: [Brief Description]
+
+**Symptom**: [What error was observed]
+
+**Root Cause**: [Why the error occurred]
+
+**Fix Applied**:
+- File: [Dockerfile / .dockerignore / etc.]
+- Change: [What was changed]
+
+**Regression Test Added**:
+- [Description of test that prevents this bug from recurring]
+
+**Verification**:
+- [ ] Image builds successfully
+- [ ] Container starts without errors
+- [ ] Structure tests pass
+- [ ] Cache behavior verified
+```
+
+---
+
 ## 3. Mandatory Instructions
 ### A. Base Images & Tagging
 * Pin Versions: Never use :latest. Use specific semantic versions (e.g., python:3.11.4-slim-bookworm or node:20.9-alpine).

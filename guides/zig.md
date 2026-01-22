@@ -2252,6 +2252,94 @@ test "Memory leak detection" {
 
 ---
 
+## 16. Quick Reference
+
+### Common Commands
+
+```bash
+# Build
+zig build
+zig build -Doptimize=ReleaseSafe
+
+# Run
+zig run src/main.zig
+
+# Test
+zig build test
+zig test src/test.zig
+
+# Format
+zig fmt src/
+
+# Generate docs
+zig build docs
+```
+
+### Zig Patterns Cheat Sheet
+
+```zig
+// Error handling
+const result = function() catch |err| return err;
+const value = optional orelse default;
+try function();  // Propagate error
+
+// Defer for cleanup
+var file = try std.fs.open();
+defer file.close();
+
+// Allocators
+var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+defer _ = gpa.deinit();
+const allocator = gpa.allocator();
+
+// Slices
+const items: []const u8 = "hello";
+for (items) |item| {}
+
+// Comptime
+fn GenericType(comptime T: type) type {
+    return struct { value: T };
+}
+```
+
+### build.zig Template
+
+```zig
+const std = @import("std");
+
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+
+    const exe = b.addExecutable(.{
+        .name = "myapp",
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    b.installArtifact(exe);
+
+    const tests = b.addTest(.{
+        .root_source_file = b.path("src/main.zig"),
+    });
+    const test_step = b.step("test", "Run tests");
+    test_step.dependOn(&tests.step);
+}
+```
+
+### Project Structure
+
+```
+my_project/
+├── build.zig
+├── src/
+│   ├── main.zig
+│   └── lib/
+└── tests/
+```
+
+---
+
 ## References
 
 - [Zig Language Reference](https://ziglang.org/documentation/master/)

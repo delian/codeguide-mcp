@@ -1053,6 +1053,740 @@ function example(): void
 
 ---
 
+## 2A. TDD Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new PHP code.**
+
+### TDD Cycle Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        RED-GREEN-REFACTOR CYCLE                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│    ┌──────────┐         ┌──────────┐         ┌──────────┐              │
+│    │   RED    │         │  GREEN   │         │ REFACTOR │              │
+│    │  Write   │ ──────► │  Write   │ ──────► │ Improve  │              │
+│    │ Failing  │         │ Minimal  │         │   Code   │              │
+│    │   Test   │         │   Code   │         │          │              │
+│    └──────────┘         └──────────┘         └──────────┘              │
+│         │                                          │                    │
+│         │                                          │                    │
+│         └──────────────────────────────────────────┘                    │
+│                          REPEAT                                         │
+│                                                                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│  Step 1: RED     │ Write a test that fails (class/method doesn't exist) │
+│  Step 2: GREEN   │ Write the minimum code to make the test pass         │
+│  Step 3: REFACTOR│ Improve code quality while keeping tests green       │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Example TDD Workflow for PHP using PHPUnit
+
+**Scenario: Building a Password Strength Validator**
+
+#### Step 1: RED - Write Failing Test First
+
+```php
+<?php
+// tests/Unit/Security/PasswordStrengthValidatorTest.php
+
+declare(strict_types=1);
+
+namespace Tests\Unit\Security;
+
+use App\Security\PasswordStrengthValidator;
+use App\Security\PasswordStrength;
+use PHPUnit\Framework\TestCase;
+
+/**
+ * @covers \App\Security\PasswordStrengthValidator
+ */
+final class PasswordStrengthValidatorTest extends TestCase
+{
+    private PasswordStrengthValidator $validator;
+
+    protected function setUp(): void
+    {
+        $this->validator = new PasswordStrengthValidator();
+    }
+
+    public function testWeakPasswordReturnsWeakStrength(): void
+    {
+        $result = $this->validator->evaluate('abc');
+
+        self::assertEquals(PasswordStrength::Weak, $result);
+    }
+
+    public function testMediumPasswordReturnsMediumStrength(): void
+    {
+        $result = $this->validator->evaluate('Password1');
+
+        self::assertEquals(PasswordStrength::Medium, $result);
+    }
+
+    public function testStrongPasswordReturnsStrongStrength(): void
+    {
+        $result = $this->validator->evaluate('MyP@ssw0rd!123');
+
+        self::assertEquals(PasswordStrength::Strong, $result);
+    }
+
+    /**
+     * @dataProvider weakPasswordsProvider
+     */
+    public function testIdentifiesWeakPasswords(string $password): void
+    {
+        $result = $this->validator->evaluate($password);
+
+        self::assertEquals(PasswordStrength::Weak, $result);
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function weakPasswordsProvider(): array
+    {
+        return [
+            'too short' => ['ab'],
+            'only lowercase' => ['abcdefgh'],
+            'only numbers' => ['12345678'],
+            'common password' => ['password'],
+        ];
+    }
+}
+```
+
+```bash
+# Run the test
+./vendor/bin/phpunit tests/Unit/Security/PasswordStrengthValidatorTest.php
+
+# Output:
+# Error: Class "App\Security\PasswordStrengthValidator" not found
+# ❌ RED - Test fails because class doesn't exist
+```
+
+#### Step 2: GREEN - Write Minimal Implementation
+
+```php
+<?php
+// src/Security/PasswordStrength.php
+
+declare(strict_types=1);
+
+namespace App\Security;
+
+/**
+ * Enum representing password strength levels.
+ */
+enum PasswordStrength: string
+{
+    case Weak = 'weak';
+    case Medium = 'medium';
+    case Strong = 'strong';
+}
+```
+
+```php
+<?php
+// src/Security/PasswordStrengthValidator.php
+
+declare(strict_types=1);
+
+namespace App\Security;
+
+/**
+ * Validates password strength.
+ *
+ * @since 1.0.0
+ */
+final readonly class PasswordStrengthValidator
+{
+    private const MIN_LENGTH = 8;
+    private const COMMON_PASSWORDS = ['password', '12345678', 'qwerty'];
+
+    /**
+     * Evaluates the strength of a password.
+     *
+     * @param string $password The password to evaluate
+     * @return PasswordStrength The evaluated strength level
+     */
+    public function evaluate(string $password): PasswordStrength
+    {
+        $length = strlen($password);
+
+        // Check for weak passwords
+        if ($length < self::MIN_LENGTH || in_array(strtolower($password), self::COMMON_PASSWORDS, true)) {
+            return PasswordStrength::Weak;
+        }
+
+        $hasLower = preg_match('/[a-z]/', $password) === 1;
+        $hasUpper = preg_match('/[A-Z]/', $password) === 1;
+        $hasNumber = preg_match('/[0-9]/', $password) === 1;
+        $hasSpecial = preg_match('/[^a-zA-Z0-9]/', $password) === 1;
+
+        // Check for only one character type
+        $types = array_filter([$hasLower, $hasUpper, $hasNumber, $hasSpecial]);
+        if (count($types) <= 1) {
+            return PasswordStrength::Weak;
+        }
+
+        // Strong: has all four character types and sufficient length
+        if ($hasLower && $hasUpper && $hasNumber && $hasSpecial && $length >= 12) {
+            return PasswordStrength::Strong;
+        }
+
+        return PasswordStrength::Medium;
+    }
+}
+```
+
+```bash
+# Run the test
+./vendor/bin/phpunit tests/Unit/Security/PasswordStrengthValidatorTest.php
+
+# Output:
+# OK (7 tests, 7 assertions)
+# ✅ GREEN - All tests pass
+```
+
+#### Step 3: REFACTOR - Improve Code Quality
+
+```php
+<?php
+// src/Security/PasswordStrengthValidator.php (Refactored)
+
+declare(strict_types=1);
+
+namespace App\Security;
+
+/**
+ * Evaluates password strength based on multiple criteria.
+ *
+ * Criteria evaluated:
+ * - Minimum length (8 characters)
+ * - Character diversity (lowercase, uppercase, numbers, special)
+ * - Common password blacklist
+ *
+ * @since 1.0.0
+ */
+final readonly class PasswordStrengthValidator
+{
+    private const MIN_LENGTH_WEAK = 8;
+    private const MIN_LENGTH_STRONG = 12;
+
+    /** @var list<string> */
+    private const COMMON_PASSWORDS = [
+        'password', '12345678', 'qwerty', 'letmein', 'welcome',
+        'admin', 'login', 'passw0rd', 'abc123', 'iloveyou',
+    ];
+
+    /**
+     * Evaluates the strength of a password.
+     *
+     * @param string $password The password to evaluate
+     * @return PasswordStrength The evaluated strength level
+     *
+     * @example
+     * ```php
+     * $validator = new PasswordStrengthValidator();
+     * $strength = $validator->evaluate('MyP@ssw0rd!');
+     * if ($strength === PasswordStrength::Strong) {
+     *     echo "Password is strong!";
+     * }
+     * ```
+     */
+    public function evaluate(string $password): PasswordStrength
+    {
+        if ($this->isWeakPassword($password)) {
+            return PasswordStrength::Weak;
+        }
+
+        if ($this->isStrongPassword($password)) {
+            return PasswordStrength::Strong;
+        }
+
+        return PasswordStrength::Medium;
+    }
+
+    /**
+     * Checks if password meets weak criteria.
+     */
+    private function isWeakPassword(string $password): bool
+    {
+        return strlen($password) < self::MIN_LENGTH_WEAK
+            || $this->isCommonPassword($password)
+            || $this->getCharacterTypeCount($password) <= 1;
+    }
+
+    /**
+     * Checks if password meets strong criteria.
+     */
+    private function isStrongPassword(string $password): bool
+    {
+        return strlen($password) >= self::MIN_LENGTH_STRONG
+            && $this->getCharacterTypeCount($password) >= 4;
+    }
+
+    /**
+     * Checks if password is in the common passwords list.
+     */
+    private function isCommonPassword(string $password): bool
+    {
+        return in_array(strtolower($password), self::COMMON_PASSWORDS, true);
+    }
+
+    /**
+     * Counts the number of character types present in the password.
+     */
+    private function getCharacterTypeCount(string $password): int
+    {
+        return array_sum([
+            (int) (preg_match('/[a-z]/', $password) === 1),
+            (int) (preg_match('/[A-Z]/', $password) === 1),
+            (int) (preg_match('/[0-9]/', $password) === 1),
+            (int) (preg_match('/[^a-zA-Z0-9]/', $password) === 1),
+        ]);
+    }
+}
+```
+
+```bash
+# Run the test
+./vendor/bin/phpunit tests/Unit/Security/PasswordStrengthValidatorTest.php
+
+# Output:
+# OK (7 tests, 7 assertions)
+# ✅ REFACTOR - Tests still pass, code is cleaner
+```
+
+### Visual Step-by-Step TDD Example
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│                    TDD WORKFLOW: PasswordStrengthValidator                │
+├───────────────────────────────────────────────────────────────────────────┤
+│                                                                           │
+│  STEP 1: RED                                                              │
+│  ┌─────────────────────────────────────────────────────────────────────┐  │
+│  │ ❌ Write test: PasswordStrengthValidatorTest.php                    │  │
+│  │    - testWeakPasswordReturnsWeakStrength()                          │  │
+│  │    - testMediumPasswordReturnsMediumStrength()                      │  │
+│  │    - testStrongPasswordReturnsStrongStrength()                      │  │
+│  │                                                                     │  │
+│  │ $ ./vendor/bin/phpunit                                              │  │
+│  │ Result: Error - Class not found                                     │  │
+│  └─────────────────────────────────────────────────────────────────────┘  │
+│                              │                                            │
+│                              ▼                                            │
+│  STEP 2: GREEN                                                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐  │
+│  │ ✅ Create: PasswordStrength.php (enum)                              │  │
+│  │ ✅ Create: PasswordStrengthValidator.php (minimal implementation)   │  │
+│  │                                                                     │  │
+│  │ $ ./vendor/bin/phpunit                                              │  │
+│  │ Result: OK (7 tests, 7 assertions)                                  │  │
+│  └─────────────────────────────────────────────────────────────────────┘  │
+│                              │                                            │
+│                              ▼                                            │
+│  STEP 3: REFACTOR                                                         │
+│  ┌─────────────────────────────────────────────────────────────────────┐  │
+│  │ 🔄 Refactor: Extract private methods                                │  │
+│  │    - isWeakPassword()                                               │  │
+│  │    - isStrongPassword()                                             │  │
+│  │    - isCommonPassword()                                             │  │
+│  │    - getCharacterTypeCount()                                        │  │
+│  │ 🔄 Add: PHPDoc documentation and examples                           │  │
+│  │                                                                     │  │
+│  │ $ ./vendor/bin/phpunit                                              │  │
+│  │ Result: OK (7 tests, 7 assertions) ✓                                │  │
+│  └─────────────────────────────────────────────────────────────────────┘  │
+│                              │                                            │
+│                              ▼                                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐  │
+│  │                    REPEAT FOR NEXT FEATURE                          │  │
+│  └─────────────────────────────────────────────────────────────────────┘  │
+│                                                                           │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+### TDD Best Practices for PHP
+
+| Practice | Description |
+|----------|-------------|
+| **One assertion per test** | Each test should verify one specific behavior |
+| **Descriptive test names** | Use `testMethodName_condition_expectedResult` naming |
+| **Data providers** | Use `@dataProvider` for testing multiple inputs |
+| **Arrange-Act-Assert** | Structure tests with clear setup, action, and verification |
+| **Test edge cases** | Include boundary conditions and error scenarios |
+| **Keep tests fast** | Unit tests should run in milliseconds |
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every PHP bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow Diagram
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│                         BUG FIX WORKFLOW                                  │
+├───────────────────────────────────────────────────────────────────────────┤
+│                                                                           │
+│  ┌─────────────┐    ┌──────────────┐    ┌──────────────┐                 │
+│  │     BUG     │    │   WRITE      │    │   VERIFY     │                 │
+│  │  REPORTED   │───►│ REGRESSION   │───►│  TEST FAILS  │                 │
+│  │             │    │    TEST      │    │  (RIGHT WAY) │                 │
+│  └─────────────┘    └──────────────┘    └──────────────┘                 │
+│                                                │                          │
+│                                                ▼                          │
+│  ┌─────────────┐    ┌──────────────┐    ┌──────────────┐                 │
+│  │  DOCUMENT   │◄───│   VERIFY     │◄───│   FIX THE    │                 │
+│  │  & DEPLOY   │    │ TEST PASSES  │    │     BUG      │                 │
+│  │             │    │              │    │              │                 │
+│  └─────────────┘    └──────────────┘    └──────────────┘                 │
+│                                                                           │
+├───────────────────────────────────────────────────────────────────────────┤
+│                          WORKFLOW DETAILS                                 │
+├─────────────────┬─────────────────────────────────────────────────────────┤
+│ 1. Bug Reported │ Document: ID, description, reproduction steps          │
+│ 2. Write Test   │ Create PHPUnit test that reproduces the bug            │
+│ 3. Verify Fail  │ Run test, confirm it fails for the expected reason     │
+│ 4. Fix Bug      │ Implement the fix in the source code                   │
+│ 5. Verify Pass  │ Run test, confirm it now passes                        │
+│ 6. Document     │ Add bug ID in PHPDoc, explain the fix                  │
+└─────────────────┴─────────────────────────────────────────────────────────┘
+```
+
+### Example Bug Fix with Regression Test using PHPUnit
+
+**Bug Report #4521: ArrayHelper::flatten() causes infinite loop on circular references**
+
+#### Step 1: Document the Bug
+
+```
+Bug ID: #4521
+Reported: 2026-01-20
+Severity: Critical
+Description: ArrayHelper::flatten() enters infinite loop when array contains
+             circular references, causing memory exhaustion.
+Reproduction: Create array with self-reference, call flatten()
+```
+
+#### Step 2: Write Regression Test (Test Will FAIL)
+
+```php
+<?php
+// tests/Unit/Helper/ArrayHelperFlattenBugTest.php
+
+declare(strict_types=1);
+
+namespace Tests\Unit\Helper;
+
+use App\Helper\ArrayHelper;
+use App\Exception\CircularReferenceException;
+use PHPUnit\Framework\TestCase;
+
+/**
+ * Regression tests for ArrayHelper::flatten() bug fixes.
+ *
+ * @covers \App\Helper\ArrayHelper
+ */
+final class ArrayHelperFlattenBugTest extends TestCase
+{
+    /**
+     * Bug #4521: flatten() causes infinite loop on circular references.
+     * Discovered: 2026-01-20
+     *
+     * The flatten method should detect circular references and throw
+     * an exception instead of entering an infinite loop.
+     *
+     * @test
+     */
+    public function flatten_throwsException_whenCircularReferenceDetected_Bug4521(): void
+    {
+        // Arrange: Create array with circular reference
+        $array = ['a' => 1, 'b' => []];
+        $array['b']['circular'] = &$array;
+
+        // Assert: Expect exception
+        $this->expectException(CircularReferenceException::class);
+        $this->expectExceptionMessage('Circular reference detected');
+
+        // Act: Attempt to flatten
+        ArrayHelper::flatten($array);
+    }
+
+    /**
+     * Bug #4521: Ensure normal nested arrays still work after fix.
+     *
+     * @test
+     */
+    public function flatten_worksCorrectly_withDeeplyNestedArrays_Bug4521(): void
+    {
+        $array = [
+            'level1' => [
+                'level2' => [
+                    'level3' => [
+                        'value' => 'deep',
+                    ],
+                ],
+            ],
+        ];
+
+        $result = ArrayHelper::flatten($array);
+
+        self::assertEquals(['level1.level2.level3.value' => 'deep'], $result);
+    }
+
+    /**
+     * Bug #4521: Ensure performance with maximum recursion depth.
+     *
+     * @test
+     */
+    public function flatten_respectsMaxDepth_toPreventStackOverflow_Bug4521(): void
+    {
+        // Create deeply nested array (100 levels)
+        $array = ['value' => 'leaf'];
+        for ($i = 0; $i < 100; $i++) {
+            $array = ['nested' => $array];
+        }
+
+        $this->expectException(CircularReferenceException::class);
+        $this->expectExceptionMessage('Maximum recursion depth exceeded');
+
+        ArrayHelper::flatten($array, maxDepth: 50);
+    }
+}
+```
+
+```bash
+# Run the test
+./vendor/bin/phpunit tests/Unit/Helper/ArrayHelperFlattenBugTest.php
+
+# Output:
+# 1) flatten_throwsException_whenCircularReferenceDetected_Bug4521
+#    Failed asserting that exception of type "CircularReferenceException" is thrown.
+#    (Test times out / memory exhausted)
+# ❌ RED - Test fails because bug exists
+```
+
+#### Step 3: Verify Test Fails for the Right Reason
+
+```bash
+# The test either:
+# - Times out (infinite loop)
+# - Runs out of memory
+# - Does not throw the expected exception
+
+# This confirms the bug exists and our test reproduces it
+```
+
+#### Step 4: Fix the Bug
+
+```php
+<?php
+// src/Exception/CircularReferenceException.php
+
+declare(strict_types=1);
+
+namespace App\Exception;
+
+/**
+ * Exception thrown when a circular reference is detected.
+ */
+final class CircularReferenceException extends \RuntimeException
+{
+    public static function detected(): self
+    {
+        return new self('Circular reference detected in array structure');
+    }
+
+    public static function maxDepthExceeded(int $maxDepth): self
+    {
+        return new self(
+            sprintf('Maximum recursion depth exceeded (max: %d)', $maxDepth)
+        );
+    }
+}
+```
+
+```php
+<?php
+// src/Helper/ArrayHelper.php
+
+declare(strict_types=1);
+
+namespace App\Helper;
+
+use App\Exception\CircularReferenceException;
+
+/**
+ * Helper class for array operations.
+ *
+ * @since 1.0.0
+ */
+final class ArrayHelper
+{
+    private const DEFAULT_MAX_DEPTH = 100;
+
+    /**
+     * Flattens a nested array into a single-level array with dot notation keys.
+     *
+     * Bug Fix #4521: Now detects circular references and respects maximum
+     * recursion depth to prevent infinite loops and stack overflows.
+     *
+     * @param array<mixed> $array The array to flatten
+     * @param string $prefix The prefix for keys (used internally)
+     * @param int $maxDepth Maximum recursion depth (default: 100)
+     * @return array<string, mixed> The flattened array
+     *
+     * @throws CircularReferenceException If circular reference detected or max depth exceeded
+     *
+     * @example
+     * ```php
+     * $nested = ['user' => ['name' => 'John', 'email' => 'john@example.com']];
+     * $flat = ArrayHelper::flatten($nested);
+     * // Result: ['user.name' => 'John', 'user.email' => 'john@example.com']
+     * ```
+     */
+    public static function flatten(
+        array $array,
+        string $prefix = '',
+        int $maxDepth = self::DEFAULT_MAX_DEPTH
+    ): array {
+        // Track seen arrays to detect circular references
+        static $seen = [];
+
+        // Reset tracking on initial call
+        if ($prefix === '') {
+            $seen = [];
+        }
+
+        // Check max depth
+        $currentDepth = substr_count($prefix, '.');
+        if ($currentDepth > $maxDepth) {
+            $seen = []; // Reset before throwing
+            throw CircularReferenceException::maxDepthExceeded($maxDepth);
+        }
+
+        // Get unique ID for this array instance
+        $arrayId = self::getArrayId($array);
+
+        // Check for circular reference
+        if (isset($seen[$arrayId])) {
+            $seen = []; // Reset before throwing
+            throw CircularReferenceException::detected();
+        }
+
+        $seen[$arrayId] = true;
+
+        $result = [];
+
+        foreach ($array as $key => $value) {
+            $newKey = $prefix === '' ? (string) $key : $prefix . '.' . $key;
+
+            if (is_array($value) && !empty($value)) {
+                $result = array_merge($result, self::flatten($value, $newKey, $maxDepth));
+            } else {
+                $result[$newKey] = $value;
+            }
+        }
+
+        // Clean up tracking for this array
+        unset($seen[$arrayId]);
+
+        return $result;
+    }
+
+    /**
+     * Gets a unique identifier for an array instance.
+     *
+     * @param array<mixed> $array The array
+     * @return string The unique identifier
+     */
+    private static function getArrayId(array &$array): string
+    {
+        // Use a marker to detect the same array instance
+        $marker = '__flatten_marker_' . spl_object_id(new \stdClass());
+
+        // Check if we've seen this exact array reference
+        if (isset($array[$marker])) {
+            return $array[$marker];
+        }
+
+        // Mark this array
+        $id = uniqid('array_', true);
+        $array[$marker] = $id;
+
+        // Clean up marker after getting ID
+        $result = $id;
+        unset($array[$marker]);
+
+        return $result;
+    }
+}
+```
+
+#### Step 5: Verify Test Passes
+
+```bash
+# Run the test
+./vendor/bin/phpunit tests/Unit/Helper/ArrayHelperFlattenBugTest.php
+
+# Output:
+# OK (3 tests, 3 assertions)
+# ✅ GREEN - Bug fixed, regression test passes
+```
+
+#### Step 6: Document and Verify All Tests
+
+```bash
+# Run full test suite to ensure no regressions
+./vendor/bin/phpunit
+
+# Run static analysis
+./vendor/bin/phpstan analyse src tests --level max
+
+# Verify all checks pass before committing
+# ✅ All tests pass
+# ✅ Static analysis passes
+# ✅ Bug #4521 fixed with regression test
+```
+
+### Bug Fix Checklist
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│                      BUG FIX VERIFICATION CHECKLIST                       │
+├───────────────────────────────────────────────────────────────────────────┤
+│                                                                           │
+│  Before Fixing:                                                           │
+│  [ ] Bug documented with ID, description, and reproduction steps          │
+│  [ ] Regression test written that reproduces the bug                      │
+│  [ ] Test verified to FAIL before fix                                     │
+│                                                                           │
+│  After Fixing:                                                            │
+│  [ ] Regression test now PASSES                                           │
+│  [ ] All existing tests still pass                                        │
+│  [ ] Bug ID documented in PHPDoc comment                                  │
+│  [ ] Fix explanation added to code comments                               │
+│  [ ] Static analysis passes (Psalm/PHPStan)                               │
+│  [ ] Code style check passes (PHP-CS-Fixer)                               │
+│                                                                           │
+│  Prohibited Actions:                                                      │
+│  [ ] DO NOT fix bugs without regression tests                             │
+│  [ ] DO NOT delete tests to make code pass                                │
+│  [ ] DO NOT use @group ignore to skip failing tests                       │
+│  [ ] DO NOT suppress errors with @ operator                               │
+│                                                                           │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## 3. Hexagonal Architecture (MANDATORY)
 
 ### A. Directory Structure
@@ -1912,6 +2646,424 @@ final class UserTest extends TestCase
 
 ---
 
+## Quick Reference
+
+### Common Commands
+
+```bash
+# ─────────────────────────────────────────────────────────────────────────────
+# COMPOSER - Dependency Management
+# ─────────────────────────────────────────────────────────────────────────────
+composer install              # Install dependencies from composer.lock
+composer update               # Update dependencies to latest versions
+composer require vendor/pkg   # Add a new dependency
+composer require --dev pkg    # Add a dev dependency
+composer dump-autoload -o     # Optimize autoloader for production
+composer validate             # Validate composer.json
+composer check-platform-reqs  # Check PHP version and extensions
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PHPUNIT - Testing
+# ─────────────────────────────────────────────────────────────────────────────
+./vendor/bin/phpunit                           # Run all tests
+./vendor/bin/phpunit tests/Unit                # Run unit tests only
+./vendor/bin/phpunit tests/Integration         # Run integration tests only
+./vendor/bin/phpunit --filter=TestClassName    # Run specific test class
+./vendor/bin/phpunit --filter=testMethodName   # Run specific test method
+./vendor/bin/phpunit --group=regression        # Run tests in a group
+
+# With coverage (requires Xdebug or PCOV)
+XDEBUG_MODE=coverage ./vendor/bin/phpunit --coverage-text
+XDEBUG_MODE=coverage ./vendor/bin/phpunit --coverage-html=coverage
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PHPSTAN - Static Analysis
+# ─────────────────────────────────────────────────────────────────────────────
+./vendor/bin/phpstan analyse src tests         # Analyze source and tests
+./vendor/bin/phpstan analyse --level max       # Maximum strictness
+./vendor/bin/phpstan analyse --generate-baseline  # Generate baseline for legacy code
+./vendor/bin/phpstan clear-result-cache       # Clear analysis cache
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PSALM - Static Analysis (Alternative)
+# ─────────────────────────────────────────────────────────────────────────────
+./vendor/bin/psalm                             # Run Psalm analysis
+./vendor/bin/psalm --no-cache                  # Run without cache
+./vendor/bin/psalm --set-baseline=baseline.xml # Create baseline
+./vendor/bin/psalm --show-info=true            # Show all issues including info
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PHP-CS-FIXER - Code Style
+# ─────────────────────────────────────────────────────────────────────────────
+./vendor/bin/php-cs-fixer fix                  # Auto-fix code style
+./vendor/bin/php-cs-fixer fix --dry-run        # Preview changes only
+./vendor/bin/php-cs-fixer fix --diff           # Show diff of changes
+./vendor/bin/php-cs-fixer fix src/             # Fix specific directory
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PHP - Syntax and Execution
+# ─────────────────────────────────────────────────────────────────────────────
+php -l src/File.php                            # Syntax check single file
+find src/ -name "*.php" -exec php -l {} \;     # Syntax check all files
+php -S localhost:8080 -t public/               # Built-in development server
+php bin/console                                # Run console command (Symfony)
+php artisan                                    # Run console command (Laravel)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AMPHP - Async Development Server
+# ─────────────────────────────────────────────────────────────────────────────
+php bin/server.php                             # Run AMPHP server
+php bin/worker.php                             # Run background worker
+```
+
+### PHP Patterns Cheat Sheet
+
+```php
+<?php
+// ═══════════════════════════════════════════════════════════════════════════
+// VALUE OBJECTS (Immutable, Self-Validating)
+// ═══════════════════════════════════════════════════════════════════════════
+final readonly class Email
+{
+    private function __construct(private string $value) {}
+
+    public static function fromString(string $email): self
+    {
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            throw new \InvalidArgumentException("Invalid email: {$email}");
+        }
+        return new self($email);
+    }
+
+    public function value(): string { return $this->value; }
+    public function equals(self $other): bool { return $this->value === $other->value; }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ENUMS (Type-Safe Constants)
+// ═══════════════════════════════════════════════════════════════════════════
+enum Status: string
+{
+    case Pending = 'pending';
+    case Active = 'active';
+    case Inactive = 'inactive';
+
+    public function isActive(): bool { return $this === self::Active; }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RESULT TYPE (Error Handling Without Exceptions)
+// ═══════════════════════════════════════════════════════════════════════════
+/**
+ * @template T
+ * @template E
+ */
+final readonly class Result
+{
+    /** @param T|null $value @param E|null $error */
+    private function __construct(
+        private mixed $value,
+        private mixed $error,
+        private bool $isSuccess
+    ) {}
+
+    /** @param T $value @return self<T, never> */
+    public static function ok(mixed $value): self
+    {
+        return new self($value, null, true);
+    }
+
+    /** @param E $error @return self<never, E> */
+    public static function err(mixed $error): self
+    {
+        return new self(null, $error, false);
+    }
+
+    public function isOk(): bool { return $this->isSuccess; }
+    public function isErr(): bool { return !$this->isSuccess; }
+    /** @return T */ public function unwrap(): mixed { return $this->value; }
+    /** @return E */ public function error(): mixed { return $this->error; }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// REPOSITORY INTERFACE (Port in Hexagonal Architecture)
+// ═══════════════════════════════════════════════════════════════════════════
+interface UserRepositoryInterface
+{
+    public function findById(UserId $id): ?User;
+    public function findByEmail(Email $email): ?User;
+    public function save(User $user): void;
+    public function delete(UserId $id): void;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COMMAND/HANDLER PATTERN (CQRS)
+// ═══════════════════════════════════════════════════════════════════════════
+final readonly class CreateUserCommand
+{
+    public function __construct(
+        public string $name,
+        public string $email
+    ) {}
+}
+
+final readonly class CreateUserHandler
+{
+    public function __construct(
+        private UserRepositoryInterface $repository,
+        private EventBusInterface $eventBus
+    ) {}
+
+    public function handle(CreateUserCommand $cmd): User
+    {
+        $user = User::create($cmd->name, $cmd->email);
+        $this->repository->save($user);
+        $this->eventBus->publish(new UserCreatedEvent($user->id()));
+        return $user;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ASYNC PATTERNS (AMPHP)
+// ═══════════════════════════════════════════════════════════════════════════
+use function Amp\async;
+use function Amp\Future\await;
+
+// Parallel execution
+[$user, $orders, $stats] = await([
+    async(fn() => $userRepo->findById($userId)),
+    async(fn() => $orderRepo->findByUser($userId)),
+    async(fn() => $statsRepo->getForUser($userId)),
+]);
+
+// Sequential with async
+$user = $userRepo->findById($userId);  // Runs async, suspends fiber
+$orders = $orderRepo->findByUser($user->id());  // Runs after user found
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DEPENDENCY INJECTION (Constructor Injection)
+// ═══════════════════════════════════════════════════════════════════════════
+final readonly class UserService
+{
+    public function __construct(
+        private UserRepositoryInterface $userRepository,  // Interface, not concrete
+        private LoggerInterface $logger,                  // PSR-3 Logger
+        private EventBusInterface $eventBus               // Event publishing
+    ) {}
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TESTING PATTERNS
+// ═══════════════════════════════════════════════════════════════════════════
+final class UserServiceTest extends TestCase
+{
+    // Arrange-Act-Assert pattern
+    public function testCreateUserReturnsUser(): void
+    {
+        // Arrange
+        $repository = $this->createMock(UserRepositoryInterface::class);
+        $repository->method('findByEmail')->willReturn(null);
+        $service = new UserService($repository);
+
+        // Act
+        $user = $service->create('John', 'john@example.com');
+
+        // Assert
+        self::assertEquals('John', $user->name());
+    }
+
+    // Data provider pattern
+    /** @dataProvider invalidEmailsProvider */
+    public function testRejectsInvalidEmails(string $email): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        Email::fromString($email);
+    }
+
+    public static function invalidEmailsProvider(): array
+    {
+        return [
+            'no at symbol' => ['invalid'],
+            'no domain' => ['user@'],
+            'no local part' => ['@domain.com'],
+        ];
+    }
+}
+```
+
+### Project Structure
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│                    STANDARD PHP PROJECT STRUCTURE                         │
+├───────────────────────────────────────────────────────────────────────────┤
+│                                                                           │
+│  project-root/                                                            │
+│  │                                                                        │
+│  ├── bin/                         # Executable scripts                    │
+│  │   ├── console                  # CLI entry point                       │
+│  │   └── server.php               # AMPHP server entry point              │
+│  │                                                                        │
+│  ├── config/                      # Configuration files                   │
+│  │   ├── services.php             # DI container configuration            │
+│  │   ├── routes.php               # HTTP routes                           │
+│  │   └── packages/                # Package-specific configs              │
+│  │                                                                        │
+│  ├── public/                      # Web root (if applicable)              │
+│  │   └── index.php                # Front controller                      │
+│  │                                                                        │
+│  ├── src/                         # Source code (PSR-4: App\)             │
+│  │   │                                                                    │
+│  │   ├── Domain/                  # Core domain (no dependencies)         │
+│  │   │   ├── Entity/              # Domain entities                       │
+│  │   │   │   └── User.php                                                 │
+│  │   │   ├── ValueObject/         # Value objects                         │
+│  │   │   │   ├── UserId.php                                               │
+│  │   │   │   └── Email.php                                                │
+│  │   │   ├── Repository/          # Repository interfaces (ports)         │
+│  │   │   │   └── UserRepositoryInterface.php                              │
+│  │   │   ├── Service/             # Domain services                       │
+│  │   │   └── Event/               # Domain events                         │
+│  │   │                                                                    │
+│  │   ├── Application/             # Use cases & orchestration             │
+│  │   │   ├── Command/             # Commands (write operations)           │
+│  │   │   │   ├── CreateUserCommand.php                                    │
+│  │   │   │   └── CreateUserHandler.php                                    │
+│  │   │   ├── Query/               # Queries (read operations)             │
+│  │   │   │   ├── GetUserQuery.php                                         │
+│  │   │   │   └── GetUserHandler.php                                       │
+│  │   │   └── Service/             # Application services                  │
+│  │   │                                                                    │
+│  │   ├── Infrastructure/          # External implementations              │
+│  │   │   ├── Persistence/         # Database implementations              │
+│  │   │   │   ├── Mysql/                                                   │
+│  │   │   │   │   └── MysqlUserRepository.php                              │
+│  │   │   │   └── Redis/                                                   │
+│  │   │   │       └── RedisCache.php                                       │
+│  │   │   ├── Messaging/           # Queue/event implementations           │
+│  │   │   │   └── AmqpEventBus.php                                         │
+│  │   │   └── Http/                # HTTP client implementations           │
+│  │   │                                                                    │
+│  │   └── Adapter/                 # Driving adapters (entry points)       │
+│  │       ├── Http/                # HTTP controllers                      │
+│  │       │   ├── Controller/                                              │
+│  │       │   │   └── UserController.php                                   │
+│  │       │   └── Middleware/                                              │
+│  │       ├── Console/             # CLI commands                          │
+│  │       │   └── Command/                                                 │
+│  │       └── Api/                 # API handlers (GraphQL, gRPC)          │
+│  │                                                                        │
+│  ├── tests/                       # Test code                             │
+│  │   ├── Unit/                    # Unit tests (mirror src/ structure)    │
+│  │   │   ├── Domain/                                                      │
+│  │   │   ├── Application/                                                 │
+│  │   │   └── Infrastructure/                                              │
+│  │   ├── Integration/             # Integration tests                     │
+│  │   │   └── Infrastructure/                                              │
+│  │   ├── E2E/                     # End-to-end tests                      │
+│  │   │   └── Http/                                                        │
+│  │   └── Fixtures/                # Test data fixtures                    │
+│  │                                                                        │
+│  ├── var/                         # Generated files (gitignored)          │
+│  │   ├── cache/                   # Cache files                           │
+│  │   └── log/                     # Log files                             │
+│  │                                                                        │
+│  ├── vendor/                      # Composer dependencies (gitignored)    │
+│  │                                                                        │
+│  ├── .env                         # Environment variables (gitignored)    │
+│  ├── .env.example                 # Example environment file              │
+│  ├── .gitignore                                                           │
+│  ├── .php-cs-fixer.php            # PHP-CS-Fixer configuration            │
+│  ├── composer.json                # Composer dependencies                 │
+│  ├── composer.lock                # Locked dependency versions            │
+│  ├── phpstan.neon                 # PHPStan configuration                 │
+│  ├── phpunit.xml                  # PHPUnit configuration                 │
+│  ├── psalm.xml                    # Psalm configuration (alternative)     │
+│  └── README.md                    # Project documentation                 │
+│                                                                           │
+└───────────────────────────────────────────────────────────────────────────┘
+
+LAYER DEPENDENCIES (Hexagonal Architecture):
+
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │                                                                         │
+  │    Adapter ─────► Application ─────► Domain ◄───── Infrastructure      │
+  │    (HTTP,        (Commands,         (Entities,     (MySQL, Redis,      │
+  │     CLI)          Queries)           Ports)         External APIs)     │
+  │                                                                         │
+  │    ════════════════════════════════════════════════════════════════    │
+  │    Direction of dependencies: Outside → Inside                         │
+  │    Domain has NO external dependencies                                  │
+  │    Infrastructure IMPLEMENTS Domain interfaces                          │
+  │                                                                         │
+  └─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Configuration Files Quick Reference
+
+```php
+<?php
+// .php-cs-fixer.php - Code Style Configuration
+return (new PhpCsFixer\Config())
+    ->setRules([
+        '@PSR12' => true,
+        '@PHP83Migration' => true,
+        'strict_param' => true,
+        'declare_strict_types' => true,
+        'array_syntax' => ['syntax' => 'short'],
+        'ordered_imports' => ['sort_algorithm' => 'alpha'],
+        'no_unused_imports' => true,
+        'single_quote' => true,
+        'trailing_comma_in_multiline' => true,
+    ])
+    ->setFinder(
+        PhpCsFixer\Finder::create()
+            ->in(__DIR__ . '/src')
+            ->in(__DIR__ . '/tests')
+    );
+```
+
+```yaml
+# phpstan.neon - Static Analysis Configuration
+parameters:
+    level: max
+    paths:
+        - src
+        - tests
+    excludePaths:
+        - src/Infrastructure/Migration
+    checkMissingIterableValueType: true
+    checkGenericClassInNonGenericObjectType: true
+    treatPhpDocTypesAsCertain: false
+```
+
+```json
+// composer.json - Dependency Management
+{
+    "require": {
+        "php": "^8.3",
+        "amphp/amp": "^3.0",
+        "amphp/http-server": "^3.0",
+        "amphp/mysql": "^3.0",
+        "psr/log": "^3.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.0",
+        "phpstan/phpstan": "^1.10",
+        "friendsofphp/php-cs-fixer": "^3.0",
+        "amphp/phpunit-util": "^3.0"
+    },
+    "autoload": {
+        "psr-4": { "App\\": "src/" }
+    },
+    "autoload-dev": {
+        "psr-4": { "Tests\\": "tests/" }
+    }
+}
+```
+
+---
+
 ## References
 
 - [AMPHP Documentation](https://amphp.org/)
@@ -1923,6 +3075,6 @@ final class UserTest extends TestCase
 
 ---
 
-**Last Updated:** 2026-01-18  
-**Version:** 1.0  
+**Last Updated:** 2026-01-22
+**Version:** 1.1
 **Maintainer:** Development Team

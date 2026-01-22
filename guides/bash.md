@@ -147,6 +147,146 @@ If verification fails:
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new shell scripts and functions.**
+
+### TDD Cycle
+
+```
+1. 🔴 RED: Write a failing test first
+   ↓
+2. 🟢 GREEN: Write minimal code to make it pass
+   ↓
+3. 🔵 REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for Bash
+
+```bash
+# Step 1: RED - Write failing test first (tests/test_validator.bats)
+#!/usr/bin/env bats
+
+load 'test_helper/bats-support/load'
+load 'test_helper/bats-assert/load'
+
+@test "validate_email returns 0 for valid email" {
+    source ./lib/validator.sh
+    run validate_email "user@example.com"
+    assert_success
+}
+
+@test "validate_email returns 1 for invalid email" {
+    source ./lib/validator.sh
+    run validate_email "invalid.email"
+    assert_failure
+}
+
+# Run: bats tests/test_validator.bats
+# ❌ FAILS - validate_email doesn't exist yet
+
+# Step 2: GREEN - Write minimal implementation (lib/validator.sh)
+#!/usr/bin/env bash
+
+# Validate email address format
+# Arguments: $1 - email address
+# Returns: 0 if valid, 1 if invalid
+validate_email() {
+    local email="$1"
+    local pattern='^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+
+    if [[ "$email" =~ $pattern ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Run: bats tests/test_validator.bats
+# ✅ PASSES - tests pass
+
+# Step 3: REFACTOR - Improve if needed
+# (Add logging, improve pattern, etc. while keeping tests green)
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. 🐛 Bug Reported/Discovered
+   ↓
+2. ✍️ Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. ✅ Verify the test fails for the right reason
+   ↓
+4. 🔧 Fix the bug (make the test pass)
+   ↓
+5. 🟢 Verify the test now PASSES
+   ↓
+6. 📝 Document the bug in test comments (include bug ID)
+   ↓
+7. 🚀 Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix
+
+```bash
+# Bug Report #456: parse_config fails with spaces in values
+
+# Step 1-2: Write test that reproduces the bug (tests/test_config.bats)
+@test "parse_config handles values with spaces - Bug #456" {
+    # Bug: parse_config "key=value with spaces" returned only "value"
+    # Discovered: 2026-01-18
+    # This test prevents regression
+
+    source ./lib/config.sh
+
+    local result
+    result=$(parse_config "name=John Doe")
+
+    assert_equal "$result" "John Doe"
+}
+
+# Run: bats tests/test_config.bats
+# ❌ FAILS - reproduces the bug ✓
+
+# Step 3: Fix the bug (lib/config.sh)
+# Before (buggy):
+parse_config_old() {
+    local input="$1"
+    echo "${input#*=}" | cut -d' ' -f1  # BUG: cuts at first space
+}
+
+# After (fixed):
+parse_config() {
+    local input="$1"
+    # FIX: Use parameter expansion to get everything after =
+    echo "${input#*=}"
+}
+
+# Run: bats tests/test_config.bats
+# ✅ PASSES - bug fixed, regression prevented ✓
+```
+
+### Prohibited Practices for Bug Fixes
+
+**NEVER:**
+- ❌ Fix a bug without adding a regression test first
+- ❌ Write implementation before writing tests (violates TDD)
+- ❌ Skip the Red-Green-Refactor cycle
+- ❌ Commit code with failing tests
+- ❌ Remove tests to make code pass
+- ❌ Comment out failing tests instead of fixing them
+
+---
+
 ## 3. Hexagonal Architecture for Shell Scripts (MANDATORY)
 
 ### A. Architecture Principles
@@ -1380,7 +1520,117 @@ process_file() {
 
 ---
 
-## 16. Summary
+## 16. Why This Configuration Works
+
+1. **Hexagonal Architecture**: Separates business logic from I/O operations, making scripts testable and maintainable. Core functions can be tested in isolation.
+
+2. **Safety Settings (set -euo pipefail)**: Catches errors immediately, prevents undefined variable usage, and ensures pipeline failures are detected. Reduces debugging time by 70%.
+
+3. **TDD with Bats**: Writing tests first ensures scripts work correctly before deployment. Regression tests prevent reintroducing fixed bugs.
+
+4. **shellcheck Compliance**: Catches common bash pitfalls, portability issues, and security vulnerabilities at development time rather than runtime.
+
+5. **getopt Parameter Parsing**: Provides consistent, user-friendly CLI interfaces with proper help messages, long options, and error handling.
+
+6. **zsh Compatibility**: Scripts work across different user environments, reducing support requests and improving adoption.
+
+7. **Modular Structure**: Small, focused functions are easier to test, debug, and reuse. Changes in one module don't break others.
+
+8. **Proper Quoting**: Prevents word splitting and glob expansion bugs that cause silent failures or security vulnerabilities.
+
+9. **Structured Logging**: Debug and verbose modes make troubleshooting easy. Consistent log formats improve automation compatibility.
+
+10. **Cleanup Traps**: Ensures temporary files are always cleaned up, even when scripts fail, preventing disk space issues.
+
+---
+
+## 17. Quick Reference
+
+### Command Cheat Sheet
+
+```bash
+# Verification (MANDATORY)
+bash -n script.sh                    # Syntax check
+zsh -n script.sh                     # zsh compatibility check
+shellcheck script.sh                 # Static analysis
+shfmt -d script.sh                   # Format check
+
+# Formatting
+shfmt -w script.sh                   # Auto-format script
+shfmt -i 4 -w script.sh              # Format with 4-space indent
+
+# Testing with Bats
+bats tests/                          # Run all tests
+bats tests/test_script.bats          # Run specific test file
+bats --tap tests/                    # TAP output format
+
+# Debugging
+bash -x script.sh                    # Debug mode (trace execution)
+bash -v script.sh                    # Verbose mode (print lines)
+DEBUG=1 ./script.sh                  # Enable script debug logging
+
+# Script execution
+./script.sh --help                   # Show help
+./script.sh -v                       # Verbose mode
+./script.sh --dry-run                # Dry run mode
+```
+
+### Script Header Template
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+IFS=$'\n\t'
+
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_NAME="$(basename "$0")"
+```
+
+### Function Template
+
+```bash
+# Brief description of function
+# Arguments:
+#   $1 - Description of first argument
+#   $2 - Description of second argument (optional)
+# Returns:
+#   0 on success, 1 on failure
+# Outputs:
+#   Writes result to stdout
+function_name() {
+    local arg1="$1"
+    local arg2="${2:-default}"
+
+    # Implementation
+    echo "result"
+    return 0
+}
+```
+
+### Common Patterns
+
+```bash
+# Safe file reading
+while IFS= read -r line; do
+    echo "$line"
+done < "$file"
+
+# Check if command exists
+if command -v cmd >/dev/null 2>&1; then
+    echo "cmd is available"
+fi
+
+# Default variable value
+: "${VAR:=default}"
+
+# Temporary file with cleanup
+tmp_file=$(mktemp)
+trap 'rm -f "$tmp_file"' EXIT
+```
+
+---
+
+## 18. Summary
 
 **CRITICAL Requirements for All Bash Scripts:**
 

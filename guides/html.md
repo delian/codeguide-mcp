@@ -171,6 +171,139 @@ If verification fails:
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new HTML development.**
+
+### TDD Cycle for HTML
+
+```
+1. 🔴 RED: Write a failing test/validation first
+   ↓
+2. 🟢 GREEN: Write minimal HTML to make it pass
+   ↓
+3. 🔵 REFACTOR: Improve structure while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for HTML
+
+```javascript
+// Step 1: RED - Write failing test first (tests/html.test.js)
+import { test, expect } from 'vitest';
+import { JSDOM } from 'jsdom';
+import fs from 'fs';
+
+test('page has proper semantic structure', () => {
+  const html = fs.readFileSync('src/index.html', 'utf-8');
+  const dom = new JSDOM(html);
+  const doc = dom.window.document;
+
+  expect(doc.querySelector('header')).toBeTruthy();
+  expect(doc.querySelector('main')).toBeTruthy();
+  expect(doc.querySelector('footer')).toBeTruthy();
+  expect(doc.querySelector('nav')).toBeTruthy();
+});
+
+test('all images have alt attributes', () => {
+  const html = fs.readFileSync('src/index.html', 'utf-8');
+  const dom = new JSDOM(html);
+  const images = dom.window.document.querySelectorAll('img');
+
+  images.forEach(img => {
+    expect(img.hasAttribute('alt')).toBe(true);
+  });
+});
+
+// Run: npm test
+// ❌ FAILS - HTML structure doesn't exist yet
+
+// Step 2: GREEN - Write minimal HTML
+// src/index.html
+/*
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Page Title</title>
+</head>
+<body>
+  <header><nav>...</nav></header>
+  <main>...</main>
+  <footer>...</footer>
+</body>
+</html>
+*/
+
+// Run: npm test
+// ✅ PASSES - semantic structure present
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every HTML bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. 🐛 Bug Reported/Discovered (e.g., accessibility issue)
+   ↓
+2. ✍️ Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. ✅ Verify the test fails for the right reason
+   ↓
+4. 🔧 Fix the bug (make the test pass)
+   ↓
+5. 🟢 Verify the test now PASSES
+   ↓
+6. 📝 Document the bug in test comments (include bug ID)
+   ↓
+7. 🚀 Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix
+
+```javascript
+// Bug Report #234: Form inputs missing labels
+
+// Step 1-2: Write test that reproduces the bug
+test('all form inputs have associated labels - Bug #234', () => {
+  // Bug: Screen readers couldn't identify form fields
+  // Discovered: 2026-01-18
+  // This test prevents regression
+
+  const html = fs.readFileSync('src/contact.html', 'utf-8');
+  const dom = new JSDOM(html);
+  const doc = dom.window.document;
+  const inputs = doc.querySelectorAll('input:not([type="hidden"]), textarea, select');
+
+  inputs.forEach(input => {
+    const id = input.getAttribute('id');
+    const label = doc.querySelector(`label[for="${id}"]`);
+    expect(label).toBeTruthy();
+  });
+});
+
+// Run: npm test
+// ❌ FAILS - inputs missing labels
+
+// Step 3: Fix the HTML
+// Before (buggy):
+// <input type="email" name="email">
+
+// After (fixed):
+// <label for="email">Email Address</label>
+// <input type="email" id="email" name="email">
+
+// Run: npm test
+// ✅ PASSES - bug fixed, regression prevented
+```
+
+---
+
 ## 3. HTML5 Document Structure (MANDATORY)
 
 ### A. Complete HTML5 Template
@@ -1295,6 +1428,98 @@ project/
 6. **Progressive Enhancement**: Content accessible without CSS/JS, works on all devices, future-proof.
 
 7. **Agent Verification**: Ensures all generated HTML is valid, accessible, and performant, eliminates common errors.
+
+---
+
+## 13. Quick Reference
+
+### Common Commands
+
+```bash
+# Validate HTML
+npx html-validate *.html
+
+# Accessibility audit
+npx pa11y-ci *.html
+
+# Lighthouse audit (all categories)
+npx lighthouse index.html --output=html --output-path=./report.html
+
+# Lighthouse accessibility only
+npx lighthouse --only-categories=accessibility index.html
+
+# Lighthouse performance only
+npx lighthouse --only-categories=performance index.html
+
+# Lighthouse SEO only
+npx lighthouse --only-categories=seo index.html
+
+# Format HTML with Prettier
+npx prettier --write "**/*.html"
+
+# Run HTML tests
+npm test
+```
+
+### Essential HTML5 Template
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Page description">
+  <title>Page Title - Site Name</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <a href="#main" class="skip-link">Skip to main content</a>
+  <header><nav aria-label="Main">...</nav></header>
+  <main id="main">...</main>
+  <footer>...</footer>
+  <script src="/js/main.js" defer></script>
+</body>
+</html>
+```
+
+### Semantic Element Quick Guide
+
+| Element | Use For |
+|---------|---------|
+| `<header>` | Page/section header |
+| `<nav>` | Navigation links |
+| `<main>` | Main content (one per page) |
+| `<article>` | Self-contained content |
+| `<section>` | Thematic grouping |
+| `<aside>` | Related sidebar content |
+| `<footer>` | Page/section footer |
+| `<figure>` | Image/media with caption |
+| `<time>` | Date/time values |
+
+### Accessibility Checklist
+
+```
+[ ] Only one <h1> per page
+[ ] Headings in order (h1→h2→h3)
+[ ] All images have alt text
+[ ] All form inputs have labels
+[ ] Skip link present
+[ ] ARIA labels on nav/regions
+[ ] Keyboard navigation works
+[ ] Color contrast ≥ 4.5:1
+```
+
+### Performance Checklist
+
+```
+[ ] Images use loading="lazy"
+[ ] Critical CSS inlined
+[ ] Scripts use defer/async
+[ ] Images have width/height
+[ ] Resources preloaded
+[ ] Modern image formats (WebP/AVIF)
+```
 
 ---
 

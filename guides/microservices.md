@@ -129,6 +129,438 @@ SERVICE BOUNDARY VALIDATION:
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new microservice code.**
+
+### TDD Cycle for Microservices
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    TDD CYCLE FOR MICROSERVICES                   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│     ┌───────────────────────────────────────────────────┐       │
+│     │                                                    │       │
+│     │   1. RED: Write a failing test first              │       │
+│     │      └── Define expected behavior                 │       │
+│     │      └── Test should fail (no implementation)     │       │
+│     │                                                    │       │
+│     │                      ↓                             │       │
+│     │                                                    │       │
+│     │   2. GREEN: Write minimal code to pass            │       │
+│     │      └── Implement just enough to pass test       │       │
+│     │      └── Don't over-engineer                      │       │
+│     │                                                    │       │
+│     │                      ↓                             │       │
+│     │                                                    │       │
+│     │   3. REFACTOR: Improve while tests stay green     │       │
+│     │      └── Clean up code                            │       │
+│     │      └── Remove duplication                       │       │
+│     │      └── Improve naming                           │       │
+│     │                                                    │       │
+│     │                      ↓                             │       │
+│     │                                                    │       │
+│     │   ─────────────── REPEAT ──────────────────       │       │
+│     │                                                    │       │
+│     └───────────────────────────────────────────────────┘       │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### TDD at Different Test Levels
+
+```
+MICROSERVICES TDD APPROACH:
+
+┌─────────────────────────────────────────────────────────────────┐
+│ Level              │ TDD Focus                                   │
+├─────────────────────────────────────────────────────────────────┤
+│ Unit Tests         │ Individual functions, domain logic          │
+│                    │ - Mock all external dependencies            │
+│                    │ - Fast feedback loop (milliseconds)         │
+├─────────────────────────────────────────────────────────────────┤
+│ Component Tests    │ Single service in isolation                 │
+│                    │ - Use test containers for databases         │
+│                    │ - Mock external service calls               │
+│                    │ - Test service API behavior                 │
+├─────────────────────────────────────────────────────────────────┤
+│ Contract Tests     │ API contracts between services              │
+│                    │ - Consumer defines expected contract        │
+│                    │ - Provider verifies contract compliance     │
+│                    │ - Prevents breaking changes                 │
+├─────────────────────────────────────────────────────────────────┤
+│ Integration Tests  │ Service with real dependencies              │
+│                    │ - Real database, message broker             │
+│                    │ - Test adapters and external integrations   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Example: TDD for Order Service Endpoint
+
+```
+SCENARIO: Implement POST /orders endpoint
+
+STEP 1: RED - Write failing contract test
+─────────────────────────────────────────
+// Test file: order_service_contract_test
+describe("POST /orders", () => {
+  it("should create order and return 201 with order ID", async () => {
+    const request = {
+      customerId: "customer-123",
+      items: [{ productId: "prod-001", quantity: 2 }]
+    };
+
+    const response = await httpClient.post("/orders", request);
+
+    expect(response.status).toBe(201);
+    expect(response.body.orderId).toBeDefined();
+    expect(response.body.status).toBe("PENDING");
+  });
+});
+
+// Run: test runner → FAILS (endpoint not implemented)
+
+STEP 2: GREEN - Minimal implementation
+─────────────────────────────────────────
+// order_handler
+func CreateOrder(request CreateOrderRequest) CreateOrderResponse {
+    order := Order{
+        ID:         generateOrderId(),
+        CustomerID: request.CustomerID,
+        Items:      request.Items,
+        Status:     "PENDING",
+    }
+    orderRepository.Save(order)
+    return CreateOrderResponse{OrderID: order.ID, Status: order.Status}
+}
+
+// Run: test runner → PASSES
+
+STEP 3: REFACTOR - Improve implementation
+─────────────────────────────────────────
+// Extract domain logic, add validation, improve error handling
+func CreateOrder(request CreateOrderRequest) (CreateOrderResponse, error) {
+    if err := validateRequest(request); err != nil {
+        return CreateOrderResponse{}, ValidationError{err}
+    }
+
+    order := domain.NewOrder(request.CustomerID, request.Items)
+
+    if err := orderRepository.Save(order); err != nil {
+        return CreateOrderResponse{}, err
+    }
+
+    eventPublisher.Publish(OrderCreatedEvent{Order: order})
+
+    return CreateOrderResponse{OrderID: order.ID, Status: order.Status}, nil
+}
+
+// Run: test runner → STILL PASSES
+// Add more tests for validation, error cases, events...
+```
+
+### TDD for Resilience Patterns
+
+```
+TESTING CIRCUIT BREAKERS WITH TDD:
+
+STEP 1: RED - Define expected behavior
+─────────────────────────────────────────
+describe("Payment Service Circuit Breaker", () => {
+  it("should open circuit after 5 consecutive failures", async () => {
+    // Simulate 5 failures
+    for (let i = 0; i < 5; i++) {
+      paymentServiceMock.failNextCall();
+      await orderService.processPayment(orderId);
+    }
+
+    // Circuit should be open
+    expect(circuitBreaker.getState()).toBe("OPEN");
+
+    // Next call should fail fast without calling payment service
+    const result = await orderService.processPayment(orderId);
+    expect(result.error).toBe("CircuitOpen");
+    expect(paymentServiceMock.callCount).toBe(5); // Not 6
+  });
+});
+
+STEP 2: GREEN - Implement circuit breaker
+─────────────────────────────────────────
+// Implement with configured thresholds
+circuitBreaker := NewCircuitBreaker(Config{
+    FailureThreshold: 5,
+    SuccessThreshold: 3,
+    Timeout:          30 * time.Second,
+})
+
+STEP 3: REFACTOR - Add monitoring, improve config
+─────────────────────────────────────────
+// Add metrics, health endpoint integration, etc.
+```
+
+### TDD Rules for Microservices
+
+```
+TDD RULES:
+
+1. ALWAYS write test BEFORE implementation
+   └── No exceptions for "simple" code
+   └── Tests document expected behavior
+
+2. Test one thing at a time
+   └── Each test has single assertion focus
+   └── Easy to identify what broke
+
+3. Keep test execution fast
+   └── Unit tests: < 10ms each
+   └── Component tests: < 1 second each
+   └── Use in-memory databases for speed
+
+4. Test at the right level
+   └── Business logic → Unit tests
+   └── API behavior → Component tests
+   └── Service interactions → Contract tests
+   └── Adapters → Integration tests
+
+5. Mock external services
+   └── Never call real external services in unit/component tests
+   └── Use contract tests to verify compatibility
+
+6. Test failure scenarios
+   └── Network failures, timeouts
+   └── Invalid inputs
+   └── Circuit breaker states
+   └── Fallback behaviors
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    BUG FIX PROTOCOL                              │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   1. Bug Reported/Discovered                                     │
+│      └── Document: service, endpoint, symptoms                   │
+│      └── Gather: logs, traces, error messages                    │
+│                          │                                       │
+│                          ▼                                       │
+│   2. Write Test That REPRODUCES the Bug                          │
+│      └── Test MUST FAIL initially                                │
+│      └── Test captures exact failure scenario                    │
+│      └── Include bug ID in test name/comments                    │
+│                          │                                       │
+│                          ▼                                       │
+│   3. Verify Test Fails for the RIGHT Reason                      │
+│      └── Failure matches reported bug behavior                   │
+│      └── Not failing for unrelated reasons                       │
+│                          │                                       │
+│                          ▼                                       │
+│   4. Fix the Bug                                                 │
+│      └── Make minimal changes to fix                             │
+│      └── Don't refactor during bug fix                           │
+│                          │                                       │
+│                          ▼                                       │
+│   5. Verify Test Now PASSES                                      │
+│      └── All existing tests still pass                           │
+│      └── No regressions introduced                               │
+│                          │                                       │
+│                          ▼                                       │
+│   6. Document in Test Comments                                   │
+│      └── Bug ID, description, root cause                         │
+│      └── Date fixed, related services                            │
+│                          │                                       │
+│                          ▼                                       │
+│   7. Deploy with Confidence                                      │
+│      └── Regression permanently prevented                        │
+│      └── Future changes protected                                │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Example: Fixing a Distributed System Bug
+
+```
+BUG REPORT #MS-1234:
+─────────────────────
+Service: Order Service
+Symptom: Order stuck in PENDING when Payment Service times out
+Expected: Order should transition to PAYMENT_FAILED after timeout
+Environment: Production, high load conditions
+
+STEP 1: Understand and Document
+───────────────────────────────
+- Order created successfully
+- Payment Service call times out after 30s
+- Order remains PENDING (never updated)
+- Circuit breaker not triggering
+- No retry logic for status update
+
+STEP 2: Write Regression Test (MUST FAIL)
+─────────────────────────────────────────
+// test: order_payment_timeout_test
+
+describe("Bug #MS-1234: Order payment timeout handling", () => {
+  it("should mark order as PAYMENT_FAILED when payment times out", async () => {
+    // Arrange: Create order and mock payment timeout
+    const order = await createTestOrder();
+    paymentServiceMock.simulateTimeout(35000); // 35 second timeout
+
+    // Act: Process payment (should timeout)
+    await orderService.processPayment(order.id);
+
+    // Assert: Order should be PAYMENT_FAILED
+    const updatedOrder = await orderRepository.findById(order.id);
+    expect(updatedOrder.status).toBe("PAYMENT_FAILED");
+    expect(updatedOrder.failureReason).toContain("timeout");
+  });
+
+  it("should emit PaymentFailed event on timeout", async () => {
+    const order = await createTestOrder();
+    paymentServiceMock.simulateTimeout(35000);
+
+    await orderService.processPayment(order.id);
+
+    expect(eventBus.published).toContainEqual(
+      expect.objectContaining({
+        type: "PaymentFailed",
+        orderId: order.id,
+        reason: "timeout"
+      })
+    );
+  });
+});
+
+// Run test → FAILS (order stays PENDING, no event emitted)
+// ✓ Test fails for the right reason (matches bug behavior)
+
+STEP 3: Fix the Bug
+───────────────────
+// order_service.processPayment
+
+func (s *OrderService) ProcessPayment(orderID string) error {
+    order, err := s.orderRepo.FindByID(orderID)
+    if err != nil {
+        return err
+    }
+
+    ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+    defer cancel()
+
+    result, err := s.paymentClient.ProcessPayment(ctx, order)
+
+    if err != nil {
+        // BUG FIX #MS-1234: Handle timeout and update order status
+        if errors.Is(err, context.DeadlineExceeded) {
+            order.Status = "PAYMENT_FAILED"
+            order.FailureReason = "Payment service timeout"
+
+            if saveErr := s.orderRepo.Save(order); saveErr != nil {
+                return fmt.Errorf("failed to save order: %w", saveErr)
+            }
+
+            s.eventPublisher.Publish(PaymentFailedEvent{
+                OrderID: orderID,
+                Reason:  "timeout",
+            })
+        }
+        return err
+    }
+
+    // ... handle success case
+}
+
+// Run test → PASSES
+// Run all tests → ALL PASS (no regressions)
+
+STEP 4: Document the Fix
+────────────────────────
+// Test file header comment:
+/*
+ * Bug #MS-1234: Order payment timeout handling
+ * Fixed: 2024-01-15
+ * Root Cause: Payment timeout errors were not updating order status
+ * Impact: Orders stuck in PENDING state during high load
+ * Fix: Added explicit timeout handling with status update and event emission
+ * Related: order_service.go, payment_client.go
+ */
+```
+
+### Bug Categories and Testing Approaches
+
+```
+BUG CATEGORY TESTING MATRIX:
+
+┌──────────────────────┬────────────────────────────────────────────┐
+│ Bug Category         │ Testing Approach                            │
+├──────────────────────┼────────────────────────────────────────────┤
+│ Race Condition       │ - Use concurrent test runners               │
+│                      │ - Stress tests with parallel requests       │
+│                      │ - Test with intentional delays              │
+├──────────────────────┼────────────────────────────────────────────┤
+│ Timeout Handling     │ - Mock slow responses                       │
+│                      │ - Verify circuit breaker triggers           │
+│                      │ - Test retry exhaustion                     │
+├──────────────────────┼────────────────────────────────────────────┤
+│ Data Inconsistency   │ - Test SAGA compensation flows              │
+│                      │ - Verify eventual consistency               │
+│                      │ - Test partial failure scenarios            │
+├──────────────────────┼────────────────────────────────────────────┤
+│ Event Ordering       │ - Test out-of-order event delivery          │
+│                      │ - Verify idempotency                        │
+│                      │ - Test duplicate event handling             │
+├──────────────────────┼────────────────────────────────────────────┤
+│ Service Discovery    │ - Test with unavailable services            │
+│                      │ - Verify fallback behavior                  │
+│                      │ - Test service registration/deregistration  │
+├──────────────────────┼────────────────────────────────────────────┤
+│ Authentication       │ - Test expired tokens                       │
+│                      │ - Test invalid credentials                  │
+│                      │ - Verify token refresh flows                │
+└──────────────────────┴────────────────────────────────────────────┘
+```
+
+### Bug Fix Checklist
+
+```
+BUG FIX VERIFICATION CHECKLIST:
+
+□ Reproduction
+  □ Bug reproduced locally
+  □ Regression test written
+  □ Test fails for correct reason
+
+□ Fix Implementation
+  □ Minimal code change
+  □ No unrelated refactoring
+  □ Root cause addressed (not just symptoms)
+
+□ Testing
+  □ Regression test passes
+  □ All existing tests pass
+  □ Related edge cases covered
+  □ Cross-service impact tested (if applicable)
+
+□ Documentation
+  □ Test includes bug ID reference
+  □ Root cause documented
+  □ Fix explanation in code comments
+
+□ Review
+  □ Fix reviewed for correctness
+  □ No new anti-patterns introduced
+  □ Observability (logs/metrics) added for detection
+```
+
+---
+
 ## 3. Communication Patterns (MANDATORY)
 
 ### A. Synchronous Communication
@@ -1606,6 +2038,227 @@ BEFORE A SERVICE GOES TO PRODUCTION:
 > "If you can't deploy your service independently, you don't have microservices - you have a distributed monolith."
 
 > "Design for failure. Embrace eventual consistency. Monitor everything."
+
+---
+
+## Quick Reference
+
+### Common Patterns Cheat Sheet
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                 MICROSERVICES QUICK REFERENCE                    │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  SERVICE BOUNDARIES                                              │
+│  ─────────────────                                               │
+│  ✓ One service = One business capability                        │
+│  ✓ Database per service (never shared)                          │
+│  ✓ Independent deployment                                       │
+│  ✓ Team ownership (2-pizza rule)                                │
+│  ✗ Shared database across services                              │
+│  ✗ Coordinated deployments                                      │
+│                                                                  │
+│  COMMUNICATION                                                   │
+│  ─────────────                                                   │
+│  Sync (REST/gRPC): Immediate response needed                    │
+│  Async (Events): Decoupling, scalability                        │
+│  Always: Timeouts + Circuit breakers + Retries                  │
+│                                                                  │
+│  RESILIENCE                                                      │
+│  ──────────                                                      │
+│  Circuit Breaker: 5 failures → Open → 30s → Half-Open           │
+│  Retry: Exponential backoff with jitter                         │
+│  Timeout: Upstream > Downstream (Gateway > Service > DB)        │
+│  Fallback: Cached data, default values, degraded service        │
+│                                                                  │
+│  OBSERVABILITY (Three Pillars)                                   │
+│  ─────────────────────────────                                   │
+│  Logs: Structured JSON, correlation IDs, no PII                 │
+│  Metrics: RED (Rate, Errors, Duration)                          │
+│  Traces: Distributed tracing, span context propagation          │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### TDD Cycle Summary
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    TDD QUICK REFERENCE                           │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  NEW FEATURE:                                                    │
+│  ────────────                                                    │
+│  1. RED    → Write failing test                                  │
+│  2. GREEN  → Minimal implementation                              │
+│  3. REFACTOR → Improve code (tests stay green)                   │
+│  4. REPEAT                                                       │
+│                                                                  │
+│  BUG FIX:                                                        │
+│  ─────────                                                       │
+│  1. Write test that reproduces bug (FAILS)                       │
+│  2. Verify failure matches bug                                   │
+│  3. Fix bug (test PASSES)                                        │
+│  4. Document bug ID in test                                      │
+│                                                                  │
+│  TEST LEVELS:                                                    │
+│  ─────────────                                                   │
+│  Unit       → Domain logic, mock dependencies                    │
+│  Component  → Service API, test containers                       │
+│  Contract   → API compatibility between services                 │
+│  Integration→ Real databases, message brokers                    │
+│  E2E        → Critical paths only (slow, expensive)              │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Event Design Template
+
+```
+EVENT STRUCTURE TEMPLATE:
+
+{
+  "eventId": "uuid-v4",                    // Unique identifier
+  "eventType": "OrderPlaced",              // Past tense verb
+  "aggregateType": "Order",                // Source entity type
+  "aggregateId": "order-123",              // Source entity ID
+  "timestamp": "2024-01-15T10:30:00.000Z", // ISO-8601
+  "version": 1,                            // Schema version
+  "correlationId": "request-uuid",         // Request correlation
+  "causationId": "causing-event-uuid",     // Causing event
+  "data": {                                // Event payload
+    "orderId": "order-123",
+    "customerId": "customer-456",
+    "totalAmount": 99.99
+  },
+  "metadata": {                            // Context
+    "userId": "user-789",
+    "source": "order-service"
+  }
+}
+```
+
+### Health Check Endpoints
+
+```
+HEALTH ENDPOINTS:
+
+/health/live   → Is process running?
+                 200 OK or 503 Service Unavailable
+                 Used by: Container orchestrator (restart)
+
+/health/ready  → Can service handle traffic?
+                 Checks: DB, cache, downstream services
+                 Used by: Load balancer (routing)
+
+/health/startup → Has service finished initializing?
+                  Checks: Migrations, cache warming
+                  Used by: Orchestrator (probe scheduling)
+```
+
+### Deployment Strategy Decision
+
+```
+DEPLOYMENT DECISION TREE:
+
+Need instant rollback?
+├── YES → Blue-Green
+└── NO
+    └── Validating with real traffic?
+        ├── YES → Canary (5% → 25% → 50% → 100%)
+        └── NO → Rolling Deployment
+            └── Feature flags for gradual feature rollout
+```
+
+### Circuit Breaker Configuration
+
+```
+CIRCUIT BREAKER DEFAULTS:
+
+┌────────────────────┬──────────────────────┐
+│ Parameter          │ Recommended Value    │
+├────────────────────┼──────────────────────┤
+│ Failure Threshold  │ 5 failures           │
+│ Success Threshold  │ 3 successes          │
+│ Timeout (Open)     │ 30 seconds           │
+│ Failure Window     │ 60 seconds           │
+│ Half-Open Requests │ 3 requests           │
+└────────────────────┴──────────────────────┘
+
+States: CLOSED → (failures) → OPEN → (timeout) → HALF-OPEN → (success) → CLOSED
+```
+
+### API Design Quick Reference
+
+```
+REST API STANDARDS:
+
+Methods:
+  GET    → Read (idempotent, cacheable)
+  POST   → Create (not idempotent)
+  PUT    → Full update (idempotent)
+  PATCH  → Partial update
+  DELETE → Remove (idempotent)
+
+Status Codes:
+  2xx → Success (200 OK, 201 Created, 204 No Content)
+  4xx → Client error (400 Bad Request, 404 Not Found)
+  5xx → Server error (500 Internal, 503 Unavailable)
+
+URLs:
+  ✓ /orders/{id}/items     (nouns, hierarchical)
+  ✗ /getOrderItems         (verbs, RPC-style)
+```
+
+### Common Anti-Patterns Checklist
+
+```
+ANTI-PATTERN DETECTION:
+
+□ Distributed Monolith
+  └── Services must deploy together? ← FIX: Decouple
+
+□ Shared Database
+  └── Multiple services access same DB? ← FIX: Database per service
+
+□ Chatty Services
+  └── Many calls for single operation? ← FIX: Coarse-grained APIs
+
+□ Synchronous Chains
+  └── A → B → C → D → E deep chains? ← FIX: Async, parallelize
+
+□ Hardcoded Locations
+  └── IP addresses in config? ← FIX: Service discovery
+```
+
+### Verification Commands Template
+
+```bash
+# Service Verification Checklist
+
+# 1. Build/Compile
+[build_command]        # Must exit 0
+
+# 2. Unit Tests
+[test_command]         # Must pass, >80% coverage
+
+# 3. Contract Tests
+[contract_test]        # Consumer/provider verification
+
+# 4. Lint/Format
+[lint_command]         # No warnings
+[format_command]       # No changes needed
+
+# 5. Health Check (running service)
+curl -f http://localhost:8080/health/ready
+
+# 6. Security Scan
+[security_scan]        # No high/critical vulnerabilities
+
+# 7. Documentation
+[doc_command]          # All public APIs documented
+```
 
 ---
 

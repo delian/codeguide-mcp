@@ -99,6 +99,341 @@ COMBINING ARCHITECTURES:
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol for Architecture (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle when implementing architectural decisions.**
+
+### TDD Cycle for Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                                                             │
+│  ARCHITECTURE TDD CYCLE                                                     │
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                                                                     │   │
+│  │     ┌───────────┐                                                   │   │
+│  │     │   RED     │  Write architectural fitness tests first          │   │
+│  │     │  (Test)   │  • Boundary tests fail (modules don't exist)      │   │
+│  │     └─────┬─────┘  • Contract tests fail (interfaces undefined)     │   │
+│  │           │        • Integration tests fail (not connected)          │   │
+│  │           ▼                                                          │   │
+│  │     ┌───────────┐                                                   │   │
+│  │     │  GREEN    │  Implement minimum architecture to pass           │   │
+│  │     │ (Impl)    │  • Define module boundaries                       │   │
+│  │     └─────┬─────┘  • Create port/adapter interfaces                 │   │
+│  │           │        • Wire components together                        │   │
+│  │           ▼                                                          │   │
+│  │     ┌───────────┐                                                   │   │
+│  │     │ REFACTOR  │  Improve architecture while tests stay green      │   │
+│  │     │ (Improve) │  • Extract common patterns                        │   │
+│  │     └─────┬─────┘  • Optimize boundaries                            │   │
+│  │           │        • Apply design patterns                           │   │
+│  │           │                                                          │   │
+│  │           └────────────────────► Repeat                             │   │
+│  │                                                                     │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+│  ARCHITECTURAL FITNESS FUNCTIONS:                                           │
+│  • Dependency direction tests (core has no outward dependencies)           │
+│  • Module coupling metrics (low coupling between modules)                  │
+│  • Cohesion tests (high cohesion within modules)                          │
+│  • Performance boundary tests (latency, throughput)                        │
+│  • Scalability tests (load handling, resource usage)                      │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Example: TDD for Hexagonal Architecture Boundary
+
+```
+SCENARIO: Adding a new payment gateway adapter
+
+Step 1: RED - Write failing boundary test first
+────────────────────────────────────────────────────────────────────────────────
+// Test: PaymentPort should be independent of any payment gateway
+// File: tests/architecture/payment_boundary_test.py
+
+def test_payment_port_has_no_external_dependencies():
+    """Core payment port must not import any external payment SDK."""
+    import_graph = analyze_imports("core/ports/payment_port")
+
+    # This test FAILS initially - port doesn't exist
+    assert "stripe" not in import_graph.all_imports
+    assert "paypal" not in import_graph.all_imports
+    assert "braintree" not in import_graph.all_imports
+
+def test_payment_service_uses_only_port_interface():
+    """Payment service must only depend on PaymentPort, not concrete adapters."""
+    service_deps = get_dependencies("core/services/payment_service")
+
+    # This test FAILS initially - service doesn't exist
+    assert "PaymentPort" in service_deps
+    assert "StripeAdapter" not in service_deps
+────────────────────────────────────────────────────────────────────────────────
+
+Step 2: GREEN - Implement minimum architecture to pass
+────────────────────────────────────────────────────────────────────────────────
+// File: core/ports/payment_port.py (Port - no external dependencies)
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+
+@dataclass
+class PaymentResult:
+    success: bool
+    transaction_id: str
+    error_message: str | None = None
+
+class PaymentPort(ABC):
+    @abstractmethod
+    def charge(self, amount: int, currency: str, token: str) -> PaymentResult:
+        pass
+
+// File: core/services/payment_service.py (Uses only port)
+from core.ports.payment_port import PaymentPort, PaymentResult
+
+class PaymentService:
+    def __init__(self, payment_port: PaymentPort):
+        self._payment = payment_port
+
+    def process_payment(self, order_id: str, amount: int) -> PaymentResult:
+        return self._payment.charge(amount, "USD", order_id)
+
+// File: adapters/payment/stripe_adapter.py (Adapter - external dependency here)
+import stripe
+from core.ports.payment_port import PaymentPort, PaymentResult
+
+class StripeAdapter(PaymentPort):
+    def charge(self, amount: int, currency: str, token: str) -> PaymentResult:
+        # Stripe SDK used only in adapter layer
+        result = stripe.Charge.create(amount=amount, currency=currency)
+        return PaymentResult(success=True, transaction_id=result.id)
+────────────────────────────────────────────────────────────────────────────────
+
+Step 3: REFACTOR - Improve while keeping tests green
+────────────────────────────────────────────────────────────────────────────────
+• Add error handling abstraction to port
+• Create adapter factory for easy switching
+• Add retry decorator for resilience
+• Tests continue to pass - boundaries maintained
+────────────────────────────────────────────────────────────────────────────────
+```
+
+### Architecture TDD Checklist
+
+```
+BEFORE implementing any architectural change:
+
+□ Write fitness function tests for the architectural constraint
+  • Dependency direction tests
+  • Module boundary tests
+  • Contract/interface tests
+
+□ Verify tests FAIL (Red phase confirms constraint doesn't exist yet)
+
+□ Implement minimum architecture to pass tests (Green phase)
+  • Focus on boundaries and interfaces first
+  • Implement concrete components second
+
+□ Refactor while tests remain green
+  • Apply patterns (Factory, Strategy, etc.)
+  • Optimize for clarity and performance
+  • Ensure documentation is updated
+
+□ Add new tests for edge cases discovered during refactoring
+```
+
+---
+
+## 2B. Bug Fix Protocol for Architecture (MANDATORY)
+
+**CRITICAL: Every architectural bug MUST receive a regression test BEFORE fixing.**
+
+### Architectural Bug Fix Workflow
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                                                             │
+│  ARCHITECTURAL BUG FIX WORKFLOW                                            │
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                                                                     │   │
+│  │  1. BUG DISCOVERED                                                  │   │
+│  │     │  "Circular dependency between Order and Payment modules"      │   │
+│  │     │  "Database logic leaked into domain layer"                    │   │
+│  │     │  "Service directly calls external API instead of adapter"    │   │
+│  │     ▼                                                               │   │
+│  │  2. WRITE REGRESSION TEST (MUST FAIL)                               │   │
+│  │     │  Test that exposes the architectural violation                │   │
+│  │     │  Document bug ID and description in test                      │   │
+│  │     ▼                                                               │   │
+│  │  3. VERIFY TEST FAILS FOR CORRECT REASON                            │   │
+│  │     │  Confirm the test catches the actual bug                      │   │
+│  │     │  Not a false positive from other issues                       │   │
+│  │     ▼                                                               │   │
+│  │  4. FIX THE ARCHITECTURAL VIOLATION                                 │   │
+│  │     │  Refactor to correct boundaries                               │   │
+│  │     │  Introduce missing abstractions                               │   │
+│  │     │  Remove improper dependencies                                 │   │
+│  │     ▼                                                               │   │
+│  │  5. VERIFY TEST PASSES                                              │   │
+│  │     │  Regression prevented                                         │   │
+│  │     │  Architecture constraint enforced                             │   │
+│  │     ▼                                                               │   │
+│  │  6. RUN FULL ARCHITECTURE TEST SUITE                                │   │
+│  │     │  Ensure fix didn't break other constraints                    │   │
+│  │     ▼                                                               │   │
+│  │  7. UPDATE ADR (Architecture Decision Record)                       │   │
+│  │        Document the issue and resolution                            │   │
+│  │        Add to "Lessons Learned" section                             │   │
+│  │                                                                     │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Example: Fixing a Layer Violation Bug
+
+```
+BUG REPORT #ARCH-042: Domain service directly imports database ORM model
+────────────────────────────────────────────────────────────────────────────────
+SEVERITY: High (violates Clean Architecture dependency rule)
+DISCOVERED: Code review found OrderService importing SQLAlchemy model
+IMPACT: Domain layer now coupled to database implementation
+────────────────────────────────────────────────────────────────────────────────
+
+Step 1-2: Write regression test that reproduces the bug
+────────────────────────────────────────────────────────────────────────────────
+// File: tests/architecture/layer_dependency_test.py
+
+def test_domain_services_have_no_infrastructure_imports():
+    """
+    Regression test for BUG #ARCH-042
+    Domain services must not import infrastructure/ORM modules.
+    """
+    domain_modules = discover_modules("core/services/")
+    infrastructure_patterns = [
+        "sqlalchemy", "psycopg", "pymongo",  # Database
+        "redis", "celery",                    # Infrastructure
+        "requests", "httpx", "aiohttp"        # HTTP clients
+    ]
+
+    for module in domain_modules:
+        imports = get_all_imports(module)
+        for pattern in infrastructure_patterns:
+            # This test FAILS - OrderService imports sqlalchemy.orm
+            assert pattern not in imports, \
+                f"BUG #ARCH-042: {module} imports {pattern}"
+
+// Run test:
+// $ pytest tests/architecture/layer_dependency_test.py -v
+// FAILED - core/services/order_service.py imports sqlalchemy.orm
+────────────────────────────────────────────────────────────────────────────────
+
+Step 3: Verify failure is for the correct reason
+────────────────────────────────────────────────────────────────────────────────
+// The bug (BEFORE fix):
+// File: core/services/order_service.py
+
+from sqlalchemy.orm import Session  # ❌ VIOLATION: Infrastructure in domain
+from infrastructure.db.models import OrderModel  # ❌ VIOLATION
+
+class OrderService:
+    def __init__(self, db: Session):
+        self._db = db
+
+    def get_order(self, order_id: str):
+        return self._db.query(OrderModel).filter_by(id=order_id).first()
+────────────────────────────────────────────────────────────────────────────────
+
+Step 4: Fix the architectural violation
+────────────────────────────────────────────────────────────────────────────────
+// File: core/domain/order.py (Pure domain entity)
+@dataclass
+class Order:
+    id: str
+    customer_id: str
+    total: Decimal
+    status: OrderStatus
+
+// File: core/ports/order_repository.py (Port interface)
+from abc import ABC, abstractmethod
+from core.domain.order import Order
+
+class OrderRepository(ABC):
+    @abstractmethod
+    def find_by_id(self, order_id: str) -> Order | None:
+        pass
+
+// File: core/services/order_service.py (Uses only port)
+from core.ports.order_repository import OrderRepository  # ✅ Clean dependency
+
+class OrderService:
+    def __init__(self, repository: OrderRepository):  # ✅ Injected abstraction
+        self._repository = repository
+
+    def get_order(self, order_id: str):
+        return self._repository.find_by_id(order_id)
+
+// File: infrastructure/persistence/sqlalchemy_order_repository.py (Adapter)
+from sqlalchemy.orm import Session
+from core.ports.order_repository import OrderRepository
+from core.domain.order import Order
+from .models import OrderModel
+
+class SqlAlchemyOrderRepository(OrderRepository):  # ✅ Infrastructure isolated
+    def __init__(self, session: Session):
+        self._session = session
+
+    def find_by_id(self, order_id: str) -> Order | None:
+        model = self._session.query(OrderModel).filter_by(id=order_id).first()
+        return self._map_to_domain(model) if model else None
+────────────────────────────────────────────────────────────────────────────────
+
+Step 5-6: Verify test passes and run full suite
+────────────────────────────────────────────────────────────────────────────────
+// Run regression test:
+// $ pytest tests/architecture/layer_dependency_test.py -v
+// PASSED - No infrastructure imports in domain services
+
+// Run full architecture test suite:
+// $ pytest tests/architecture/ -v
+// All tests pass - bug fixed, regression prevented
+────────────────────────────────────────────────────────────────────────────────
+
+Step 7: Update ADR
+────────────────────────────────────────────────────────────────────────────────
+// File: docs/adr/ADR-001-hexagonal-architecture.md
+
+## Lessons Learned
+
+### BUG #ARCH-042 (2024-01-15)
+**Issue**: OrderService directly imported SQLAlchemy ORM, violating dependency rule.
+**Root Cause**: Developer unfamiliar with ports/adapters pattern.
+**Resolution**: Introduced OrderRepository port, moved ORM to adapter layer.
+**Prevention**: Added automated architecture tests to CI pipeline.
+────────────────────────────────────────────────────────────────────────────────
+```
+
+### Common Architectural Bugs and Their Tests
+
+```
+┌────────────────────────────┬────────────────────────────────────────────────┐
+│ Architectural Bug          │ Regression Test Approach                       │
+├────────────────────────────┼────────────────────────────────────────────────┤
+│ Circular module dependency │ Import graph analysis for cycles               │
+│ Layer violation            │ Dependency direction verification              │
+│ Missing abstraction        │ Interface coverage tests                       │
+│ Leaky adapter              │ Domain purity tests (no infra imports)         │
+│ God module (too big)       │ Module size/complexity metrics                 │
+│ Shotgun surgery required   │ Change impact analysis tests                   │
+│ Wrong bounded context      │ Context mapping validation                     │
+│ Distributed monolith       │ Service independence tests                     │
+└────────────────────────────┴────────────────────────────────────────────────┘
+```
+
+---
+
 ## 3. Internal Structure Architectures
 
 These define how you organize code within a deployable unit.
@@ -1379,6 +1714,210 @@ ARCHITECTURE DOCUMENTATION:
 > "Architecture is about the important stuff. Whatever that is." — Ralph Johnson
 
 > "The best architecture is the simplest one that solves the problem."
+
+---
+
+## 12. Quick Reference
+
+### Architecture Comparison Patterns
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     ARCHITECTURE SELECTION QUICK GUIDE                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+INTERNAL STRUCTURE - "How do I organize code?"
+──────────────────────────────────────────────────────────────────────────────
+┌──────────────────┬─────────────┬─────────────┬─────────────┬───────────────┐
+│                  │   Layered   │  Hexagonal  │    Clean    │ Vertical Slice│
+├──────────────────┼─────────────┼─────────────┼─────────────┼───────────────┤
+│ Complexity       │    Low      │   Medium    │    High     │    Medium     │
+│ Testability      │    Low      │    High     │    High     │    Medium     │
+│ Flexibility      │    Low      │    High     │    High     │    High       │
+│ Learning Curve   │    Low      │   Medium    │    High     │    Medium     │
+│ Best For         │ CRUD/MVP    │ Long-lived  │ Enterprise  │ Feature-heavy │
+│ Team Size        │   1-5       │   3-15      │   10-50+    │    5-20       │
+└──────────────────┴─────────────┴─────────────┴─────────────┴───────────────┘
+
+DEPLOYMENT - "How do I run it?"
+──────────────────────────────────────────────────────────────────────────────
+┌──────────────────┬─────────────┬─────────────┬─────────────┬───────────────┐
+│                  │  Monolith   │ Mod. Mono.  │ Microservices│  Serverless  │
+├──────────────────┼─────────────┼─────────────┼─────────────┼───────────────┤
+│ Ops Complexity   │    Low      │    Low      │    High     │    Medium     │
+│ Scalability      │   Limited   │   Limited   │    High     │    High       │
+│ Team Independence│    Low      │   Medium    │    High     │    High       │
+│ Initial Cost     │    Low      │    Low      │    High     │    Low        │
+│ Best For         │  Startups   │   Growing   │   Large Org │ Event-driven  │
+│ Team Size        │   1-10      │   5-30      │    30+      │    Any        │
+└──────────────────┴─────────────┴─────────────┴─────────────┴───────────────┘
+
+COMMUNICATION - "How do parts talk?"
+──────────────────────────────────────────────────────────────────────────────
+┌──────────────────┬─────────────┬─────────────┬─────────────┬───────────────┐
+│                  │    REST     │    gRPC     │   Events    │   Streaming   │
+├──────────────────┼─────────────┼─────────────┼─────────────┼───────────────┤
+│ Coupling         │   Tight     │   Tight     │   Loose     │    Loose      │
+│ Latency          │   Medium    │    Low      │   Variable  │    Low        │
+│ Consistency      │   Strong    │   Strong    │  Eventual   │   Eventual    │
+│ Debugging        │   Easy      │   Medium    │    Hard     │    Hard       │
+│ Best For         │ Simple APIs │ Internal    │ Decoupled   │ Real-time     │
+└──────────────────┴─────────────┴─────────────┴─────────────┴───────────────┘
+
+DATA - "How do I manage state?"
+──────────────────────────────────────────────────────────────────────────────
+┌──────────────────┬─────────────┬─────────────┬─────────────────────────────┐
+│                  │    CRUD     │    CQRS     │     Event Sourcing          │
+├──────────────────┼─────────────┼─────────────┼─────────────────────────────┤
+│ Complexity       │    Low      │   Medium    │         High                │
+│ Audit Trail      │    None     │   Optional  │        Complete             │
+│ Read Performance │   Medium    │    High     │         High                │
+│ Consistency      │   Strong    │  Eventual   │        Eventual             │
+│ Best For         │ Simple apps │ Read-heavy  │  Audit/compliance           │
+└──────────────────┴─────────────┴─────────────┴─────────────────────────────┘
+```
+
+### Decision Flowchart
+
+```
+START: What should I use?
+        │
+        ▼
+┌───────────────────────────────┐
+│ Is this a prototype or MVP?   │
+└───────────────────┬───────────┘
+          ┌────────┴────────┐
+         YES               NO
+          │                 │
+          ▼                 ▼
+┌─────────────────┐ ┌───────────────────────────────┐
+│ Layered +       │ │ Do you have clear domain      │
+│ Monolith +      │ │ boundaries?                   │
+│ REST + CRUD     │ └───────────────┬───────────────┘
+│                 │       ┌────────┴────────┐
+│ (Keep it simple)│      YES               NO
+└─────────────────┘       │                 │
+                          ▼                 ▼
+            ┌─────────────────────┐ ┌─────────────────────┐
+            │ > 3 teams working   │ │ Vertical Slice +    │
+            │ independently?      │ │ Modular Monolith    │
+            └──────────┬──────────┘ │                     │
+              ┌───────┴───────┐     │ (Discover boundaries│
+             YES             NO     │  through features)  │
+              │               │     └─────────────────────┘
+              ▼               ▼
+┌─────────────────────┐ ┌─────────────────────┐
+│ Microservices +     │ │ Hexagonal +         │
+│ Event-Driven +      │ │ Modular Monolith +  │
+│ CQRS (if needed)    │ │ REST + Events       │
+│                     │ │                     │
+│ (Scale teams &      │ │ (Clean boundaries,  │
+│  systems)           │ │  extraction ready)  │
+└─────────────────────┘ └─────────────────────┘
+```
+
+### Common Combinations
+
+```
+PROVEN ARCHITECTURE COMBINATIONS:
+──────────────────────────────────────────────────────────────────────────────
+
+1. STARTUP STACK (Simple & Fast)
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ Internal: Layered or Hexagonal                                          │
+   │ Deployment: Monolith                                                    │
+   │ Communication: REST                                                     │
+   │ Data: CRUD with PostgreSQL                                             │
+   │ When: MVP, <5 developers, simple domain, need speed                    │
+   └─────────────────────────────────────────────────────────────────────────┘
+
+2. GROWTH STACK (Balanced)
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ Internal: Hexagonal per module                                          │
+   │ Deployment: Modular Monolith                                           │
+   │ Communication: REST + Internal Events                                  │
+   │ Data: CRUD + Read replicas                                             │
+   │ When: 5-30 developers, growing domain, eventual microservices          │
+   └─────────────────────────────────────────────────────────────────────────┘
+
+3. ENTERPRISE STACK (Complex)
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ Internal: Clean/Hexagonal per service                                  │
+   │ Deployment: Microservices                                              │
+   │ Communication: gRPC internal + Events external                         │
+   │ Data: CQRS + Event Sourcing for key domains                           │
+   │ When: 30+ developers, complex domain, compliance requirements         │
+   └─────────────────────────────────────────────────────────────────────────┘
+
+4. EVENT-DRIVEN STACK (Real-time)
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │ Internal: Hexagonal per service                                         │
+   │ Deployment: Microservices or Serverless                                │
+   │ Communication: Event Streaming (Kafka)                                 │
+   │ Data: Event Sourcing + CQRS                                           │
+   │ When: Real-time requirements, audit trail, replay needed              │
+   └─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Architecture Smell Checklist
+
+```
+WARNING SIGNS - Time to reconsider your architecture:
+──────────────────────────────────────────────────────────────────────────────
+
+□ Changing one feature requires touching 5+ files across layers
+  → Consider: Vertical Slice architecture
+
+□ "It works on my machine" but fails in production
+  → Consider: Better adapter isolation (Hexagonal)
+
+□ Tests require full database/infrastructure setup
+  → Consider: Ports and adapters for testability
+
+□ Two teams blocked waiting on each other
+  → Consider: Module boundaries or microservices
+
+□ Deploy everything to change one service
+  → Consider: Modular monolith or microservices
+
+□ Can't explain where new code should go
+  → Consider: Clean Architecture layers
+
+□ Same bug keeps coming back
+  → Consider: Add architectural fitness tests
+
+□ Database schema drives all decisions
+  → Consider: Domain-first approach (DDD)
+
+□ Network calls everywhere causing cascading failures
+  → Consider: Event-driven + Circuit breakers
+
+□ Simple changes take weeks
+  → Consider: Reduce architecture complexity
+```
+
+### Quick Commands for Architecture Validation
+
+```bash
+# Analyze module dependencies (Python example)
+pydeps --cluster --max-bacon 2 src/
+
+# Check for circular imports
+pylint --disable=all --enable=cyclic-import src/
+
+# Measure module coupling
+radon cc src/ -a -s  # Cyclomatic complexity
+radon mi src/ -s      # Maintainability index
+
+# Architecture fitness test example
+pytest tests/architecture/ -v --tb=short
+
+# Generate dependency graph
+madge --circular --image graph.svg src/
+
+# Check layer violations (custom script example)
+./scripts/check-architecture.sh
+```
 
 ---
 

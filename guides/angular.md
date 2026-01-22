@@ -248,6 +248,661 @@ src/
 }
 ```
 
+---
+
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+    +------------------+
+    |                  |
+    v                  |
++-------+    +-------+ |    +----------+
+|  RED  |--->| GREEN |-+--->| REFACTOR |
++-------+    +-------+      +----------+
+    ^                            |
+    |                            |
+    +----------------------------+
+
+1. RED: Write a failing test first
+   - Test describes the expected behavior
+   - Test MUST fail initially (confirms test is valid)
+
+2. GREEN: Write minimal code to make it pass
+   - Only write enough code to pass the test
+   - Do not optimize or refactor yet
+
+3. REFACTOR: Improve code while keeping tests green
+   - Clean up code structure
+   - Remove duplication
+   - Improve naming
+   - All tests must still pass
+```
+
+### Example TDD Workflow for Angular (Jasmine/Karma)
+
+```typescript
+// ============================================
+// Step 1: RED - Write failing test first
+// ============================================
+
+// user-filter.service.spec.ts
+import { TestBed } from '@angular/core/testing';
+import { UserFilterService } from './user-filter.service';
+
+describe('UserFilterService', () => {
+  let service: UserFilterService;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [UserFilterService]
+    });
+    service = TestBed.inject(UserFilterService);
+  });
+
+  it('should filter users by active status', () => {
+    const users = [
+      { id: '1', name: 'Alice', email: 'alice@example.com', isActive: true },
+      { id: '2', name: 'Bob', email: 'bob@example.com', isActive: false },
+      { id: '3', name: 'Charlie', email: 'charlie@example.com', isActive: true }
+    ];
+
+    const result = service.filterActiveUsers(users);
+
+    expect(result.length).toBe(2);
+    expect(result.every(u => u.isActive)).toBe(true);
+  });
+
+  it('should return empty array when no active users exist', () => {
+    const users = [
+      { id: '1', name: 'Bob', email: 'bob@example.com', isActive: false }
+    ];
+
+    const result = service.filterActiveUsers(users);
+
+    expect(result).toEqual([]);
+  });
+
+  it('should handle empty array input', () => {
+    const result = service.filterActiveUsers([]);
+
+    expect(result).toEqual([]);
+  });
+});
+
+// Run: ng test --include=**/user-filter.service.spec.ts
+// FAILS - UserFilterService doesn't exist yet
+
+// ============================================
+// Step 2: GREEN - Write minimal implementation
+// ============================================
+
+// user-filter.service.ts
+import { Injectable } from '@angular/core';
+
+interface User {
+  id: string;
+  name: string;
+  email: string;
+  isActive: boolean;
+}
+
+@Injectable({ providedIn: 'root' })
+export class UserFilterService {
+  filterActiveUsers(users: User[]): User[] {
+    return users.filter(user => user.isActive);
+  }
+}
+
+// Run: ng test --include=**/user-filter.service.spec.ts
+// PASSES - All 3 tests pass
+
+// ============================================
+// Step 3: REFACTOR - Improve while tests stay green
+// ============================================
+
+// user-filter.service.ts (refactored with additional utilities)
+import { Injectable, signal, computed } from '@angular/core';
+
+interface User {
+  id: string;
+  name: string;
+  email: string;
+  isActive: boolean;
+}
+
+type UserPredicate = (user: User) => boolean;
+
+@Injectable({ providedIn: 'root' })
+export class UserFilterService {
+  /**
+   * Filters users to return only active users.
+   * @param users - Array of users to filter
+   * @returns Array of active users
+   */
+  filterActiveUsers(users: User[]): User[] {
+    return this.filterUsers(users, user => user.isActive);
+  }
+
+  /**
+   * Generic filter method for users.
+   * @param users - Array of users to filter
+   * @param predicate - Filter condition
+   * @returns Filtered array of users
+   */
+  filterUsers(users: User[], predicate: UserPredicate): User[] {
+    return users.filter(predicate);
+  }
+}
+
+// Run: ng test --include=**/user-filter.service.spec.ts
+// PASSES - All tests still pass after refactoring
+```
+
+### Example TDD Workflow for Component Testing
+
+```typescript
+// ============================================
+// Step 1: RED - Write failing test for component
+// ============================================
+
+// counter.component.spec.ts
+import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { CounterComponent } from './counter.component';
+
+describe('CounterComponent', () => {
+  let component: CounterComponent;
+  let fixture: ComponentFixture<CounterComponent>;
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [CounterComponent]
+    }).compileComponents();
+
+    fixture = TestBed.createComponent(CounterComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+  });
+
+  it('should create', () => {
+    expect(component).toBeTruthy();
+  });
+
+  it('should display initial count of 0', () => {
+    const compiled = fixture.nativeElement as HTMLElement;
+    expect(compiled.querySelector('[data-testid="count"]')?.textContent).toContain('0');
+  });
+
+  it('should increment count when increment button is clicked', () => {
+    const button = fixture.nativeElement.querySelector('[data-testid="increment"]');
+    button.click();
+    fixture.detectChanges();
+
+    expect(component.count()).toBe(1);
+  });
+
+  it('should decrement count when decrement button is clicked', () => {
+    component.count.set(5);
+    fixture.detectChanges();
+
+    const button = fixture.nativeElement.querySelector('[data-testid="decrement"]');
+    button.click();
+    fixture.detectChanges();
+
+    expect(component.count()).toBe(4);
+  });
+
+  it('should not decrement below 0', () => {
+    const button = fixture.nativeElement.querySelector('[data-testid="decrement"]');
+    button.click();
+    fixture.detectChanges();
+
+    expect(component.count()).toBe(0);
+  });
+
+  it('should emit countChange when count changes', () => {
+    let emittedValue: number | undefined;
+    component.countChange.subscribe((value: number) => {
+      emittedValue = value;
+    });
+
+    component.increment();
+
+    expect(emittedValue).toBe(1);
+  });
+});
+
+// Run: ng test --include=**/counter.component.spec.ts
+// FAILS - CounterComponent doesn't exist yet
+
+// ============================================
+// Step 2: GREEN - Write minimal implementation
+// ============================================
+
+// counter.component.ts
+import { Component, signal, output, ChangeDetectionStrategy } from '@angular/core';
+
+@Component({
+  selector: 'app-counter',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `
+    <div class="counter">
+      <button data-testid="decrement" (click)="decrement()" type="button">-</button>
+      <span data-testid="count">{{ count() }}</span>
+      <button data-testid="increment" (click)="increment()" type="button">+</button>
+    </div>
+  `
+})
+export class CounterComponent {
+  count = signal(0);
+  countChange = output<number>();
+
+  increment(): void {
+    this.count.update(c => c + 1);
+    this.countChange.emit(this.count());
+  }
+
+  decrement(): void {
+    if (this.count() > 0) {
+      this.count.update(c => c - 1);
+      this.countChange.emit(this.count());
+    }
+  }
+}
+
+// Run: ng test --include=**/counter.component.spec.ts
+// PASSES - All 6 tests pass
+```
+
+### Example TDD Workflow with Jest (Alternative)
+
+```typescript
+// If using Jest instead of Jasmine/Karma:
+
+// jest.config.js
+module.exports = {
+  preset: 'jest-preset-angular',
+  setupFilesAfterEnv: ['<rootDir>/setup-jest.ts'],
+  testPathIgnorePatterns: ['<rootDir>/node_modules/', '<rootDir>/dist/'],
+  coverageDirectory: 'coverage',
+  collectCoverageFrom: ['src/app/**/*.ts', '!src/app/**/*.module.ts']
+};
+
+// user.service.spec.ts (Jest style)
+import { TestBed } from '@angular/core/testing';
+import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
+import { UserService } from './user.service';
+
+describe('UserService', () => {
+  let service: UserService;
+  let httpMock: HttpTestingController;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      imports: [HttpClientTestingModule],
+      providers: [UserService]
+    });
+
+    service = TestBed.inject(UserService);
+    httpMock = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => {
+    httpMock.verify();
+  });
+
+  it('should fetch users from API', async () => {
+    const mockUsers = [
+      { id: '1', name: 'Alice', email: 'alice@example.com' }
+    ];
+
+    const usersPromise = service.getUsers();
+
+    const req = httpMock.expectOne('/api/users');
+    expect(req.request.method).toBe('GET');
+    req.flush(mockUsers);
+
+    const users = await usersPromise;
+    expect(users).toEqual(mockUsers);
+  });
+});
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
++------------------------+
+| 1. Bug Reported        |
++------------------------+
+           |
+           v
++------------------------+
+| 2. Write Failing Test  |<---- Test MUST reproduce the bug
++------------------------+
+           |
+           v
++------------------------+
+| 3. Verify Test Fails   |<---- Confirms bug exists
++------------------------+
+           |
+           v
++------------------------+
+| 4. Implement Fix       |
++------------------------+
+           |
+           v
++------------------------+
+| 5. Verify Test Passes  |<---- Confirms bug is fixed
++------------------------+
+           |
+           v
++------------------------+
+| 6. Run All Tests       |<---- No regressions introduced
++------------------------+
+           |
+           v
++------------------------+
+| 7. Document Bug in     |<---- Include bug ID, date, description
+|    Test Comments       |
++------------------------+
+           |
+           v
++------------------------+
+| 8. Deploy with         |<---- Regression prevented forever
+|    Confidence          |
++------------------------+
+```
+
+### Example Bug Fix with Regression Test
+
+```typescript
+// =====================================================
+// Bug Report #1234: Email validation allows invalid emails
+// Reported: 2026-01-20
+// Severity: High
+// Description: Email validation accepts emails without TLD
+//              (e.g., "user@domain" passes validation)
+// =====================================================
+
+// =====================================================
+// Step 1-2: Write test that REPRODUCES the bug
+// =====================================================
+
+// email-validator.service.spec.ts
+import { TestBed } from '@angular/core/testing';
+import { EmailValidatorService } from './email-validator.service';
+
+describe('EmailValidatorService', () => {
+  let service: EmailValidatorService;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [EmailValidatorService]
+    });
+    service = TestBed.inject(EmailValidatorService);
+  });
+
+  // Existing tests...
+  it('should validate correct email', () => {
+    expect(service.isValidEmail('user@example.com')).toBe(true);
+  });
+
+  it('should reject email without @', () => {
+    expect(service.isValidEmail('userexample.com')).toBe(false);
+  });
+
+  // =====================================================
+  // REGRESSION TEST for Bug #1234
+  // Added: 2026-01-20
+  // Bug: Email validation accepts emails without TLD
+  // =====================================================
+  describe('Bug #1234 - Email must have valid TLD', () => {
+    it('should reject email without TLD - Bug #1234', () => {
+      // Bug: "user@domain" was incorrectly accepted
+      // Expected: Should be rejected (no TLD like .com, .org, etc.)
+      expect(service.isValidEmail('user@domain')).toBe(false);
+    });
+
+    it('should reject email with single-character TLD - Bug #1234', () => {
+      // Edge case discovered during bug investigation
+      expect(service.isValidEmail('user@domain.a')).toBe(false);
+    });
+
+    it('should accept email with valid two-letter TLD - Bug #1234', () => {
+      expect(service.isValidEmail('user@domain.co')).toBe(true);
+    });
+
+    it('should accept email with valid three-letter TLD - Bug #1234', () => {
+      expect(service.isValidEmail('user@domain.com')).toBe(true);
+    });
+  });
+});
+
+// Run: ng test --include=**/email-validator.service.spec.ts
+// FAILS - Bug #1234 tests fail, confirming the bug exists
+
+// =====================================================
+// Step 3: Verify test fails for the RIGHT reason
+// =====================================================
+
+// Output:
+// FAILED: should reject email without TLD - Bug #1234
+//   Expected: false
+//   Actual: true
+//
+// This confirms the bug: emails without TLD are incorrectly accepted
+
+// =====================================================
+// Step 4: Implement the fix
+// =====================================================
+
+// email-validator.service.ts (BEFORE - buggy version)
+@Injectable({ providedIn: 'root' })
+export class EmailValidatorService {
+  isValidEmail(email: string): boolean {
+    // BUG: This regex doesn't require a TLD
+    const emailRegex = /^[^\s@]+@[^\s@]+$/;
+    return emailRegex.test(email);
+  }
+}
+
+// email-validator.service.ts (AFTER - fixed version)
+import { Injectable } from '@angular/core';
+
+/**
+ * Service for validating email addresses.
+ *
+ * @service
+ * @providedIn 'root'
+ */
+@Injectable({ providedIn: 'root' })
+export class EmailValidatorService {
+  /**
+   * Validates an email address format.
+   *
+   * @param email - The email address to validate
+   * @returns true if the email format is valid, false otherwise
+   *
+   * @example
+   * ```typescript
+   * service.isValidEmail('user@example.com'); // true
+   * service.isValidEmail('user@domain'); // false (no TLD)
+   * ```
+   *
+   * @remarks
+   * Fix for Bug #1234: Now requires a valid TLD (minimum 2 characters)
+   */
+  isValidEmail(email: string): boolean {
+    // FIX for Bug #1234: Require TLD with minimum 2 characters
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+    return emailRegex.test(email);
+  }
+}
+
+// =====================================================
+// Step 5-6: Verify test passes and no regressions
+// =====================================================
+
+// Run: ng test --include=**/email-validator.service.spec.ts
+// PASSES - All tests pass including Bug #1234 regression tests
+
+// Run: ng test --no-watch --browsers=ChromeHeadless
+// PASSES - All project tests pass, no regressions
+```
+
+### Example Bug Fix for Component Interaction
+
+```typescript
+// =====================================================
+// Bug Report #5678: Search results not cleared on empty query
+// Reported: 2026-01-21
+// Severity: Medium
+// Description: When user clears search input, old results remain visible
+// =====================================================
+
+// search.component.spec.ts
+describe('SearchComponent - Bug #5678', () => {
+  let component: SearchComponent;
+  let fixture: ComponentFixture<SearchComponent>;
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [SearchComponent],
+      providers: [
+        { provide: SearchService, useValue: mockSearchService }
+      ]
+    }).compileComponents();
+
+    fixture = TestBed.createComponent(SearchComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+  });
+
+  // =====================================================
+  // REGRESSION TEST for Bug #5678
+  // Added: 2026-01-21
+  // Bug: Search results persist when query is cleared
+  // =====================================================
+  describe('Bug #5678 - Clear results on empty query', () => {
+    it('should clear results when search query becomes empty - Bug #5678', async () => {
+      // Setup: Perform a search first
+      component.searchQuery.set('test');
+      await component.performSearch();
+      fixture.detectChanges();
+
+      expect(component.results().length).toBeGreaterThan(0);
+
+      // Bug reproduction: Clear the search query
+      component.searchQuery.set('');
+      await component.performSearch();
+      fixture.detectChanges();
+
+      // Expected: Results should be empty
+      // Bug behavior: Results remained from previous search
+      expect(component.results()).toEqual([]);
+    });
+
+    it('should clear results when search query is only whitespace - Bug #5678', async () => {
+      component.searchQuery.set('test');
+      await component.performSearch();
+      fixture.detectChanges();
+
+      component.searchQuery.set('   ');
+      await component.performSearch();
+      fixture.detectChanges();
+
+      expect(component.results()).toEqual([]);
+    });
+  });
+});
+
+// search.component.ts (FIXED)
+@Component({
+  selector: 'app-search',
+  standalone: true,
+  imports: [CommonModule, FormsModule, MatInputModule, MatIconModule],
+  template: `
+    <mat-form-field>
+      <mat-label>Search</mat-label>
+      <input matInput [(ngModel)]="searchQuery" (ngModelChange)="onSearchChange($event)" />
+      <mat-icon matSuffix>search</mat-icon>
+    </mat-form-field>
+
+    @if (isLoading()) {
+      <mat-spinner diameter="24" />
+    }
+
+    @for (result of results(); track result.id) {
+      <div class="search-result">{{ result.title }}</div>
+    } @empty {
+      @if (hasSearched() && !isLoading()) {
+        <p>No results found</p>
+      }
+    }
+  `,
+  changeDetection: ChangeDetectionStrategy.OnPush
+})
+export class SearchComponent {
+  private searchService = inject(SearchService);
+
+  searchQuery = signal('');
+  results = signal<SearchResult[]>([]);
+  isLoading = signal(false);
+  hasSearched = signal(false);
+
+  async onSearchChange(query: string): Promise<void> {
+    this.searchQuery.set(query);
+    await this.performSearch();
+  }
+
+  async performSearch(): Promise<void> {
+    const query = this.searchQuery().trim();
+
+    // FIX for Bug #5678: Clear results if query is empty
+    if (!query) {
+      this.results.set([]);
+      this.hasSearched.set(false);
+      return;
+    }
+
+    this.isLoading.set(true);
+    this.hasSearched.set(true);
+
+    try {
+      const results = await this.searchService.search(query);
+      this.results.set(results);
+    } finally {
+      this.isLoading.set(false);
+    }
+  }
+}
+```
+
+### Bug Fix Checklist
+
+Before marking a bug fix as complete, verify:
+
+- [ ] Regression test written BEFORE implementing fix
+- [ ] Regression test fails initially (reproduces the bug)
+- [ ] Bug ID referenced in test description and comments
+- [ ] Fix implemented with minimal changes
+- [ ] Regression test passes after fix
+- [ ] All existing tests still pass
+- [ ] Code documented with JSDoc including bug reference
+- [ ] No new warnings or errors introduced
+
+---
+
 ## 3. Agent Code Generation Requirements (MANDATORY)
 
 ### A. Build Verification Protocol
@@ -3843,6 +4498,410 @@ export const appConfig: ApplicationConfig = {
 16. **Typed Forms**: Type safety from form to submission, better DX.
 
 17. **Functional Guards/Interceptors**: Less boilerplate, better composition.
+
+---
+
+## Quick Reference
+
+### Common Commands
+
+```bash
+# Project Setup
+ng new my-app --standalone --routing --style=scss    # Create new standalone Angular app
+ng add @angular/material                              # Add Angular Material
+ng add @angular/pwa                                   # Add PWA support
+
+# Development
+ng serve                                              # Start dev server (http://localhost:4200)
+ng serve --port 3000                                  # Start on custom port
+ng serve --open                                       # Start and open browser
+ng serve --configuration=production                   # Run with production config
+
+# Code Generation
+ng generate component features/users/user-list        # Generate component
+ng generate component shared/components/button --inline-template --inline-style
+ng generate service core/services/auth               # Generate service
+ng generate pipe shared/pipes/truncate               # Generate pipe
+ng generate directive shared/directives/highlight    # Generate directive
+ng generate guard core/guards/auth                   # Generate guard
+ng generate interceptor core/interceptors/auth       # Generate interceptor
+ng generate interface core/models/user               # Generate interface
+
+# Aliases for generate (shorter commands)
+ng g c features/dashboard                            # Generate component
+ng g s core/services/api                             # Generate service
+ng g p shared/pipes/date-format                      # Generate pipe
+ng g d shared/directives/auto-focus                  # Generate directive
+
+# Testing
+ng test                                              # Run tests in watch mode
+ng test --no-watch                                   # Run tests once
+ng test --no-watch --browsers=ChromeHeadless         # Run headless (CI)
+ng test --code-coverage                              # Generate coverage report
+ng test --include=**/user.service.spec.ts            # Run specific test file
+
+# Building
+ng build                                             # Development build
+ng build --configuration=production                  # Production build
+ng build --configuration=production --stats-json    # Build with bundle stats
+ng build --source-map                                # Include source maps
+
+# Linting & Formatting
+ng lint                                              # Run ESLint
+ng lint --fix                                        # Auto-fix linting issues
+
+# Analysis
+ng build --stats-json && npx webpack-bundle-analyzer dist/my-app/stats.json
+                                                     # Analyze bundle size
+
+# Documentation (with TypeDoc)
+npm run docs                                         # Generate API documentation
+npm run docs:check                                   # Verify JSDoc coverage
+
+# Update
+ng update                                            # Check for updates
+ng update @angular/core @angular/cli                 # Update Angular
+ng update @angular/material                          # Update Material
+
+# Other
+ng version                                           # Show Angular CLI version
+ng cache clean                                       # Clear Angular cache
+ng analytics disable                                 # Disable analytics
+```
+
+### Angular Patterns Cheat Sheet
+
+```typescript
+// ============================================
+// COMPONENT PATTERNS
+// ============================================
+
+// Signal-based inputs (required)
+user = input.required<User>();
+
+// Signal-based inputs (optional with default)
+showActions = input(false);
+
+// Signal-based outputs
+edit = output<string>();
+delete = output<{ id: string; reason: string }>();
+
+// Internal signals
+isLoading = signal(false);
+error = signal<string | null>(null);
+
+// Computed signals
+fullName = computed(() => `${this.user().firstName} ${this.user().lastName}`);
+
+// Signal effects (use sparingly)
+constructor() {
+  effect(() => {
+    console.log('User changed:', this.user());
+  });
+}
+
+// ============================================
+// SERVICE PATTERNS
+// ============================================
+
+// Modern service with inject()
+@Injectable({ providedIn: 'root' })
+export class UserService {
+  private http = inject(HttpClient);
+  private config = inject(APP_CONFIG);
+
+  users = signal<User[]>([]);
+  isLoading = signal(false);
+}
+
+// Async/await HTTP calls
+async getUsers(): Promise<User[]> {
+  return await firstValueFrom(this.http.get<User[]>('/api/users'));
+}
+
+// ============================================
+// TEMPLATE PATTERNS
+// ============================================
+
+// Modern @if syntax
+@if (isLoading()) {
+  <mat-spinner />
+} @else if (error()) {
+  <p>Error: {{ error() }}</p>
+} @else {
+  <div>Content here</div>
+}
+
+// Modern @for syntax with track
+@for (user of users(); track user.id) {
+  <app-user-card [user]="user" />
+} @empty {
+  <p>No users found</p>
+}
+
+// Modern @switch syntax
+@switch (status()) {
+  @case ('loading') { <mat-spinner /> }
+  @case ('error') { <p>Error</p> }
+  @default { <div>Content</div> }
+}
+
+// ============================================
+// ROUTING PATTERNS
+// ============================================
+
+// Lazy loaded routes
+export const routes: Routes = [
+  {
+    path: 'users',
+    loadComponent: () => import('./features/users/user-list.component')
+      .then(m => m.UserListComponent),
+    canActivate: [authGuard]
+  },
+  {
+    path: 'dashboard',
+    loadChildren: () => import('./features/dashboard/dashboard.routes')
+      .then(m => m.DASHBOARD_ROUTES)
+  }
+];
+
+// Functional guard
+export const authGuard: CanActivateFn = (route, state) => {
+  const authService = inject(AuthService);
+  const router = inject(Router);
+
+  if (authService.isAuthenticated()) {
+    return true;
+  }
+
+  return router.createUrlTree(['/login'], {
+    queryParams: { returnUrl: state.url }
+  });
+};
+
+// ============================================
+// FORM PATTERNS
+// ============================================
+
+// Typed reactive forms
+interface UserForm {
+  name: FormControl<string>;
+  email: FormControl<string>;
+  age: FormControl<number | null>;
+}
+
+form = new FormGroup<UserForm>({
+  name: new FormControl('', { nonNullable: true, validators: [Validators.required] }),
+  email: new FormControl('', { nonNullable: true, validators: [Validators.required, Validators.email] }),
+  age: new FormControl(null, { validators: [Validators.min(0)] })
+});
+
+// ============================================
+// INTERCEPTOR PATTERNS
+// ============================================
+
+// Functional interceptor
+export const authInterceptor: HttpInterceptorFn = (req, next) => {
+  const authService = inject(AuthService);
+  const token = authService.getToken();
+
+  if (token) {
+    req = req.clone({
+      headers: req.headers.set('Authorization', `Bearer ${token}`)
+    });
+  }
+
+  return next(req);
+};
+
+// Error handling interceptor
+export const errorInterceptor: HttpInterceptorFn = (req, next) => {
+  return next(req).pipe(
+    catchError((error: HttpErrorResponse) => {
+      if (error.status === 401) {
+        inject(Router).navigate(['/login']);
+      }
+      return throwError(() => error);
+    })
+  );
+};
+
+// ============================================
+// TESTING PATTERNS
+// ============================================
+
+// Component test setup
+beforeEach(async () => {
+  await TestBed.configureTestingModule({
+    imports: [ComponentUnderTest],
+    providers: [
+      { provide: SomeService, useValue: mockService }
+    ]
+  }).compileComponents();
+
+  fixture = TestBed.createComponent(ComponentUnderTest);
+  component = fixture.componentInstance;
+  fixture.detectChanges();
+});
+
+// Setting signal inputs in tests
+fixture.componentRef.setInput('user', mockUser);
+fixture.detectChanges();
+
+// Service test with HTTP mock
+let httpMock: HttpTestingController;
+
+beforeEach(() => {
+  TestBed.configureTestingModule({
+    imports: [HttpClientTestingModule],
+    providers: [ServiceUnderTest]
+  });
+
+  service = TestBed.inject(ServiceUnderTest);
+  httpMock = TestBed.inject(HttpTestingController);
+});
+
+afterEach(() => {
+  httpMock.verify();  // Verify no outstanding requests
+});
+```
+
+### Project Structure
+
+```
+src/
+├── app/
+│   ├── core/                           # Singleton services, guards, interceptors
+│   │   ├── guards/
+│   │   │   ├── auth.guard.ts          # Authentication guard
+│   │   │   ├── role.guard.ts          # Role-based access guard
+│   │   │   └── index.ts               # Public exports
+│   │   ├── interceptors/
+│   │   │   ├── auth.interceptor.ts    # Add auth token to requests
+│   │   │   ├── error.interceptor.ts   # Global error handling
+│   │   │   ├── loading.interceptor.ts # Loading state management
+│   │   │   └── index.ts
+│   │   ├── services/
+│   │   │   ├── api.service.ts         # Base API service
+│   │   │   ├── auth.service.ts        # Authentication logic
+│   │   │   ├── storage.service.ts     # LocalStorage/SessionStorage
+│   │   │   └── index.ts
+│   │   └── models/
+│   │       ├── user.model.ts          # User interface/type
+│   │       ├── api-response.model.ts  # API response types
+│   │       └── index.ts
+│   │
+│   ├── shared/                         # Shared components, pipes, directives
+│   │   ├── components/
+│   │   │   ├── button/
+│   │   │   │   ├── button.component.ts
+│   │   │   │   ├── button.component.html
+│   │   │   │   ├── button.component.scss
+│   │   │   │   └── button.component.spec.ts
+│   │   │   ├── loading-spinner/
+│   │   │   ├── confirm-dialog/
+│   │   │   └── index.ts
+│   │   ├── directives/
+│   │   │   ├── highlight.directive.ts
+│   │   │   ├── click-outside.directive.ts
+│   │   │   └── index.ts
+│   │   ├── pipes/
+│   │   │   ├── truncate.pipe.ts
+│   │   │   ├── time-ago.pipe.ts
+│   │   │   └── index.ts
+│   │   └── utils/
+│   │       ├── validators.ts          # Custom form validators
+│   │       ├── helpers.ts             # Utility functions
+│   │       └── index.ts
+│   │
+│   ├── features/                       # Feature modules (lazy-loaded)
+│   │   ├── dashboard/
+│   │   │   ├── dashboard.routes.ts    # Feature routes
+│   │   │   ├── dashboard.component.ts # Main feature component
+│   │   │   ├── components/            # Feature-specific components
+│   │   │   │   ├── stats-card/
+│   │   │   │   └── activity-feed/
+│   │   │   ├── services/              # Feature-specific services
+│   │   │   │   └── dashboard.service.ts
+│   │   │   └── store/                 # Feature state (NgRx signals)
+│   │   │       └── dashboard.store.ts
+│   │   │
+│   │   ├── users/
+│   │   │   ├── users.routes.ts
+│   │   │   ├── user-list/
+│   │   │   │   ├── user-list.component.ts
+│   │   │   │   └── user-list.component.spec.ts
+│   │   │   ├── user-detail/
+│   │   │   ├── user-form/
+│   │   │   └── services/
+│   │   │       └── user.service.ts
+│   │   │
+│   │   └── settings/
+│   │       ├── settings.routes.ts
+│   │       └── ...
+│   │
+│   ├── layout/                         # Layout components
+│   │   ├── header/
+│   │   │   ├── header.component.ts
+│   │   │   └── header.component.spec.ts
+│   │   ├── footer/
+│   │   ├── sidebar/
+│   │   └── main-layout/
+│   │
+│   ├── app.component.ts               # Root component
+│   ├── app.component.html
+│   ├── app.component.scss
+│   ├── app.component.spec.ts
+│   ├── app.config.ts                  # Application configuration
+│   └── app.routes.ts                  # Root routes
+│
+├── assets/
+│   ├── images/
+│   ├── fonts/
+│   ├── icons/
+│   └── i18n/                          # Translation files
+│       ├── en.json
+│       └── es.json
+│
+├── environments/
+│   ├── environment.ts                 # Development config
+│   └── environment.prod.ts            # Production config
+│
+├── styles/
+│   ├── _variables.scss                # SCSS variables
+│   ├── _mixins.scss                   # SCSS mixins
+│   ├── _typography.scss               # Typography styles
+│   └── styles.scss                    # Global styles
+│
+├── index.html
+├── main.ts                            # Application entry point
+└── test.ts                            # Test configuration
+
+# Configuration Files (root)
+├── angular.json                       # Angular CLI configuration
+├── package.json                       # Dependencies
+├── tsconfig.json                      # TypeScript config
+├── tsconfig.app.json                  # App-specific TS config
+├── tsconfig.spec.json                 # Test-specific TS config
+├── karma.conf.js                      # Karma test runner config
+├── .eslintrc.json                     # ESLint configuration
+└── .prettierrc                        # Prettier configuration
+```
+
+### File Naming Conventions
+
+| Type | Pattern | Example |
+|------|---------|---------|
+| Component | `name.component.ts` | `user-card.component.ts` |
+| Service | `name.service.ts` | `auth.service.ts` |
+| Pipe | `name.pipe.ts` | `truncate.pipe.ts` |
+| Directive | `name.directive.ts` | `highlight.directive.ts` |
+| Guard | `name.guard.ts` | `auth.guard.ts` |
+| Interceptor | `name.interceptor.ts` | `error.interceptor.ts` |
+| Model/Interface | `name.model.ts` | `user.model.ts` |
+| Test | `name.*.spec.ts` | `user.service.spec.ts` |
+| Routes | `name.routes.ts` | `dashboard.routes.ts` |
+| Store | `name.store.ts` | `user.store.ts` |
 
 ---
 

@@ -172,6 +172,603 @@ make DEBUG=1
 
 ---
 
+## 2A. TDD Protocol for Makefiles (MANDATORY)
+
+### A. Test-Driven Development Cycle
+
+**CRITICAL: When developing new Makefile targets or modifying existing ones, follow the TDD cycle to ensure correctness and prevent regressions.**
+
+#### TDD Cycle Diagram
+
+```
+    ┌─────────────────────────────────────────────────────────────┐
+    │                    MAKEFILE TDD CYCLE                       │
+    └─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                 ┌────────────────────────┐
+                 │   1. WRITE TEST FIRST  │
+                 │   Define expected      │
+                 │   target behavior      │
+                 └───────────┬────────────┘
+                             │
+                             ▼
+                 ┌────────────────────────┐
+                 │   2. RUN TEST (FAIL)   │◄────────────────┐
+                 │   Verify test fails    │                 │
+                 │   (target missing)     │                 │
+                 └───────────┬────────────┘                 │
+                             │                              │
+                             ▼                              │
+                 ┌────────────────────────┐                 │
+                 │ 3. IMPLEMENT TARGET    │                 │
+                 │ Write minimal Makefile │                 │
+                 │ code to pass test      │                 │
+                 └───────────┬────────────┘                 │
+                             │                              │
+                             ▼                              │
+                 ┌────────────────────────┐                 │
+                 │   4. RUN TEST (PASS)   │                 │
+                 │   make -n, make test   │                 │
+                 │   Verify all pass      │                 │
+                 └───────────┬────────────┘                 │
+                             │                              │
+                             ▼                              │
+                 ┌────────────────────────┐                 │
+                 │   5. REFACTOR          │                 │
+                 │   Clean up code        │─────────────────┘
+                 │   Re-run tests         │   (if tests fail)
+                 └───────────┬────────────┘
+                             │
+                             ▼
+                 ┌────────────────────────┐
+                 │   6. COMMIT            │
+                 │   All tests pass       │
+                 └────────────────────────┘
+```
+
+### B. Makefile Test Patterns
+
+**Write tests for Makefile targets to validate behavior before implementation.**
+
+#### Test Module Template
+
+```makefile
+# make/test-targets.mk - Target testing infrastructure
+
+.PHONY: test-targets test-build test-clean test-help test-all-targets
+
+# Run all target tests
+test-targets: ## Run all Makefile target tests ## Test
+	@echo "Running Makefile target tests..."
+	@$(MAKE) test-build
+	@$(MAKE) test-clean
+	@$(MAKE) test-help
+	@echo "✓ All target tests passed"
+
+# Test build target
+test-build: ## Test build target works correctly ## Test
+	@echo "Testing build target..."
+	@# Test 1: Target exists and is parseable
+	@make -n build > /dev/null 2>&1 || \
+		(echo "✗ FAIL: build target not parseable" && exit 1)
+	@echo "  ✓ build target is parseable"
+	@# Test 2: Creates expected output
+	@$(MAKE) clean > /dev/null 2>&1 || true
+	@$(MAKE) build > /dev/null 2>&1
+	@test -f $(BUILD_DIR)/main || \
+		(echo "✗ FAIL: build did not create $(BUILD_DIR)/main" && exit 1)
+	@echo "  ✓ build creates expected output"
+	@# Test 3: Incremental build works (second run skips)
+	@output=$$($(MAKE) build 2>&1); \
+	if echo "$$output" | grep -q "is up to date\|Nothing to be done"; then \
+		echo "  ✓ incremental build works"; \
+	else \
+		echo "  ✓ build completed (may have rebuilt)"; \
+	fi
+
+# Test clean target
+test-clean: ## Test clean target works correctly ## Test
+	@echo "Testing clean target..."
+	@# Setup: ensure build exists
+	@$(MAKE) build > /dev/null 2>&1 || true
+	@# Test 1: Clean removes build directory
+	@$(MAKE) clean > /dev/null 2>&1
+	@test ! -d $(BUILD_DIR) || \
+		(echo "✗ FAIL: clean did not remove $(BUILD_DIR)" && exit 1)
+	@echo "  ✓ clean removes build directory"
+	@# Test 2: Clean is idempotent (safe to run twice)
+	@$(MAKE) clean > /dev/null 2>&1 || \
+		(echo "✗ FAIL: clean is not idempotent" && exit 1)
+	@echo "  ✓ clean is idempotent"
+
+# Test help target
+test-help: ## Test help target displays correctly ## Test
+	@echo "Testing help target..."
+	@# Test 1: Help outputs something
+	@output=$$($(MAKE) help 2>&1); \
+	test -n "$$output" || \
+		(echo "✗ FAIL: help produces no output" && exit 1)
+	@echo "  ✓ help produces output"
+	@# Test 2: Help contains expected text
+	@$(MAKE) help 2>&1 | grep -q "Usage\|target\|Available" || \
+		(echo "✗ FAIL: help missing expected content" && exit 1)
+	@echo "  ✓ help contains expected content"
+```
+
+### C. TDD Example: Adding a New Target
+
+**Step-by-step TDD workflow for adding an `install` target.**
+
+#### Step 1: Write Test First (RED)
+
+```makefile
+# make/test-targets.mk - Add test before implementation
+
+test-install: ## Test install target ## Test
+	@echo "Testing install target..."
+	@# Test 1: Target exists
+	@make -n install > /dev/null 2>&1 || \
+		(echo "✗ FAIL: install target not found" && exit 1)
+	@echo "  ✓ install target exists"
+	@# Test 2: Installs to correct location
+	@$(MAKE) build > /dev/null 2>&1
+	@PREFIX=/tmp/test-install $(MAKE) install > /dev/null 2>&1
+	@test -f /tmp/test-install/bin/$(PROJECT_NAME) || \
+		(echo "✗ FAIL: install did not copy binary" && exit 1)
+	@echo "  ✓ install copies binary to PREFIX/bin"
+	@# Cleanup
+	@rm -rf /tmp/test-install
+```
+
+#### Step 2: Run Test - Expect Failure (RED)
+
+```bash
+$ make test-install
+Testing install target...
+✗ FAIL: install target not found
+make: *** [test-install] Error 1
+```
+
+#### Step 3: Implement Target (GREEN)
+
+```makefile
+# make/install.mk - Minimal implementation to pass test
+
+PREFIX ?= /usr/local
+
+.PHONY: install
+install: $(BUILD_DIR)/main ## Install the project ## Build
+	@echo "Installing to $(PREFIX)..."
+	@mkdir -p $(PREFIX)/bin
+	@cp $(BUILD_DIR)/main $(PREFIX)/bin/$(PROJECT_NAME)
+	@echo "✓ Installed $(PROJECT_NAME) to $(PREFIX)/bin"
+```
+
+#### Step 4: Run Test - Expect Success (GREEN)
+
+```bash
+$ make test-install
+Testing install target...
+  ✓ install target exists
+  ✓ install copies binary to PREFIX/bin
+```
+
+#### Step 5: Refactor and Re-test
+
+```makefile
+# make/install.mk - Refactored with better error handling
+
+PREFIX ?= /usr/local
+BINDIR ?= $(PREFIX)/bin
+
+.PHONY: install uninstall
+
+install: $(BUILD_DIR)/main ## Install the project ## Build
+	@echo "[1/2] Creating directory $(BINDIR)..."
+	@mkdir -p $(BINDIR)
+	@echo "[2/2] Installing $(PROJECT_NAME)..."
+	@install -m 755 $(BUILD_DIR)/main $(BINDIR)/$(PROJECT_NAME)
+	@echo "✓ Installed $(PROJECT_NAME) to $(BINDIR)"
+
+uninstall: ## Uninstall the project ## Build
+	@echo "Removing $(BINDIR)/$(PROJECT_NAME)..."
+	@rm -f $(BINDIR)/$(PROJECT_NAME)
+	@echo "✓ Uninstalled $(PROJECT_NAME)"
+```
+
+### D. Test Categories for Makefiles
+
+```makefile
+# make/test-comprehensive.mk - Comprehensive test suite
+
+.PHONY: test-all test-parse test-targets test-modes test-deps
+
+# Run all tests
+test-all: ## Run comprehensive Makefile test suite ## Test
+	@echo "═══════════════════════════════════════════"
+	@echo "        MAKEFILE TEST SUITE"
+	@echo "═══════════════════════════════════════════"
+	@$(MAKE) test-parse
+	@$(MAKE) test-targets
+	@$(MAKE) test-modes
+	@$(MAKE) test-deps
+	@echo "═══════════════════════════════════════════"
+	@echo "        ALL TESTS PASSED ✓"
+	@echo "═══════════════════════════════════════════"
+
+# Test parseability
+test-parse: ## Test Makefile syntax ## Test
+	@echo "Testing parseability..."
+	@make -n > /dev/null 2>&1 || \
+		(echo "✗ FAIL: Makefile has syntax errors" && exit 1)
+	@echo "  ✓ Makefile is parseable"
+
+# Test verbose and debug modes
+test-modes: ## Test V=1 and DEBUG=1 modes ## Test
+	@echo "Testing modes..."
+	@$(MAKE) V=1 help > /dev/null 2>&1 || \
+		(echo "✗ FAIL: V=1 mode broken" && exit 1)
+	@echo "  ✓ Verbose mode (V=1) works"
+	@$(MAKE) DEBUG=1 help > /dev/null 2>&1 || \
+		(echo "✗ FAIL: DEBUG=1 mode broken" && exit 1)
+	@echo "  ✓ Debug mode (DEBUG=1) works"
+
+# Test dependency tracking
+test-deps: ## Test dependency tracking works ## Test
+	@echo "Testing dependency tracking..."
+	@$(MAKE) clean > /dev/null 2>&1 || true
+	@$(MAKE) build > /dev/null 2>&1
+	@first_hash=$$(sha256sum $(BUILD_DIR)/main 2>/dev/null | cut -d' ' -f1); \
+	sleep 1; \
+	$(MAKE) build > /dev/null 2>&1; \
+	second_hash=$$(sha256sum $(BUILD_DIR)/main 2>/dev/null | cut -d' ' -f1); \
+	if [ "$$first_hash" = "$$second_hash" ]; then \
+		echo "  ✓ Dependency tracking prevents unnecessary rebuilds"; \
+	else \
+		echo "  ⚠ Warning: Binary changed without source changes"; \
+	fi
+```
+
+### E. TDD Best Practices for Makefiles
+
+**Guidelines for effective Test-Driven Makefile development:**
+
+1. **Test Target Existence**: Verify target is parseable with `make -n target`
+2. **Test Output Artifacts**: Check expected files are created
+3. **Test Idempotency**: Run target twice, verify consistent behavior
+4. **Test Incremental Builds**: Ensure caching works correctly
+5. **Test Error Cases**: Verify graceful failure with missing dependencies
+6. **Test Mode Flags**: Verify V=1 and DEBUG=1 work with all targets
+
+```makefile
+# TDD Checklist for new targets:
+# [ ] Write test first (test-<target>)
+# [ ] Run test, verify it fails
+# [ ] Implement minimal target to pass test
+# [ ] Run test, verify it passes
+# [ ] Refactor for clarity and reusability
+# [ ] Re-run all tests to prevent regressions
+# [ ] Update help documentation
+```
+
+---
+
+## 2B. Bug Fix Protocol for Makefiles (MANDATORY)
+
+### A. Bug Fix Workflow
+
+**CRITICAL: When fixing bugs in Makefiles, follow this systematic workflow to ensure fixes are correct and don't introduce regressions.**
+
+#### Bug Fix Workflow Diagram
+
+```
+    ┌─────────────────────────────────────────────────────────────┐
+    │                  MAKEFILE BUG FIX WORKFLOW                  │
+    └─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                 ┌────────────────────────┐
+                 │   1. REPRODUCE BUG     │
+                 │   Run failing command  │
+                 │   Document error       │
+                 └───────────┬────────────┘
+                             │
+                             ▼
+                 ┌────────────────────────┐
+                 │   2. WRITE FAILING TEST│
+                 │   Create test that     │
+                 │   demonstrates bug     │
+                 └───────────┬────────────┘
+                             │
+                             ▼
+                 ┌────────────────────────┐
+                 │   3. DIAGNOSE CAUSE    │
+                 │   make DEBUG=1         │
+                 │   make -d (trace)      │
+                 └───────────┬────────────┘
+                             │
+                             ▼
+                 ┌────────────────────────┐
+                 │   4. IMPLEMENT FIX     │
+                 │   Minimal change to    │
+                 │   fix the issue        │
+                 └───────────┬────────────┘
+                             │
+                             ▼
+                 ┌────────────────────────┐
+                 │   5. VERIFY FIX        │
+                 │   make -n (parseability)│
+                 │   Run failing test     │
+                 └───────────┬────────────┘
+                             │
+                             ▼
+                 ┌────────────────────────┐
+                 │   6. RUN ALL TESTS     │
+                 │   Ensure no regressions│
+                 │   make test-all        │
+                 └───────────┬────────────┘
+                             │
+                    Tests pass?
+                    │        │
+                 Yes│        │No
+                    ▼        ▼
+         ┌──────────────┐  ┌──────────────┐
+         │  7. COMMIT   │  │ GO TO STEP 4 │
+         │  Document fix│  │ Revise fix   │
+         └──────────────┘  └──────────────┘
+```
+
+### B. Bug Diagnosis Tools
+
+**Use these debugging techniques to identify Makefile issues.**
+
+```makefile
+# make/debug-tools.mk - Debugging utilities
+
+.PHONY: debug-info debug-vars debug-trace debug-deps
+
+# Show comprehensive debug information
+debug-info: ## Show all debug information ## Utility
+	@echo "═══════════════════════════════════════════"
+	@echo "        MAKEFILE DEBUG INFO"
+	@echo "═══════════════════════════════════════════"
+	@echo "Make version: $$(make --version | head -1)"
+	@echo "Shell: $(SHELL)"
+	@echo "MAKEFLAGS: $(MAKEFLAGS)"
+	@echo "MAKEFILE_LIST: $(MAKEFILE_LIST)"
+	@echo "CURDIR: $(CURDIR)"
+	@echo ""
+	@$(MAKE) debug-vars
+
+# Show all important variables
+debug-vars: ## Show all configuration variables ## Utility
+	@echo "Variables:"
+	@echo "  PROJECT_NAME = $(PROJECT_NAME)"
+	@echo "  VERSION      = $(VERSION)"
+	@echo "  BUILD_DIR    = $(BUILD_DIR)"
+	@echo "  SRC_DIR      = $(SRC_DIR)"
+	@echo "  CC           = $(CC)"
+	@echo "  CFLAGS       = $(CFLAGS)"
+	@echo "  V            = $(V)"
+	@echo "  DEBUG        = $(DEBUG)"
+
+# Trace target execution (use: make debug-trace TARGET=build)
+debug-trace: ## Trace target execution (TARGET=<target>) ## Utility
+	@echo "Tracing target: $(TARGET)"
+	@echo "═══════════════════════════════════════════"
+	@make -d $(TARGET) 2>&1 | head -100
+	@echo "═══════════════════════════════════════════"
+	@echo "(Output truncated to 100 lines)"
+
+# Show dependency tree for a target
+debug-deps: ## Show dependencies (TARGET=<target>) ## Utility
+	@echo "Dependencies for: $(TARGET)"
+	@echo "═══════════════════════════════════════════"
+	@make -p $(TARGET) 2>/dev/null | grep -A1 "^$(TARGET):" || \
+		echo "Target not found or no explicit dependencies"
+```
+
+### C. Common Makefile Bug Patterns
+
+**Recognize and fix common Makefile issues.**
+
+#### Bug Pattern 1: Missing Dependencies
+
+```makefile
+# ❌ BUG: Target always rebuilds (missing dependency)
+build:
+	@$(CC) $(CFLAGS) -o $(BUILD_DIR)/main $(SRC_DIR)/main.c
+
+# ✅ FIX: Add proper dependencies
+$(BUILD_DIR)/main: $(SRC_DIR)/main.c | $(BUILD_DIR)
+	@$(CC) $(CFLAGS) -o $@ $<
+
+build: $(BUILD_DIR)/main
+	@echo "Build complete"
+```
+
+#### Bug Pattern 2: Incorrect Variable Expansion
+
+```makefile
+# ❌ BUG: Immediate expansion captures wrong value
+FILES := $(wildcard $(SRC_DIR)/*.c)
+# If SRC_DIR changes later, FILES won't update
+
+# ✅ FIX: Use deferred expansion for dependencies
+FILES = $(wildcard $(SRC_DIR)/*.c)
+# Or ensure SRC_DIR is set before FILES
+```
+
+#### Bug Pattern 3: Recipe Command Failures Hidden
+
+```makefile
+# ❌ BUG: Errors are silently ignored
+build:
+	@cp src/*.c build/ 2>/dev/null
+	@echo "Build complete"
+	# If cp fails, "Build complete" still shows
+
+# ✅ FIX: Fail fast on errors
+build:
+	@cp src/*.c build/ || (echo "Error: Copy failed" && exit 1)
+	@echo "Build complete"
+```
+
+#### Bug Pattern 4: Tab vs Space Issues
+
+```makefile
+# ❌ BUG: Spaces instead of tabs (invisible error!)
+build:
+    @echo "Building..."   # WRONG: 4 spaces
+
+# ✅ FIX: Use actual tab character
+build:
+	@echo "Building..."   # CORRECT: 1 tab
+```
+
+### D. Bug Fix Example: Fixing Incremental Build
+
+**Complete example of fixing a caching/incremental build bug.**
+
+#### Step 1: Reproduce the Bug
+
+```bash
+$ make build
+Building...
+$ make build
+Building...  # BUG: Should say "up to date"!
+```
+
+#### Step 2: Write Failing Test
+
+```makefile
+# make/test-targets.mk - Add regression test
+
+test-incremental-build: ## Test incremental build caching ## Test
+	@echo "Testing incremental build..."
+	@$(MAKE) clean > /dev/null 2>&1 || true
+	@$(MAKE) build > /dev/null 2>&1
+	@# Second build should be skipped
+	@output=$$($(MAKE) build 2>&1); \
+	if echo "$$output" | grep -qi "Building"; then \
+		echo "✗ FAIL: Build ran twice (no caching)"; \
+		exit 1; \
+	fi
+	@echo "  ✓ Incremental build uses cache"
+```
+
+#### Step 3: Diagnose the Cause
+
+```bash
+$ make DEBUG=1 build
+[DEBUG] Starting build
+[DEBUG] No dependencies specified - always rebuilds!
+
+$ make -d build 2>&1 | grep -A5 "Considering target"
+# Shows: File 'build' does not exist, must rebuild
+```
+
+#### Step 4: Implement the Fix
+
+```makefile
+# ❌ BEFORE (Bug): No dependency tracking
+.PHONY: build
+build:
+	@echo "Building..."
+	@$(CC) $(CFLAGS) -o $(BUILD_DIR)/main $(SRC_DIR)/main.c
+
+# ✅ AFTER (Fix): Proper dependency tracking
+SOURCES := $(wildcard $(SRC_DIR)/*.c)
+OBJECTS := $(SOURCES:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
+
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
+	$(call compile-c,$<,$@)
+
+$(BUILD_DIR)/main: $(OBJECTS)
+	$(call link,$@,$^)
+
+.PHONY: build
+build: $(BUILD_DIR)/main
+	@echo "Build complete"
+```
+
+#### Step 5: Verify the Fix
+
+```bash
+$ make -n build   # Verify parseability
+$ make test-incremental-build
+Testing incremental build...
+  ✓ Incremental build uses cache
+```
+
+#### Step 6: Run All Tests
+
+```bash
+$ make test-all
+═══════════════════════════════════════════
+        MAKEFILE TEST SUITE
+═══════════════════════════════════════════
+Testing parseability...
+  ✓ Makefile is parseable
+Testing build target...
+  ✓ build target is parseable
+  ✓ build creates expected output
+  ✓ incremental build works
+Testing clean target...
+  ✓ clean removes build directory
+  ✓ clean is idempotent
+═══════════════════════════════════════════
+        ALL TESTS PASSED ✓
+═══════════════════════════════════════════
+```
+
+### E. Bug Fix Verification Checklist
+
+**MANDATORY: Complete this checklist for every bug fix.**
+
+```makefile
+# Bug Fix Verification Checklist:
+# [ ] Bug reproduced and documented
+# [ ] Failing test written (demonstrates bug)
+# [ ] Root cause identified (using DEBUG=1 or make -d)
+# [ ] Fix implemented (minimal change)
+# [ ] make -n passes (parseability verified)
+# [ ] Failing test now passes
+# [ ] All existing tests pass (no regressions)
+# [ ] Fix documented in commit message
+```
+
+### F. Regression Prevention
+
+**Add regression tests for every bug fix to prevent reoccurrence.**
+
+```makefile
+# make/test-regressions.mk - Regression test suite
+
+.PHONY: test-regressions
+
+# Regression tests for fixed bugs
+test-regressions: ## Run regression tests ## Test
+	@echo "Running regression tests..."
+	@echo ""
+	@echo "BUG-001: Incremental build not caching"
+	@$(MAKE) test-incremental-build
+	@echo ""
+	@echo "BUG-002: Clean not idempotent"
+	@$(MAKE) test-clean-idempotent
+	@echo ""
+	@echo "✓ All regression tests passed"
+
+test-clean-idempotent:
+	@$(MAKE) clean > /dev/null 2>&1 || true
+	@$(MAKE) clean > /dev/null 2>&1 || \
+		(echo "✗ FAIL: BUG-002 regression - clean not idempotent" && exit 1)
+	@echo "  ✓ BUG-002: clean is idempotent"
+```
+
+---
+
 ## 3. Incremental Builds and Caching (MANDATORY)
 
 ### A. Dependency-Based Caching

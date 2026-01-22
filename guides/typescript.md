@@ -2158,6 +2158,93 @@ export class UserService {
 
 ---
 
+## 14. Quick Reference
+
+### Common Commands
+
+```bash
+# Build & Check
+npx tsc --noEmit
+npx tsc --build
+
+# Test
+npm test
+npm run test:watch
+npm run test:coverage
+
+# Lint & Format
+npm run lint
+npm run lint:fix
+npx prettier --check .
+npx prettier --write .
+
+# Documentation
+npx typedoc --out docs src/
+
+# Run
+npx ts-node src/index.ts
+npx tsx src/index.ts
+```
+
+### Type Patterns Cheat Sheet
+
+```typescript
+// Branded types
+type UserId = string & { readonly brand: unique symbol };
+const userId = id as UserId;
+
+// Result type
+type Result<T, E = Error> =
+  | { success: true; data: T }
+  | { success: false; error: E };
+
+// Guard function
+function isUser(obj: unknown): obj is User {
+  return typeof obj === 'object' && obj !== null && 'id' in obj;
+}
+
+// Readonly deep
+type DeepReadonly<T> = {
+  readonly [P in keyof T]: DeepReadonly<T[P]>;
+};
+
+// Optional fields
+type PartialBy<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
+```
+
+### tsconfig.json Essentials
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": true
+  }
+}
+```
+
+### Project Structure
+
+```
+my_project/
+├── src/
+│   ├── index.ts          # Entry point
+│   ├── types/            # Type definitions
+│   ├── domain/           # Domain models
+│   ├── services/         # Business logic
+│   └── utils/            # Utilities
+├── tests/
+├── tsconfig.json
+└── package.json
+```
+
+---
+
 ## References
 
 - [TypeScript Handbook](https://www.typescriptlang.org/docs/)

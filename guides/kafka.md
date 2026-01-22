@@ -158,6 +158,426 @@ Processing:
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new Kafka code.**
+
+### TDD Cycle
+
+```
+TDD RED-GREEN-REFACTOR CYCLE:
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                                                                     │
+│    ┌─────────────┐                                                  │
+│    │             │                                                  │
+│    │    RED      │  1. Write a failing test first                  │
+│    │   (FAIL)    │     - Define expected behavior                  │
+│    │             │     - Test MUST fail initially                  │
+│    └──────┬──────┘                                                  │
+│           │                                                         │
+│           ▼                                                         │
+│    ┌─────────────┐                                                  │
+│    │             │                                                  │
+│    │   GREEN     │  2. Write minimal code to pass                  │
+│    │   (PASS)    │     - Only enough to make test pass             │
+│    │             │     - No premature optimization                  │
+│    └──────┬──────┘                                                  │
+│           │                                                         │
+│           ▼                                                         │
+│    ┌─────────────┐                                                  │
+│    │             │                                                  │
+│    │  REFACTOR   │  3. Improve code quality                        │
+│    │  (IMPROVE)  │     - Clean up duplication                      │
+│    │             │     - Tests MUST stay green                     │
+│    └──────┬──────┘                                                  │
+│           │                                                         │
+│           └──────────────────────────────────────────────▶ Repeat   │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Example TDD Workflow for Kafka Producers/Consumers
+
+```
+TDD WORKFLOW FOR KAFKA ORDER PROCESSOR:
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                                                                     │
+│  STEP 1: RED - Write Failing Test                                  │
+│  ───────────────────────────────────────────────────────────────── │
+│                                                                     │
+│  // Test: Order processor should produce invoice for valid order   │
+│  test("processes valid order and produces invoice") {              │
+│      // Given                                                       │
+│      order = Order(id="123", customerId="C001", amount=100.00)     │
+│                                                                     │
+│      // When                                                        │
+│      producer.send("orders-input", order.id, order)                │
+│      invoice = consumer.poll("invoices-output", timeout=10s)       │
+│                                                                     │
+│      // Then                                                        │
+│      expect(invoice).notNull()                                     │
+│      expect(invoice.orderId).equals("123")                         │
+│      expect(invoice.amount).equals(100.00)                         │
+│  }                                                                  │
+│                                                                     │
+│  Run: test-runner                                                   │
+│  Result: ❌ FAILS - OrderProcessor class not found                 │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                                                                     │
+│  STEP 2: GREEN - Write Minimal Implementation                      │
+│  ───────────────────────────────────────────────────────────────── │
+│                                                                     │
+│  // Minimal OrderProcessor to make test pass                       │
+│  class OrderProcessor {                                             │
+│      constructor(inputTopic, outputTopic) {                        │
+│          this.consumer = createConsumer(inputTopic)                │
+│          this.producer = createProducer()                          │
+│          this.outputTopic = outputTopic                            │
+│      }                                                              │
+│                                                                     │
+│      process() {                                                    │
+│          records = consumer.poll()                                 │
+│          for (record in records) {                                 │
+│              order = record.value                                  │
+│              invoice = Invoice(                                    │
+│                  orderId: order.id,                                │
+│                  amount: order.amount                              │
+│              )                                                      │
+│              producer.send(outputTopic, invoice.orderId, invoice)  │
+│          }                                                          │
+│      }                                                              │
+│  }                                                                  │
+│                                                                     │
+│  Run: test-runner                                                   │
+│  Result: ✅ PASSES - Test now passes                               │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                                                                     │
+│  STEP 3: REFACTOR - Add Transactional Processing                   │
+│  ───────────────────────────────────────────────────────────────── │
+│                                                                     │
+│  // Refactored with exactly-once semantics                         │
+│  class OrderProcessor {                                             │
+│      constructor(inputTopic, outputTopic, transactionalId) {       │
+│          this.consumer = createTransactionalConsumer(inputTopic)   │
+│          this.producer = createTransactionalProducer(transactionalId)│
+│          this.outputTopic = outputTopic                            │
+│          this.producer.initTransactions()                          │
+│      }                                                              │
+│                                                                     │
+│      process() {                                                    │
+│          records = consumer.poll()                                 │
+│          if (records.isEmpty()) return                             │
+│                                                                     │
+│          producer.beginTransaction()                               │
+│          try {                                                      │
+│              for (record in records) {                             │
+│                  invoice = processOrder(record.value)              │
+│                  producer.send(outputTopic, invoice.orderId, invoice)│
+│              }                                                      │
+│              producer.sendOffsetsToTransaction(                    │
+│                  consumer.getOffsetsToCommit(),                    │
+│                  consumer.groupMetadata()                          │
+│              )                                                      │
+│              producer.commitTransaction()                          │
+│          } catch (e) {                                              │
+│              producer.abortTransaction()                           │
+│              throw e                                                │
+│          }                                                          │
+│      }                                                              │
+│                                                                     │
+│      processOrder(order) {                                         │
+│          return Invoice(orderId: order.id, amount: order.amount)   │
+│      }                                                              │
+│  }                                                                  │
+│                                                                     │
+│  Run: test-runner                                                   │
+│  Result: ✅ PASSES - Tests still pass after refactoring            │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Visual Step-by-Step TDD Example
+
+```
+TDD FOR KAFKA CONSUMER WITH DEAD LETTER QUEUE:
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ ITERATION 1: Basic Message Processing                               │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  RED:    test("consumes and processes valid message")              │
+│          → FAILS: Consumer not implemented                         │
+│                                                                     │
+│  GREEN:  Implement basic consumer.poll() and process()             │
+│          → PASSES                                                   │
+│                                                                     │
+│  REFACTOR: Extract message validation logic                        │
+│          → PASSES                                                   │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ ITERATION 2: Error Handling                                         │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  RED:    test("sends invalid message to DLQ")                      │
+│          → FAILS: DLQ handling not implemented                     │
+│                                                                     │
+│  GREEN:  Add try/catch, implement sendToDLQ()                      │
+│          → PASSES                                                   │
+│                                                                     │
+│  REFACTOR: Extract DLQ message builder with metadata               │
+│          → PASSES                                                   │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ ITERATION 3: Exactly-Once Semantics                                 │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  RED:    test("no duplicates on producer retry")                   │
+│          → FAILS: Not using transactions                           │
+│                                                                     │
+│  GREEN:  Wrap processing in Kafka transaction                      │
+│          → PASSES                                                   │
+│                                                                     │
+│  REFACTOR: Extract transaction wrapper, add offset management      │
+│          → PASSES                                                   │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ ITERATION 4: State Recovery                                         │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  RED:    test("resumes from committed offset after restart")       │
+│          → FAILS: State not properly recovered                     │
+│                                                                     │
+│  GREEN:  Implement offset seek on startup from committed position  │
+│          → PASSES                                                   │
+│                                                                     │
+│  REFACTOR: Add snapshot support for faster recovery                │
+│          → PASSES                                                   │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every Kafka bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+BUG FIX WORKFLOW:
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                                                                     │
+│  1. Bug Reported/Discovered                                        │
+│     │                                                               │
+│     │   "Consumer processes duplicate messages after rebalance"    │
+│     │                                                               │
+│     ▼                                                               │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │ 2. Write Regression Test (MUST FAIL)                        │   │
+│  │                                                              │   │
+│  │    test("BUG-1234: no duplicates after consumer rebalance") │   │
+│  │    {                                                         │   │
+│  │        // Setup: send 10 messages                           │   │
+│  │        // Trigger: force rebalance mid-processing           │   │
+│  │        // Assert: exactly 10 unique messages processed      │   │
+│  │    }                                                         │   │
+│  │                                                              │   │
+│  │    Result: ❌ FAILS - 12 messages processed (2 duplicates)  │   │
+│  │                                                              │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│     │                                                               │
+│     ▼                                                               │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │ 3. Verify Test Fails for Right Reason                       │   │
+│  │                                                              │   │
+│  │    - Duplicate messages due to uncommitted offsets          │   │
+│  │    - Rebalance occurred before transaction commit           │   │
+│  │    - Consumer re-read already-processed messages            │   │
+│  │                                                              │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│     │                                                               │
+│     ▼                                                               │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │ 4. Fix the Bug                                               │   │
+│  │                                                              │   │
+│  │    // Add rebalance listener to commit before revocation    │   │
+│  │    consumer.subscribe(topics, new RebalanceListener() {     │   │
+│  │        onPartitionsRevoked(partitions) {                    │   │
+│  │            producer.commitTransaction()  // Commit first!   │   │
+│  │        }                                                     │   │
+│  │    })                                                        │   │
+│  │                                                              │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│     │                                                               │
+│     ▼                                                               │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │ 5. Verify Test Passes                                        │   │
+│  │                                                              │   │
+│  │    Run: test-runner                                          │   │
+│  │    Result: ✅ PASSES - Exactly 10 messages processed        │   │
+│  │                                                              │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│     │                                                               │
+│     ▼                                                               │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │ 6. Document in Test Comments                                 │   │
+│  │                                                              │   │
+│  │    /**                                                       │   │
+│  │     * Regression test for BUG-1234                          │   │
+│  │     * Issue: Duplicates after consumer rebalance            │   │
+│  │     * Root cause: Transaction not committed before revoke   │   │
+│  │     * Fix: Added rebalance listener with commit             │   │
+│  │     */                                                       │   │
+│  │                                                              │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│     │                                                               │
+│     ▼                                                               │
+│  7. Deploy with Confidence (Regression Prevented Forever)          │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Example Bug Fix with Regression Test
+
+```
+BUG REPORT #4567: Messages Lost During Producer Timeout
+
+SYMPTOMS:
+  - Sporadic message loss under high load
+  - delivery.timeout.ms exceeded during traffic spikes
+  - No errors logged, messages silently dropped
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ STEP 1-2: Write Test That Reproduces the Bug                        │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  /**                                                                │
+│   * Regression test for BUG-4567                                   │
+│   * Issue: Messages lost when delivery.timeout.ms exceeded         │
+│   */                                                                │
+│  test("BUG-4567: handles producer timeout without message loss") { │
+│      // Given: Producer with short timeout to trigger issue        │
+│      producer = createProducer(                                    │
+│          deliveryTimeoutMs: 1000,  // Artificially short           │
+│          acks: "all"                                               │
+│      )                                                              │
+│                                                                     │
+│      // And: Slow broker simulation                                │
+│      simulateBrokerLatency(2000ms)                                 │
+│                                                                     │
+│      // When: Send message                                         │
+│      result = producer.send("orders", "key", order)                │
+│                                                                     │
+│      // Then: Should handle timeout gracefully                     │
+│      expect(result.failed).toBeTrue()                              │
+│      expect(failedMessages.contains(order)).toBeTrue()             │
+│      expect(dlqMessages.contains(order)).toBeTrue()  // ❌ FAILS   │
+│  }                                                                  │
+│                                                                     │
+│  Run: test-runner                                                   │
+│  Result: ❌ FAILS - Message not in DLQ (lost silently)             │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ STEP 3: Verify Failure Reason                                       │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  Root Cause Analysis:                                               │
+│  - Producer callback not handling TimeoutException                 │
+│  - Message dropped without notification                            │
+│  - No retry or DLQ mechanism for timed-out sends                   │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ STEP 4: Implement the Fix                                           │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  // Before (buggy):                                                 │
+│  producer.send(record)  // Fire and forget, no callback            │
+│                                                                     │
+│  // After (fixed):                                                  │
+│  producer.send(record, (metadata, exception) -> {                  │
+│      if (exception != null) {                                      │
+│          if (exception instanceof TimeoutException) {              │
+│              // Log the failure                                    │
+│              log.error("Send timeout for key={}", record.key())    │
+│                                                                     │
+│              // Track failed message                               │
+│              failedMessages.add(record)                            │
+│                                                                     │
+│              // Send to DLQ for later processing                   │
+│              sendToDLQ(record, exception)                          │
+│                                                                     │
+│              // Emit metric                                        │
+│              metrics.increment("producer.timeout.count")           │
+│          }                                                          │
+│      }                                                              │
+│  })                                                                 │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ STEP 5: Verify Test Passes                                          │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  Run: test-runner                                                   │
+│  Result: ✅ PASSES                                                  │
+│                                                                     │
+│  - Timeout exception caught                                        │
+│  - Message tracked in failedMessages                               │
+│  - Message sent to DLQ                                             │
+│  - Metric emitted                                                  │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ STEP 6: Final Test with Documentation                               │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  /**                                                                │
+│   * Regression test for BUG-4567                                   │
+│   *                                                                 │
+│   * Issue: Messages silently lost when delivery.timeout.ms         │
+│   *        exceeded during traffic spikes                          │
+│   *                                                                 │
+│   * Root cause: Producer callback not handling TimeoutException    │
+│   *                                                                 │
+│   * Fix: Added timeout handling with DLQ fallback                  │
+│   *      - Catch TimeoutException in producer callback             │
+│   *      - Track failed message for visibility                     │
+│   *      - Send to DLQ for later retry/investigation               │
+│   *      - Emit metric for alerting                                │
+│   *                                                                 │
+│   * Resolved: 2024-01-15 by @developer                             │
+│   */                                                                │
+│  test("BUG-4567: handles producer timeout without message loss")   │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## 3. Transactional Processing Pattern (MANDATORY)
 
 ### A. The Read-Process-Write Pattern
@@ -1831,6 +2251,370 @@ while (running) {
 > "Exactly-once requires transactions. Without them, you have at-most-once or at-least-once, but never exactly-once."
 
 > "Stateless services aren't stateless - they recover state from the commit log. Design your events to support full state reconstruction."
+
+---
+
+## Quick Reference
+
+### Common kafka-* CLI Commands
+
+```bash
+# ═══════════════════════════════════════════════════════════════════
+# TOPIC MANAGEMENT
+# ═══════════════════════════════════════════════════════════════════
+
+# List all topics
+kafka-topics.sh --bootstrap-server localhost:9092 --list
+
+# Create a topic with partitions and replication
+kafka-topics.sh --bootstrap-server localhost:9092 \
+  --create --topic orders \
+  --partitions 12 \
+  --replication-factor 3 \
+  --config retention.ms=604800000 \
+  --config min.insync.replicas=2
+
+# Describe topic configuration
+kafka-topics.sh --bootstrap-server localhost:9092 \
+  --describe --topic orders
+
+# Delete a topic
+kafka-topics.sh --bootstrap-server localhost:9092 \
+  --delete --topic orders
+
+# Alter topic partitions (can only increase)
+kafka-topics.sh --bootstrap-server localhost:9092 \
+  --alter --topic orders --partitions 24
+
+# ═══════════════════════════════════════════════════════════════════
+# CONSUMER GROUP MANAGEMENT
+# ═══════════════════════════════════════════════════════════════════
+
+# List all consumer groups
+kafka-consumer-groups.sh --bootstrap-server localhost:9092 --list
+
+# Describe consumer group (shows lag!)
+kafka-consumer-groups.sh --bootstrap-server localhost:9092 \
+  --describe --group order-processor-group
+
+# Reset consumer group offsets to earliest
+kafka-consumer-groups.sh --bootstrap-server localhost:9092 \
+  --group order-processor-group \
+  --topic orders \
+  --reset-offsets --to-earliest --execute
+
+# Reset to specific offset
+kafka-consumer-groups.sh --bootstrap-server localhost:9092 \
+  --group order-processor-group \
+  --topic orders \
+  --reset-offsets --to-offset 1000 --execute
+
+# Reset to timestamp
+kafka-consumer-groups.sh --bootstrap-server localhost:9092 \
+  --group order-processor-group \
+  --topic orders \
+  --reset-offsets --to-datetime 2024-01-15T00:00:00.000 --execute
+
+# Delete consumer group
+kafka-consumer-groups.sh --bootstrap-server localhost:9092 \
+  --delete --group order-processor-group
+
+# ═══════════════════════════════════════════════════════════════════
+# PRODUCING & CONSUMING (DEBUG/TESTING)
+# ═══════════════════════════════════════════════════════════════════
+
+# Produce messages from console
+kafka-console-producer.sh --bootstrap-server localhost:9092 \
+  --topic orders \
+  --property "parse.key=true" \
+  --property "key.separator=:"
+
+# Consume messages from beginning
+kafka-console-consumer.sh --bootstrap-server localhost:9092 \
+  --topic orders \
+  --from-beginning \
+  --property print.key=true \
+  --property key.separator=":"
+
+# Consume with consumer group
+kafka-console-consumer.sh --bootstrap-server localhost:9092 \
+  --topic orders \
+  --group debug-consumer \
+  --property print.key=true
+
+# Consume specific partition
+kafka-console-consumer.sh --bootstrap-server localhost:9092 \
+  --topic orders \
+  --partition 0 \
+  --offset 100
+
+# ═══════════════════════════════════════════════════════════════════
+# CLUSTER & BROKER MANAGEMENT
+# ═══════════════════════════════════════════════════════════════════
+
+# Get cluster metadata
+kafka-metadata.sh --snapshot /var/kafka/data/__cluster_metadata-0/00000000000000000000.log \
+  --command "cat"
+
+# List broker configurations
+kafka-configs.sh --bootstrap-server localhost:9092 \
+  --entity-type brokers --entity-name 0 --describe
+
+# Alter broker configuration
+kafka-configs.sh --bootstrap-server localhost:9092 \
+  --entity-type brokers --entity-name 0 \
+  --alter --add-config log.retention.hours=168
+
+# ═══════════════════════════════════════════════════════════════════
+# TOPIC CONFIGURATION
+# ═══════════════════════════════════════════════════════════════════
+
+# Describe topic configs
+kafka-configs.sh --bootstrap-server localhost:9092 \
+  --entity-type topics --entity-name orders --describe
+
+# Alter topic retention
+kafka-configs.sh --bootstrap-server localhost:9092 \
+  --entity-type topics --entity-name orders \
+  --alter --add-config retention.ms=2592000000
+
+# Enable compaction
+kafka-configs.sh --bootstrap-server localhost:9092 \
+  --entity-type topics --entity-name user-profiles \
+  --alter --add-config cleanup.policy=compact
+```
+
+### Kafka Patterns Cheat Sheet
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                     KAFKA PATTERNS QUICK REFERENCE                  │
+└─────────────────────────────────────────────────────────────────────┘
+
+DELIVERY SEMANTICS:
+┌────────────────────┬────────────────────────────────────────────────┐
+│ Semantic           │ Configuration                                  │
+├────────────────────┼────────────────────────────────────────────────┤
+│ At-Most-Once       │ acks=0, enable.auto.commit=true               │
+│ (may lose)         │ Use for: Metrics, logs                        │
+├────────────────────┼────────────────────────────────────────────────┤
+│ At-Least-Once      │ acks=all, enable.auto.commit=false            │
+│ (may duplicate)    │ Manual commit after processing                 │
+│                    │ Use for: Most applications + idempotency       │
+├────────────────────┼────────────────────────────────────────────────┤
+│ Exactly-Once       │ transactional.id=xxx, acks=all                │
+│ (guaranteed)       │ isolation.level=read_committed                 │
+│                    │ Use for: Financial, critical data              │
+└────────────────────┴────────────────────────────────────────────────┘
+
+PROCESSING PATTERNS:
+┌────────────────────┬────────────────────────────────────────────────┐
+│ Pattern            │ When to Use                                    │
+├────────────────────┼────────────────────────────────────────────────┤
+│ Simple Consumer    │ Read-only, no downstream writes                │
+│                    │ Manual commit after processing                 │
+├────────────────────┼────────────────────────────────────────────────┤
+│ Transactional      │ Read-process-write pipelines                   │
+│ Read-Process-Write │ Exactly-once across input/output topics        │
+├────────────────────┼────────────────────────────────────────────────┤
+│ Event Sourcing     │ State reconstruction from events               │
+│                    │ Replay from beginning for recovery             │
+├────────────────────┼────────────────────────────────────────────────┤
+│ CQRS               │ Separate read/write models                     │
+│                    │ Kafka as event store                           │
+├────────────────────┼────────────────────────────────────────────────┤
+│ Saga/Choreography  │ Distributed transactions                       │
+│                    │ Each service publishes events                  │
+└────────────────────┴────────────────────────────────────────────────┘
+
+TOPIC DESIGN:
+┌────────────────────┬────────────────────────────────────────────────┐
+│ Topic Type         │ Configuration                                  │
+├────────────────────┼────────────────────────────────────────────────┤
+│ Event Log          │ cleanup.policy=delete                          │
+│                    │ retention.ms=604800000 (7 days)                │
+├────────────────────┼────────────────────────────────────────────────┤
+│ State Store        │ cleanup.policy=compact                         │
+│ (Compacted)        │ retention.ms=-1 (forever)                      │
+├────────────────────┼────────────────────────────────────────────────┤
+│ Dead Letter Queue  │ cleanup.policy=delete                          │
+│                    │ retention.ms=2592000000 (30 days)              │
+│                    │ partitions=1 (ordering for investigation)      │
+└────────────────────┴────────────────────────────────────────────────┘
+
+KEY SELECTION:
+┌────────────────────┬────────────────────────────────────────────────┐
+│ Use Case           │ Recommended Key                                │
+├────────────────────┼────────────────────────────────────────────────┤
+│ Order Processing   │ order_id (all events for order together)      │
+│ User Activity      │ user_id (all user actions ordered)            │
+│ IoT Devices        │ device_id (device events ordered)             │
+│ Multi-tenant       │ tenant_id:entity_id (isolation + ordering)    │
+│ Global Ordering    │ Single partition (limits parallelism!)        │
+└────────────────────┴────────────────────────────────────────────────┘
+
+PARTITION COUNT GUIDELINES:
+┌────────────────────┬────────────────────────────────────────────────┐
+│ Throughput Need    │ Recommended Partitions                         │
+├────────────────────┼────────────────────────────────────────────────┤
+│ Low (<10 MB/s)     │ 6 partitions                                   │
+│ Medium (10-50 MB/s)│ 12-30 partitions                               │
+│ High (>50 MB/s)    │ 30-100 partitions                              │
+│ Max consumers      │ partitions >= max_consumer_instances           │
+└────────────────────┴────────────────────────────────────────────────┘
+
+ERROR HANDLING:
+┌────────────────────┬────────────────────────────────────────────────┐
+│ Error Type         │ Action                                         │
+├────────────────────┼────────────────────────────────────────────────┤
+│ Retryable          │ Exponential backoff, max 5 retries            │
+│ (timeout, network) │ delay = min(1s * 2^attempt, 30s) + jitter     │
+├────────────────────┼────────────────────────────────────────────────┤
+│ Non-Retryable      │ Send to DLQ immediately                       │
+│ (validation, data) │ Include original + error metadata              │
+├────────────────────┼────────────────────────────────────────────────┤
+│ ProducerFenced     │ Shutdown instance (zombie fencing)            │
+│                    │ Another instance took over transactional.id    │
+└────────────────────┴────────────────────────────────────────────────┘
+```
+
+### Configuration Structure
+
+```
+PRODUCER CONFIGURATION:
+┌─────────────────────────────────────────────────────────────────────┐
+│ # ═══════════════════════════════════════════════════════════════  │
+│ # REQUIRED FOR PRODUCTION                                          │
+│ # ═══════════════════════════════════════════════════════════════  │
+│                                                                     │
+│ bootstrap.servers=broker1:9092,broker2:9092,broker3:9092           │
+│ acks=all                              # Wait for all replicas      │
+│ enable.idempotence=true               # Deduplicate retries        │
+│ retries=2147483647                    # Retry indefinitely         │
+│ max.in.flight.requests.per.connection=5  # With idempotence        │
+│                                                                     │
+│ # ═══════════════════════════════════════════════════════════════  │
+│ # FOR EXACTLY-ONCE (add to above)                                  │
+│ # ═══════════════════════════════════════════════════════════════  │
+│                                                                     │
+│ transactional.id=order-processor-${HOSTNAME}                       │
+│ transaction.timeout.ms=60000                                       │
+│                                                                     │
+│ # ═══════════════════════════════════════════════════════════════  │
+│ # PERFORMANCE TUNING                                               │
+│ # ═══════════════════════════════════════════════════════════════  │
+│                                                                     │
+│ batch.size=65536                      # 64KB batches               │
+│ linger.ms=10                          # Wait for batch fill        │
+│ compression.type=lz4                  # Compress batches           │
+│ buffer.memory=67108864                # 64MB buffer                │
+│ delivery.timeout.ms=120000            # 2 min total timeout        │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+CONSUMER CONFIGURATION:
+┌─────────────────────────────────────────────────────────────────────┐
+│ # ═══════════════════════════════════════════════════════════════  │
+│ # REQUIRED FOR PRODUCTION                                          │
+│ # ═══════════════════════════════════════════════════════════════  │
+│                                                                     │
+│ bootstrap.servers=broker1:9092,broker2:9092,broker3:9092           │
+│ group.id=order-processor-group                                     │
+│ enable.auto.commit=false              # Manual commit only!        │
+│ auto.offset.reset=earliest            # Start from beginning       │
+│                                                                     │
+│ # ═══════════════════════════════════════════════════════════════  │
+│ # FOR EXACTLY-ONCE (add to above)                                  │
+│ # ═══════════════════════════════════════════════════════════════  │
+│                                                                     │
+│ isolation.level=read_committed        # Only see committed         │
+│                                                                     │
+│ # ═══════════════════════════════════════════════════════════════  │
+│ # SESSION & REBALANCE                                              │
+│ # ═══════════════════════════════════════════════════════════════  │
+│                                                                     │
+│ session.timeout.ms=45000              # Dead detection timeout     │
+│ heartbeat.interval.ms=15000           # Heartbeat frequency        │
+│ max.poll.interval.ms=300000           # Processing timeout         │
+│ max.poll.records=500                  # Records per poll           │
+│ partition.assignment.strategy=\                                    │
+│   org.apache.kafka.clients.consumer.CooperativeStickyAssignor      │
+│                                                                     │
+│ # ═══════════════════════════════════════════════════════════════  │
+│ # FETCH TUNING                                                     │
+│ # ═══════════════════════════════════════════════════════════════  │
+│                                                                     │
+│ fetch.min.bytes=1024                  # Min 1KB per fetch          │
+│ fetch.max.wait.ms=500                 # Max wait time              │
+│ fetch.max.bytes=52428800              # 50MB max per request       │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+TOPIC CONFIGURATION:
+┌─────────────────────────────────────────────────────────────────────┐
+│ # ═══════════════════════════════════════════════════════════════  │
+│ # EVENT LOG TOPIC                                                  │
+│ # ═══════════════════════════════════════════════════════════════  │
+│                                                                     │
+│ partitions=12                                                      │
+│ replication.factor=3                                               │
+│ min.insync.replicas=2                                              │
+│ cleanup.policy=delete                                              │
+│ retention.ms=604800000                # 7 days                     │
+│ retention.bytes=-1                    # No size limit              │
+│                                                                     │
+│ # ═══════════════════════════════════════════════════════════════  │
+│ # COMPACTED TOPIC (State Store)                                    │
+│ # ═══════════════════════════════════════════════════════════════  │
+│                                                                     │
+│ partitions=12                                                      │
+│ replication.factor=3                                               │
+│ min.insync.replicas=2                                              │
+│ cleanup.policy=compact                                             │
+│ retention.ms=-1                       # Keep forever               │
+│ min.cleanable.dirty.ratio=0.1         # Aggressive compaction      │
+│ delete.retention.ms=86400000          # 24h tombstone retention    │
+│                                                                     │
+│ # ═══════════════════════════════════════════════════════════════  │
+│ # DEAD LETTER QUEUE TOPIC                                          │
+│ # ═══════════════════════════════════════════════════════════════  │
+│                                                                     │
+│ partitions=3                          # Lower parallelism OK       │
+│ replication.factor=3                                               │
+│ min.insync.replicas=2                                              │
+│ cleanup.policy=delete                                              │
+│ retention.ms=2592000000               # 30 days for investigation  │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+BROKER CONFIGURATION (Critical Settings):
+┌─────────────────────────────────────────────────────────────────────┐
+│ # ═══════════════════════════════════════════════════════════════  │
+│ # DURABILITY & RELIABILITY                                         │
+│ # ═══════════════════════════════════════════════════════════════  │
+│                                                                     │
+│ default.replication.factor=3                                       │
+│ min.insync.replicas=2                 # At least 2 must ack        │
+│ unclean.leader.election.enable=false  # Prevent data loss          │
+│                                                                     │
+│ # ═══════════════════════════════════════════════════════════════  │
+│ # LOG MANAGEMENT                                                   │
+│ # ═══════════════════════════════════════════════════════════════  │
+│                                                                     │
+│ log.retention.hours=168               # 7 days default             │
+│ log.segment.bytes=1073741824          # 1GB segments               │
+│ log.cleanup.policy=delete                                          │
+│                                                                     │
+│ # ═══════════════════════════════════════════════════════════════  │
+│ # TRANSACTIONS                                                     │
+│ # ═══════════════════════════════════════════════════════════════  │
+│                                                                     │
+│ transaction.max.timeout.ms=900000     # 15 min max                 │
+│ transaction.state.log.replication.factor=3                         │
+│ transaction.state.log.min.isr=2                                    │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 

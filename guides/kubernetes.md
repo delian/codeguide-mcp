@@ -160,6 +160,454 @@ NAMESPACE REQUIREMENTS:
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new Kubernetes manifests and configurations.**
+
+### TDD Cycle
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    TDD CYCLE FOR KUBERNETES                      │
+│                                                                  │
+│    ┌──────────┐                                                 │
+│    │   RED    │◀────────────────────────────────────┐           │
+│    │          │                                      │           │
+│    │ Write a  │                                      │           │
+│    │ failing  │                                      │           │
+│    │  test    │                                      │           │
+│    └────┬─────┘                                      │           │
+│         │                                            │           │
+│         ▼                                            │           │
+│    ┌──────────┐                                      │           │
+│    │  GREEN   │                                      │           │
+│    │          │                                      │           │
+│    │  Write   │                                      │           │
+│    │ minimal  │                                      │           │
+│    │ manifest │                                      │           │
+│    └────┬─────┘                                      │           │
+│         │                                            │           │
+│         ▼                                            │           │
+│    ┌──────────┐                                      │           │
+│    │ REFACTOR │──────────────────────────────────────┘           │
+│    │          │                                                  │
+│    │ Improve  │                                                  │
+│    │ keeping  │                                                  │
+│    │  tests   │                                                  │
+│    │  green   │                                                  │
+│    └──────────┘                                                  │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Example TDD Workflow for Kubernetes Manifests
+
+```yaml
+# Step 1: RED - Write failing validation test first
+# File: tests/deployment_test.yaml (using kubeconform/conftest)
+
+# conftest policy: policy/deployment.rego
+package main
+
+deny[msg] {
+  input.kind == "Deployment"
+  not input.spec.template.spec.securityContext.runAsNonRoot
+  msg := "Deployment must have runAsNonRoot: true"
+}
+
+deny[msg] {
+  input.kind == "Deployment"
+  container := input.spec.template.spec.containers[_]
+  not container.resources.limits.memory
+  msg := sprintf("Container %s must have memory limits", [container.name])
+}
+
+deny[msg] {
+  input.kind == "Deployment"
+  container := input.spec.template.spec.containers[_]
+  container.securityContext.allowPrivilegeEscalation == true
+  msg := sprintf("Container %s must not allow privilege escalation", [container.name])
+}
+
+# Run: conftest test deployment.yaml --policy policy/
+# FAILS - deployment.yaml doesn't exist yet or fails policies
+```
+
+```yaml
+# Step 2: GREEN - Write minimal manifest to pass tests
+# File: deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+  namespace: team-orders
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: order-service
+  template:
+    metadata:
+      labels:
+        app: order-service
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: order-service
+          image: registry.company.com/orders/order-service:v1.0.0
+          securityContext:
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+# Run: conftest test deployment.yaml --policy policy/
+# PASSES - all policies satisfied
+```
+
+```yaml
+# Step 3: REFACTOR - Add production-ready configurations
+# File: deployment.yaml (enhanced)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+  namespace: team-orders
+  labels:
+    app: order-service
+    version: v1.0.0
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: order-service
+  template:
+    metadata:
+      labels:
+        app: order-service
+        version: v1.0.0
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+    spec:
+      serviceAccountName: order-service
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: order-service
+          image: registry.company.com/orders/order-service:v1.0.0
+          imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          ports:
+            - name: http
+              containerPort: 8080
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: order-service
+                topologyKey: kubernetes.io/hostname
+      terminationGracePeriodSeconds: 30
+
+# Run: conftest test deployment.yaml --policy policy/
+# PASSES - tests still green after refactoring
+```
+
+### Visual Step-by-Step TDD Example
+
+```
+TDD WORKFLOW FOR HELM CHARTS:
+
+Step 1: RED - Define expected behavior
+┌─────────────────────────────────────────────────────────────────┐
+│  # Write helm unittest tests first                              │
+│  # tests/deployment_test.yaml                                   │
+│  suite: deployment test                                         │
+│  templates:                                                     │
+│    - deployment.yaml                                            │
+│  tests:                                                         │
+│    - it: should set security context                            │
+│      asserts:                                                   │
+│        - equal:                                                 │
+│            path: spec.template.spec.securityContext.runAsNonRoot│
+│            value: true                                          │
+│    - it: should have resource limits                            │
+│      asserts:                                                   │
+│        - isNotNull:                                             │
+│            path: spec.template.spec.containers[0].resources.limits│
+│                                                                 │
+│  $ helm unittest ./mychart                                      │
+│  FAIL - templates/deployment.yaml not found                     │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+Step 2: GREEN - Create minimal chart
+┌─────────────────────────────────────────────────────────────────┐
+│  # templates/deployment.yaml                                    │
+│  apiVersion: apps/v1                                            │
+│  kind: Deployment                                               │
+│  metadata:                                                      │
+│    name: {{ .Release.Name }}                                    │
+│  spec:                                                          │
+│    template:                                                    │
+│      spec:                                                      │
+│        securityContext:                                         │
+│          runAsNonRoot: true                                     │
+│        containers:                                              │
+│          - name: app                                            │
+│            resources:                                           │
+│              limits:                                            │
+│                cpu: 500m                                        │
+│                memory: 512Mi                                    │
+│                                                                 │
+│  $ helm unittest ./mychart                                      │
+│  PASS - all tests green                                         │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+Step 3: REFACTOR - Add production features
+┌─────────────────────────────────────────────────────────────────┐
+│  # Enhance with values.yaml templating                          │
+│  # Add more security controls                                   │
+│  # Add health probes                                            │
+│  # Add pod disruption budget                                    │
+│                                                                 │
+│  $ helm unittest ./mychart                                      │
+│  PASS - tests still green                                       │
+│                                                                 │
+│  $ helm lint ./mychart                                          │
+│  PASS - no linting errors                                       │
+│                                                                 │
+│  $ helm template ./mychart | kubeconform -strict                │
+│  PASS - valid Kubernetes manifests                              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### TDD Testing Tools for Kubernetes
+
+```
+KUBERNETES TDD TOOLKIT:
+
+Tool                 │ Purpose                    │ Command
+─────────────────────┼────────────────────────────┼──────────────────────────
+kubeconform          │ Schema validation          │ kubeconform -strict *.yaml
+conftest             │ Policy testing (OPA)       │ conftest test *.yaml
+helm unittest        │ Helm chart testing         │ helm unittest ./chart
+kuttl                │ E2E K8s testing            │ kubectl kuttl test
+kubeval              │ Legacy schema validation   │ kubeval *.yaml
+pluto                │ Deprecated API detection   │ pluto detect-files -d .
+polaris              │ Best practices audit       │ polaris audit --audit-path .
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every Kubernetes configuration bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    BUG FIX WORKFLOW                              │
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │ 1. Bug Reported/Discovered                                  │ │
+│  │    "Pods failing to start due to missing security context" │ │
+│  └─────────────────────────┬──────────────────────────────────┘ │
+│                            ▼                                     │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │ 2. Write test that REPRODUCES the bug (test will FAIL)     │ │
+│  │    conftest policy to detect missing securityContext       │ │
+│  └─────────────────────────┬──────────────────────────────────┘ │
+│                            ▼                                     │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │ 3. Verify the test fails for the right reason              │ │
+│  │    $ conftest test deployment.yaml                         │ │
+│  │    FAIL - "securityContext.runAsNonRoot required"          │ │
+│  └─────────────────────────┬──────────────────────────────────┘ │
+│                            ▼                                     │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │ 4. Fix the bug (make the test pass)                        │ │
+│  │    Add securityContext to deployment spec                  │ │
+│  └─────────────────────────┬──────────────────────────────────┘ │
+│                            ▼                                     │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │ 5. Verify the test now PASSES                              │ │
+│  │    $ conftest test deployment.yaml                         │ │
+│  │    PASS - all policies satisfied                           │ │
+│  └─────────────────────────┬──────────────────────────────────┘ │
+│                            ▼                                     │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │ 6. Document the bug in test comments (include bug ID)      │ │
+│  │    # BUG-1234: Ensure pods have security context           │ │
+│  └─────────────────────────┬──────────────────────────────────┘ │
+│                            ▼                                     │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │ 7. Deploy with confidence (regression prevented)           │ │
+│  │    Policy now part of CI/CD pipeline                       │ │
+│  └────────────────────────────────────────────────────────────┘ │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Example Bug Fix with Regression Test
+
+```yaml
+# Bug Report #K8S-1234: Pods OOMKilled due to missing memory limits
+# Impact: Production services experiencing random restarts
+# Root Cause: Deployment missing resource limits configuration
+
+# Step 1-2: Write test that reproduces the bug
+# File: policy/resource-limits.rego
+package kubernetes.resources
+
+# BUG-K8S-1234: Ensure all containers have memory limits
+deny[msg] {
+  input.kind == "Deployment"
+  container := input.spec.template.spec.containers[_]
+  not container.resources.limits.memory
+  msg := sprintf(
+    "BUG-K8S-1234: Container '%s' in Deployment '%s' must have memory limits to prevent OOMKilled",
+    [container.name, input.metadata.name]
+  )
+}
+
+# Also check for CPU limits
+deny[msg] {
+  input.kind == "Deployment"
+  container := input.spec.template.spec.containers[_]
+  not container.resources.limits.cpu
+  msg := sprintf(
+    "Container '%s' in Deployment '%s' should have CPU limits",
+    [container.name, input.metadata.name]
+  )
+}
+
+# Ensure requests are also set
+deny[msg] {
+  input.kind == "Deployment"
+  container := input.spec.template.spec.containers[_]
+  not container.resources.requests.memory
+  msg := sprintf(
+    "Container '%s' in Deployment '%s' must have memory requests",
+    [container.name, input.metadata.name]
+  )
+}
+```
+
+```bash
+# Run: conftest test deployment.yaml --policy policy/
+# FAILS - "BUG-K8S-1234: Container 'order-service' must have memory limits"
+```
+
+```yaml
+# Step 3: Fix the bug by adding resource limits
+# File: deployment.yaml (BEFORE - buggy)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+spec:
+  template:
+    spec:
+      containers:
+        - name: order-service
+          image: registry.company.com/orders/order-service:v1.0.0
+          # BUG: Missing resources section caused OOMKilled
+```
+
+```yaml
+# File: deployment.yaml (AFTER - fixed)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+spec:
+  template:
+    spec:
+      containers:
+        - name: order-service
+          image: registry.company.com/orders/order-service:v1.0.0
+          # FIX for BUG-K8S-1234: Added resource limits
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi  # Prevents OOMKilled
+```
+
+```bash
+# Run: conftest test deployment.yaml --policy policy/
+# PASSES - bug fixed, regression prevented
+
+# Add to CI/CD pipeline to prevent future occurrences
+# .gitlab-ci.yml or similar
+# validate:
+#   script:
+#     - conftest test manifests/ --policy policy/
+```
+
+### Common K8s Configuration Bugs and Regression Tests
+
+```
+BUG CATEGORY           │ REGRESSION TEST                         │ POLICY EXAMPLE
+───────────────────────┼─────────────────────────────────────────┼─────────────────────────
+Missing resource limits│ Check .resources.limits exists          │ deny if no limits.memory
+No security context    │ Check runAsNonRoot: true                │ deny if privileged
+Latest image tag       │ Check image tag != "latest"             │ deny if tag == "latest"
+Missing health probes  │ Check livenessProbe exists              │ deny if no probes
+No PDB defined         │ Check PDB exists for Deployment         │ warn if replicas > 1, no PDB
+Privileged containers  │ Check privileged: false                 │ deny if privileged == true
+Host network access    │ Check hostNetwork: false                │ deny if hostNetwork
+Missing namespace      │ Check namespace is specified            │ deny if namespace == "default"
+No anti-affinity       │ Check podAntiAffinity for HA            │ warn if replicas > 1, no affinity
+Missing labels         │ Check required labels exist             │ deny if missing app label
+```
+
+---
+
 ## 3. Pod Security (MANDATORY)
 
 ### A. Pod Security Standards
@@ -1974,7 +2422,391 @@ kubectl get networkpolicies -n team-orders
 
 ---
 
-## Related Guides
+## 16. Quick Reference
+
+### Common kubectl Commands
+
+```bash
+# ═══════════════════════════════════════════════════════════════════
+# CLUSTER INFORMATION
+# ═══════════════════════════════════════════════════════════════════
+kubectl cluster-info                              # Display cluster info
+kubectl get nodes -o wide                         # List nodes with details
+kubectl top nodes                                 # Node resource usage
+kubectl api-resources                             # List all resource types
+
+# ═══════════════════════════════════════════════════════════════════
+# NAMESPACE OPERATIONS
+# ═══════════════════════════════════════════════════════════════════
+kubectl get namespaces                            # List all namespaces
+kubectl create namespace team-orders              # Create namespace
+kubectl config set-context --current --namespace=team-orders  # Set default ns
+
+# ═══════════════════════════════════════════════════════════════════
+# POD OPERATIONS
+# ═══════════════════════════════════════════════════════════════════
+kubectl get pods -n team-orders                   # List pods in namespace
+kubectl get pods -o wide                          # Pods with node info
+kubectl get pods -l app=order-service             # Filter by label
+kubectl describe pod <pod-name> -n team-orders    # Pod details
+kubectl logs <pod-name> -n team-orders            # View logs
+kubectl logs <pod-name> -c <container> -f         # Follow container logs
+kubectl logs <pod-name> --previous                # Previous container logs
+kubectl exec -it <pod-name> -- /bin/sh            # Shell into pod
+kubectl port-forward <pod-name> 8080:8080         # Port forward
+kubectl top pods -n team-orders                   # Pod resource usage
+kubectl delete pod <pod-name> -n team-orders      # Delete pod (restart)
+
+# ═══════════════════════════════════════════════════════════════════
+# DEPLOYMENT OPERATIONS
+# ═══════════════════════════════════════════════════════════════════
+kubectl get deployments -n team-orders            # List deployments
+kubectl describe deployment <name>                # Deployment details
+kubectl rollout status deployment/<name>          # Rollout status
+kubectl rollout history deployment/<name>         # Rollout history
+kubectl rollout undo deployment/<name>            # Rollback to previous
+kubectl rollout undo deployment/<name> --to-revision=2  # Rollback to rev
+kubectl scale deployment/<name> --replicas=5      # Scale deployment
+kubectl set image deployment/<name> app=image:v2  # Update image
+
+# ═══════════════════════════════════════════════════════════════════
+# SERVICE & NETWORKING
+# ═══════════════════════════════════════════════════════════════════
+kubectl get services -n team-orders               # List services
+kubectl get endpoints -n team-orders              # List endpoints
+kubectl get ingress -n team-orders                # List ingresses
+kubectl get networkpolicies -n team-orders        # List network policies
+
+# ═══════════════════════════════════════════════════════════════════
+# CONFIG & SECRETS
+# ═══════════════════════════════════════════════════════════════════
+kubectl get configmaps -n team-orders             # List ConfigMaps
+kubectl get secrets -n team-orders                # List Secrets
+kubectl create secret generic my-secret \
+  --from-literal=key=value                        # Create secret
+kubectl get secret my-secret -o jsonpath='{.data.key}' | base64 -d  # Decode
+
+# ═══════════════════════════════════════════════════════════════════
+# DEBUGGING & TROUBLESHOOTING
+# ═══════════════════════════════════════════════════════════════════
+kubectl get events -n team-orders --sort-by='.lastTimestamp'  # Recent events
+kubectl get events --field-selector type=Warning  # Warning events only
+kubectl run debug --image=busybox -it --rm -- sh  # Temporary debug pod
+kubectl auth can-i create pods -n team-orders     # Check permissions
+kubectl explain deployment.spec.template          # API documentation
+
+# ═══════════════════════════════════════════════════════════════════
+# VALIDATION & DRY-RUN
+# ═══════════════════════════════════════════════════════════════════
+kubectl apply --dry-run=client -f manifest.yaml   # Client-side validation
+kubectl apply --dry-run=server -f manifest.yaml   # Server-side validation
+kubectl diff -f manifest.yaml                     # Show diff before apply
+kubeconform -strict manifest.yaml                 # Schema validation
+conftest test manifest.yaml --policy policy/      # Policy validation
+
+# ═══════════════════════════════════════════════════════════════════
+# ISTIO-SPECIFIC
+# ═══════════════════════════════════════════════════════════════════
+istioctl analyze -n team-orders                   # Analyze Istio config
+istioctl proxy-status                             # Envoy sync status
+istioctl x describe pod <pod-name>                # Describe pod mesh config
+kubectl get virtualservices -n team-orders        # List VirtualServices
+kubectl get destinationrules -n team-orders       # List DestinationRules
+kubectl get authorizationpolicies -n team-orders  # List AuthorizationPolicies
+```
+
+### Kubernetes Patterns Cheat Sheet
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                 KUBERNETES PATTERNS CHEAT SHEET                  │
+└─────────────────────────────────────────────────────────────────┘
+
+HIGH AVAILABILITY PATTERN
+─────────────────────────
+□ replicas: 3+ (never 1 in production)
+□ podAntiAffinity across nodes/zones
+□ PodDisruptionBudget (minAvailable: 2)
+□ Multiple availability zones
+□ Resource requests/limits set
+
+SECURITY PATTERN
+────────────────
+□ runAsNonRoot: true
+□ readOnlyRootFilesystem: true
+□ allowPrivilegeEscalation: false
+□ capabilities.drop: ALL
+□ seccompProfile: RuntimeDefault
+□ Dedicated ServiceAccount
+□ automountServiceAccountToken: false
+□ NetworkPolicies (default deny)
+□ No :latest image tags
+
+RESILIENCE PATTERN
+──────────────────
+□ startupProbe (slow-starting apps)
+□ livenessProbe (restart unhealthy)
+□ readinessProbe (traffic control)
+□ terminationGracePeriodSeconds: 30+
+□ preStop hook for graceful shutdown
+□ Resource limits prevent cascading failures
+
+OBSERVABILITY PATTERN
+─────────────────────
+□ Prometheus annotations for scraping
+□ ServiceMonitor for metrics collection
+□ Structured JSON logging
+□ Distributed tracing headers
+□ PrometheusRule for alerts
+□ Istio telemetry configuration
+
+CONFIGURATION PATTERN
+─────────────────────
+□ ConfigMap for non-sensitive config
+□ External Secrets for sensitive data
+□ envFrom for bulk injection
+□ Mounted config files for complex config
+□ Environment-specific overlays
+
+GITOPS PATTERN
+──────────────
+□ All manifests in Git
+□ Kustomize base + overlays
+□ ArgoCD Application per environment
+□ Automated sync with self-heal
+□ No manual kubectl apply
+
+TRAFFIC MANAGEMENT PATTERN (Istio)
+──────────────────────────────────
+□ Gateway for ingress (TLS termination)
+□ VirtualService for routing rules
+□ DestinationRule for traffic policies
+□ Circuit breaker (outlierDetection)
+□ Retry policies with backoff
+□ Timeout configuration
+□ Canary/Blue-Green via subsets
+
+ZERO-TRUST PATTERN (Istio)
+──────────────────────────
+□ PeerAuthentication: STRICT mTLS
+□ AuthorizationPolicy: deny-all default
+□ Explicit allow rules per service
+□ RequestAuthentication for JWT
+□ Service identity via SPIFFE
+```
+
+### Manifest Structure Quick Reference
+
+```yaml
+# ═══════════════════════════════════════════════════════════════════
+# DEPLOYMENT - Complete Production Template
+# ═══════════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: <service-name>
+  namespace: <namespace>
+  labels:
+    app: <service-name>
+    version: <version>
+spec:
+  replicas: 3                              # HA: minimum 3
+  selector:
+    matchLabels:
+      app: <service-name>
+  template:
+    metadata:
+      labels:
+        app: <service-name>
+        version: <version>
+      annotations:
+        prometheus.io/scrape: "true"       # Observability
+        prometheus.io/port: "8080"
+    spec:
+      serviceAccountName: <service-name>   # Dedicated SA
+      automountServiceAccountToken: false
+      securityContext:                     # Pod security
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: <service-name>
+          image: <registry>/<image>:<tag>  # Never :latest
+          imagePullPolicy: Always
+          securityContext:                 # Container security
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:                       # Resource management
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          ports:
+            - name: http
+              containerPort: 8080
+          startupProbe:                    # Health probes
+            httpGet:
+              path: /health/startup
+              port: 8080
+            failureThreshold: 30
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8080
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8080
+            periodSeconds: 5
+          envFrom:                         # Configuration
+            - configMapRef:
+                name: <service-name>-config
+            - secretRef:
+                name: <service-name>-secrets
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 100Mi
+      affinity:                            # Pod anti-affinity
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: <service-name>
+                topologyKey: kubernetes.io/hostname
+      terminationGracePeriodSeconds: 30    # Graceful shutdown
+---
+# ═══════════════════════════════════════════════════════════════════
+# SERVICE
+# ═══════════════════════════════════════════════════════════════════
+apiVersion: v1
+kind: Service
+metadata:
+  name: <service-name>
+  namespace: <namespace>
+spec:
+  ports:
+    - name: http                           # Named ports for Istio
+      port: 8080
+      targetPort: 8080
+  selector:
+    app: <service-name>
+---
+# ═══════════════════════════════════════════════════════════════════
+# HPA
+# ═══════════════════════════════════════════════════════════════════
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: <service-name>-hpa
+  namespace: <namespace>
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: <service-name>
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+# ═══════════════════════════════════════════════════════════════════
+# PDB
+# ═══════════════════════════════════════════════════════════════════
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: <service-name>-pdb
+  namespace: <namespace>
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: <service-name>
+---
+# ═══════════════════════════════════════════════════════════════════
+# NETWORKPOLICY - Default Deny
+# ═══════════════════════════════════════════════════════════════════
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: <namespace>
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# ═══════════════════════════════════════════════════════════════════
+# ISTIO VIRTUALSERVICE
+# ═══════════════════════════════════════════════════════════════════
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: <service-name>
+  namespace: <namespace>
+spec:
+  hosts:
+    - <service-name>
+  http:
+    - route:
+        - destination:
+            host: <service-name>
+            port:
+              number: 8080
+      timeout: 30s
+      retries:
+        attempts: 3
+        perTryTimeout: 10s
+        retryOn: 5xx,reset,connect-failure
+---
+# ═══════════════════════════════════════════════════════════════════
+# ISTIO DESTINATIONRULE
+# ═══════════════════════════════════════════════════════════════════
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: <service-name>
+  namespace: <namespace>
+spec:
+  host: <service-name>
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        http2MaxRequests: 1000
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 10s
+      baseEjectionTime: 30s
+    tls:
+      mode: ISTIO_MUTUAL
+```
+
+---
+
+## References
 
 - **[istio.md](istio.md)**: Detailed Istio configuration including static IP setup for different platforms
 - **[microservices.md](microservices.md)**: Microservices architecture patterns deployed on Kubernetes

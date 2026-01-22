@@ -210,6 +210,470 @@ PFMERGE unique:visitors:2024-q1 unique:visitors:2024-01 \
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new Redis implementation code.**
+
+### TDD Cycle
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                                                                         │
+│                      RED-GREEN-REFACTOR CYCLE                           │
+│                                                                         │
+│         ┌─────────┐                                                     │
+│         │   RED   │  Write a failing test first                         │
+│         │  (FAIL) │  Test should verify Redis behavior                  │
+│         └────┬────┘                                                     │
+│              │                                                          │
+│              ▼                                                          │
+│         ┌─────────┐                                                     │
+│         │  GREEN  │  Write minimal code to make test pass               │
+│         │ (PASS)  │  Implement Redis operation correctly                │
+│         └────┬────┘                                                     │
+│              │                                                          │
+│              ▼                                                          │
+│         ┌─────────┐                                                     │
+│         │REFACTOR │  Improve code quality                               │
+│         │ (PASS)  │  Optimize Redis usage, keep tests green             │
+│         └────┬────┘                                                     │
+│              │                                                          │
+│              └──────────► Repeat for next feature                       │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Example TDD Workflow for Redis Operations
+
+**Scenario: Implementing a Rate Limiter with Sliding Window**
+
+```
+TDD WORKFLOW - RATE LIMITER IMPLEMENTATION:
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                                                                         │
+│  STEP 1: RED - Write Failing Test                                       │
+│  ─────────────────────────────────                                      │
+│                                                                         │
+│  // Test: Rate limiter should allow requests under limit                │
+│  function test_rate_limiter_allows_under_limit() {                      │
+│      limiter = new RateLimiter(redis, limit=5, window=60)              │
+│      userId = "user:123"                                                │
+│                                                                         │
+│      // First 5 requests should succeed                                 │
+│      for i in 1..5:                                                     │
+│          assert limiter.checkLimit(userId) == true                      │
+│  }                                                                      │
+│                                                                         │
+│  // Run test:                                                           │
+│  $ test_runner --run test_rate_limiter                                 │
+│  ❌ FAILS - RateLimiter class does not exist                           │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                                                                         │
+│  STEP 2: GREEN - Minimal Implementation                                 │
+│  ──────────────────────────────────────                                 │
+│                                                                         │
+│  class RateLimiter {                                                    │
+│      constructor(redis, limit, windowSeconds) {                         │
+│          this.redis = redis                                             │
+│          this.limit = limit                                             │
+│          this.window = windowSeconds                                    │
+│      }                                                                  │
+│                                                                         │
+│      function checkLimit(userId) {                                      │
+│          key = "rate:" + userId                                         │
+│          current = this.redis.INCR(key)                                │
+│                                                                         │
+│          if (current == 1) {                                            │
+│              this.redis.EXPIRE(key, this.window)                       │
+│          }                                                              │
+│                                                                         │
+│          return current <= this.limit                                   │
+│      }                                                                  │
+│  }                                                                      │
+│                                                                         │
+│  // Run test:                                                           │
+│  $ test_runner --run test_rate_limiter                                 │
+│  ✅ PASSES - Basic implementation works                                │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                                                                         │
+│  STEP 3: RED - Add More Tests (Edge Cases)                              │
+│  ─────────────────────────────────────────                              │
+│                                                                         │
+│  function test_rate_limiter_blocks_over_limit() {                       │
+│      limiter = new RateLimiter(redis, limit=5, window=60)              │
+│      userId = "user:456"                                                │
+│                                                                         │
+│      // Exhaust limit                                                   │
+│      for i in 1..5:                                                     │
+│          limiter.checkLimit(userId)                                     │
+│                                                                         │
+│      // 6th request should fail                                         │
+│      assert limiter.checkLimit(userId) == false                         │
+│  }                                                                      │
+│                                                                         │
+│  function test_rate_limiter_resets_after_window() {                     │
+│      limiter = new RateLimiter(redis, limit=5, window=1)  // 1 sec     │
+│      userId = "user:789"                                                │
+│                                                                         │
+│      // Exhaust limit                                                   │
+│      for i in 1..5:                                                     │
+│          limiter.checkLimit(userId)                                     │
+│                                                                         │
+│      // Wait for window to expire                                       │
+│      sleep(1.1)                                                         │
+│                                                                         │
+│      // Should allow again                                              │
+│      assert limiter.checkLimit(userId) == true                          │
+│  }                                                                      │
+│                                                                         │
+│  // Run tests:                                                          │
+│  $ test_runner --run test_rate_limiter                                 │
+│  ✅ PASSES - All edge cases covered                                    │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                                                                         │
+│  STEP 4: REFACTOR - Improve Implementation                              │
+│  ─────────────────────────────────────────                              │
+│                                                                         │
+│  class RateLimiter {                                                    │
+│      constructor(redis, limit, windowSeconds) {                         │
+│          this.redis = redis                                             │
+│          this.limit = limit                                             │
+│          this.window = windowSeconds                                    │
+│          this.script = this._loadLuaScript()  // Atomic operation      │
+│      }                                                                  │
+│                                                                         │
+│      function checkLimit(userId) {                                      │
+│          key = "rate:" + userId + ":" + this._currentWindow()          │
+│                                                                         │
+│          // Use Lua script for atomicity                                │
+│          result = this.redis.EVALSHA(                                  │
+│              this.script,                                               │
+│              1, key,                                                    │
+│              this.limit, this.window                                    │
+│          )                                                              │
+│                                                                         │
+│          return result == 1                                             │
+│      }                                                                  │
+│                                                                         │
+│      function _currentWindow() {                                        │
+│          return floor(now() / this.window)                             │
+│      }                                                                  │
+│                                                                         │
+│      function _loadLuaScript() {                                        │
+│          // Atomic increment with limit check                           │
+│          return redis.SCRIPT_LOAD("""                                  │
+│              local current = redis.call('INCR', KEYS[1])               │
+│              if current == 1 then                                       │
+│                  redis.call('EXPIRE', KEYS[1], ARGV[2])                │
+│              end                                                        │
+│              if current > tonumber(ARGV[1]) then                        │
+│                  return 0                                               │
+│              end                                                        │
+│              return 1                                                   │
+│          """)                                                           │
+│      }                                                                  │
+│  }                                                                      │
+│                                                                         │
+│  // Run all tests:                                                      │
+│  $ test_runner --run test_rate_limiter                                 │
+│  ✅ PASSES - Refactored code still works                               │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Visual Step-by-Step Example
+
+```
+TDD VISUAL FLOW - CACHE IMPLEMENTATION:
+
+    TEST FIRST                    IMPLEMENT                     REFACTOR
+    ──────────                    ─────────                     ────────
+
+    ┌─────────────┐              ┌─────────────┐              ┌─────────────┐
+    │ Write test: │              │ Implement:  │              │ Improve:    │
+    │             │              │             │              │             │
+    │ getCache()  │     →        │ GET key     │     →        │ Add TTL     │
+    │ returns     │              │ return val  │              │ Add jitter  │
+    │ cached val  │              │             │              │ Add metrics │
+    └─────────────┘              └─────────────┘              └─────────────┘
+          │                            │                            │
+          ▼                            ▼                            ▼
+       ❌ FAIL                      ✅ PASS                      ✅ PASS
+    (no impl yet)              (minimal impl)               (optimized impl)
+
+
+COMPLETE TDD CYCLE FOR CACHE-ASIDE PATTERN:
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│                                                                            │
+│  1. RED: Test cache miss behavior                                          │
+│     ──────────────────────────────                                         │
+│     test_cache_miss_fetches_from_database()                                │
+│     → FAILS (no implementation)                                            │
+│                                                                            │
+│  2. GREEN: Implement cache-aside read                                      │
+│     ────────────────────────────────                                       │
+│     GET key → miss → query DB → SET key → return                          │
+│     → PASSES                                                               │
+│                                                                            │
+│  3. RED: Test cache hit behavior                                           │
+│     ─────────────────────────────                                          │
+│     test_cache_hit_returns_cached_value()                                  │
+│     → PASSES (already works)                                               │
+│                                                                            │
+│  4. RED: Test TTL behavior                                                 │
+│     ──────────────────────                                                 │
+│     test_cache_expires_after_ttl()                                         │
+│     → FAILS (no TTL set)                                                   │
+│                                                                            │
+│  5. GREEN: Add TTL to SET                                                  │
+│     ─────────────────────                                                  │
+│     SETEX key ttl value                                                    │
+│     → PASSES                                                               │
+│                                                                            │
+│  6. REFACTOR: Add TTL jitter to prevent stampede                           │
+│     ──────────────────────────────────────────                             │
+│     ttl = base_ttl + random(0, jitter)                                     │
+│     → PASSES (all tests still green)                                       │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every Redis bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                                                                         │
+│                        BUG FIX WORKFLOW                                 │
+│                                                                         │
+│  ┌──────────────────┐                                                   │
+│  │  Bug Reported    │  "Cache returns stale data after update"         │
+│  │  or Discovered   │                                                   │
+│  └────────┬─────────┘                                                   │
+│           │                                                             │
+│           ▼                                                             │
+│  ┌──────────────────┐                                                   │
+│  │  Write Test That │  test_cache_invalidated_on_update()              │
+│  │  REPRODUCES Bug  │  → Should FAIL (proving bug exists)              │
+│  └────────┬─────────┘                                                   │
+│           │                                                             │
+│           ▼                                                             │
+│  ┌──────────────────┐                                                   │
+│  │  Verify Test     │  Confirm test fails for the RIGHT reason         │
+│  │  Fails Correctly │  (stale data returned, not other error)          │
+│  └────────┬─────────┘                                                   │
+│           │                                                             │
+│           ▼                                                             │
+│  ┌──────────────────┐                                                   │
+│  │  Fix the Bug     │  Add cache invalidation on update                │
+│  │                  │  DEL cache_key after database update             │
+│  └────────┬─────────┘                                                   │
+│           │                                                             │
+│           ▼                                                             │
+│  ┌──────────────────┐                                                   │
+│  │  Verify Test     │  test_cache_invalidated_on_update()              │
+│  │  Now PASSES      │  → Should PASS (bug fixed)                       │
+│  └────────┬─────────┘                                                   │
+│           │                                                             │
+│           ▼                                                             │
+│  ┌──────────────────┐                                                   │
+│  │  Run ALL Tests   │  Ensure no regressions introduced                │
+│  │                  │  → All tests PASS                                │
+│  └────────┬─────────┘                                                   │
+│           │                                                             │
+│           ▼                                                             │
+│  ┌──────────────────┐                                                   │
+│  │  Document Bug    │  Add bug ID and description to test              │
+│  │  in Test         │  // Regression test for BUG-1234                 │
+│  └──────────────────┘                                                   │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Example Bug Fix with Regression Test
+
+```
+BUG FIX EXAMPLE - CACHE INVALIDATION BUG:
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                                                                         │
+│  BUG REPORT #1234:                                                      │
+│  "User profile shows old data after update. Cache not invalidated."     │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+STEP 1-2: Write Regression Test (MUST FAIL)
+───────────────────────────────────────────
+
+// Regression test for BUG-1234: Cache not invalidated on profile update
+function test_bug_1234_cache_invalidated_on_profile_update() {
+    userId = "user:test:1234"
+    cacheKey = "cache:user:" + userId + ":profile"
+
+    // Setup: Create user and cache their profile
+    originalProfile = { name: "John", email: "john@old.com" }
+    database.insert(userId, originalProfile)
+    redis.SET(cacheKey, serialize(originalProfile), "EX", 3600)
+
+    // Action: Update profile in database
+    newProfile = { name: "John", email: "john@new.com" }
+    userService.updateProfile(userId, newProfile)
+
+    // Verify: Cache should return NEW data (not stale)
+    cachedProfile = deserialize(redis.GET(cacheKey))
+
+    // This assertion will FAIL if bug exists
+    assert cachedProfile.email == "john@new.com"
+    // Bug: Returns "john@old.com" (stale cached data)
+}
+
+// Run test:
+$ test_runner --run test_bug_1234
+❌ FAILS - AssertionError: "john@old.com" != "john@new.com"
+   Bug confirmed! Stale data returned from cache.
+
+
+STEP 3: Fix the Bug
+───────────────────
+
+// BEFORE (buggy code):
+function updateProfile(userId, newProfile) {
+    // Only updates database, forgets to invalidate cache
+    database.update("users", userId, newProfile)
+    return newProfile
+}
+
+// AFTER (fixed code):
+function updateProfile(userId, newProfile) {
+    // Update database
+    database.update("users", userId, newProfile)
+
+    // Invalidate cache - FIX FOR BUG-1234
+    cacheKey = "cache:user:" + userId + ":profile"
+    redis.DEL(cacheKey)
+
+    return newProfile
+}
+
+
+STEP 4: Verify Fix
+──────────────────
+
+// Run regression test:
+$ test_runner --run test_bug_1234
+✅ PASSES - Cache correctly invalidated
+
+// Run all tests to check for regressions:
+$ test_runner --run all
+✅ ALL TESTS PASS - No regressions introduced
+
+
+STEP 5: Document in Test
+────────────────────────
+
+// Regression test for BUG-1234: Cache not invalidated on profile update
+// Issue: User profile showed stale data after update
+// Root cause: updateProfile() did not invalidate cache after DB write
+// Fix: Added redis.DEL(cacheKey) after database update
+// Date: 2024-01-21
+// Author: [developer]
+function test_bug_1234_cache_invalidated_on_profile_update() {
+    // ... test implementation ...
+}
+```
+
+### Common Redis Bug Patterns and Regression Tests
+
+```
+COMMON BUG PATTERNS:
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                                                                         │
+│  BUG TYPE                 │ REGRESSION TEST PATTERN                     │
+│  ─────────────────────────┼───────────────────────────────────────────  │
+│                           │                                             │
+│  Cache stampede           │ test_concurrent_cache_miss_single_db_call() │
+│                           │ Verify: Only 1 DB call under concurrent     │
+│                           │ requests for same key                       │
+│                           │                                             │
+│  Stale cache after update │ test_cache_invalidated_on_update()          │
+│                           │ Verify: GET returns new data after SET      │
+│                           │                                             │
+│  TTL not set              │ test_cache_key_has_ttl()                    │
+│                           │ Verify: TTL key returns > 0                 │
+│                           │                                             │
+│  Race condition in lock   │ test_lock_prevents_concurrent_execution()   │
+│                           │ Verify: Only 1 process enters critical      │
+│                           │ section at a time                           │
+│                           │                                             │
+│  Lock not released        │ test_lock_released_after_work()             │
+│                           │ Verify: Lock key deleted after function     │
+│                           │ completes (success or failure)              │
+│                           │                                             │
+│  Memory leak (no TTL)     │ test_all_cache_keys_have_expiration()       │
+│                           │ Verify: SCAN all cache:* keys, check TTL    │
+│                           │                                             │
+│  Connection pool exhaust  │ test_connections_returned_to_pool()         │
+│                           │ Verify: Pool available connections after    │
+│                           │ many operations                             │
+│                           │                                             │
+│  Wrong data structure     │ test_data_structure_operations_correct()    │
+│                           │ Verify: Operations work as expected         │
+│                           │ (e.g., LPUSH vs RPUSH order)               │
+│                           │                                             │
+└─────────────────────────────────────────────────────────────────────────┘
+
+EXAMPLE - CONNECTION LEAK BUG FIX:
+
+// Regression test for BUG-5678: Connection pool exhaustion
+function test_bug_5678_connections_returned_after_error() {
+    pool = createRedisPool(maxConnections=5)
+
+    // Simulate 100 operations that throw errors
+    for i in 1..100:
+        try {
+            conn = pool.acquire()
+            // Simulate error during operation
+            throw new Error("Simulated failure")
+        } catch (e) {
+            // Connection should be returned even on error
+        }
+
+    // Pool should still have available connections
+    // Bug: Connections were not returned on error, pool exhausted
+    availableConnections = pool.getAvailableCount()
+    assert availableConnections > 0
+}
+
+// Fix: Use try-finally to always return connection
+function executeRedisOperation(operation) {
+    conn = pool.acquire()
+    try {
+        return operation(conn)
+    } finally {
+        pool.release(conn)  // Always return connection
+    }
+}
+```
+
+---
+
 ## 3. Key Design Patterns
 
 ### A. Key Naming Conventions
@@ -1862,6 +2326,370 @@ REDIS IMPLEMENTATION CHECKLIST:
 > "Network round trips matter. Use pipelining and Lua scripts."
 
 > "Fail gracefully. Your application should work (degraded) without Redis."
+
+---
+
+## 15. Quick Reference
+
+### Common redis-cli Commands
+
+```
+REDIS-CLI QUICK REFERENCE:
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                                                                         │
+│  CONNECTION & SERVER                                                    │
+│  ───────────────────                                                    │
+│  redis-cli                          # Connect to localhost:6379         │
+│  redis-cli -h host -p port          # Connect to specific host/port     │
+│  redis-cli -a password              # Connect with password             │
+│  redis-cli --tls                    # Connect with TLS                  │
+│  redis-cli -n 2                     # Select database 2                 │
+│                                                                         │
+│  PING                               # Test connection (returns PONG)    │
+│  INFO                               # Server info and statistics        │
+│  INFO memory                        # Memory usage details              │
+│  INFO replication                   # Replication status                │
+│  CONFIG GET maxmemory               # Get config value                  │
+│  CONFIG SET maxmemory 4gb           # Set config value                  │
+│  CLIENT LIST                        # List connected clients            │
+│  DBSIZE                             # Number of keys in database        │
+│                                                                         │
+│  STRING OPERATIONS                                                      │
+│  ─────────────────                                                      │
+│  SET key value                      # Set string value                  │
+│  SET key value EX 3600              # Set with 1 hour TTL               │
+│  SET key value NX                   # Set only if not exists            │
+│  SET key value XX                   # Set only if exists                │
+│  SETEX key 3600 value               # Set with TTL (seconds)            │
+│  SETNX key value                    # Set if not exists                 │
+│  GET key                            # Get string value                  │
+│  MGET key1 key2 key3                # Get multiple values               │
+│  MSET k1 v1 k2 v2                   # Set multiple values               │
+│  INCR key                           # Increment by 1                    │
+│  INCRBY key 10                      # Increment by 10                   │
+│  DECR key                           # Decrement by 1                    │
+│  APPEND key value                   # Append to string                  │
+│  STRLEN key                         # String length                     │
+│                                                                         │
+│  HASH OPERATIONS                                                        │
+│  ───────────────                                                        │
+│  HSET key field value               # Set hash field                    │
+│  HGET key field                     # Get hash field                    │
+│  HMSET key f1 v1 f2 v2              # Set multiple fields               │
+│  HMGET key f1 f2                    # Get multiple fields               │
+│  HGETALL key                        # Get all fields and values         │
+│  HDEL key field                     # Delete field                      │
+│  HEXISTS key field                  # Check field exists                │
+│  HINCRBY key field 1                # Increment field                   │
+│  HKEYS key                          # Get all field names               │
+│  HVALS key                          # Get all values                    │
+│  HLEN key                           # Number of fields                  │
+│                                                                         │
+│  LIST OPERATIONS                                                        │
+│  ───────────────                                                        │
+│  LPUSH key value                    # Push to head                      │
+│  RPUSH key value                    # Push to tail                      │
+│  LPOP key                           # Pop from head                     │
+│  RPOP key                           # Pop from tail                     │
+│  LRANGE key 0 -1                    # Get all elements                  │
+│  LRANGE key 0 9                     # Get first 10 elements             │
+│  LLEN key                           # List length                       │
+│  LINDEX key 0                       # Get element at index              │
+│  LTRIM key 0 99                     # Keep only first 100               │
+│  BRPOP key 30                       # Blocking pop (30s timeout)        │
+│  BLPOP key 30                       # Blocking pop from head            │
+│                                                                         │
+│  SET OPERATIONS                                                         │
+│  ──────────────                                                         │
+│  SADD key member                    # Add member                        │
+│  SREM key member                    # Remove member                     │
+│  SMEMBERS key                       # Get all members                   │
+│  SISMEMBER key member               # Check membership                  │
+│  SCARD key                          # Set cardinality (size)            │
+│  SINTER key1 key2                   # Intersection                      │
+│  SUNION key1 key2                   # Union                             │
+│  SDIFF key1 key2                    # Difference                        │
+│                                                                         │
+│  SORTED SET OPERATIONS                                                  │
+│  ─────────────────────                                                  │
+│  ZADD key score member              # Add with score                    │
+│  ZREM key member                    # Remove member                     │
+│  ZSCORE key member                  # Get score                         │
+│  ZRANK key member                   # Get rank (0-based)                │
+│  ZREVRANK key member                # Get reverse rank                  │
+│  ZRANGE key 0 9                     # Get by rank range                 │
+│  ZREVRANGE key 0 9 WITHSCORES       # Top 10 with scores                │
+│  ZRANGEBYSCORE key min max          # Get by score range                │
+│  ZCARD key                          # Set size                          │
+│  ZINCRBY key 1 member               # Increment score                   │
+│                                                                         │
+│  KEY OPERATIONS                                                         │
+│  ──────────────                                                         │
+│  DEL key                            # Delete key                        │
+│  EXISTS key                         # Check exists (returns 0/1)        │
+│  TYPE key                           # Get key type                      │
+│  EXPIRE key 3600                    # Set TTL (seconds)                 │
+│  PEXPIRE key 3600000                # Set TTL (milliseconds)            │
+│  TTL key                            # Get TTL (seconds)                 │
+│  PTTL key                           # Get TTL (milliseconds)            │
+│  PERSIST key                        # Remove TTL                        │
+│  RENAME key newkey                  # Rename key                        │
+│  SCAN 0 MATCH pattern COUNT 100     # Iterate keys (safe)               │
+│                                                                         │
+│  ⚠️  AVOID IN PRODUCTION:                                               │
+│  KEYS *                             # Blocks Redis (use SCAN instead)   │
+│  FLUSHALL                           # Deletes everything                │
+│  FLUSHDB                            # Deletes current database          │
+│                                                                         │
+│  TRANSACTIONS & SCRIPTING                                               │
+│  ────────────────────────                                               │
+│  MULTI                              # Start transaction                 │
+│  EXEC                               # Execute transaction               │
+│  DISCARD                            # Abort transaction                 │
+│  WATCH key                          # Watch key for changes             │
+│  EVAL "script" numkeys keys args    # Run Lua script                    │
+│  EVALSHA sha numkeys keys args      # Run cached script                 │
+│  SCRIPT LOAD "script"               # Load and cache script             │
+│                                                                         │
+│  STREAM OPERATIONS                                                      │
+│  ─────────────────                                                      │
+│  XADD stream * field value          # Add entry (auto ID)               │
+│  XLEN stream                        # Stream length                     │
+│  XRANGE stream - +                  # Read all entries                  │
+│  XREAD STREAMS stream 0             # Read from beginning               │
+│  XREAD BLOCK 5000 STREAMS stream $  # Blocking read (new only)         │
+│  XGROUP CREATE stream group $ MKSTREAM  # Create consumer group        │
+│  XREADGROUP GROUP g c STREAMS s >   # Read as consumer                  │
+│  XACK stream group id               # Acknowledge message               │
+│  XPENDING stream group              # Pending messages                  │
+│                                                                         │
+│  PUB/SUB                                                                │
+│  ───────                                                                │
+│  PUBLISH channel message            # Publish message                   │
+│  SUBSCRIBE channel                  # Subscribe to channel              │
+│  PSUBSCRIBE pattern                 # Subscribe to pattern              │
+│                                                                         │
+│  DEBUGGING & MONITORING                                                 │
+│  ──────────────────────                                                 │
+│  MONITOR                            # Watch all commands (careful!)     │
+│  SLOWLOG GET 10                     # Get slow queries                  │
+│  MEMORY USAGE key                   # Memory used by key                │
+│  MEMORY DOCTOR                      # Memory issues report              │
+│  DEBUG OBJECT key                   # Debug info about key              │
+│  OBJECT ENCODING key                # Internal encoding                 │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Redis Patterns Cheat Sheet
+
+```
+REDIS PATTERNS CHEAT SHEET:
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                                                                         │
+│  PATTERN                    │ IMPLEMENTATION                            │
+│  ──────────────────────────────────────────────────────────────────────│
+│                                                                         │
+│  CACHE-ASIDE               │ GET key                                    │
+│  (Lazy Loading)            │ if miss: fetch DB → SET key val EX ttl    │
+│                            │                                            │
+│  WRITE-THROUGH             │ UPDATE DB → SET key val EX ttl            │
+│                            │ (sync write to both)                       │
+│                            │                                            │
+│  WRITE-BEHIND              │ SET key val → queue DB write              │
+│                            │ (async persist)                            │
+│                            │                                            │
+│  CACHE INVALIDATION        │ UPDATE DB → DEL cache_key                 │
+│                            │ (delete on change)                         │
+│                            │                                            │
+│  DISTRIBUTED LOCK          │ SET lock:x owner NX EX 30                 │
+│                            │ Release: Lua script (check owner first)   │
+│                            │                                            │
+│  RATE LIMIT (Fixed)        │ INCR rate:user:123:min:1530               │
+│                            │ EXPIRE 60 (if count == 1)                 │
+│                            │                                            │
+│  RATE LIMIT (Sliding)      │ ZADD rate:user score=now member=reqid    │
+│                            │ ZREMRANGEBYSCORE 0 (now-window)           │
+│                            │ ZCARD rate:user                            │
+│                            │                                            │
+│  LEADERBOARD               │ ZADD leaderboard score player             │
+│                            │ ZREVRANGE leaderboard 0 9 WITHSCORES      │
+│                            │                                            │
+│  SESSION STORAGE           │ SETEX session:id ttl json_data            │
+│                            │ GET session:id                             │
+│                            │                                            │
+│  QUEUE (Simple)            │ Producer: LPUSH queue job                 │
+│                            │ Consumer: BRPOP queue timeout             │
+│                            │                                            │
+│  QUEUE (Reliable)          │ XADD stream * field value                 │
+│                            │ XREADGROUP GROUP g c STREAMS s >          │
+│                            │ XACK stream group id                       │
+│                            │                                            │
+│  RECENT ITEMS              │ LPUSH recent item                          │
+│                            │ LTRIM recent 0 99 (keep last 100)         │
+│                            │                                            │
+│  UNIQUE VISITORS           │ PFADD visitors:today user_id              │
+│                            │ PFCOUNT visitors:today                     │
+│                            │                                            │
+│  FEATURE FLAGS             │ HSET features flag_name 1/0               │
+│                            │ HGET features flag_name                    │
+│                            │                                            │
+│  COUNTING (Exact)          │ SADD users:active:today user_id           │
+│                            │ SCARD users:active:today                   │
+│                            │                                            │
+│  COUNTING (Approx)         │ PFADD counter user_id                     │
+│                            │ PFCOUNT counter (~0.81% error)            │
+│                            │                                            │
+│  PUB/SUB EVENTS            │ PUBLISH events:user:created json          │
+│                            │ SUBSCRIBE events:user:*                    │
+│                            │                                            │
+│  DEDUPLICATION             │ SETNX processed:event:id 1 EX 86400       │
+│                            │ if result == 1: process event              │
+│                            │                                            │
+│  SEMAPHORE                 │ LPUSH sem:resource tokens (N tokens)      │
+│                            │ BRPOP sem:resource timeout (acquire)      │
+│                            │ LPUSH sem:resource token (release)        │
+│                            │                                            │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Configuration Structure
+
+```
+REDIS CONFIGURATION REFERENCE:
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                                                                         │
+│  MEMORY CONFIGURATION                                                   │
+│  ────────────────────                                                   │
+│  maxmemory 4gb                      # Maximum memory limit              │
+│  maxmemory-policy allkeys-lru       # Eviction policy                   │
+│                                                                         │
+│  EVICTION POLICIES:                                                     │
+│  • noeviction      - Return errors when limit reached                   │
+│  • allkeys-lru     - Evict LRU from all keys (recommended for cache)   │
+│  • allkeys-lfu     - Evict least frequently used                        │
+│  • volatile-lru    - Evict LRU from keys with TTL                       │
+│  • volatile-lfu    - Evict LFU from keys with TTL                       │
+│  • volatile-ttl    - Evict keys with shortest TTL                       │
+│  • allkeys-random  - Evict random keys                                  │
+│  • volatile-random - Evict random keys with TTL                         │
+│                                                                         │
+│  PERSISTENCE CONFIGURATION                                              │
+│  ─────────────────────────                                              │
+│  # RDB Snapshots                                                        │
+│  save 900 1                         # Save if 1 key changed in 15min   │
+│  save 300 10                        # Save if 10 keys changed in 5min  │
+│  save 60 10000                      # Save if 10000 keys in 1min       │
+│  dbfilename dump.rdb                # RDB filename                      │
+│  dir /var/lib/redis                 # Data directory                    │
+│                                                                         │
+│  # AOF (Append Only File)                                               │
+│  appendonly yes                     # Enable AOF                        │
+│  appendfilename "appendonly.aof"    # AOF filename                      │
+│  appendfsync everysec               # Sync every second (recommended)   │
+│  # appendfsync always               # Sync on every write (slow)        │
+│  # appendfsync no                   # Let OS handle (fast, risky)       │
+│                                                                         │
+│  NETWORK CONFIGURATION                                                  │
+│  ─────────────────────                                                  │
+│  bind 127.0.0.1 10.0.0.1            # Listen interfaces                 │
+│  port 6379                          # Listen port                       │
+│  protected-mode yes                 # Require auth for external         │
+│  timeout 0                          # Client timeout (0 = disabled)     │
+│  tcp-keepalive 300                  # TCP keepalive interval            │
+│                                                                         │
+│  SECURITY CONFIGURATION                                                 │
+│  ──────────────────────                                                 │
+│  requirepass YourStrongPassword     # Password authentication           │
+│                                                                         │
+│  # ACL (Redis 6+)                                                       │
+│  user default off                   # Disable default user              │
+│  user app on >password ~* +@all     # Full access user                  │
+│  user readonly on >pass ~* +@read   # Read-only user                    │
+│                                                                         │
+│  # Disable dangerous commands                                           │
+│  rename-command FLUSHALL ""         # Disable                           │
+│  rename-command FLUSHDB ""          # Disable                           │
+│  rename-command DEBUG ""            # Disable                           │
+│  rename-command CONFIG "CFG_x7k2"   # Rename to obscure name           │
+│                                                                         │
+│  # TLS Configuration                                                    │
+│  tls-port 6379                      # TLS port                          │
+│  port 0                             # Disable non-TLS                   │
+│  tls-cert-file /path/redis.crt      # Server certificate                │
+│  tls-key-file /path/redis.key       # Server private key                │
+│  tls-ca-cert-file /path/ca.crt      # CA certificate                    │
+│  tls-auth-clients yes               # Require client certs              │
+│                                                                         │
+│  REPLICATION CONFIGURATION                                              │
+│  ─────────────────────────                                              │
+│  # On replica:                                                          │
+│  replicaof master_host 6379         # Set master                        │
+│  masterauth master_password         # Master password                   │
+│  replica-read-only yes              # Read-only replica                 │
+│                                                                         │
+│  CLUSTER CONFIGURATION                                                  │
+│  ─────────────────────                                                  │
+│  cluster-enabled yes                # Enable cluster mode               │
+│  cluster-config-file nodes.conf     # Cluster state file                │
+│  cluster-node-timeout 5000          # Node timeout (ms)                 │
+│  cluster-replica-validity-factor 10 # Replica validity                  │
+│                                                                         │
+│  PERFORMANCE TUNING                                                     │
+│  ──────────────────                                                     │
+│  # Slow log                                                             │
+│  slowlog-log-slower-than 10000      # Log commands > 10ms              │
+│  slowlog-max-len 128                # Keep last 128 slow commands       │
+│                                                                         │
+│  # Client output buffer limits                                          │
+│  client-output-buffer-limit normal 0 0 0                                │
+│  client-output-buffer-limit replica 256mb 64mb 60                       │
+│  client-output-buffer-limit pubsub 32mb 8mb 60                          │
+│                                                                         │
+│  # Lazy freeing (background deletion)                                   │
+│  lazyfree-lazy-eviction yes         # Async eviction                    │
+│  lazyfree-lazy-expire yes           # Async expiration                  │
+│  lazyfree-lazy-server-del yes       # Async DEL                         │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+CONNECTION POOL CONFIGURATION (Application Side):
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                                                                         │
+│  SETTING                  │ RECOMMENDED         │ NOTES                 │
+│  ─────────────────────────┼─────────────────────┼─────────────────────  │
+│  minConnections           │ 5-10                │ Pre-warmed pool       │
+│  maxConnections           │ 20-50               │ Based on load         │
+│  connectionTimeout        │ 1000-5000ms         │ Fail fast             │
+│  socketTimeout            │ 1000-5000ms         │ Read/write timeout    │
+│  idleTimeout              │ 30000-60000ms       │ Release unused        │
+│  maxLifetime              │ 1800000-3600000ms   │ Refresh connections   │
+│  retryAttempts            │ 3                   │ Retry on failure      │
+│  retryDelay               │ 100-1000ms          │ Backoff between tries │
+│                                                                         │
+│  Example Pool Configuration:                                            │
+│                                                                         │
+│  pool = RedisPool({                                                     │
+│      host: "redis.example.com",                                         │
+│      port: 6379,                                                        │
+│      password: getSecret("redis-password"),                            │
+│      minConnections: 10,                                                │
+│      maxConnections: 50,                                                │
+│      connectionTimeout: 3000,                                           │
+│      socketTimeout: 3000,                                               │
+│      idleTimeout: 30000,                                                │
+│      maxLifetime: 1800000,                                              │
+│      retryAttempts: 3,                                                  │
+│      retryDelay: 100,                                                   │
+│      tls: { enabled: true }                                             │
+│  })                                                                     │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 

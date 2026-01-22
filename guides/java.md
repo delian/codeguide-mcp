@@ -2552,3 +2552,105 @@ class UserServiceTest {
 - Only present working, tested, documented code to the user
 
 **Remember**: Minimalistic, clean, readable, well-documented, functional, immutable, async-first code with hexagonal architecture, virtual threads, modern patterns, focus on performance, scalability, and minimal memory footprint. Keep it simple, keep it modern, keep it working.
+
+---
+
+## 15. Quick Reference
+
+### Common Commands
+
+```bash
+# Build (Gradle)
+./gradlew build
+./gradlew compileJava
+
+# Test
+./gradlew test
+./gradlew test --tests "MyTest"
+
+# Build (Maven)
+mvn compile
+mvn package
+
+# Test (Maven)
+mvn test
+
+# Format
+mvn spotless:apply
+./gradlew spotlessApply
+
+# Documentation
+mvn javadoc:javadoc
+./gradlew javadoc
+```
+
+### Modern Java Patterns
+
+```java
+// Records (immutable data)
+record User(Long id, String name, String email) {}
+
+// Sealed classes
+sealed interface Result permits Success, Failure {}
+record Success(Data data) implements Result {}
+record Failure(String error) implements Result {}
+
+// Pattern matching
+if (obj instanceof User u) { use(u.name()); }
+
+// Switch expressions
+String result = switch (status) {
+    case ACTIVE -> "active";
+    case PENDING -> "pending";
+    default -> "unknown";
+};
+
+// Streams
+list.stream()
+    .filter(x -> x.active())
+    .map(User::name)
+    .toList();
+
+// Virtual threads
+Thread.startVirtualThread(() -> process());
+```
+
+### build.gradle.kts Template
+
+```kotlin
+plugins {
+    java
+    id("org.springframework.boot") version "3.2.0"
+}
+
+java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
+
+dependencies {
+    implementation("org.springframework.boot:spring-boot-starter-web")
+    testImplementation("org.springframework.boot:spring-boot-starter-test")
+}
+
+tasks.test { useJUnitPlatform() }
+```
+
+### Project Structure
+
+```
+my_project/
+├── build.gradle.kts
+├── src/
+│   ├── main/java/com/example/
+│   │   ├── domain/          # Domain models
+│   │   ├── port/            # Interfaces
+│   │   └── adapter/         # Implementations
+│   └── test/java/
+└── docs/
+```
+
+---
+
+## References
+
+- [Java Documentation](https://docs.oracle.com/en/java/)
+- [Spring Boot Reference](https://docs.spring.io/spring-boot/docs/current/reference/)
+- [JUnit 5 User Guide](https://junit.org/junit5/docs/current/user-guide/)

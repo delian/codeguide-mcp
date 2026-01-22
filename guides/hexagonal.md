@@ -119,6 +119,330 @@ Dependencies flow INWARD only: Infrastructure → Application → Domain
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code in every layer.**
+
+### TDD Cycle for Hexagonal Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    TDD IN HEXAGONAL ARCHITECTURE                 │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   1. 🔴 RED: Write a failing test first                         │
+│      │                                                          │
+│      │  Start with DOMAIN layer tests (innermost)               │
+│      │  • Entity behavior tests                                 │
+│      │  • Value object validation tests                         │
+│      │  • Domain service tests                                  │
+│      ▼                                                          │
+│   2. 🟢 GREEN: Write minimal code to make it pass               │
+│      │                                                          │
+│      │  Implement ONLY what the test requires                   │
+│      │  • No extra features                                     │
+│      │  • No premature optimization                             │
+│      ▼                                                          │
+│   3. 🔵 REFACTOR: Improve code while keeping tests green        │
+│      │                                                          │
+│      │  Clean up implementation                                 │
+│      │  • Extract value objects                                 │
+│      │  • Apply domain patterns                                 │
+│      ▼                                                          │
+│   4. 🔄 REPEAT: Move outward through layers                     │
+│                                                                  │
+│      Domain → Application → Infrastructure                       │
+│      (Each layer tested in isolation)                           │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Example TDD Workflow: Creating a Port and Adapter
+
+**Scenario**: Implement a PaymentGateway driven port with a Stripe adapter.
+
+```
+STEP 1: 🔴 RED - Write Domain Test First
+────────────────────────────────────────
+// Domain Layer Test
+test "Order processes payment successfully" {
+    order = Order.create(customerId, items)
+    paymentResult = PaymentResult.success(transactionId)
+
+    order.markAsPaid(paymentResult)
+
+    assert order.status == OrderStatus.PAID
+    assert order.paymentTransactionId == transactionId
+}
+// RUN: FAILS - Order.markAsPaid() doesn't exist
+
+STEP 2: 🟢 GREEN - Implement Domain Logic
+─────────────────────────────────────────
+// Domain Layer
+class Order {
+    markAsPaid(result: PaymentResult): void {
+        this.ensureCanBePaid()
+        this.status = OrderStatus.PAID
+        this.paymentTransactionId = result.transactionId
+        this.addEvent(new OrderPaid(this.id, result))
+    }
+}
+// RUN: PASSES
+
+STEP 3: 🔴 RED - Write Application Layer Test (with Port)
+─────────────────────────────────────────────────────────
+// Application Layer Test (mocking the driven port)
+test "PlaceOrderUseCase processes payment via gateway" {
+    mockPaymentGateway = mock(PaymentGateway)
+    mockPaymentGateway.processPayment(any, any)
+        .returns(PaymentResult.success("txn_123"))
+
+    useCase = PlaceOrderUseCase(
+        orderRepository: mockOrderRepo,
+        paymentGateway: mockPaymentGateway
+    )
+
+    result = useCase.execute(placeOrderCommand)
+
+    assert result.isSuccess
+    verify mockPaymentGateway.processPayment(
+        amount: Money(100, "USD"),
+        method: any
+    )
+}
+// RUN: FAILS - PaymentGateway port doesn't exist
+
+STEP 4: 🟢 GREEN - Define Port Interface
+────────────────────────────────────────
+// Application Layer - Driven Port
+interface PaymentGateway {
+    processPayment(amount: Money, method: PaymentMethod): PaymentResult
+    refund(paymentId: PaymentId, amount: Money): RefundResult
+}
+// RUN: PASSES (with mock implementation)
+
+STEP 5: 🔴 RED - Write Integration Test for Adapter
+───────────────────────────────────────────────────
+// Infrastructure Layer Test (integration)
+test "StripePaymentGateway processes payment" {
+    gateway = StripePaymentGateway(testApiKey)
+
+    result = gateway.processPayment(
+        Money(1000, "USD"),
+        PaymentMethod.card(testCard)
+    )
+
+    assert result.isSuccess
+    assert result.transactionId.startsWith("txn_")
+}
+// RUN: FAILS - StripePaymentGateway doesn't exist
+
+STEP 6: 🟢 GREEN - Implement Adapter
+────────────────────────────────────
+// Infrastructure Layer - Driven Adapter
+class StripePaymentGateway implements PaymentGateway {
+    processPayment(amount: Money, method: PaymentMethod): PaymentResult {
+        stripeCharge = this.stripeClient.charges.create({
+            amount: amount.cents,
+            currency: amount.currency.code,
+            source: this.toStripeSource(method)
+        })
+        return PaymentResult.success(stripeCharge.id)
+    }
+}
+// RUN: PASSES
+```
+
+### TDD Rules by Layer
+
+```
+DOMAIN LAYER TDD:
+├── NO mocking required (pure domain logic)
+├── Test entities, value objects, domain services
+├── Focus on business rule validation
+└── Fast, isolated tests
+
+APPLICATION LAYER TDD:
+├── MOCK all driven ports (repositories, gateways)
+├── Test use case orchestration
+├── Verify port interactions
+└── Test error handling and edge cases
+
+INFRASTRUCTURE LAYER TDD:
+├── INTEGRATION tests with real external systems
+├── Use test databases, sandbox APIs
+├── Test adapters implement ports correctly
+└── Test technical error handling (retries, timeouts)
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow for Hexagonal Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│               BUG FIX WORKFLOW IN HEXAGONAL ARCHITECTURE         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   1. 🐛 BUG REPORTED/DISCOVERED                                 │
+│      │                                                          │
+│      │  Identify which layer contains the bug:                  │
+│      │  • Domain bug? (business logic error)                    │
+│      │  • Application bug? (orchestration error)                │
+│      │  • Infrastructure bug? (adapter/integration error)       │
+│      ▼                                                          │
+│   2. 📝 WRITE FAILING TEST (in appropriate layer)               │
+│      │                                                          │
+│      │  Test MUST reproduce the exact bug behavior              │
+│      │  • Domain bug → Unit test in domain                      │
+│      │  • Port contract bug → Application test with mock        │
+│      │  • Adapter bug → Integration test                        │
+│      ▼                                                          │
+│   3. ✅ VERIFY TEST FAILS for the right reason                  │
+│      │                                                          │
+│      │  Confirm the test captures the bug accurately            │
+│      ▼                                                          │
+│   4. 🔧 FIX THE BUG (in the correct layer)                      │
+│      │                                                          │
+│      │  Fix should be minimal and focused                       │
+│      │  • Respect layer boundaries                              │
+│      │  • Don't leak abstractions                               │
+│      ▼                                                          │
+│   5. ✅ VERIFY TEST PASSES                                       │
+│      │                                                          │
+│      │  Run all tests to ensure no regressions                  │
+│      ▼                                                          │
+│   6. 📄 DOCUMENT in test comments (include bug ID)              │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Example Bug Fix: Domain Layer Bug
+
+```
+BUG REPORT #BUG-142:
+"Orders with zero items can be completed, violating business rules"
+
+LAYER IDENTIFICATION:
+This is a DOMAIN BUG - business invariant not enforced
+
+STEP 1: Write failing test in Domain layer
+──────────────────────────────────────────
+// tests/unit/domain/OrderTest
+test "BUG-142: Cannot complete order with zero items" {
+    order = Order.create(customerId, items: [])
+
+    // This should throw but currently doesn't
+    assertThrows(EmptyOrderError) {
+        order.complete()
+    }
+}
+// RUN: FAILS - order.complete() succeeds with zero items
+
+STEP 2: Fix the bug in Domain layer
+───────────────────────────────────
+// domain/model/entities/Order
+class Order {
+    complete(): void {
+        // BUG-142 FIX: Add invariant check
+        if (this.items.isEmpty()) {
+            throw new EmptyOrderError(
+                "Cannot complete order with no items"
+            )
+        }
+        this.ensureCanComplete()
+        this.status = OrderStatus.COMPLETED
+        this.addEvent(new OrderCompleted(this.id))
+    }
+}
+// RUN: PASSES - bug fixed, regression prevented
+```
+
+### Example Bug Fix: Port/Adapter Integration Bug
+
+```
+BUG REPORT #BUG-287:
+"Payment gateway timeout not handled, causes 500 errors"
+
+LAYER IDENTIFICATION:
+This is an INFRASTRUCTURE BUG - adapter error handling
+
+STEP 1: Write failing integration test
+──────────────────────────────────────
+// tests/integration/adapters/StripePaymentGatewayTest
+test "BUG-287: Handles gateway timeout gracefully" {
+    gateway = StripePaymentGateway(
+        apiKey: testKey,
+        timeout: 1ms  // Force timeout
+    )
+
+    result = gateway.processPayment(
+        Money(1000, "USD"),
+        testPaymentMethod
+    )
+
+    // Should return failure, not throw exception
+    assert result.isFailure
+    assert result.error instanceof PaymentTimeoutError
+}
+// RUN: FAILS - throws unhandled timeout exception
+
+STEP 2: Fix in Infrastructure layer
+───────────────────────────────────
+// infrastructure/adapters/driven/StripePaymentGateway
+class StripePaymentGateway implements PaymentGateway {
+    processPayment(amount: Money, method: PaymentMethod): PaymentResult {
+        try {
+            stripeCharge = this.stripeClient.charges.create(...)
+            return PaymentResult.success(stripeCharge.id)
+        } catch (TimeoutException e) {
+            // BUG-287 FIX: Handle timeout gracefully
+            return PaymentResult.failure(
+                new PaymentTimeoutError("Payment gateway timed out")
+            )
+        }
+    }
+}
+// RUN: PASSES
+
+STEP 3: Add Application layer test for proper handling
+──────────────────────────────────────────────────────
+// tests/unit/application/PlaceOrderUseCaseTest
+test "BUG-287: Use case handles payment timeout" {
+    mockGateway = mock(PaymentGateway)
+    mockGateway.processPayment(any, any)
+        .returns(PaymentResult.failure(PaymentTimeoutError()))
+
+    useCase = PlaceOrderUseCase(gateway: mockGateway, ...)
+
+    result = useCase.execute(command)
+
+    assert result.isFailure
+    assert result.error.message.contains("payment")
+}
+// Ensures application layer handles adapter errors correctly
+```
+
+### Bug Fix Checklist
+
+```
+BUG FIX VERIFICATION:
+□ Bug isolated to correct layer (Domain/Application/Infrastructure)
+□ Failing test written BEFORE fix
+□ Test reproduces exact bug behavior
+□ Fix implemented in appropriate layer
+□ Fix respects layer boundaries (no dependency violations)
+□ All existing tests still pass
+□ Bug ID documented in test comments
+□ No new technical debt introduced
+```
+
+---
+
 ## 3. Ports and Adapters (MANDATORY)
 
 ### A. Port Types
@@ -1126,6 +1450,169 @@ Phase 5: Clean Up
 
 > "The center of your application is not the database. Nor is it one or more of the frameworks you may be using. The center of your application is the use cases of your application."
 > — Robert C. Martin (Uncle Bob)
+
+---
+
+## Quick Reference
+
+### Hexagonal Architecture at a Glance
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     QUICK REFERENCE                              │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  LAYER HIERARCHY (Dependencies flow INWARD only):               │
+│                                                                  │
+│    Infrastructure → Application → Domain                         │
+│         │                │            │                          │
+│    Adapters         Ports/Use     Entities                       │
+│    Config           Cases         Value Objects                  │
+│    DB/HTTP          DTOs          Domain Services                │
+│                                                                  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  PORT TYPES:                                                     │
+│                                                                  │
+│  DRIVING (Primary/Inbound):    DRIVEN (Secondary/Outbound):     │
+│  • Use case interfaces          • Repository interfaces          │
+│  • Command handlers             • External service interfaces    │
+│  • Query handlers               • Notification interfaces        │
+│                                                                  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ADAPTER TYPES:                                                  │
+│                                                                  │
+│  DRIVING (Inbound):             DRIVEN (Outbound):              │
+│  • REST Controllers             • Database Repositories          │
+│  • CLI Handlers                 • External API Clients           │
+│  • Message Consumers            • Message Publishers             │
+│  • GraphQL Resolvers            • File Storage Adapters          │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Common Patterns
+
+```
+PATTERN                         USE CASE
+─────────────────────────────────────────────────────────────────
+Repository Interface            Abstract persistence in domain
+  (Domain) + Impl (Infra)       Swap databases without domain changes
+
+Port Interface                  Define contracts for external systems
+  (Application)                 Decouple from specific implementations
+
+Driving Adapter                 Translate external protocols to app calls
+  (Infrastructure)              Support multiple entry points (REST, CLI)
+
+Driven Adapter                  Implement port with specific technology
+  (Infrastructure)              Hide external system complexity
+
+Application Service             Orchestrate domain operations
+  (Application)                 Single use case per service
+
+Domain Service                  Cross-entity business logic
+  (Domain)                      Stateless, operates on domain objects
+
+Value Object                    Immutable, self-validating types
+  (Domain)                      Replace primitives with domain concepts
+
+Aggregate Root                  Consistency boundary
+  (Domain)                      Single entry point for related entities
+```
+
+### Directory Structure Quick Reference
+
+```
+project/
+├── src/
+│   ├── domain/                 # INNERMOST - Zero external dependencies
+│   │   ├── model/              # Entities, Value Objects, Aggregates
+│   │   ├── services/           # Domain Services (stateless)
+│   │   ├── events/             # Domain Events
+│   │   └── repositories/       # Repository INTERFACES only
+│   │
+│   ├── application/            # MIDDLE - Depends only on Domain
+│   │   ├── ports/
+│   │   │   ├── driving/        # Inbound port interfaces
+│   │   │   └── driven/         # Outbound port interfaces
+│   │   ├── services/           # Use case implementations
+│   │   └── dto/                # Data Transfer Objects
+│   │
+│   └── infrastructure/         # OUTERMOST - Implements all ports
+│       ├── adapters/
+│       │   ├── driving/        # REST, CLI, GraphQL, Messaging
+│       │   └── driven/         # Repositories, External APIs
+│       └── config/             # DI, Database, Framework config
+│
+└── tests/
+    ├── unit/domain/            # No mocks needed
+    ├── unit/application/       # Mock all ports
+    └── integration/adapters/   # Real external systems (test instances)
+```
+
+### TDD Quick Reference
+
+```
+LAYER           TEST TYPE       MOCKING                 FOCUS
+─────────────────────────────────────────────────────────────────
+Domain          Unit            None                    Business rules
+Application     Unit            All driven ports        Orchestration
+Infrastructure  Integration     Minimal                 External systems
+```
+
+### Common Anti-Patterns to Avoid
+
+```
+❌ ANTI-PATTERN                  ✅ CORRECT APPROACH
+─────────────────────────────────────────────────────────────────
+Domain imports infrastructure   Domain has zero external imports
+Application calls DB directly   Application uses repository port
+Framework annotations in domain Keep domain pure, annotations in infra
+Business logic in adapters      Adapters only translate/delegate
+Fat application services        One public method per use case
+Anemic domain model             Entities have behavior, not just data
+Leaky port interfaces           Ports use domain types only
+Skipping TDD for "simple" code  TDD for ALL code, especially domain
+```
+
+### Verification Commands
+
+```bash
+# Typical verification workflow (language-agnostic)
+
+# 1. Run domain unit tests (should be fast, no external deps)
+[test-runner] tests/unit/domain/
+
+# 2. Run application unit tests (with mocked ports)
+[test-runner] tests/unit/application/
+
+# 3. Run integration tests (may need test containers/databases)
+[test-runner] tests/integration/
+
+# 4. Verify dependency direction (use architecture linting tools)
+# Example tools: ArchUnit (Java), dependency-cruiser (JS),
+# import-linter (Python), deptrac (PHP)
+
+# 5. Check test coverage
+[coverage-tool] --threshold=80
+```
+
+### Key Questions for Architecture Review
+
+```
+VALIDATION CHECKLIST:
+□ Can domain be tested without ANY infrastructure?
+□ Can I swap the database by only changing one adapter?
+□ Can I add a CLI adapter without modifying existing code?
+□ Are all port interfaces defined in the application layer?
+□ Do adapters implement ports, not call each other?
+□ Is there ANY business logic outside the domain layer?
+□ Do dependencies flow inward (never outward)?
+□ Are value objects used instead of primitives?
+□ Does every bug have a regression test?
+```
 
 ---
 

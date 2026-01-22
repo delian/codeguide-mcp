@@ -1978,3 +1978,108 @@ class ErrorWidget extends StatelessWidget {
 - Only present working, tested, documented code to the user
 
 **Remember**: Minimalistic, clean, readable, well-documented, functional, immutable Flutter/Dart code with hexagonal architecture, Riverpod state management, Freezed classes, comprehensive testing, and focus on performance and portability. Keep it simple, keep it modern, keep it working.
+
+---
+
+## 13. Quick Reference
+
+### Common Commands
+
+```bash
+# Build & Run
+flutter run
+flutter run --release
+flutter build apk
+flutter build ios
+flutter build web
+
+# Test
+flutter test
+flutter test --coverage
+flutter test integration_test/
+
+# Analyze & Format
+flutter analyze
+dart format lib/
+dart fix --apply
+
+# Generate code
+flutter pub run build_runner build --delete-conflicting-outputs
+
+# Dependencies
+flutter pub get
+flutter pub upgrade
+flutter pub outdated
+```
+
+### Riverpod Patterns Cheat Sheet
+
+```dart
+// Simple provider
+@riverpod
+int counter(Ref ref) => 0;
+
+// Async provider
+@riverpod
+Future<User> user(Ref ref) async => fetchUser();
+
+// Notifier
+@riverpod
+class Counter extends _$Counter {
+  @override
+  int build() => 0;
+  void increment() => state++;
+}
+
+// Watch in widget
+class MyWidget extends ConsumerWidget {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final count = ref.watch(counterProvider);
+    return Text('$count');
+  }
+}
+```
+
+### Freezed Model Template
+
+```dart
+@freezed
+class User with _$User {
+  const factory User({
+    required String id,
+    required String email,
+    String? name,
+  }) = _User;
+
+  factory User.fromJson(Map<String, dynamic> json) =>
+      _$UserFromJson(json);
+}
+```
+
+### Project Structure
+
+```
+lib/
+├── main.dart
+├── features/
+│   └── auth/
+│       ├── domain/          # Entities, ports
+│       ├── data/            # Adapters
+│       └── presentation/    # UI, providers
+├── core/                    # Utilities
+└── shared/                  # Shared widgets
+
+test/
+├── unit/
+├── widget/
+└── integration_test/
+```
+
+---
+
+## References
+
+- [Flutter Documentation](https://docs.flutter.dev/)
+- [Riverpod Documentation](https://riverpod.dev/)
+- [Freezed Package](https://pub.dev/packages/freezed)
+- [Dart Language Guide](https://dart.dev/guides)

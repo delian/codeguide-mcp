@@ -189,6 +189,533 @@ project/
 }
 ```
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    TDD CYCLE                                │
+│                                                             │
+│    ┌───────────┐                                            │
+│    │   RED     │  1. Write a failing test first             │
+│    │  (FAIL)   │     - Define expected behavior             │
+│    └─────┬─────┘     - Test MUST fail initially             │
+│          │                                                  │
+│          ▼                                                  │
+│    ┌───────────┐                                            │
+│    │   GREEN   │  2. Write minimal code to pass             │
+│    │  (PASS)   │     - Only enough code to pass test        │
+│    └─────┬─────┘     - No premature optimization            │
+│          │                                                  │
+│          ▼                                                  │
+│    ┌───────────┐                                            │
+│    │ REFACTOR  │  3. Improve code quality                   │
+│    │ (IMPROVE) │     - Clean up duplication                 │
+│    └─────┬─────┘     - Tests MUST still pass                │
+│          │                                                  │
+│          └──────────► Repeat for next feature               │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Example TDD Workflow for Node.js (Vitest)
+
+```typescript
+// ═══════════════════════════════════════════════════════════════
+// STEP 1: RED - Write failing test first
+// ═══════════════════════════════════════════════════════════════
+
+// tests/unit/user.service.test.ts
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { UserService } from '../../src/services/user.service.js';
+import type { UserRepository } from '../../src/repositories/user.repository.js';
+
+describe('UserService', () => {
+  let service: UserService;
+  let mockRepository: UserRepository;
+
+  beforeEach(() => {
+    mockRepository = {
+      findById: vi.fn(),
+      findByEmail: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+    };
+    service = new UserService(mockRepository);
+  });
+
+  describe('createUser', () => {
+    it('should create a user with valid input', async () => {
+      const input = { email: 'test@example.com', name: 'Test User' };
+      const expected = { id: '123', ...input, createdAt: new Date() };
+
+      vi.mocked(mockRepository.findByEmail).mockResolvedValue(null);
+      vi.mocked(mockRepository.create).mockResolvedValue(expected);
+
+      const result = await service.createUser(input);
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.email).toBe(input.email);
+        expect(result.data.name).toBe(input.name);
+      }
+      expect(mockRepository.create).toHaveBeenCalledWith(input);
+    });
+
+    it('should return error if email already exists', async () => {
+      const input = { email: 'existing@example.com', name: 'Test' };
+      const existingUser = { id: '456', ...input, createdAt: new Date() };
+
+      vi.mocked(mockRepository.findByEmail).mockResolvedValue(existingUser);
+
+      const result = await service.createUser(input);
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.message).toContain('already exists');
+      }
+      expect(mockRepository.create).not.toHaveBeenCalled();
+    });
+  });
+});
+
+// Run: npm test
+// ❌ FAILS - UserService doesn't exist yet
+
+// ═══════════════════════════════════════════════════════════════
+// STEP 2: GREEN - Write minimal implementation
+// ═══════════════════════════════════════════════════════════════
+
+// src/services/user.service.ts
+import type { UserRepository } from '../repositories/user.repository.js';
+import type { User, CreateUserInput, Result } from '../types/index.js';
+
+export class UserService {
+  constructor(private readonly repository: UserRepository) {}
+
+  async createUser(input: CreateUserInput): Promise<Result<User>> {
+    const existing = await this.repository.findByEmail(input.email);
+    if (existing) {
+      return {
+        success: false,
+        error: new Error('Email already exists'),
+      };
+    }
+
+    const user = await this.repository.create(input);
+    return { success: true, data: user };
+  }
+}
+
+// Run: npm test
+// ✅ PASSES - tests pass
+
+// ═══════════════════════════════════════════════════════════════
+// STEP 3: REFACTOR - Improve with validation and logging
+// ═══════════════════════════════════════════════════════════════
+
+// src/services/user.service.ts (refactored)
+import { z } from 'zod';
+import type { UserRepository } from '../repositories/user.repository.js';
+import type { User, CreateUserInput, Result } from '../types/index.js';
+import { ValidationError } from '../utils/errors.js';
+import { logger } from '../utils/logger.js';
+
+const createUserSchema = z.object({
+  email: z.string().email(),
+  name: z.string().min(1).max(100),
+});
+
+export class UserService {
+  constructor(private readonly repository: UserRepository) {}
+
+  async createUser(input: CreateUserInput): Promise<Result<User>> {
+    // Validate input
+    const parsed = createUserSchema.safeParse(input);
+    if (!parsed.success) {
+      return {
+        success: false,
+        error: new ValidationError(parsed.error.message),
+      };
+    }
+
+    // Check for duplicate email
+    const existing = await this.repository.findByEmail(input.email);
+    if (existing) {
+      logger.warn({ email: input.email }, 'Attempted to create user with existing email');
+      return {
+        success: false,
+        error: new ValidationError('Email already exists'),
+      };
+    }
+
+    // Create user
+    try {
+      const user = await this.repository.create(parsed.data);
+      logger.info({ userId: user.id }, 'User created successfully');
+      return { success: true, data: user };
+    } catch (error) {
+      logger.error({ error, input }, 'Failed to create user');
+      throw error;
+    }
+  }
+}
+
+// Run: npm test
+// ✅ PASSES - tests still pass after refactoring
+```
+
+### Example TDD for API Endpoint Testing
+
+```typescript
+// tests/integration/users.api.test.ts
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import request from 'supertest';
+import { createApp } from '../../src/app.js';
+import { PrismaClient } from '@prisma/client';
+
+const prisma = new PrismaClient();
+const app = createApp(prisma);
+
+describe('POST /api/users', () => {
+  beforeAll(async () => {
+    await prisma.$connect();
+  });
+
+  afterAll(async () => {
+    await prisma.user.deleteMany();
+    await prisma.$disconnect();
+  });
+
+  // RED: Write test first
+  it('should create a new user and return 201', async () => {
+    const newUser = {
+      email: 'newuser@example.com',
+      name: 'New User',
+    };
+
+    const response = await request(app)
+      .post('/api/users')
+      .send(newUser)
+      .expect(201);
+
+    expect(response.body.success).toBe(true);
+    expect(response.body.data).toMatchObject({
+      email: newUser.email,
+      name: newUser.name,
+    });
+    expect(response.body.data.id).toBeDefined();
+  });
+
+  it('should return 400 for invalid email', async () => {
+    const invalidUser = {
+      email: 'not-an-email',
+      name: 'Test User',
+    };
+
+    const response = await request(app)
+      .post('/api/users')
+      .send(invalidUser)
+      .expect(400);
+
+    expect(response.body.success).toBe(false);
+    expect(response.body.error).toBeDefined();
+  });
+
+  it('should return 400 for duplicate email', async () => {
+    const user = {
+      email: 'duplicate@example.com',
+      name: 'First User',
+    };
+
+    // Create first user
+    await request(app).post('/api/users').send(user).expect(201);
+
+    // Attempt to create duplicate
+    const response = await request(app)
+      .post('/api/users')
+      .send(user)
+      .expect(400);
+
+    expect(response.body.success).toBe(false);
+    expect(response.body.error.message).toContain('already exists');
+  });
+});
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                  BUG FIX WORKFLOW                           │
+│                                                             │
+│  ┌──────────────────┐                                       │
+│  │  1. BUG REPORTED │  Ticket/Issue created                 │
+│  └────────┬─────────┘                                       │
+│           │                                                 │
+│           ▼                                                 │
+│  ┌──────────────────┐                                       │
+│  │  2. WRITE TEST   │  Reproduce bug in test (MUST FAIL)    │
+│  │     (RED)        │  Include bug ID in test name          │
+│  └────────┬─────────┘                                       │
+│           │                                                 │
+│           ▼                                                 │
+│  ┌──────────────────┐                                       │
+│  │  3. VERIFY FAIL  │  Confirm test fails for right reason  │
+│  └────────┬─────────┘                                       │
+│           │                                                 │
+│           ▼                                                 │
+│  ┌──────────────────┐                                       │
+│  │  4. FIX BUG      │  Implement the fix                    │
+│  │     (GREEN)      │  Minimal changes only                 │
+│  └────────┬─────────┘                                       │
+│           │                                                 │
+│           ▼                                                 │
+│  ┌──────────────────┐                                       │
+│  │  5. VERIFY PASS  │  Test now passes                      │
+│  └────────┬─────────┘  All other tests still pass           │
+│           │                                                 │
+│           ▼                                                 │
+│  ┌──────────────────┐                                       │
+│  │  6. DOCUMENT     │  Add comments with bug ID             │
+│  └────────┬─────────┘  Update changelog if needed           │
+│           │                                                 │
+│           ▼                                                 │
+│  ┌──────────────────┐                                       │
+│  │  7. DEPLOY       │  Regression prevented forever         │
+│  └──────────────────┘                                       │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Example Bug Fix with Regression Test
+
+```typescript
+// ═══════════════════════════════════════════════════════════════
+// Bug Report #4721: User search returns wrong results when name
+// contains special characters (e.g., "O'Brien", "José")
+// ═══════════════════════════════════════════════════════════════
+
+// STEP 1-2: Write test that reproduces the bug
+// tests/unit/user.service.test.ts
+
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { UserService } from '../../src/services/user.service.js';
+
+describe('UserService - Bug Fixes', () => {
+  // ... setup ...
+
+  describe('searchUsers - Bug #4721: Special characters in names', () => {
+    it("should find users with apostrophes in name - Bug #4721", async () => {
+      // Bug: searchUsers("O'Brien") returned empty array
+      // Discovered: 2026-01-18
+      // Root cause: SQL LIKE query not escaping special chars
+
+      const usersWithSpecialNames = [
+        { id: '1', name: "Patrick O'Brien", email: 'patrick@example.com' },
+        { id: '2', name: 'María José García', email: 'maria@example.com' },
+      ];
+
+      vi.mocked(mockRepository.search).mockResolvedValue(usersWithSpecialNames);
+
+      const result = await service.searchUsers("O'Brien");
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data).toHaveLength(1);
+        expect(result.data[0]?.name).toBe("Patrick O'Brien");
+      }
+    });
+
+    it('should find users with accented characters - Bug #4721', async () => {
+      // Related to Bug #4721: Unicode characters also affected
+
+      const usersWithAccents = [
+        { id: '2', name: 'María José García', email: 'maria@example.com' },
+      ];
+
+      vi.mocked(mockRepository.search).mockResolvedValue(usersWithAccents);
+
+      const result = await service.searchUsers('José');
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data).toHaveLength(1);
+        expect(result.data[0]?.name).toContain('José');
+      }
+    });
+  });
+});
+
+// Run: npm test
+// ❌ FAILS - searchUsers crashes on special characters
+
+// ═══════════════════════════════════════════════════════════════
+// STEP 3-4: Fix the bug
+// ═══════════════════════════════════════════════════════════════
+
+// src/services/user.service.ts
+
+/**
+ * Searches for users by name.
+ *
+ * @param query - Search query string
+ * @returns Promise resolving to Result with matching users
+ *
+ * @remarks
+ * Fix for Bug #4721: Now properly handles special characters
+ * including apostrophes and Unicode characters.
+ */
+async searchUsers(query: string): Promise<Result<User[]>> {
+  // Validate and sanitize input
+  if (!query || query.trim().length === 0) {
+    return { success: true, data: [] };
+  }
+
+  // FIX for Bug #4721: Escape special characters for search
+  // Previously: query was passed directly causing SQL issues
+  const sanitizedQuery = this.sanitizeSearchQuery(query);
+
+  try {
+    const users = await this.repository.search(sanitizedQuery);
+    return { success: true, data: users };
+  } catch (error) {
+    logger.error({ error, query }, 'User search failed');
+    return {
+      success: false,
+      error: error instanceof Error ? error : new Error('Search failed'),
+    };
+  }
+}
+
+/**
+ * Sanitizes search query for safe database operations.
+ *
+ * @private
+ * @param query - Raw search query
+ * @returns Sanitized query string
+ *
+ * @remarks
+ * Added as part of Bug #4721 fix.
+ */
+private sanitizeSearchQuery(query: string): string {
+  // Escape special SQL LIKE characters
+  return query
+    .trim()
+    .replace(/[%_\\]/g, '\\$&')  // Escape LIKE wildcards
+    .normalize('NFC');            // Normalize Unicode
+}
+
+// Run: npm test
+// ✅ PASSES - bug fixed, regression prevented forever
+```
+
+### Example: Async/Promise Bug Fix
+
+```typescript
+// ═══════════════════════════════════════════════════════════════
+// Bug Report #5102: Race condition in concurrent user updates
+// causes data loss
+// ═══════════════════════════════════════════════════════════════
+
+// STEP 1-2: Write test that reproduces the race condition
+describe('UserService - Bug #5102: Concurrent update race condition', () => {
+  it('should handle concurrent updates without data loss - Bug #5102', async () => {
+    // Bug: When two updates happen simultaneously, second update
+    // overwrites first update's changes completely
+    // Discovered: 2026-01-20
+
+    const userId = '123';
+    const initialUser = {
+      id: userId,
+      name: 'Original Name',
+      email: 'original@example.com',
+      role: 'user' as const,
+    };
+
+    // Simulate concurrent updates
+    vi.mocked(mockRepository.findById).mockResolvedValue(initialUser);
+    vi.mocked(mockRepository.update).mockImplementation(async (id, data) => ({
+      ...initialUser,
+      ...data,
+    }));
+
+    // Two concurrent updates to different fields
+    const [result1, result2] = await Promise.all([
+      service.updateUser(userId, { name: 'New Name' }),
+      service.updateUser(userId, { email: 'new@example.com' }),
+    ]);
+
+    // Both updates should succeed
+    expect(result1.success).toBe(true);
+    expect(result2.success).toBe(true);
+
+    // Verify repository was called with partial updates (not full replacement)
+    expect(mockRepository.update).toHaveBeenCalledWith(userId, { name: 'New Name' });
+    expect(mockRepository.update).toHaveBeenCalledWith(userId, { email: 'new@example.com' });
+  });
+});
+
+// STEP 3-4: Fix with optimistic locking
+// src/services/user.service.ts
+
+/**
+ * Updates a user with optimistic locking to prevent race conditions.
+ *
+ * @param id - User ID to update
+ * @param data - Partial user data to update
+ * @returns Promise resolving to Result with updated user
+ *
+ * @remarks
+ * Fix for Bug #5102: Uses optimistic locking with version field
+ * to detect and handle concurrent modifications.
+ */
+async updateUser(id: string, data: Partial<User>): Promise<Result<User>> {
+  try {
+    // FIX for Bug #5102: Use atomic update operation
+    // Previously: Read-then-write caused race conditions
+    const updated = await this.repository.update(id, data);
+
+    logger.info({ userId: id, fields: Object.keys(data) }, 'User updated');
+    return { success: true, data: updated };
+  } catch (error) {
+    if (error instanceof OptimisticLockError) {
+      // Bug #5102: Handle concurrent modification
+      logger.warn({ userId: id }, 'Concurrent modification detected');
+      return {
+        success: false,
+        error: new ConflictError('User was modified by another request'),
+      };
+    }
+    throw error;
+  }
+}
+```
+
+### Prohibited Practices for Bug Fixes
+
+**NEVER:**
+- Fix a bug without adding a regression test first
+- Write implementation before writing tests (violates TDD)
+- Skip the Red-Green-Refactor cycle
+- Commit code with failing tests
+- Remove tests to make code pass
+- Use `test.skip()` or `it.skip()` to ignore failing tests
+- Mark tests as `test.todo()` indefinitely
+- Catch and swallow errors without logging
+
+---
+
 ## 3. Documentation Requirements (MANDATORY)
 
 ### A. JSDoc Comments for All Code
@@ -1044,215 +1571,6 @@ export class AuthService {
 }
 ```
 
----
-
-## 3A. Test-Driven Development (TDD) Protocol (MANDATORY)
-
-**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
-
-### TDD Cycle
-
-```
-1. 🔴 RED: Write a failing test first
-   ↓
-2. 🟢 GREEN: Write minimal code to make it pass
-   ↓
-3. 🔵 REFACTOR: Improve code while keeping tests green
-   ↓
-   Repeat
-```
-
-### Example TDD Workflow for Node.js
-
-```typescript
-// Step 1: RED - Write failing test first
-import { describe, it, expect } from 'vitest';
-import { rateLimit } from './middleware.js';
-
-describe('rateLimit middleware', () => {
-  it('allows requests under the rate limit', async () => {
-    const middleware = rateLimit({ maxRequests: 5, window: 60000 });
-    const req = { ip: '127.0.0.1' };
-    const res = { status: vi.fn(), json: vi.fn() };
-    const next = vi.fn();
-    
-    await middleware(req, res, next);
-    
-    expect(next).toHaveBeenCalled();
-    expect(res.status).not.toHaveBeenCalled();
-  });
-  
-  it('blocks requests over the rate limit', async () => {
-    const middleware = rateLimit({ maxRequests: 2, window: 60000 });
-    const req = { ip: '127.0.0.1' };
-    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-    const next = vi.fn();
-    
-    // Make 3 requests (2 allowed, 1 blocked)
-    await middleware(req, res, next);
-    await middleware(req, res, next);
-    await middleware(req, res, next);
-    
-    expect(res.status).toHaveBeenCalledWith(429);
-  });
-});
-
-// Run: npm test
-// ❌ FAILS - rateLimit doesn't exist yet
-
-// Step 2: GREEN - Write minimal implementation
-const requestCounts = new Map<string, { count: number; resetTime: number }>();
-
-export function rateLimit(options: { maxRequests: number; window: number }) {
-  return async (req: any, res: any, next: () => void) => {
-    const ip = req.ip;
-    const now = Date.now();
-    const record = requestCounts.get(ip);
-    
-    if (!record || now > record.resetTime) {
-      requestCounts.set(ip, { count: 1, resetTime: now + options.window });
-      return next();
-    }
-    
-    if (record.count < options.maxRequests) {
-      record.count++;
-      return next();
-    }
-    
-    res.status(429).json({ error: 'Too many requests' });
-  };
-}
-
-// Run: npm test
-// ✅ PASSES - tests pass
-
-// Step 3: REFACTOR - Add cleanup, better types
-interface RateLimitOptions {
-  maxRequests: number;
-  window: number;
-}
-
-interface RequestRecord {
-  count: number;
-  resetTime: number;
-}
-
-export function rateLimit(options: RateLimitOptions) {
-  const requestCounts = new Map<string, RequestRecord>();
-  
-  // Cleanup old records every minute
-  setInterval(() => {
-    const now = Date.now();
-    for (const [ip, record] of requestCounts.entries()) {
-      if (now > record.resetTime) {
-        requestCounts.delete(ip);
-      }
-    }
-  }, 60000);
-  
-  return async (req: Request, res: Response, next: NextFunction) => {
-    const ip = req.ip;
-    const now = Date.now();
-    const record = requestCounts.get(ip);
-    
-    if (!record || now > record.resetTime) {
-      requestCounts.set(ip, { count: 1, resetTime: now + options.window });
-      return next();
-    }
-    
-    if (record.count < options.maxRequests) {
-      record.count++;
-      return next();
-    }
-    
-    res.status(429).json({ error: 'Too many requests' });
-  };
-}
-// Tests still pass ✓
-```
-
----
-
-## 3B. Bug Fix Protocol (MANDATORY)
-
-**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
-
-### Bug Fix Workflow
-
-```
-1. 🐛 Bug Reported/Discovered
-   ↓
-2. ✍️ Write a test that REPRODUCES the bug (test will FAIL)
-   ↓
-3. ✅ Verify the test fails for the right reason
-   ↓
-4. 🔧 Fix the bug (make the test pass)
-   ↓
-5. 🟢 Verify the test now PASSES
-   ↓
-6. 📝 Document the bug in test comments (include bug ID)
-   ↓
-7. 🚀 Deploy with confidence (regression prevented)
-```
-
-### Example Bug Fix
-
-```typescript
-// Bug Report #4721: JWT verification fails for tokens with URL-safe base64
-
-// Step 1-2: Write test that reproduces the bug
-import { describe, it, expect } from 'vitest';
-import { verifyToken } from './auth.js';
-
-describe('verifyToken - Bug #4721', () => {
-  it('verifies tokens with URL-safe base64 - Bug #4721', async () => {
-    // Bug: verifyToken failed for tokens containing _ or -
-    // Discovered: 2026-01-18
-    // This test prevents regression
-    
-    const tokenWithUrlSafeChars = 'eyJhbGciOi_VzI1NiIsInR5cCI6IkpXVCJ9...';
-    
-    await expect(verifyToken(tokenWithUrlSafeChars)).resolves.toMatchObject({
-      valid: true,
-    });
-  });
-});
-
-// Run: npm test
-// ❌ FAILS - verifyToken crashes on _ and - characters
-
-// Step 3: Fix the bug
-import { jwtVerify, importSPKI } from 'jose';
-
-export async function verifyToken(token: string) {
-  try {
-    // FIX: URL-safe base64 is standard for JWT
-    // No need to replace _ or -, jose handles it correctly
-    const publicKey = await importSPKI(process.env.JWT_PUBLIC_KEY!, 'RS256');
-    const { payload } = await jwtVerify(token, publicKey);
-    
-    return { valid: true, payload };
-  } catch (error) {
-    return { valid: false, error: error.message };
-  }
-}
-
-// Run: npm test
-// ✅ PASSES - bug fixed, regression prevented ✓
-```
-
-### Prohibited Practices for Bug Fixes
-
-**NEVER:**
-- ❌ Fix a bug without adding a regression test first
-- ❌ Write implementation before writing tests (violates TDD)
-- ❌ Skip the Red-Green-Refactor cycle
-- ❌ Commit code with failing tests
-- ❌ Remove tests to make code pass
-- ❌ Use test.skip() to ignore failing tests
-
----
-
 ## 4. Mandatory Code Standards
 
 ### A. Type Safety
@@ -1614,7 +1932,7 @@ try {
 }
 ```
 
-## 4. Modern Framework Patterns
+## 5. Modern Framework Patterns
 
 ### A. Fastify (Recommended for APIs)
 * **USE Fastify v4+** for high-performance APIs.
@@ -1783,7 +2101,7 @@ export class UserService {
 }
 ```
 
-## 5. Testing Standards
+## 6. Testing Standards
 
 ### A. Unit Testing with Vitest
 * **USE Vitest** for fast, modern testing.
@@ -1896,7 +2214,7 @@ describe('User Integration Tests', () => {
 });
 ```
 
-## 6. Performance Optimization
+## 7. Performance Optimization
 
 ### A. Native Node.js APIs
 * **USE native Node.js APIs** when available.
@@ -1980,7 +2298,7 @@ for await (const line of readLargeFile('large-file.txt')) {
 }
 ```
 
-## 7. Security Best Practices
+## 8. Security Best Practices
 
 ### A. Input Sanitization & Validation
 ```typescript
@@ -2091,7 +2409,7 @@ const limiter = rateLimit({
 app.use('/api/', limiter);
 ```
 
-## 8. Development Tools
+## 9. Development Tools
 
 ### A. Biome Configuration (Modern Linter + Formatter)
 ```json
@@ -2202,7 +2520,7 @@ app.use('/api/', limiter);
 }
 ```
 
-## 9. Complete Production Example
+## 10. Complete Production Example
 
 ```typescript
 // src/index.ts - Main application
@@ -2355,7 +2673,7 @@ export function errorHandler(error: Error, c: Context) {
 }
 ```
 
-## 10. Deployment Checklist
+## 11. Deployment Checklist
 
 ### Pre-Production Validation
 - [ ] All TypeScript strict checks enabled and passing
@@ -2455,7 +2773,7 @@ yarn-debug.log*
 yarn-error.log*
 ```
 
-## 11. Why This Configuration Works
+## 12. Why This Configuration Works
 
 1. **ESM Modules**: Modern standard, tree-shaking support, better for performance and compatibility with web standards.
 
@@ -2478,6 +2796,460 @@ yarn-error.log*
 10. **npm**: Standard tool working correctly under Linux, OSX and Windows.
 
 11. **Native APIs**: Better performance, smaller bundle size, no external dependencies to maintain.
+
+---
+
+## 13. Quick Reference
+
+### Common Commands
+
+```bash
+# ═══════════════════════════════════════════════════════════════
+# DEVELOPMENT
+# ═══════════════════════════════════════════════════════════════
+
+# Run development server with hot reload
+npm run dev                    # Uses tsx watch src/index.ts
+
+# Run a single TypeScript file
+npx tsx src/script.ts          # Execute TS directly
+
+# Type check without emitting
+npm run typecheck              # tsc --noEmit
+
+# ═══════════════════════════════════════════════════════════════
+# TESTING
+# ═══════════════════════════════════════════════════════════════
+
+# Run all tests
+npm test                       # vitest
+
+# Run tests in watch mode
+npm run test:watch             # vitest --watch
+
+# Run tests with coverage
+npm run test:coverage          # vitest run --coverage
+
+# Run specific test file
+npx vitest src/services/user.service.test.ts
+
+# Run tests matching pattern
+npx vitest -t "should create user"
+
+# ═══════════════════════════════════════════════════════════════
+# BUILD & PRODUCTION
+# ═══════════════════════════════════════════════════════════════
+
+# Build TypeScript to JavaScript
+npm run build                  # tsc
+
+# Run production build
+npm start                      # node dist/index.js
+
+# Clean build artifacts
+npm run clean                  # rm -rf dist docs
+
+# ═══════════════════════════════════════════════════════════════
+# CODE QUALITY
+# ═══════════════════════════════════════════════════════════════
+
+# Lint code
+npm run lint                   # biome check .
+
+# Fix lint issues
+npm run lint:fix               # biome check --apply .
+
+# Format code
+npm run format                 # biome format --write .
+
+# Full verification (typecheck + lint + test)
+npm run verify                 # All checks in sequence
+
+# ═══════════════════════════════════════════════════════════════
+# DOCUMENTATION
+# ═══════════════════════════════════════════════════════════════
+
+# Generate API documentation
+npm run docs                   # typedoc --out docs src/
+
+# Check documentation completeness
+npm run docs:check             # typedoc --emit none --validation.notDocumented true
+
+# Serve documentation locally
+npm run docs:serve             # Generate and serve at localhost
+
+# ═══════════════════════════════════════════════════════════════
+# DATABASE (Prisma)
+# ═══════════════════════════════════════════════════════════════
+
+# Run migrations in development
+npm run db:migrate             # prisma migrate dev
+
+# Generate Prisma Client
+npm run db:generate            # prisma generate
+
+# Open Prisma Studio (database GUI)
+npm run db:studio              # prisma studio
+
+# Reset database
+npx prisma migrate reset       # Drop and recreate
+
+# ═══════════════════════════════════════════════════════════════
+# PACKAGE MANAGEMENT
+# ═══════════════════════════════════════════════════════════════
+
+# Install dependencies
+npm install                    # Install from package.json
+
+# Add production dependency
+npm add zod                    # Add to dependencies
+
+# Add dev dependency
+npm add -D vitest              # Add to devDependencies
+
+# Update all dependencies
+npm update                     # Update within semver ranges
+
+# Check for outdated packages
+npm outdated                   # Show outdated deps
+
+# Audit for vulnerabilities
+npm audit                      # Security check
+npm audit fix                  # Auto-fix vulnerabilities
+```
+
+### Node.js Patterns Cheat Sheet
+
+```typescript
+// ═══════════════════════════════════════════════════════════════
+// ASYNC/AWAIT PATTERNS
+// ═══════════════════════════════════════════════════════════════
+
+// Parallel execution (independent operations)
+const [users, posts, comments] = await Promise.all([
+  fetchUsers(),
+  fetchPosts(),
+  fetchComments(),
+]);
+
+// Sequential execution (dependent operations)
+const user = await fetchUser(id);
+const posts = await fetchUserPosts(user.id);
+const comments = await fetchPostComments(posts[0].id);
+
+// Race condition (first to complete wins)
+const result = await Promise.race([
+  fetchFromPrimary(),
+  fetchFromBackup(),
+]);
+
+// All settled (get results regardless of success/failure)
+const results = await Promise.allSettled([
+  riskyOperation1(),
+  riskyOperation2(),
+]);
+results.forEach(result => {
+  if (result.status === 'fulfilled') {
+    console.log('Success:', result.value);
+  } else {
+    console.log('Failed:', result.reason);
+  }
+});
+
+// Timeout wrapper
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  const timeout = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('Timeout')), ms)
+  );
+  return Promise.race([promise, timeout]);
+}
+
+// Retry with exponential backoff
+async function retry<T>(
+  fn: () => Promise<T>,
+  maxAttempts: number = 3,
+  baseDelay: number = 1000,
+): Promise<T> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (attempt === maxAttempts) throw error;
+      await new Promise(r => setTimeout(r, baseDelay * Math.pow(2, attempt - 1)));
+    }
+  }
+  throw new Error('Unreachable');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// STREAM PATTERNS
+// ═══════════════════════════════════════════════════════════════
+
+import { pipeline } from 'node:stream/promises';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { createGzip, createGunzip } from 'node:zlib';
+import { Transform } from 'node:stream';
+
+// Basic file compression
+await pipeline(
+  createReadStream('input.txt'),
+  createGzip(),
+  createWriteStream('input.txt.gz'),
+);
+
+// Transform stream (process line by line)
+const upperCaseTransform = new Transform({
+  transform(chunk, encoding, callback) {
+    this.push(chunk.toString().toUpperCase());
+    callback();
+  },
+});
+
+// Async generator for memory-efficient processing
+async function* readLines(path: string): AsyncGenerator<string> {
+  const stream = createReadStream(path, { encoding: 'utf-8' });
+  let buffer = '';
+
+  for await (const chunk of stream) {
+    buffer += chunk;
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      yield line;
+    }
+  }
+  if (buffer) yield buffer;
+}
+
+// Usage
+for await (const line of readLines('large-file.txt')) {
+  await processLine(line);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MODULE PATTERNS (ESM)
+// ═══════════════════════════════════════════════════════════════
+
+// Named exports (preferred)
+export function doSomething() {}
+export const CONFIG = { port: 3000 };
+export type User = { id: string; name: string };
+
+// Default export (use sparingly)
+export default class MyService {}
+
+// Re-exports (barrel files)
+// src/services/index.ts
+export { UserService } from './user.service.js';
+export { AuthService } from './auth.service.js';
+export type { User, CreateUserInput } from './types.js';
+
+// Dynamic imports (code splitting)
+const module = await import('./heavy-module.js');
+
+// Import JSON (requires resolveJsonModule)
+import config from './config.json' with { type: 'json' };
+
+// Import with assertions
+import data from './data.json' with { type: 'json' };
+
+// ═══════════════════════════════════════════════════════════════
+// ERROR HANDLING PATTERNS
+// ═══════════════════════════════════════════════════════════════
+
+// Result type pattern
+type Result<T, E = Error> =
+  | { success: true; data: T }
+  | { success: false; error: E };
+
+async function safeOperation(): Promise<Result<Data>> {
+  try {
+    const data = await riskyOperation();
+    return { success: true, data };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error : new Error('Unknown error'),
+    };
+  }
+}
+
+// Custom error classes
+class AppError extends Error {
+  constructor(
+    message: string,
+    public readonly code: string,
+    public readonly statusCode: number = 500,
+  ) {
+    super(message);
+    this.name = this.constructor.name;
+    Error.captureStackTrace(this, this.constructor);
+  }
+}
+
+class NotFoundError extends AppError {
+  constructor(resource: string) {
+    super(`${resource} not found`, 'NOT_FOUND', 404);
+  }
+}
+
+class ValidationError extends AppError {
+  constructor(message: string) {
+    super(message, 'VALIDATION_ERROR', 400);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TYPE PATTERNS
+// ═══════════════════════════════════════════════════════════════
+
+// Type guards
+function isUser(value: unknown): value is User {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'id' in value &&
+    'email' in value &&
+    typeof (value as User).id === 'string'
+  );
+}
+
+// Discriminated unions
+type ApiResponse<T> =
+  | { status: 'success'; data: T }
+  | { status: 'error'; error: string }
+  | { status: 'loading' };
+
+// Branded types (nominal typing)
+type UserId = string & { readonly __brand: 'UserId' };
+type PostId = string & { readonly __brand: 'PostId' };
+
+function createUserId(id: string): UserId {
+  return id as UserId;
+}
+
+// Utility types
+type Readonly<T> = { readonly [P in keyof T]: T[P] };
+type Partial<T> = { [P in keyof T]?: T[P] };
+type Required<T> = { [P in keyof T]-?: T[P] };
+type Pick<T, K extends keyof T> = { [P in K]: T[P] };
+type Omit<T, K extends keyof T> = Pick<T, Exclude<keyof T, K>>;
+```
+
+### Project Structure
+
+```
+project/
+├── src/
+│   ├── config/               # Configuration management
+│   │   ├── index.ts          # Config loader with Zod validation
+│   │   └── env.ts            # Environment variable schema
+│   │
+│   ├── types/                # TypeScript type definitions
+│   │   ├── index.ts          # Main type exports
+│   │   ├── user.types.ts     # Domain-specific types
+│   │   └── api.types.ts      # API request/response types
+│   │
+│   ├── utils/                # Utility functions
+│   │   ├── logger.ts         # Pino logger setup
+│   │   ├── errors.ts         # Custom error classes
+│   │   └── validation.ts     # Zod schemas and validators
+│   │
+│   ├── repositories/         # Data access layer
+│   │   ├── user.repository.ts
+│   │   └── index.ts          # Repository interfaces
+│   │
+│   ├── services/             # Business logic layer
+│   │   ├── user.service.ts
+│   │   ├── auth.service.ts
+│   │   └── index.ts
+│   │
+│   ├── middleware/           # Express/Fastify middleware
+│   │   ├── auth.middleware.ts
+│   │   ├── error.middleware.ts
+│   │   └── validation.middleware.ts
+│   │
+│   ├── routes/               # API route definitions
+│   │   ├── user.routes.ts
+│   │   ├── auth.routes.ts
+│   │   └── index.ts
+│   │
+│   ├── controllers/          # Route handlers (optional)
+│   │   └── user.controller.ts
+│   │
+│   ├── app.ts                # Application factory
+│   └── index.ts              # Entry point
+│
+├── tests/
+│   ├── unit/                 # Unit tests (mirror src structure)
+│   │   ├── services/
+│   │   │   └── user.service.test.ts
+│   │   └── utils/
+│   │       └── validation.test.ts
+│   │
+│   ├── integration/          # Integration tests
+│   │   ├── api/
+│   │   │   └── users.api.test.ts
+│   │   └── setup.ts          # Test database setup
+│   │
+│   └── e2e/                  # End-to-end tests
+│       └── user-flow.e2e.test.ts
+│
+├── prisma/                   # Prisma ORM (if using)
+│   ├── schema.prisma
+│   └── migrations/
+│
+├── scripts/                  # Build/deploy scripts
+│   ├── seed.ts               # Database seeding
+│   └── migrate.ts            # Migration runner
+│
+├── docs/                     # Generated documentation (gitignored)
+│
+├── .env.example              # Environment template
+├── .gitignore
+├── biome.json                # Linter & formatter config
+├── tsconfig.json             # TypeScript configuration
+├── typedoc.json              # Documentation config
+├── vitest.config.ts          # Test configuration
+├── package.json
+└── README.md
+```
+
+### Package.json Scripts Reference
+
+```json
+{
+  "name": "modern-node-app",
+  "version": "1.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "vitest",
+    "test:watch": "vitest --watch",
+    "test:coverage": "vitest run --coverage",
+    "test:ui": "vitest --ui",
+    "lint": "biome check .",
+    "lint:fix": "biome check --apply .",
+    "format": "biome format --write .",
+    "typecheck": "tsc --noEmit",
+    "docs": "typedoc --out docs src/",
+    "docs:check": "typedoc --emit none --validation.notDocumented true",
+    "docs:serve": "typedoc --out docs src/ && npx serve docs",
+    "verify": "npm run typecheck && npm run docs:check && npm run lint && npm run test",
+    "db:migrate": "prisma migrate dev",
+    "db:generate": "prisma generate",
+    "db:studio": "prisma studio",
+    "db:seed": "tsx scripts/seed.ts",
+    "clean": "rm -rf dist docs coverage"
+  }
+}
+```
 
 ---
 

@@ -543,6 +543,691 @@ export const userStore = createUserStore();
 
 ---
 
+## 2A. TDD Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new Svelte code.**
+
+### TDD Cycle Diagram
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    TDD CYCLE                                │
+│                                                             │
+│     ┌──────────┐                                            │
+│     │   RED    │  Write a failing test first                │
+│     │  (FAIL)  │  - Define expected behavior                │
+│     └────┬─────┘  - Test should not pass yet                │
+│          │                                                  │
+│          ▼                                                  │
+│     ┌──────────┐                                            │
+│     │  GREEN   │  Write minimal code to pass                │
+│     │  (PASS)  │  - Only enough to satisfy the test         │
+│     └────┬─────┘  - Don't over-engineer                     │
+│          │                                                  │
+│          ▼                                                  │
+│     ┌──────────┐                                            │
+│     │ REFACTOR │  Improve code quality                      │
+│     │  (PASS)  │  - Clean up duplication                    │
+│     └────┬─────┘  - Tests must still pass                   │
+│          │                                                  │
+│          └──────────────► Repeat                            │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Example TDD Workflow for Svelte Component
+
+Using Vitest and Svelte Testing Library:
+
+```typescript
+// Step 1: RED - Write failing test first
+// src/lib/components/TodoItem.test.ts
+import { describe, it, expect, vi } from 'vitest';
+import { render, fireEvent } from '@testing-library/svelte';
+import TodoItem from './TodoItem.svelte';
+
+describe('TodoItem', () => {
+  it('displays todo text', () => {
+    const { getByText } = render(TodoItem, {
+      props: { todo: { id: '1', text: 'Buy milk', completed: false } }
+    });
+    expect(getByText('Buy milk')).toBeInTheDocument();
+  });
+
+  it('shows completed state with strikethrough', () => {
+    const { container } = render(TodoItem, {
+      props: { todo: { id: '1', text: 'Buy milk', completed: true } }
+    });
+    const text = container.querySelector('.todo-text');
+    expect(text).toHaveClass('completed');
+  });
+
+  it('calls onToggle when checkbox clicked', async () => {
+    const onToggle = vi.fn();
+    const { getByRole } = render(TodoItem, {
+      props: {
+        todo: { id: '1', text: 'Buy milk', completed: false },
+        onToggle
+      }
+    });
+
+    const checkbox = getByRole('checkbox');
+    await fireEvent.click(checkbox);
+
+    expect(onToggle).toHaveBeenCalledWith('1');
+  });
+
+  it('calls onDelete when delete button clicked', async () => {
+    const onDelete = vi.fn();
+    const { getByRole } = render(TodoItem, {
+      props: {
+        todo: { id: '1', text: 'Buy milk', completed: false },
+        onDelete
+      }
+    });
+
+    const deleteBtn = getByRole('button', { name: /delete/i });
+    await fireEvent.click(deleteBtn);
+
+    expect(onDelete).toHaveBeenCalledWith('1');
+  });
+});
+
+// Run: npm test
+// ❌ FAILS - TodoItem component doesn't exist yet
+
+// Step 2: GREEN - Write minimal implementation
+// src/lib/components/TodoItem.svelte
+<script lang="ts">
+  interface Todo {
+    id: string;
+    text: string;
+    completed: boolean;
+  }
+
+  interface Props {
+    todo: Todo;
+    onToggle?: (id: string) => void;
+    onDelete?: (id: string) => void;
+  }
+
+  let { todo, onToggle, onDelete }: Props = $props();
+</script>
+
+<div class="todo-item">
+  <input
+    type="checkbox"
+    checked={todo.completed}
+    onchange={() => onToggle?.(todo.id)}
+  />
+  <span class="todo-text" class:completed={todo.completed}>
+    {todo.text}
+  </span>
+  <button onclick={() => onDelete?.(todo.id)} aria-label="Delete">
+    Delete
+  </button>
+</div>
+
+<style>
+  .completed {
+    text-decoration: line-through;
+    opacity: 0.6;
+  }
+</style>
+
+// Run: npm test
+// ✅ PASSES - all tests pass
+
+// Step 3: REFACTOR - Improve with better styling and accessibility
+<script lang="ts">
+  /**
+   * Individual todo item component
+   * @example
+   * <TodoItem
+   *   todo={{ id: '1', text: 'Buy milk', completed: false }}
+   *   onToggle={handleToggle}
+   *   onDelete={handleDelete}
+   * />
+   */
+  interface Todo {
+    id: string;
+    text: string;
+    completed: boolean;
+  }
+
+  interface Props {
+    /** The todo item to display */
+    todo: Todo;
+    /** Callback when todo completion is toggled */
+    onToggle?: (id: string) => void;
+    /** Callback when todo is deleted */
+    onDelete?: (id: string) => void;
+  }
+
+  let { todo, onToggle, onDelete }: Props = $props();
+
+  function handleToggle() {
+    onToggle?.(todo.id);
+  }
+
+  function handleDelete() {
+    onDelete?.(todo.id);
+  }
+</script>
+
+<li class="todo-item" data-testid="todo-{todo.id}">
+  <label class="todo-label">
+    <input
+      type="checkbox"
+      checked={todo.completed}
+      onchange={handleToggle}
+      aria-describedby="todo-text-{todo.id}"
+    />
+    <span
+      id="todo-text-{todo.id}"
+      class="todo-text"
+      class:completed={todo.completed}
+    >
+      {todo.text}
+    </span>
+  </label>
+  <button
+    class="delete-btn"
+    onclick={handleDelete}
+    aria-label="Delete {todo.text}"
+  >
+    <svg viewBox="0 0 24 24" width="18" height="18">
+      <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12z"/>
+    </svg>
+  </button>
+</li>
+
+<style>
+  .todo-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    border-bottom: 1px solid #eee;
+  }
+
+  .todo-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex: 1;
+    cursor: pointer;
+  }
+
+  .todo-text {
+    transition: opacity 0.2s, text-decoration 0.2s;
+  }
+
+  .completed {
+    text-decoration: line-through;
+    opacity: 0.6;
+  }
+
+  .delete-btn {
+    background: none;
+    border: none;
+    color: #e53e3e;
+    cursor: pointer;
+    padding: 0.25rem;
+    border-radius: 4px;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+  }
+
+  .delete-btn:hover {
+    opacity: 1;
+  }
+</style>
+
+// Tests still pass ✓
+```
+
+### Example TDD for Svelte Store
+
+```typescript
+// Step 1: RED - Write failing test first
+// src/lib/stores/todos.test.ts
+import { describe, it, expect, beforeEach } from 'vitest';
+import { get } from 'svelte/store';
+import { createTodoStore } from './todos';
+
+describe('todoStore', () => {
+  let store: ReturnType<typeof createTodoStore>;
+
+  beforeEach(() => {
+    store = createTodoStore();
+  });
+
+  it('starts with empty todos', () => {
+    expect(get(store)).toEqual([]);
+  });
+
+  it('adds a todo', () => {
+    store.add('Buy milk');
+    const todos = get(store);
+
+    expect(todos).toHaveLength(1);
+    expect(todos[0].text).toBe('Buy milk');
+    expect(todos[0].completed).toBe(false);
+  });
+
+  it('toggles todo completion', () => {
+    store.add('Buy milk');
+    const [todo] = get(store);
+
+    store.toggle(todo.id);
+
+    expect(get(store)[0].completed).toBe(true);
+  });
+
+  it('removes a todo', () => {
+    store.add('Buy milk');
+    const [todo] = get(store);
+
+    store.remove(todo.id);
+
+    expect(get(store)).toHaveLength(0);
+  });
+
+  it('filters completed todos', () => {
+    store.add('Buy milk');
+    store.add('Walk dog');
+    const [first] = get(store);
+    store.toggle(first.id);
+
+    const completed = store.getCompleted();
+
+    expect(get(completed)).toHaveLength(1);
+    expect(get(completed)[0].text).toBe('Buy milk');
+  });
+});
+
+// Run: npm test
+// ❌ FAILS - createTodoStore doesn't exist yet
+
+// Step 2: GREEN - Write minimal implementation
+// src/lib/stores/todos.ts
+import { writable, derived, type Readable } from 'svelte/store';
+
+interface Todo {
+  id: string;
+  text: string;
+  completed: boolean;
+}
+
+export function createTodoStore() {
+  const { subscribe, update } = writable<Todo[]>([]);
+
+  return {
+    subscribe,
+
+    add(text: string) {
+      const todo: Todo = {
+        id: crypto.randomUUID(),
+        text,
+        completed: false
+      };
+      update(todos => [...todos, todo]);
+    },
+
+    toggle(id: string) {
+      update(todos =>
+        todos.map(todo =>
+          todo.id === id ? { ...todo, completed: !todo.completed } : todo
+        )
+      );
+    },
+
+    remove(id: string) {
+      update(todos => todos.filter(todo => todo.id !== id));
+    },
+
+    getCompleted(): Readable<Todo[]> {
+      return derived({ subscribe }, $todos =>
+        $todos.filter(todo => todo.completed)
+      );
+    }
+  };
+}
+
+// Run: npm test
+// ✅ PASSES - all tests pass
+
+// Step 3: REFACTOR - Add TypeScript improvements and JSDoc
+// (Code refactored with better types and documentation)
+// Tests still pass ✓
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow Diagram
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                 BUG FIX WORKFLOW                            │
+│                                                             │
+│  ┌────────────────┐                                         │
+│  │ 1. BUG REPORT  │  Bug discovered or reported             │
+│  │    RECEIVED    │  - Document reproduction steps          │
+│  └───────┬────────┘  - Note expected vs actual behavior     │
+│          │                                                  │
+│          ▼                                                  │
+│  ┌────────────────┐                                         │
+│  │ 2. WRITE TEST  │  Create test that reproduces bug        │
+│  │    (FAILS)     │  - Test MUST fail initially             │
+│  └───────┬────────┘  - Include bug ID in test name          │
+│          │                                                  │
+│          ▼                                                  │
+│  ┌────────────────┐                                         │
+│  │ 3. VERIFY FAIL │  Confirm test fails correctly           │
+│  │    REASON      │  - Failure matches bug behavior         │
+│  └───────┬────────┘  - Not failing for unrelated reason     │
+│          │                                                  │
+│          ▼                                                  │
+│  ┌────────────────┐                                         │
+│  │ 4. IMPLEMENT   │  Fix the bug                            │
+│  │    FIX         │  - Make minimal changes needed          │
+│  └───────┬────────┘  - Don't introduce new features         │
+│          │                                                  │
+│          ▼                                                  │
+│  ┌────────────────┐                                         │
+│  │ 5. VERIFY TEST │  Confirm test now passes                │
+│  │    PASSES      │  - Run full test suite                  │
+│  └───────┬────────┘  - No regressions introduced            │
+│          │                                                  │
+│          ▼                                                  │
+│  ┌────────────────┐                                         │
+│  │ 6. DOCUMENT    │  Add comments explaining fix            │
+│  │    & COMMIT    │  - Reference bug ID                     │
+│  └────────────────┘  - Regression now permanently guarded   │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Example Bug Fix with Regression Test
+
+```typescript
+// Bug Report #9876: Modal doesn't close when clicking outside
+
+// Step 1-2: Write test that reproduces the bug
+// src/lib/components/Modal.test.ts
+import { describe, it, expect, vi } from 'vitest';
+import { render, fireEvent } from '@testing-library/svelte';
+import Modal from './Modal.svelte';
+
+describe('Modal - Bug #9876', () => {
+  it('closes when clicking backdrop - Bug #9876', async () => {
+    // Bug: Modal stays open when user clicks outside the modal content
+    // Discovered: 2026-01-22
+    // Steps to reproduce:
+    //   1. Open modal
+    //   2. Click on the dark backdrop area
+    //   3. Modal should close but stays open
+    // This test prevents regression
+
+    const onClose = vi.fn();
+    const { getByTestId } = render(Modal, {
+      props: {
+        isOpen: true,
+        title: 'Test Modal',
+        onClose
+      }
+    });
+
+    // Click on the backdrop (not the modal content)
+    const backdrop = getByTestId('modal-backdrop');
+    await fireEvent.click(backdrop);
+
+    // onClose should be called when backdrop is clicked
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT close when clicking modal content - Bug #9876', async () => {
+    // Ensure we don't overcorrect - clicking inside modal should NOT close it
+    const onClose = vi.fn();
+    const { getByTestId } = render(Modal, {
+      props: {
+        isOpen: true,
+        title: 'Test Modal',
+        onClose
+      }
+    });
+
+    // Click on the modal content area
+    const content = getByTestId('modal-content');
+    await fireEvent.click(content);
+
+    // onClose should NOT be called
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+// Run: npm test
+// ❌ FAILS - clicking backdrop doesn't trigger onClose
+
+// Step 3-4: Fix the bug in Modal.svelte
+// BEFORE (buggy code):
+<script lang="ts">
+  interface Props {
+    isOpen: boolean;
+    title: string;
+    onClose: () => void;
+  }
+
+  let { isOpen, title, onClose }: Props = $props();
+</script>
+
+{#if isOpen}
+  <div class="modal-backdrop" data-testid="modal-backdrop">
+    <div class="modal-content" data-testid="modal-content">
+      <h2>{title}</h2>
+      <slot />
+      <button onclick={onClose}>Close</button>
+    </div>
+  </div>
+{/if}
+
+// AFTER (fixed code):
+<script lang="ts">
+  interface Props {
+    isOpen: boolean;
+    title: string;
+    onClose: () => void;
+  }
+
+  let { isOpen, title, onClose }: Props = $props();
+
+  // FIX: Handle backdrop click to close modal
+  function handleBackdropClick(event: MouseEvent) {
+    // Only close if clicking directly on backdrop, not on children
+    if (event.target === event.currentTarget) {
+      onClose();
+    }
+  }
+</script>
+
+{#if isOpen}
+  <div
+    class="modal-backdrop"
+    data-testid="modal-backdrop"
+    onclick={handleBackdropClick}
+    onkeydown={(e) => e.key === 'Escape' && onClose()}
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="modal-title"
+  >
+    <div
+      class="modal-content"
+      data-testid="modal-content"
+      onclick={(e) => e.stopPropagation()}
+    >
+      <h2 id="modal-title">{title}</h2>
+      <slot />
+      <button onclick={onClose}>Close</button>
+    </div>
+  </div>
+{/if}
+
+<style>
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+
+  .modal-content {
+    background: white;
+    padding: 2rem;
+    border-radius: 8px;
+    max-width: 500px;
+    width: 90%;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+</style>
+
+// Run: npm test
+// ✅ PASSES - bug fixed, regression permanently guarded
+```
+
+### Example Bug Fix for Reactive State
+
+```typescript
+// Bug Report #9877: Form validation message doesn't update reactively
+
+// Step 1-2: Write test that reproduces the bug
+// src/lib/components/LoginForm.test.ts
+import { describe, it, expect } from 'vitest';
+import { render, fireEvent, waitFor } from '@testing-library/svelte';
+import LoginForm from './LoginForm.svelte';
+
+describe('LoginForm - Bug #9877', () => {
+  it('updates validation message when input changes - Bug #9877', async () => {
+    // Bug: After showing "Email required" error, entering a valid email
+    //      doesn't clear the error message due to stale $derived value
+    // Discovered: 2026-01-22
+    // This test prevents regression
+
+    const { getByLabelText, queryByText } = render(LoginForm);
+
+    const emailInput = getByLabelText(/email/i);
+    const submitBtn = getByLabelText(/submit/i);
+
+    // Submit with empty email - should show error
+    await fireEvent.click(submitBtn);
+    expect(queryByText('Email is required')).toBeInTheDocument();
+
+    // Type valid email - error should disappear reactively
+    await fireEvent.input(emailInput, { target: { value: 'user@example.com' } });
+
+    // Wait for reactive update
+    await waitFor(() => {
+      expect(queryByText('Email is required')).not.toBeInTheDocument();
+    });
+  });
+
+  it('shows invalid email format error - Bug #9877', async () => {
+    const { getByLabelText, queryByText } = render(LoginForm);
+
+    const emailInput = getByLabelText(/email/i);
+
+    // Type invalid email
+    await fireEvent.input(emailInput, { target: { value: 'invalid-email' } });
+    await fireEvent.blur(emailInput);
+
+    expect(queryByText('Invalid email format')).toBeInTheDocument();
+
+    // Fix the email
+    await fireEvent.input(emailInput, { target: { value: 'valid@example.com' } });
+
+    await waitFor(() => {
+      expect(queryByText('Invalid email format')).not.toBeInTheDocument();
+    });
+  });
+});
+
+// Run: npm test
+// ❌ FAILS - validation message doesn't update
+
+// Step 3-4: Fix the bug
+// BEFORE (buggy - validation computed once):
+<script lang="ts">
+  let email = $state('');
+  let touched = $state(false);
+  let submitted = $state(false);
+
+  // BUG: This doesn't react properly to email changes after submit
+  let emailError = submitted && !email ? 'Email is required' : null;
+</script>
+
+// AFTER (fixed - using $derived for reactive validation):
+<script lang="ts">
+  let email = $state('');
+  let touched = $state(false);
+  let submitted = $state(false);
+
+  // FIX: Use $derived to make validation reactive
+  let emailError = $derived.by(() => {
+    if (!touched && !submitted) return null;
+    if (!email) return 'Email is required';
+    if (!email.includes('@')) return 'Invalid email format';
+    return null;
+  });
+
+  function handleSubmit() {
+    submitted = true;
+    if (!emailError) {
+      // Proceed with login
+    }
+  }
+</script>
+
+<form onsubmit|preventDefault={handleSubmit}>
+  <label>
+    Email
+    <input
+      type="email"
+      bind:value={email}
+      onblur={() => touched = true}
+      aria-label="Email"
+      aria-invalid={!!emailError}
+    />
+  </label>
+  {#if emailError}
+    <span class="error" role="alert">{emailError}</span>
+  {/if}
+  <button type="submit" aria-label="Submit">Login</button>
+</form>
+
+// Run: npm test
+// ✅ PASSES - validation is now reactive, regression prevented
+```
+
+### Prohibited Practices for Bug Fixes
+
+**NEVER:**
+- Fix a bug without writing a regression test first
+- Skip verifying the test fails before implementing the fix
+- Remove or skip tests to make code pass
+- Use `it.skip()` or `describe.skip()` to hide failing tests
+- Commit code with failing tests
+- Fix multiple unrelated bugs in one commit
+
+---
+
 ## 3. Async-First Patterns (MANDATORY)
 
 ### A. Async/Await Hierarchy
@@ -2311,6 +2996,391 @@ export const POST: RequestHandler = async ({ request }) => {
 11. **`{#await}` Blocks**: Reactive promise handling in templates eliminates manual loading state management and provides automatic cleanup.
 
 12. **Regression Tests for Bugs**: Every bug gets a test, creating a safety net that prevents regression and documents historical issues.
+
+---
+
+## Quick Reference
+
+### Common Commands
+
+```bash
+# Development
+npm run dev              # Start development server (localhost:5173)
+npm run dev -- --open    # Start dev server and open browser
+npm run dev -- --host    # Expose to network
+
+# Building
+npm run build            # Build for production
+npm run preview          # Preview production build locally
+
+# Testing
+npm run test             # Run tests once
+npm run test:watch       # Run tests in watch mode
+npm run test:coverage    # Run tests with coverage report
+npm run test:ui          # Open Vitest UI
+
+# Code Quality
+npm run check            # Run svelte-check (TypeScript validation)
+npm run lint             # Run ESLint
+npm run lint:fix         # Run ESLint with auto-fix
+npm run format           # Format with Prettier
+
+# Documentation
+npm run docs             # Generate TypeDoc documentation
+npm run docs:serve       # Serve documentation locally
+
+# SvelteKit Specific
+npx svelte-kit sync      # Sync SvelteKit types
+```
+
+### Svelte Patterns Cheat Sheet
+
+#### Reactivity (Svelte 5 Runes)
+
+```svelte
+<script lang="ts">
+  // State - reactive variable
+  let count = $state(0);
+  let user = $state<User | null>(null);
+  let items = $state<string[]>([]);
+
+  // Derived - computed value (auto-updates)
+  let doubled = $derived(count * 2);
+  let hasItems = $derived(items.length > 0);
+
+  // Derived with complex logic
+  let filteredItems = $derived.by(() => {
+    return items.filter(item => item.startsWith('A'));
+  });
+
+  // Effect - side effects (DOM, API calls, subscriptions)
+  $effect(() => {
+    console.log(`Count changed to ${count}`);
+    document.title = `Count: ${count}`;
+
+    // Cleanup function (optional)
+    return () => {
+      console.log('Cleanup');
+    };
+  });
+
+  // Props - component interface
+  interface Props {
+    title: string;
+    count?: number;
+    onUpdate?: (value: number) => void;
+  }
+  let { title, count = 0, onUpdate }: Props = $props();
+
+  // Bindable props (two-way binding)
+  let { value = $bindable('') }: { value?: string } = $props();
+</script>
+```
+
+#### Stores (Global State)
+
+```typescript
+// stores/counter.ts
+import { writable, derived, readable } from 'svelte/store';
+
+// Writable store
+export const count = writable(0);
+
+// Readable store (external data source)
+export const time = readable(new Date(), (set) => {
+  const interval = setInterval(() => set(new Date()), 1000);
+  return () => clearInterval(interval);
+});
+
+// Derived store
+export const doubled = derived(count, $count => $count * 2);
+
+// Custom store with methods
+function createCounter() {
+  const { subscribe, set, update } = writable(0);
+  return {
+    subscribe,
+    increment: () => update(n => n + 1),
+    decrement: () => update(n => n - 1),
+    reset: () => set(0)
+  };
+}
+export const counter = createCounter();
+
+// Usage in component
+import { counter } from '$lib/stores/counter';
+
+// In Svelte 5, use $effect for subscriptions
+$effect(() => {
+  const unsubscribe = counter.subscribe(value => {
+    console.log(value);
+  });
+  return unsubscribe;
+});
+
+// Or call store methods directly
+counter.increment();
+```
+
+#### Props and Events
+
+```svelte
+<!-- Parent.svelte -->
+<script lang="ts">
+  import Child from './Child.svelte';
+
+  let value = $state('');
+
+  function handleUpdate(newValue: string) {
+    console.log('Updated:', newValue);
+  }
+</script>
+
+<Child
+  title="Hello"
+  {value}
+  bind:value
+  onUpdate={handleUpdate}
+/>
+
+<!-- Child.svelte -->
+<script lang="ts">
+  interface Props {
+    title: string;
+    value?: string;
+    onUpdate?: (value: string) => void;
+  }
+
+  let { title, value = $bindable(''), onUpdate }: Props = $props();
+
+  function handleChange(e: Event) {
+    const target = e.target as HTMLInputElement;
+    value = target.value;
+    onUpdate?.(value);
+  }
+</script>
+
+<h2>{title}</h2>
+<input {value} oninput={handleChange} />
+```
+
+#### Control Flow
+
+```svelte
+<!-- Conditionals -->
+{#if loading}
+  <Spinner />
+{:else if error}
+  <Error message={error} />
+{:else}
+  <Content data={data} />
+{/if}
+
+<!-- Loops (always use keys) -->
+{#each items as item (item.id)}
+  <Item {item} />
+{:else}
+  <p>No items found</p>
+{/each}
+
+<!-- With index -->
+{#each items as item, index (item.id)}
+  <p>{index + 1}: {item.name}</p>
+{/each}
+
+<!-- Async/Await -->
+{#await promise}
+  <p>Loading...</p>
+{:then data}
+  <p>Data: {data}</p>
+{:catch error}
+  <p>Error: {error.message}</p>
+{/await}
+
+<!-- Short form (only success) -->
+{#await promise then data}
+  <p>Data: {data}</p>
+{/await}
+
+<!-- Snippets (reusable template fragments) -->
+{#snippet card(title, content)}
+  <div class="card">
+    <h3>{title}</h3>
+    <p>{content}</p>
+  </div>
+{/snippet}
+
+{@render card('Title 1', 'Content 1')}
+{@render card('Title 2', 'Content 2')}
+```
+
+#### Form Handling (SvelteKit)
+
+```svelte
+<!-- +page.svelte -->
+<script lang="ts">
+  import { enhance } from '$app/forms';
+  import type { ActionData } from './$types';
+
+  let { form }: { form: ActionData } = $props();
+  let loading = $state(false);
+</script>
+
+<form
+  method="POST"
+  action="?/create"
+  use:enhance={() => {
+    loading = true;
+    return async ({ update }) => {
+      await update();
+      loading = false;
+    };
+  }}
+>
+  <input name="email" type="email" required />
+  {#if form?.error}
+    <p class="error">{form.error}</p>
+  {/if}
+  <button disabled={loading}>
+    {loading ? 'Submitting...' : 'Submit'}
+  </button>
+</form>
+```
+
+### Project Structure
+
+```
+my-sveltekit-app/
+├── src/
+│   ├── lib/                          # Library code (alias: $lib)
+│   │   ├── domain/                   # Domain layer (business logic)
+│   │   │   ├── entities/             # Domain entities
+│   │   │   │   └── User.ts
+│   │   │   ├── value-objects/        # Value objects
+│   │   │   │   └── Email.ts
+│   │   │   └── services/             # Domain services
+│   │   │       └── AuthService.ts
+│   │   │
+│   │   ├── application/              # Application layer (use cases)
+│   │   │   ├── commands/             # Write operations
+│   │   │   │   └── CreateUser.ts
+│   │   │   ├── queries/              # Read operations
+│   │   │   │   └── GetUser.ts
+│   │   │   └── ports/                # Interfaces/contracts
+│   │   │       └── UserRepository.ts
+│   │   │
+│   │   ├── infrastructure/           # Infrastructure layer (adapters)
+│   │   │   ├── api/                  # API implementations
+│   │   │   │   └── UserApiRepository.ts
+│   │   │   └── storage/              # Storage implementations
+│   │   │       └── LocalStorageAdapter.ts
+│   │   │
+│   │   ├── ui/                       # UI layer (Svelte components)
+│   │   │   ├── components/           # Reusable components
+│   │   │   │   ├── Button.svelte
+│   │   │   │   ├── Button.test.ts
+│   │   │   │   ├── Modal.svelte
+│   │   │   │   └── Modal.test.ts
+│   │   │   ├── layouts/              # Layout components
+│   │   │   │   └── MainLayout.svelte
+│   │   │   └── stores/               # UI state stores
+│   │   │       └── ui-state.ts
+│   │   │
+│   │   ├── config/                   # Configuration
+│   │   │   ├── settings.ts
+│   │   │   └── container.ts          # DI container
+│   │   │
+│   │   └── index.ts                  # Public exports
+│   │
+│   ├── routes/                       # SvelteKit routes
+│   │   ├── +layout.svelte            # Root layout
+│   │   ├── +layout.ts                # Layout load function
+│   │   ├── +page.svelte              # Home page
+│   │   ├── +page.ts                  # Home page load
+│   │   ├── +error.svelte             # Error page
+│   │   │
+│   │   ├── users/                    # /users route
+│   │   │   ├── +page.svelte
+│   │   │   ├── +page.ts
+│   │   │   ├── +page.server.ts       # Server-side actions
+│   │   │   └── [id]/                 # /users/[id] dynamic route
+│   │   │       ├── +page.svelte
+│   │   │       └── +page.ts
+│   │   │
+│   │   └── api/                      # API routes
+│   │       └── users/
+│   │           └── +server.ts        # GET, POST, etc.
+│   │
+│   ├── app.html                      # HTML template
+│   ├── app.css                       # Global styles
+│   └── app.d.ts                      # Type declarations
+│
+├── static/                           # Static assets
+│   └── favicon.png
+│
+├── tests/                            # E2E tests (Playwright)
+│   └── e2e/
+│       └── home.test.ts
+│
+├── docs/                             # Generated documentation
+│   └── api/
+│
+├── svelte.config.js                  # Svelte configuration
+├── vite.config.ts                    # Vite configuration
+├── vitest.config.ts                  # Vitest configuration
+├── tsconfig.json                     # TypeScript configuration
+├── package.json
+└── README.md
+```
+
+### Key File Patterns
+
+```typescript
+// +page.ts - Page load function (runs on client and server)
+import type { PageLoad } from './$types';
+
+export const load: PageLoad = async ({ params, fetch }) => {
+  const response = await fetch(`/api/users/${params.id}`);
+  const user = await response.json();
+  return { user };
+};
+
+// +page.server.ts - Server-only load and actions
+import type { PageServerLoad, Actions } from './$types';
+import { fail, redirect } from '@sveltejs/kit';
+
+export const load: PageServerLoad = async ({ locals }) => {
+  if (!locals.user) throw redirect(303, '/login');
+  return { user: locals.user };
+};
+
+export const actions = {
+  default: async ({ request }) => {
+    const data = await request.formData();
+    // Process form...
+    return { success: true };
+  },
+  delete: async ({ params }) => {
+    // Handle delete action
+  }
+} satisfies Actions;
+
+// +server.ts - API endpoint
+import { json, error } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
+
+export const GET: RequestHandler = async ({ params }) => {
+  const user = await getUser(params.id);
+  if (!user) throw error(404, 'Not found');
+  return json(user);
+};
+
+export const POST: RequestHandler = async ({ request }) => {
+  const data = await request.json();
+  const user = await createUser(data);
+  return json(user, { status: 201 });
+};
+```
 
 ---
 

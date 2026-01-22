@@ -485,26 +485,76 @@ describe('UserCard', () => {
 
 ---
 
-## 3A. Test-Driven Development (TDD) Protocol (MANDATORY)
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
 
 **CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
 
-### TDD Cycle
+### TDD Cycle Diagram
 
 ```
-1. 🔴 RED: Write a failing test first
-   ↓
-2. 🟢 GREEN: Write minimal code to make it pass
-   ↓
-3. 🔵 REFACTOR: Improve code while keeping tests green
-   ↓
-   Repeat
+┌─────────────────────────────────────────────────────────────────┐
+│                     TDD CYCLE (Red-Green-Refactor)              │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│                        ┌───────────┐                            │
+│                        │   START   │                            │
+│                        └─────┬─────┘                            │
+│                              │                                  │
+│                              ▼                                  │
+│                   ┌─────────────────────┐                       │
+│              ┌────│   1. RED: Write     │                       │
+│              │    │   failing test      │                       │
+│              │    └─────────┬───────────┘                       │
+│              │              │                                   │
+│              │              ▼                                   │
+│              │    ┌─────────────────────┐                       │
+│              │    │   Run test          │                       │
+│              │    │   ❌ Test FAILS     │                       │
+│              │    └─────────┬───────────┘                       │
+│              │              │                                   │
+│              │              ▼                                   │
+│   REPEAT     │    ┌─────────────────────┐                       │
+│   FOR EACH   │    │   2. GREEN: Write   │                       │
+│   FEATURE    │    │   minimal code to   │                       │
+│              │    │   make test pass    │                       │
+│              │    └─────────┬───────────┘                       │
+│              │              │                                   │
+│              │              ▼                                   │
+│              │    ┌─────────────────────┐                       │
+│              │    │   Run test          │                       │
+│              │    │   ✅ Test PASSES    │                       │
+│              │    └─────────┬───────────┘                       │
+│              │              │                                   │
+│              │              ▼                                   │
+│              │    ┌─────────────────────┐                       │
+│              │    │   3. REFACTOR:      │                       │
+│              │    │   Improve code,     │                       │
+│              │    │   keep tests green  │                       │
+│              │    └─────────┬───────────┘                       │
+│              │              │                                   │
+│              │              ▼                                   │
+│              │    ┌─────────────────────┐                       │
+│              └────│   More features?    │                       │
+│                   └─────────────────────┘                       │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
 ```
+
+### TDD Benefits for React Development
+
+| Phase | What Happens | React Benefit |
+|-------|--------------|---------------|
+| **RED** | Write test that describes expected behavior | Forces you to think about component API and props |
+| **GREEN** | Write minimal implementation | Avoids over-engineering, focus on requirements |
+| **REFACTOR** | Improve code structure | Safe refactoring with test safety net |
 
 ### Example TDD Workflow for React Component
 
 ```typescript
+// ═══════════════════════════════════════════════════════════════
 // Step 1: RED - Write failing test first
+// ═══════════════════════════════════════════════════════════════
+// src/components/UserBadge/UserBadge.test.tsx
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { UserBadge } from './UserBadge';
@@ -512,15 +562,28 @@ import { UserBadge } from './UserBadge';
 describe('UserBadge', () => {
   it('displays user initials when no avatar provided', () => {
     render(<UserBadge name="John Doe" />);
-    
+
     expect(screen.getByText('JD')).toBeInTheDocument();
+  });
+
+  it('displays avatar image when avatar URL provided', () => {
+    render(<UserBadge name="John Doe" avatar="https://example.com/avatar.jpg" />);
+
+    expect(screen.getByRole('img', { name: 'John Doe' })).toHaveAttribute(
+      'src',
+      'https://example.com/avatar.jpg'
+    );
   });
 });
 
 // Run: npm test
 // ❌ FAILS - UserBadge component doesn't exist yet
+// Error: Cannot find module './UserBadge'
 
+// ═══════════════════════════════════════════════════════════════
 // Step 2: GREEN - Write minimal implementation
+// ═══════════════════════════════════════════════════════════════
+// src/components/UserBadge/UserBadge.tsx
 interface UserBadgeProps {
   name: string;
   avatar?: string;
@@ -532,7 +595,7 @@ export function UserBadge({ name, avatar }: UserBadgeProps) {
     .map(n => n[0])
     .join('')
     .toUpperCase();
-  
+
   return avatar ? (
     <img src={avatar} alt={name} />
   ) : (
@@ -541,111 +604,469 @@ export function UserBadge({ name, avatar }: UserBadgeProps) {
 }
 
 // Run: npm test
-// ✅ PASSES - test passes
+// ✅ PASSES - All tests pass
 
-// Step 3: REFACTOR - Add styles, accessibility, etc.
+// ═══════════════════════════════════════════════════════════════
+// Step 3: REFACTOR - Add styles, accessibility, better structure
+// ═══════════════════════════════════════════════════════════════
+// src/components/UserBadge/UserBadge.tsx
+/**
+ * UserBadge displays a user's avatar or their initials as a fallback.
+ *
+ * @component
+ * @example
+ * ```tsx
+ * <UserBadge name="John Doe" />
+ * <UserBadge name="Jane Smith" avatar="https://example.com/jane.jpg" />
+ * ```
+ */
 export function UserBadge({ name, avatar }: UserBadgeProps) {
   const initials = name
     .split(' ')
     .map(n => n[0])
     .join('')
-    .toUpperCase();
-  
-  return avatar ? (
-    <img src={avatar} alt={name} className="rounded-full w-10 h-10" />
-  ) : (
-    <div className="flex items-center justify-center w-10 h-10 rounded-full bg-gray-300" role="img" aria-label={name}>
-      <span className="text-sm font-medium">{initials}</span>
+    .toUpperCase()
+    .slice(0, 2); // Max 2 characters
+
+  const baseClasses = 'w-10 h-10 rounded-full';
+
+  if (avatar) {
+    return (
+      <img
+        src={avatar}
+        alt={name}
+        className={`${baseClasses} object-cover`}
+      />
+    );
+  }
+
+  return (
+    <div
+      className={`${baseClasses} flex items-center justify-center bg-gray-300`}
+      role="img"
+      aria-label={name}
+    >
+      <span className="text-sm font-medium text-gray-700">{initials}</span>
     </div>
   );
 }
-// Tests still pass ✓
+
+// Run: npm test
+// ✅ PASSES - Tests still pass after refactoring
 ```
 
----
-
-## 3B. Bug Fix Protocol (MANDATORY)
-
-**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
-
-### Bug Fix Workflow
-
-```
-1. 🐛 Bug Reported/Discovered
-   ↓
-2. ✍️ Write a test that REPRODUCES the bug (test will FAIL)
-   ↓
-3. ✅ Verify the test fails for the right reason
-   ↓
-4. 🔧 Fix the bug (make the test pass)
-   ↓
-5. 🟢 Verify the test now PASSES
-   ↓
-6. 📝 Document the bug in test comments (include bug ID)
-   ↓
-7. 🚀 Deploy with confidence (regression prevented)
-```
-
-### Example Bug Fix
+### Example TDD Workflow for Custom Hook
 
 ```typescript
-// Bug Report #1523: DatePicker crashes when date prop is null
-
-// Step 1-2: Write test that reproduces the bug
+// ═══════════════════════════════════════════════════════════════
+// Step 1: RED - Write failing test for custom hook
+// ═══════════════════════════════════════════════════════════════
+// src/hooks/useCounter.test.ts
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import { DatePicker } from './DatePicker';
+import { renderHook, act } from '@testing-library/react';
+import { useCounter } from './useCounter';
 
-describe('DatePicker - Bug #1523', () => {
-  it('handles null date without crashing - Bug #1523', () => {
-    // Bug: DatePicker crashes when date={null}
-    // Discovered: 2026-01-18
-    // This test prevents regression
-    
-    expect(() => {
-      render(<DatePicker date={null} onChange={vi.fn()} />);
-    }).not.toThrow();
-    
-    expect(screen.getByPlaceholderText('Select date')).toBeInTheDocument();
+describe('useCounter', () => {
+  it('initializes with default value of 0', () => {
+    const { result } = renderHook(() => useCounter());
+
+    expect(result.current.count).toBe(0);
+  });
+
+  it('initializes with provided initial value', () => {
+    const { result } = renderHook(() => useCounter(10));
+
+    expect(result.current.count).toBe(10);
+  });
+
+  it('increments the count', () => {
+    const { result } = renderHook(() => useCounter(0));
+
+    act(() => {
+      result.current.increment();
+    });
+
+    expect(result.current.count).toBe(1);
+  });
+
+  it('decrements the count', () => {
+    const { result } = renderHook(() => useCounter(10));
+
+    act(() => {
+      result.current.decrement();
+    });
+
+    expect(result.current.count).toBe(9);
+  });
+
+  it('resets to initial value', () => {
+    const { result } = renderHook(() => useCounter(5));
+
+    act(() => {
+      result.current.increment();
+      result.current.increment();
+      result.current.reset();
+    });
+
+    expect(result.current.count).toBe(5);
   });
 });
 
 // Run: npm test
-// ❌ FAILS - component crashes with "Cannot read property 'toLocaleDateString' of null"
+// ❌ FAILS - useCounter hook doesn't exist yet
 
-// Step 3: Fix the bug
-interface DatePickerProps {
-  date: Date | null;
-  onChange: (date: Date) => void;
+// ═══════════════════════════════════════════════════════════════
+// Step 2: GREEN - Write minimal implementation
+// ═══════════════════════════════════════════════════════════════
+// src/hooks/useCounter.ts
+import { useState, useCallback } from 'react';
+
+export function useCounter(initialValue = 0) {
+  const [count, setCount] = useState(initialValue);
+
+  const increment = useCallback(() => setCount(c => c + 1), []);
+  const decrement = useCallback(() => setCount(c => c - 1), []);
+  const reset = useCallback(() => setCount(initialValue), [initialValue]);
+
+  return { count, increment, decrement, reset };
 }
 
-export function DatePicker({ date, onChange }: DatePickerProps) {
-  // FIX: Handle null date safely
+// Run: npm test
+// ✅ PASSES - All tests pass
+
+// ═══════════════════════════════════════════════════════════════
+// Step 3: REFACTOR - Add types, JSDoc, and step parameter
+// ═══════════════════════════════════════════════════════════════
+// src/hooks/useCounter.ts
+import { useState, useCallback } from 'react';
+
+/**
+ * Return type for useCounter hook.
+ */
+interface UseCounterReturn {
+  /** Current count value */
+  count: number;
+  /** Increment count by step (default: 1) */
+  increment: () => void;
+  /** Decrement count by step (default: 1) */
+  decrement: () => void;
+  /** Reset count to initial value */
+  reset: () => void;
+  /** Set count to specific value */
+  setCount: (value: number | ((prev: number) => number)) => void;
+}
+
+/**
+ * Custom hook for managing a counter with increment, decrement, and reset.
+ *
+ * @param initialValue - Starting value for the counter (default: 0)
+ * @param step - Amount to increment/decrement by (default: 1)
+ * @returns Counter state and control functions
+ *
+ * @example
+ * ```tsx
+ * function Counter() {
+ *   const { count, increment, decrement, reset } = useCounter(0);
+ *
+ *   return (
+ *     <div>
+ *       <span>{count}</span>
+ *       <button onClick={decrement}>-</button>
+ *       <button onClick={increment}>+</button>
+ *       <button onClick={reset}>Reset</button>
+ *     </div>
+ *   );
+ * }
+ * ```
+ */
+export function useCounter(initialValue = 0, step = 1): UseCounterReturn {
+  const [count, setCount] = useState(initialValue);
+
+  const increment = useCallback(() => setCount(c => c + step), [step]);
+  const decrement = useCallback(() => setCount(c => c - step), [step]);
+  const reset = useCallback(() => setCount(initialValue), [initialValue]);
+
+  return { count, increment, decrement, reset, setCount };
+}
+
+// Run: npm test
+// ✅ PASSES - Tests still pass (add more tests for new step feature)
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    BUG FIX WORKFLOW                             │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│   ┌─────────────────┐                                           │
+│   │  Bug Reported/  │                                           │
+│   │  Discovered     │                                           │
+│   └────────┬────────┘                                           │
+│            │                                                    │
+│            ▼                                                    │
+│   ┌─────────────────────────────────────────┐                   │
+│   │  1. REPRODUCE: Create a test that       │                   │
+│   │     demonstrates the bug                │                   │
+│   │     (Test should FAIL)                  │                   │
+│   └────────┬────────────────────────────────┘                   │
+│            │                                                    │
+│            ▼                                                    │
+│   ┌─────────────────────────────────────────┐                   │
+│   │  2. VERIFY: Confirm test fails for      │                   │
+│   │     the RIGHT reason                    │                   │
+│   │     ❌ Test FAILS (expected)            │                   │
+│   └────────┬────────────────────────────────┘                   │
+│            │                                                    │
+│            ▼                                                    │
+│   ┌─────────────────────────────────────────┐                   │
+│   │  3. FIX: Implement the bug fix          │                   │
+│   │     (Minimal code change)               │                   │
+│   └────────┬────────────────────────────────┘                   │
+│            │                                                    │
+│            ▼                                                    │
+│   ┌─────────────────────────────────────────┐                   │
+│   │  4. VERIFY: Run the test                │                   │
+│   │     ✅ Test PASSES                      │                   │
+│   └────────┬────────────────────────────────┘                   │
+│            │                                                    │
+│            ▼                                                    │
+│   ┌─────────────────────────────────────────┐                   │
+│   │  5. REGRESSION: Run ALL tests           │                   │
+│   │     ✅ All tests PASS                   │                   │
+│   └────────┬────────────────────────────────┘                   │
+│            │                                                    │
+│            ▼                                                    │
+│   ┌─────────────────────────────────────────┐                   │
+│   │  6. DOCUMENT: Add bug ID to test        │                   │
+│   │     comment for traceability            │                   │
+│   └────────┬────────────────────────────────┘                   │
+│            │                                                    │
+│            ▼                                                    │
+│   ┌─────────────────┐                                           │
+│   │  Deploy with    │                                           │
+│   │  confidence!    │                                           │
+│   └─────────────────┘                                           │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Why Regression Tests BEFORE Fixing?
+
+| Step | Purpose | Benefit |
+|------|---------|---------|
+| Write test first | Proves you understand the bug | Prevents fixing wrong issue |
+| Test must fail | Confirms bug is reproducible | Validates test catches the bug |
+| Fix makes test pass | Proves fix is correct | Objective verification |
+| Test stays forever | Prevents regression | Bug never returns |
+
+### Example Bug Fix with Regression Test
+
+```typescript
+// ═══════════════════════════════════════════════════════════════
+// Bug Report #1523: DatePicker crashes when date prop is null
+// Reported: 2026-01-18
+// Severity: High - Crashes entire page
+// Steps to reproduce: Pass null as date prop
+// ═══════════════════════════════════════════════════════════════
+
+// ───────────────────────────────────────────────────────────────
+// Step 1-2: Write test that REPRODUCES the bug (must FAIL first)
+// ───────────────────────────────────────────────────────────────
+// src/components/DatePicker/DatePicker.test.tsx
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { DatePicker } from './DatePicker';
+
+describe('DatePicker', () => {
+  // Existing tests...
+
+  describe('Bug Fixes', () => {
+    it('handles null date without crashing - Bug #1523', () => {
+      // Bug #1523: DatePicker crashes when date={null}
+      // Reported: 2026-01-18 by QA team
+      // Root cause: toLocaleDateString called on null
+      // This test prevents regression
+
+      expect(() => {
+        render(<DatePicker date={null} onChange={vi.fn()} />);
+      }).not.toThrow();
+
+      expect(screen.getByPlaceholderText('Select date')).toBeInTheDocument();
+    });
+
+    it('displays empty string when date is null - Bug #1523', () => {
+      render(<DatePicker date={null} onChange={vi.fn()} />);
+
+      const input = screen.getByPlaceholderText('Select date');
+      expect(input).toHaveValue('');
+    });
+  });
+});
+
+// Run: npm test
+// ❌ FAILS - TypeError: Cannot read property 'toLocaleDateString' of null
+// This confirms we've reproduced the bug!
+
+// ───────────────────────────────────────────────────────────────
+// Step 3: Fix the bug (minimal change)
+// ───────────────────────────────────────────────────────────────
+// src/components/DatePicker/DatePicker.tsx
+
+interface DatePickerProps {
+  /** Selected date, or null if no date selected */
+  date: Date | null;
+  /** Callback when date changes */
+  onChange: (date: Date) => void;
+  /** Placeholder text when no date selected */
+  placeholder?: string;
+}
+
+/**
+ * DatePicker component for selecting dates.
+ *
+ * @component
+ * @example
+ * ```tsx
+ * <DatePicker
+ *   date={selectedDate}
+ *   onChange={setSelectedDate}
+ *   placeholder="Choose a date"
+ * />
+ * ```
+ */
+export function DatePicker({
+  date,
+  onChange,
+  placeholder = 'Select date',
+}: DatePickerProps) {
+  // FIX for Bug #1523: Handle null date safely with optional chaining
+  // Previously: const displayValue = date.toLocaleDateString();
+  // Now: Safe null check with fallback to empty string
   const displayValue = date?.toLocaleDateString() ?? '';
-  
+
   return (
-    <input
-      type="text"
-      value={displayValue}
-      placeholder="Select date"
-      onClick={() => {/* show calendar */}}
-    />
+    <div className="relative">
+      <input
+        type="text"
+        value={displayValue}
+        placeholder={placeholder}
+        readOnly
+        className="border rounded px-3 py-2 w-full cursor-pointer"
+        onClick={() => {
+          /* show calendar modal */
+        }}
+        aria-label="Date picker"
+      />
+      {/* Calendar dropdown would go here */}
+    </div>
   );
 }
 
 // Run: npm test
-// ✅ PASSES - bug fixed, regression prevented ✓
+// ✅ PASSES - Bug fixed!
+
+// ───────────────────────────────────────────────────────────────
+// Step 4: Run ALL tests to check for regressions
+// ───────────────────────────────────────────────────────────────
+// npm test
+// ✅ All 47 tests pass
+// ✅ No regressions introduced
+```
+
+### Example: Bug Fix for Custom Hook
+
+```typescript
+// ═══════════════════════════════════════════════════════════════
+// Bug Report #892: useDebounce doesn't cancel on unmount
+// Causes memory leak and setState on unmounted component warning
+// ═══════════════════════════════════════════════════════════════
+
+// Step 1: Write regression test
+// src/hooks/useDebounce.test.ts
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { renderHook } from '@testing-library/react';
+import { useDebounce } from './useDebounce';
+
+describe('useDebounce - Bug #892', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('cancels pending debounce on unmount - Bug #892', () => {
+    // Bug #892: Memory leak - debounce continues after unmount
+    // This test ensures cleanup happens on unmount
+
+    const { result, unmount } = renderHook(() => useDebounce('test', 500));
+
+    // Unmount before debounce completes
+    unmount();
+
+    // Fast-forward time - should NOT throw or warn
+    expect(() => {
+      vi.advanceTimersByTime(1000);
+    }).not.toThrow();
+  });
+});
+
+// Run: npm test
+// ❌ FAILS - Warning: Can't perform state update on unmounted component
+
+// Step 2: Fix the bug
+// src/hooks/useDebounce.ts
+import { useState, useEffect } from 'react';
+
+/**
+ * Debounces a value by the specified delay.
+ *
+ * @param value - Value to debounce
+ * @param delay - Debounce delay in milliseconds
+ * @returns Debounced value
+ */
+export function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+
+    // FIX for Bug #892: Clean up timeout on unmount or value change
+    // This prevents setState on unmounted component
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [value, delay]);
+
+  return debouncedValue;
+}
+
+// Run: npm test
+// ✅ PASSES - Bug fixed, no memory leak
 ```
 
 ### Prohibited Practices for Bug Fixes
 
 **NEVER:**
-- ❌ Fix a bug without adding a regression test first
-- ❌ Write implementation before writing tests (violates TDD)
-- ❌ Skip the Red-Green-Refactor cycle
-- ❌ Commit code with failing tests
-- ❌ Remove tests to make code pass
-- ❌ Use `.skip()` to ignore failing tests
+- Fix a bug without adding a regression test first
+- Write implementation before writing tests (violates TDD)
+- Skip the Red-Green-Refactor cycle
+- Commit code with failing tests
+- Remove tests to make code pass
+- Use `.skip()` to ignore failing tests
+- Close bug tickets without regression tests
+- Merge PRs that fix bugs without corresponding tests
 
 ---
 
@@ -2902,6 +3323,442 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
 ---
 
+## 15. Quick Reference
+
+### Common Commands
+
+```bash
+# ─────────────────────────────────────────────────────────────────
+# PROJECT SETUP
+# ─────────────────────────────────────────────────────────────────
+npm create vite@latest my-app -- --template react-ts  # Create new project
+cd my-app && npm install                               # Install dependencies
+
+# ─────────────────────────────────────────────────────────────────
+# DEVELOPMENT
+# ─────────────────────────────────────────────────────────────────
+npm run dev                    # Start development server (Vite)
+npm start                      # Alias for dev server (if configured)
+npm run preview                # Preview production build locally
+
+# ─────────────────────────────────────────────────────────────────
+# BUILD & PRODUCTION
+# ─────────────────────────────────────────────────────────────────
+npm run build                  # Build for production
+npm run typecheck              # TypeScript type checking only
+npx tsc --noEmit               # Alternative type check command
+
+# ─────────────────────────────────────────────────────────────────
+# TESTING
+# ─────────────────────────────────────────────────────────────────
+npm test                       # Run all tests
+npm test -- --watch            # Run tests in watch mode
+npm test -- --coverage         # Run tests with coverage report
+npm test -- --ui               # Open Vitest UI
+npm test -- MyComponent        # Run tests matching pattern
+
+# ─────────────────────────────────────────────────────────────────
+# LINTING & FORMATTING
+# ─────────────────────────────────────────────────────────────────
+npx @biomejs/biome check src/  # Run Biome linter
+npx @biomejs/biome check --write src/  # Fix auto-fixable issues
+npx @biomejs/biome format src/ # Format code
+
+# ─────────────────────────────────────────────────────────────────
+# DOCUMENTATION
+# ─────────────────────────────────────────────────────────────────
+npm run docs                   # Generate TypeDoc documentation
+npm run docs:check             # Verify documentation completeness
+npm run docs:serve             # Generate and serve docs locally
+
+# ─────────────────────────────────────────────────────────────────
+# DEPENDENCIES
+# ─────────────────────────────────────────────────────────────────
+npm add <package>              # Add production dependency
+npm add -D <package>           # Add dev dependency
+npm update                     # Update all dependencies
+npm audit                      # Check for vulnerabilities
+npm audit fix                  # Fix vulnerabilities
+```
+
+### React Patterns Cheat Sheet
+
+#### Hooks Quick Reference
+
+```typescript
+// ─────────────────────────────────────────────────────────────────
+// STATE HOOKS
+// ─────────────────────────────────────────────────────────────────
+
+// useState - Local component state
+const [state, setState] = useState<Type>(initialValue);
+setState(newValue);                    // Direct update
+setState(prev => prev + 1);            // Functional update
+
+// useReducer - Complex state logic
+const [state, dispatch] = useReducer(reducer, initialState);
+dispatch({ type: 'ACTION', payload });
+
+// ─────────────────────────────────────────────────────────────────
+// EFFECT HOOKS
+// ─────────────────────────────────────────────────────────────────
+
+// useEffect - Side effects
+useEffect(() => {
+  // Effect logic
+  return () => { /* Cleanup */ };
+}, [dependencies]);
+
+// useLayoutEffect - Synchronous DOM mutations
+useLayoutEffect(() => {
+  // Runs before browser paint
+}, [dependencies]);
+
+// ─────────────────────────────────────────────────────────────────
+// CONTEXT HOOKS
+// ─────────────────────────────────────────────────────────────────
+
+// useContext - Consume context
+const value = useContext(MyContext);
+
+// ─────────────────────────────────────────────────────────────────
+// REF HOOKS
+// ─────────────────────────────────────────────────────────────────
+
+// useRef - Mutable ref object
+const ref = useRef<HTMLDivElement>(null);
+<div ref={ref} />
+
+// useImperativeHandle - Customize ref value
+useImperativeHandle(ref, () => ({
+  focus: () => inputRef.current?.focus(),
+}));
+
+// ─────────────────────────────────────────────────────────────────
+// PERFORMANCE HOOKS
+// ─────────────────────────────────────────────────────────────────
+
+// useMemo - Memoize expensive calculations
+const memoized = useMemo(() => expensiveCalculation(a, b), [a, b]);
+
+// useCallback - Memoize functions
+const memoizedFn = useCallback((arg) => doSomething(arg), [dep]);
+
+// React.memo - Memoize components
+const MemoizedComponent = React.memo(MyComponent);
+
+// ─────────────────────────────────────────────────────────────────
+// REACT 19 HOOKS
+// ─────────────────────────────────────────────────────────────────
+
+// use - Async data fetching
+const data = use(promise);
+const value = use(context);
+
+// useOptimistic - Optimistic UI updates
+const [optimisticState, addOptimistic] = useOptimistic(state, updateFn);
+
+// useTransition - Non-blocking updates
+const [isPending, startTransition] = useTransition();
+
+// useId - Generate unique IDs
+const id = useId();
+```
+
+#### Props Patterns
+
+```typescript
+// ─────────────────────────────────────────────────────────────────
+// BASIC PROPS
+// ─────────────────────────────────────────────────────────────────
+
+interface Props {
+  required: string;              // Required prop
+  optional?: number;             // Optional prop
+  withDefault?: boolean;         // Prop with default value
+}
+
+function Component({ required, optional, withDefault = true }: Props) {}
+
+// ─────────────────────────────────────────────────────────────────
+// CHILDREN PROPS
+// ─────────────────────────────────────────────────────────────────
+
+interface Props {
+  children: React.ReactNode;     // Any renderable content
+  children: React.ReactElement;  // Single React element
+  children: string;              // Text only
+}
+
+// ─────────────────────────────────────────────────────────────────
+// EVENT HANDLER PROPS
+// ─────────────────────────────────────────────────────────────────
+
+interface Props {
+  onClick: () => void;
+  onChange: (value: string) => void;
+  onSubmit: (data: FormData) => Promise<void>;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// EXTENDING HTML ATTRIBUTES
+// ─────────────────────────────────────────────────────────────────
+
+interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  variant: 'primary' | 'secondary';
+}
+
+interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
+  label: string;
+  error?: string;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// DISCRIMINATED UNIONS
+// ─────────────────────────────────────────────────────────────────
+
+type Props =
+  | { variant: 'text'; label: string }
+  | { variant: 'icon'; icon: React.ReactNode; ariaLabel: string };
+
+function Button(props: Props) {
+  if (props.variant === 'text') {
+    return <button>{props.label}</button>;
+  }
+  return <button aria-label={props.ariaLabel}>{props.icon}</button>;
+}
+```
+
+#### State Management Patterns
+
+```typescript
+// ─────────────────────────────────────────────────────────────────
+// LOCAL STATE (useState)
+// ─────────────────────────────────────────────────────────────────
+// Use for: Form inputs, toggles, UI state
+const [isOpen, setIsOpen] = useState(false);
+
+// ─────────────────────────────────────────────────────────────────
+// COMPLEX STATE (useReducer)
+// ─────────────────────────────────────────────────────────────────
+// Use for: Multi-value state, state machines
+type Action =
+  | { type: 'INCREMENT' }
+  | { type: 'DECREMENT' }
+  | { type: 'SET'; payload: number };
+
+function reducer(state: number, action: Action): number {
+  switch (action.type) {
+    case 'INCREMENT': return state + 1;
+    case 'DECREMENT': return state - 1;
+    case 'SET': return action.payload;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// SERVER STATE (TanStack Query)
+// ─────────────────────────────────────────────────────────────────
+// Use for: API data, caching, loading states
+const { data, isLoading, error } = useQuery({
+  queryKey: ['users', userId],
+  queryFn: () => fetchUser(userId),
+});
+
+const mutation = useMutation({
+  mutationFn: updateUser,
+  onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
+});
+
+// ─────────────────────────────────────────────────────────────────
+// GLOBAL STATE (Zustand)
+// ─────────────────────────────────────────────────────────────────
+// Use for: Auth, theme, app-wide settings
+const useStore = create<State>()((set) => ({
+  count: 0,
+  increment: () => set((state) => ({ count: state.count + 1 })),
+}));
+```
+
+### Project Structure Reference
+
+```
+src/
+├── assets/                    # Static files (images, fonts, icons)
+│   ├── images/
+│   ├── fonts/
+│   └── icons/
+│
+├── components/                # Reusable UI components
+│   ├── ui/                   # Base components (Button, Input, Card)
+│   │   ├── Button/
+│   │   │   ├── Button.tsx           # Component implementation
+│   │   │   ├── Button.test.tsx      # Component tests
+│   │   │   ├── Button.module.css    # Component styles
+│   │   │   └── index.ts             # Public exports
+│   │   └── index.ts          # Barrel export for ui/
+│   │
+│   ├── layout/               # Layout components
+│   │   ├── Header/
+│   │   ├── Footer/
+│   │   ├── Sidebar/
+│   │   └── MainLayout.tsx
+│   │
+│   └── features/             # Feature-specific components
+│       ├── auth/             # Auth feature components
+│       │   ├── LoginForm/
+│       │   └── RegisterForm/
+│       └── dashboard/        # Dashboard feature components
+│           ├── StatsCard/
+│           └── ActivityFeed/
+│
+├── hooks/                     # Custom React hooks
+│   ├── useAuth.ts
+│   ├── useLocalStorage.ts
+│   ├── useDebounce.ts
+│   ├── useMediaQuery.ts
+│   └── index.ts              # Barrel export
+│
+├── lib/                       # Third-party library configs
+│   ├── axios.ts              # Axios instance configuration
+│   ├── queryClient.ts        # TanStack Query client
+│   └── zod.ts                # Zod schemas
+│
+├── pages/                     # Page/Route components
+│   ├── Home/
+│   │   ├── Home.tsx
+│   │   └── index.ts
+│   ├── Dashboard/
+│   ├── Profile/
+│   └── NotFound/
+│
+├── services/                  # API service layer
+│   ├── api/
+│   │   ├── auth.api.ts       # Auth endpoints
+│   │   ├── users.api.ts      # User endpoints
+│   │   └── index.ts
+│   └── index.ts
+│
+├── stores/                    # Global state (Zustand)
+│   ├── authStore.ts
+│   ├── themeStore.ts
+│   └── index.ts
+│
+├── types/                     # TypeScript type definitions
+│   ├── api.types.ts          # API response types
+│   ├── models.types.ts       # Domain model types
+│   ├── components.types.ts   # Shared component types
+│   └── index.ts
+│
+├── utils/                     # Utility functions
+│   ├── format.ts             # Formatting utilities
+│   ├── validation.ts         # Validation helpers
+│   ├── constants.ts          # App constants
+│   └── index.ts
+│
+├── test/                      # Test utilities & setup
+│   ├── setup.ts              # Vitest setup file
+│   ├── test-utils.tsx        # Custom render with providers
+│   └── mocks/                # Mock data and handlers
+│       ├── handlers.ts
+│       └── data.ts
+│
+├── App.tsx                    # Root component
+├── main.tsx                   # Entry point
+├── router.tsx                 # Route configuration
+├── index.css                  # Global styles
+└── vite-env.d.ts             # Vite type declarations
+
+# Root configuration files
+├── .env                       # Environment variables (git-ignored)
+├── .env.example              # Example env file (committed)
+├── tsconfig.json             # TypeScript config
+├── tsconfig.node.json        # Node-specific TS config
+├── vite.config.ts            # Vite configuration
+├── vitest.config.ts          # Vitest configuration (if separate)
+├── typedoc.json              # TypeDoc configuration
+├── biome.json                # Biome linter config
+├── tailwind.config.js        # Tailwind CSS config
+├── postcss.config.js         # PostCSS config
+├── package.json              # Package manifest
+└── README.md                 # Project documentation
+```
+
+### Testing Cheat Sheet
+
+```typescript
+// ─────────────────────────────────────────────────────────────────
+// COMPONENT TESTING PATTERNS
+// ─────────────────────────────────────────────────────────────────
+
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+
+// Basic rendering
+render(<Component prop="value" />);
+
+// Query elements
+screen.getByRole('button', { name: /submit/i });    // Throws if not found
+screen.queryByRole('button');                        // Returns null if not found
+await screen.findByRole('button');                   // Async, waits for element
+
+// User interactions
+const user = userEvent.setup();
+await user.click(screen.getByRole('button'));
+await user.type(screen.getByRole('textbox'), 'Hello');
+await user.selectOptions(screen.getByRole('combobox'), 'option1');
+
+// Assertions
+expect(element).toBeInTheDocument();
+expect(element).toHaveTextContent('text');
+expect(element).toBeDisabled();
+expect(element).toHaveAttribute('href', '/path');
+expect(element).toHaveClass('active');
+
+// Async assertions
+await waitFor(() => {
+  expect(screen.getByText('Loaded')).toBeInTheDocument();
+});
+
+// ─────────────────────────────────────────────────────────────────
+// HOOK TESTING PATTERNS
+// ─────────────────────────────────────────────────────────────────
+
+import { renderHook, act } from '@testing-library/react';
+
+const { result, rerender } = renderHook(() => useMyHook(initialValue));
+
+// Access hook return value
+expect(result.current.count).toBe(0);
+
+// Update hook state
+act(() => {
+  result.current.increment();
+});
+
+// Rerender with new props
+rerender(newValue);
+
+// ─────────────────────────────────────────────────────────────────
+// MOCKING PATTERNS
+// ─────────────────────────────────────────────────────────────────
+
+// Mock function
+const mockFn = vi.fn();
+const mockFnWithReturn = vi.fn().mockReturnValue('value');
+const mockAsyncFn = vi.fn().mockResolvedValue({ data: [] });
+
+// Mock module
+vi.mock('./api', () => ({
+  fetchUser: vi.fn().mockResolvedValue({ id: '1', name: 'Test' }),
+}));
+
+// Spy on method
+vi.spyOn(console, 'error').mockImplementation(() => {});
+```
+
+---
+
 ## References
 
 - [React Documentation](https://react.dev/)
@@ -2910,5 +3767,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
 - [TanStack Query](https://tanstack.com/query/latest)
 - [React Router](https://reactrouter.com/)
 - [Testing Library](https://testing-library.com/react)
+- [Vitest Documentation](https://vitest.dev/)
 - [Web Content Accessibility Guidelines](https://www.w3.org/WAI/WCAG21/quickref/)
 - [React TypeScript Cheatsheet](https://react-typescript-cheatsheet.netlify.app/)
+- [Zustand State Management](https://docs.pmnd.rs/zustand/getting-started/introduction)

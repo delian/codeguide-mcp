@@ -825,6 +825,577 @@ This project complies with:
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new pipeline configurations and CI/CD code.**
+
+### TDD Cycle
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    TDD CYCLE FOR GITLAB CI/CD               │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│    ┌─────────┐                                              │
+│    │  RED    │  1. Write a failing test/job first           │
+│    │  (FAIL) │     - Define expected pipeline behavior      │
+│    └────┬────┘     - Create test that validates behavior    │
+│         │          - Run pipeline: MUST FAIL                │
+│         ▼                                                   │
+│    ┌─────────┐                                              │
+│    │  GREEN  │  2. Write minimal code to pass               │
+│    │  (PASS) │     - Implement pipeline job/stage           │
+│    └────┬────┘     - Run pipeline: MUST PASS                │
+│         │                                                   │
+│         ▼                                                   │
+│    ┌─────────┐                                              │
+│    │REFACTOR │  3. Improve while keeping tests green        │
+│    │(IMPROVE)│     - Optimize pipeline performance          │
+│    └────┬────┘     - Add caching, parallelization           │
+│         │          - Run pipeline: STILL PASSES             │
+│         │                                                   │
+│         └──────────────► Repeat for next feature            │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Example TDD Workflow for GitLab CI/CD
+
+**Scenario**: Adding a new deployment validation job to ensure deployments are healthy.
+
+```yaml
+# Step 1: RED - Write failing test job first
+# .gitlab-ci.yml
+
+# Define the test that validates deployment behavior
+test:deployment-validation:
+  stage: test
+  image: alpine:latest
+  script:
+    - |
+      echo "Testing deployment validation logic..."
+
+      # Test 1: Health check function should return success for healthy endpoint
+      # This test will FAIL because deploy:validate job doesn't exist yet
+      if ! grep -q "deploy:validate" .gitlab-ci.yml; then
+        echo "FAIL: deploy:validate job not found"
+        exit 1
+      fi
+
+      # Test 2: Verify health check timeout is configured
+      if ! grep -q "HEALTH_CHECK_TIMEOUT" .gitlab-ci.yml; then
+        echo "FAIL: HEALTH_CHECK_TIMEOUT not configured"
+        exit 1
+      fi
+
+      # Test 3: Verify rollback mechanism exists
+      if ! grep -q "rollback" .gitlab-ci.yml; then
+        echo "FAIL: Rollback mechanism not defined"
+        exit 1
+      fi
+
+      echo "All deployment validation tests passed"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - .gitlab-ci.yml
+
+# Run: git push → Pipeline runs → test:deployment-validation FAILS
+# ✗ FAIL: deploy:validate job not found
+```
+
+```yaml
+# Step 2: GREEN - Write minimal implementation to pass
+
+variables:
+  HEALTH_CHECK_TIMEOUT: "30"
+  HEALTH_CHECK_RETRIES: "5"
+
+deploy:validate:
+  stage: verify
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - |
+      echo "Validating deployment health..."
+
+      # Health check with timeout and retries
+      RETRY=0
+      while [ $RETRY -lt $HEALTH_CHECK_RETRIES ]; do
+        if curl -sf --max-time $HEALTH_CHECK_TIMEOUT "$DEPLOYMENT_URL/health"; then
+          echo "✓ Health check passed"
+          exit 0
+        fi
+        RETRY=$((RETRY + 1))
+        echo "Health check attempt $RETRY failed, retrying..."
+        sleep 5
+      done
+
+      echo "✗ Health check failed after $HEALTH_CHECK_RETRIES attempts"
+      exit 1
+  environment:
+    name: $ENVIRONMENT
+    action: verify
+
+# Rollback job for failed deployments
+rollback:deployment:
+  stage: verify
+  image: alpine:latest
+  script:
+    - |
+      echo "Rolling back deployment..."
+      # Rollback to previous version
+      # kubectl rollout undo deployment/myapp
+      echo "✓ Rollback completed"
+  when: on_failure
+  needs: ["deploy:validate"]
+
+# Run: git push → Pipeline runs → test:deployment-validation PASSES
+# ✓ All deployment validation tests passed
+```
+
+```yaml
+# Step 3: REFACTOR - Improve while keeping tests green
+
+variables:
+  HEALTH_CHECK_TIMEOUT: "30"
+  HEALTH_CHECK_RETRIES: "5"
+  HEALTH_CHECK_INTERVAL: "5"
+  DEPLOYMENT_VALIDATION_ENABLED: "true"
+
+# Reusable deployment validation template
+.deployment_validation_template: &deployment_validation
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl jq
+  script:
+    - |
+      if [ "$DEPLOYMENT_VALIDATION_ENABLED" != "true" ]; then
+        echo "Deployment validation disabled, skipping..."
+        exit 0
+      fi
+
+      echo "Validating deployment to $ENVIRONMENT..."
+
+      # Enhanced health check with JSON response validation
+      RETRY=0
+      while [ $RETRY -lt $HEALTH_CHECK_RETRIES ]; do
+        RESPONSE=$(curl -sf --max-time $HEALTH_CHECK_TIMEOUT "$DEPLOYMENT_URL/health" 2>/dev/null)
+
+        if [ $? -eq 0 ]; then
+          STATUS=$(echo "$RESPONSE" | jq -r '.status // "unknown"')
+          if [ "$STATUS" = "healthy" ] || [ "$STATUS" = "ok" ]; then
+            echo "✓ Health check passed (status: $STATUS)"
+
+            # Additional validation: Check version matches
+            DEPLOYED_VERSION=$(echo "$RESPONSE" | jq -r '.version // "unknown"')
+            echo "✓ Deployed version: $DEPLOYED_VERSION"
+
+            exit 0
+          fi
+        fi
+
+        RETRY=$((RETRY + 1))
+        echo "Health check attempt $RETRY/$HEALTH_CHECK_RETRIES failed"
+        sleep $HEALTH_CHECK_INTERVAL
+      done
+
+      echo "✗ Deployment validation failed"
+      exit 1
+
+deploy:validate:staging:
+  <<: *deployment_validation
+  stage: verify
+  variables:
+    ENVIRONMENT: "staging"
+    DEPLOYMENT_URL: "https://staging.example.com"
+  environment:
+    name: staging
+    action: verify
+  needs: ["deploy:staging"]
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+deploy:validate:production:
+  <<: *deployment_validation
+  stage: verify
+  variables:
+    ENVIRONMENT: "production"
+    DEPLOYMENT_URL: "https://example.com"
+  environment:
+    name: production
+    action: verify
+  needs: ["deploy:production"]
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+
+# Enhanced rollback with notification
+rollback:deployment:
+  stage: verify
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - |
+      echo "🔄 Initiating rollback for $ENVIRONMENT..."
+
+      # Notify team of rollback
+      curl -X POST "$SLACK_WEBHOOK_URL" \
+        -H "Content-Type: application/json" \
+        -d "{\"text\":\"⚠️ Rollback initiated for $ENVIRONMENT (Pipeline: $CI_PIPELINE_URL)\"}" || true
+
+      # Perform rollback
+      # kubectl rollout undo deployment/myapp -n $ENVIRONMENT
+
+      echo "✓ Rollback completed"
+  when: on_failure
+  needs:
+    - job: deploy:validate:staging
+      optional: true
+    - job: deploy:validate:production
+      optional: true
+
+# Run: git push → Pipeline runs → All tests STILL PASS
+# ✓ Refactored with templates, parallel validation, enhanced checks
+```
+
+### Visual Step-by-Step TDD Example
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     TDD WORKFLOW FOR NEW CI JOB                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  REQUIREMENT: Add container vulnerability blocking to pipeline          │
+│                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │ STEP 1: RED - Write Test First                                  │    │
+│  │                                                                 │    │
+│  │ test:container-security-policy:                                 │    │
+│  │   script:                                                       │    │
+│  │     # Test that critical vulnerabilities block deployment       │    │
+│  │     - if ! grep -q "CS_SEVERITY_THRESHOLD" .gitlab-ci.yml;     │    │
+│  │       then exit 1; fi                                           │    │
+│  │     # Test that container scanning is required for deploy       │    │
+│  │     - if ! grep -q "needs:.*container_scanning" .gitlab-ci.yml;│    │
+│  │       then exit 1; fi                                           │    │
+│  │                                                                 │    │
+│  │ Pipeline Result: ❌ FAILED                                      │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                              │                                          │
+│                              ▼                                          │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │ STEP 2: GREEN - Implement Minimum to Pass                       │    │
+│  │                                                                 │    │
+│  │ container_scanning:                                             │    │
+│  │   variables:                                                    │    │
+│  │     CS_SEVERITY_THRESHOLD: "high"                               │    │
+│  │                                                                 │    │
+│  │ deploy:production:                                              │    │
+│  │   needs:                                                        │    │
+│  │     - container_scanning                                        │    │
+│  │     - test:unit                                                 │    │
+│  │                                                                 │    │
+│  │ Pipeline Result: ✅ PASSED                                      │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                              │                                          │
+│                              ▼                                          │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │ STEP 3: REFACTOR - Improve Without Breaking Tests               │    │
+│  │                                                                 │    │
+│  │ container_scanning:                                             │    │
+│  │   variables:                                                    │    │
+│  │     CS_SEVERITY_THRESHOLD: "high"                               │    │
+│  │     CS_DISABLE_LANGUAGE_VULNERABILITY_SCAN: "false"             │    │
+│  │   rules:                                                        │    │
+│  │     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH               │    │
+│  │     - if: $CI_COMMIT_TAG                                        │    │
+│  │                                                                 │    │
+│  │ # Added: Security gate job                                      │    │
+│  │ security:gate:                                                  │    │
+│  │   script:                                                       │    │
+│  │     - check_vulnerabilities.sh                                  │    │
+│  │   allow_failure: false                                          │    │
+│  │                                                                 │    │
+│  │ Pipeline Result: ✅ STILL PASSING                               │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every pipeline bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    BUG FIX WORKFLOW FOR GITLAB CI/CD                    │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  ┌──────────────────┐                                                   │
+│  │  1. BUG REPORTED │  Issue #789: Pipeline fails intermittently        │
+│  │     (DISCOVER)   │  on concurrent deployments                        │
+│  └────────┬─────────┘                                                   │
+│           │                                                             │
+│           ▼                                                             │
+│  ┌──────────────────┐                                                   │
+│  │  2. WRITE TEST   │  Create test that reproduces the bug              │
+│  │     (REPRODUCE)  │  Test MUST FAIL to prove bug exists               │
+│  └────────┬─────────┘                                                   │
+│           │                                                             │
+│           ▼                                                             │
+│  ┌──────────────────┐                                                   │
+│  │  3. VERIFY FAIL  │  Confirm test fails for the RIGHT reason          │
+│  │     (CONFIRM)    │  Not a flaky test or unrelated failure            │
+│  └────────┬─────────┘                                                   │
+│           │                                                             │
+│           ▼                                                             │
+│  ┌──────────────────┐                                                   │
+│  │  4. FIX BUG      │  Implement the fix                                │
+│  │     (IMPLEMENT)  │  Test should now PASS                             │
+│  └────────┬─────────┘                                                   │
+│           │                                                             │
+│           ▼                                                             │
+│  ┌──────────────────┐                                                   │
+│  │  5. VERIFY PASS  │  Run full test suite                              │
+│  │     (VALIDATE)   │  Regression test passes, no new failures          │
+│  └────────┬─────────┘                                                   │
+│           │                                                             │
+│           ▼                                                             │
+│  ┌──────────────────┐                                                   │
+│  │  6. DOCUMENT     │  Add comment with bug ID to test                  │
+│  │     (RECORD)     │  Update CHANGELOG and issue                       │
+│  └────────┬─────────┘                                                   │
+│           │                                                             │
+│           ▼                                                             │
+│  ┌──────────────────┐                                                   │
+│  │  7. DEPLOY       │  Merge with confidence                            │
+│  │     (SHIP)       │  Regression permanently prevented                 │
+│  └──────────────────┘                                                   │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Example Bug Fix with Regression Test
+
+**Bug Report #456**: Pipeline cache not invalidating when package-lock.json changes, causing stale dependencies.
+
+```yaml
+# ============================================================
+# STEP 1-2: Write test that reproduces Bug #456
+# ============================================================
+
+# .gitlab-ci.yml - Add regression test job
+
+# Bug #456: Cache invalidation test
+# This test verifies that cache is properly invalidated when
+# package-lock.json changes
+test:cache-invalidation:
+  stage: validate
+  image: alpine:latest
+  script:
+    - |
+      # Bug #456: Regression test for cache invalidation
+      # This test ensures the cache key includes package-lock.json hash
+
+      echo "Testing cache configuration for Bug #456..."
+
+      # Test 1: Verify cache key uses file hash
+      if ! grep -A5 "cache:" .gitlab-ci.yml | grep -q "files:"; then
+        echo "FAIL: Cache key does not use file-based hashing"
+        echo "Bug #456: Cache not invalidating on dependency changes"
+        exit 1
+      fi
+
+      # Test 2: Verify package-lock.json is in cache key files
+      if ! grep -A10 "cache:" .gitlab-ci.yml | grep -q "package-lock.json"; then
+        echo "FAIL: package-lock.json not in cache key"
+        echo "Bug #456: Cache not invalidating on dependency changes"
+        exit 1
+      fi
+
+      # Test 3: Verify cache policy is set correctly
+      if grep -q 'policy: "pull"' .gitlab-ci.yml | head -1; then
+        # Check if there's a corresponding push job
+        if ! grep -q 'policy: "push"' .gitlab-ci.yml; then
+          echo "FAIL: Cache pull policy without push policy"
+          echo "Bug #456: Cache may become stale"
+          exit 1
+        fi
+      fi
+
+      echo "✓ Bug #456: Cache invalidation tests passed"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - .gitlab-ci.yml
+        - package-lock.json
+
+# Run: git push → Pipeline runs → test:cache-invalidation FAILS
+# ✗ FAIL: Cache key does not use file-based hashing
+```
+
+```yaml
+# ============================================================
+# STEP 3-4: Fix Bug #456 - Proper cache invalidation
+# ============================================================
+
+# BEFORE (Buggy configuration):
+# default:
+#   cache:
+#     key: "$CI_COMMIT_REF_SLUG"  # Bug #456: Only uses branch name!
+#     paths:
+#       - node_modules/
+
+# AFTER (Fixed configuration):
+default:
+  cache:
+    # Bug #456 Fix: Use file hash for cache key invalidation
+    key:
+      files:
+        - package-lock.json      # Invalidate when dependencies change
+        - yarn.lock              # Support yarn projects
+      prefix: "$CI_COMMIT_REF_SLUG"  # Still include branch for isolation
+    paths:
+      - node_modules/
+      - .npm/
+    policy: pull-push  # Bug #456 Fix: Ensure cache is updated
+
+# For jobs that only need to read cache (optimization)
+.cache_pull_only:
+  cache:
+    key:
+      files:
+        - package-lock.json
+      prefix: "$CI_COMMIT_REF_SLUG"
+    paths:
+      - node_modules/
+      - .npm/
+    policy: pull  # Only pull, don't update cache
+
+# Job that updates the cache (runs first)
+install:dependencies:
+  stage: .pre
+  script:
+    - npm ci --cache .npm --prefer-offline
+  cache:
+    key:
+      files:
+        - package-lock.json
+      prefix: "$CI_COMMIT_REF_SLUG"
+    paths:
+      - node_modules/
+      - .npm/
+    policy: push  # Bug #456 Fix: Explicitly push new cache
+
+# Subsequent jobs use pull-only for speed
+lint:
+  stage: validate
+  extends: .cache_pull_only
+  script:
+    - npm run lint
+
+test:unit:
+  stage: test
+  extends: .cache_pull_only
+  script:
+    - npm test
+
+# Run: git push → Pipeline runs → test:cache-invalidation PASSES
+# ✓ Bug #456: Cache invalidation tests passed
+```
+
+```yaml
+# ============================================================
+# STEP 5-6: Verify and Document Bug #456 Fix
+# ============================================================
+
+# Additional validation job to prevent regression
+verify:bug-fixes:
+  stage: validate
+  image: alpine:latest
+  script:
+    - |
+      echo "Verifying bug fix regressions..."
+
+      # Bug #456: Cache invalidation
+      # Added: 2024-01-15
+      # Fixed by: Properly using file-based cache keys
+      if ! grep -A5 "key:" .gitlab-ci.yml | grep -q "files:"; then
+        echo "REGRESSION: Bug #456 - Cache invalidation broken"
+        exit 1
+      fi
+      echo "✓ Bug #456: Cache invalidation - PROTECTED"
+
+      # Bug #123: Missing retry on runner failures
+      # Added: 2024-01-10
+      if ! grep -q "runner_system_failure" .gitlab-ci.yml; then
+        echo "REGRESSION: Bug #123 - Missing retry configuration"
+        exit 1
+      fi
+      echo "✓ Bug #123: Retry configuration - PROTECTED"
+
+      # Bug #234: Security scan timeout
+      # Added: 2024-01-12
+      if ! grep -A3 "sast:" .gitlab-ci.yml | grep -q "timeout:"; then
+        echo "WARNING: Bug #234 - Consider adding SAST timeout"
+      fi
+
+      echo ""
+      echo "═══════════════════════════════════════"
+      echo "All regression tests passed!"
+      echo "═══════════════════════════════════════"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+```
+
+### Bug Fix Checklist
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      BUG FIX VERIFICATION CHECKLIST                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  Bug ID: #___________  Date: ____________  Fixed by: _______________    │
+│                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │ BEFORE FIXING                                                   │    │
+│  │ □ Bug is documented in GitLab issue                             │    │
+│  │ □ Root cause is identified                                      │    │
+│  │ □ Regression test written that reproduces bug                   │    │
+│  │ □ Regression test FAILS (proves bug exists)                     │    │
+│  │ □ Test includes comment: // Bug #XXX: Description               │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │ AFTER FIXING                                                    │    │
+│  │ □ Regression test now PASSES                                    │    │
+│  │ □ All other tests still pass                                    │    │
+│  │ □ No new warnings or errors                                     │    │
+│  │ □ Pipeline completes successfully                               │    │
+│  │ □ MR title references bug: "Fix #XXX: Description"              │    │
+│  │ □ MR description explains root cause and fix                    │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │ DOCUMENTATION                                                   │    │
+│  │ □ Issue updated with fix details                                │    │
+│  │ □ CHANGELOG updated (if applicable)                             │    │
+│  │ □ Test file documents bug prevention                            │    │
+│  │ □ Related documentation updated                                 │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## 3. Issue and Merge Request Management (MANDATORY)
 
 ### A. Issue Templates
@@ -1772,6 +2343,561 @@ wiki:update:
 10. **GitLab Pages**: Automated documentation deployment, always up-to-date.
 11. **Efficiency**: Caching, parallelization, selective execution optimize pipeline performance.
 12. **Observability**: Security dashboard, coverage reports, pipeline metrics provide visibility.
+
+---
+
+## Quick Reference
+
+### Common glab CLI Commands
+
+```bash
+# ═══════════════════════════════════════════════════════════════════════
+# GLAB CLI - QUICK REFERENCE
+# ═══════════════════════════════════════════════════════════════════════
+
+# ──────────────────────────────────────────────────────────────────────
+# AUTHENTICATION & CONFIGURATION
+# ──────────────────────────────────────────────────────────────────────
+glab auth login                          # Authenticate with GitLab
+glab auth status                         # Check authentication status
+glab config set editor vim               # Set default editor
+glab config set git_protocol ssh         # Set git protocol (ssh/https)
+
+# ──────────────────────────────────────────────────────────────────────
+# MERGE REQUESTS
+# ──────────────────────────────────────────────────────────────────────
+glab mr create                           # Create MR interactively
+glab mr create --fill                    # Create MR with commit info
+glab mr create --draft                   # Create draft MR
+glab mr create -t "Title" -d "Desc"      # Create MR with title and description
+glab mr create --target-branch develop   # Create MR targeting specific branch
+
+glab mr list                             # List open MRs
+glab mr list --state merged              # List merged MRs
+glab mr list --author @me                # List your MRs
+glab mr list --reviewer @me              # List MRs for your review
+
+glab mr view 123                         # View MR #123
+glab mr view --web                       # Open MR in browser
+glab mr checkout 123                     # Checkout MR #123 locally
+glab mr diff 123                         # Show MR diff
+
+glab mr approve 123                      # Approve MR
+glab mr merge 123                        # Merge MR
+glab mr merge 123 --squash               # Squash merge
+glab mr merge 123 --remove-source-branch # Delete branch after merge
+glab mr close 123                        # Close MR without merging
+
+glab mr note 123 -m "Comment"            # Add comment to MR
+glab mr update 123 --title "New title"   # Update MR title
+glab mr update 123 --draft               # Convert to draft
+glab mr update 123 --ready               # Mark as ready for review
+
+# ──────────────────────────────────────────────────────────────────────
+# ISSUES
+# ──────────────────────────────────────────────────────────────────────
+glab issue create                        # Create issue interactively
+glab issue create -t "Bug: X" -l bug     # Create issue with title and label
+glab issue list                          # List open issues
+glab issue list --label bug              # List issues with label
+glab issue list --assignee @me           # List issues assigned to you
+glab issue view 456                      # View issue #456
+glab issue view 456 --web                # Open issue in browser
+glab issue close 456                     # Close issue
+glab issue reopen 456                    # Reopen issue
+glab issue note 456 -m "Comment"         # Add comment to issue
+
+# ──────────────────────────────────────────────────────────────────────
+# PIPELINES & CI/CD
+# ──────────────────────────────────────────────────────────────────────
+glab ci status                           # Show pipeline status
+glab ci view                             # View current pipeline
+glab ci list                             # List recent pipelines
+glab ci run                              # Trigger new pipeline
+glab ci run -b feature-branch            # Trigger pipeline on branch
+
+glab ci trace                            # Show running job logs
+glab ci trace JOB_ID                     # Show specific job logs
+glab ci retry                            # Retry failed pipeline
+glab ci cancel                           # Cancel running pipeline
+
+glab ci lint                             # Lint .gitlab-ci.yml
+glab ci lint .gitlab-ci.yml              # Lint specific file
+
+# View job artifacts
+glab ci artifact JOB_ID                  # Download job artifacts
+glab ci artifact list                    # List available artifacts
+
+# ──────────────────────────────────────────────────────────────────────
+# REPOSITORY & PROJECT
+# ──────────────────────────────────────────────────────────────────────
+glab repo clone group/project            # Clone repository
+glab repo fork                           # Fork current repository
+glab repo view                           # View repository info
+glab repo view --web                     # Open repository in browser
+
+glab release create v1.0.0               # Create new release
+glab release list                        # List releases
+glab release view v1.0.0                 # View release details
+
+glab label list                          # List project labels
+glab label create "priority::high" -c red # Create new label
+
+# ──────────────────────────────────────────────────────────────────────
+# SEARCH
+# ──────────────────────────────────────────────────────────────────────
+glab search issues "bug"                 # Search issues
+glab search mrs "feature"                # Search merge requests
+glab search projects "api"               # Search projects
+
+# ──────────────────────────────────────────────────────────────────────
+# ALIASES & SHORTCUTS
+# ──────────────────────────────────────────────────────────────────────
+glab alias set mrc 'mr create --fill'    # Create alias for MR creation
+glab alias set cis 'ci status'           # Create alias for CI status
+glab alias list                          # List all aliases
+```
+
+### GitLab CI/CD Patterns Cheat Sheet
+
+```yaml
+# ═══════════════════════════════════════════════════════════════════════
+# GITLAB CI/CD PATTERNS CHEAT SHEET
+# ═══════════════════════════════════════════════════════════════════════
+
+# ──────────────────────────────────────────────────────────────────────
+# WORKFLOW RULES (Control when pipelines run)
+# ──────────────────────────────────────────────────────────────────────
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"  # MR pipelines
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH       # Main branch
+    - if: $CI_COMMIT_TAG                                 # Tags
+    - if: $CI_PIPELINE_SOURCE == "web"                   # Manual trigger
+    - if: $CI_PIPELINE_SOURCE == "schedule"              # Scheduled
+
+# ──────────────────────────────────────────────────────────────────────
+# JOB RULES (Control when jobs run)
+# ──────────────────────────────────────────────────────────────────────
+job:
+  rules:
+    # Run only on main branch
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+    # Run on MRs only
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+    # Run on tags matching pattern
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+
+    # Run when specific files change
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - src/**/*
+        - package.json
+
+    # Manual trigger with conditions
+    - if: $CI_COMMIT_BRANCH == "production"
+      when: manual
+
+    # Never run on specific conditions
+    - if: $CI_COMMIT_MESSAGE =~ /skip-ci/
+      when: never
+
+# ──────────────────────────────────────────────────────────────────────
+# CACHING STRATEGIES
+# ──────────────────────────────────────────────────────────────────────
+# File-based cache key (recommended)
+cache:
+  key:
+    files:
+      - package-lock.json
+    prefix: $CI_COMMIT_REF_SLUG
+  paths:
+    - node_modules/
+    - .npm/
+
+# Branch-based cache (simpler but may use stale deps)
+cache:
+  key: $CI_COMMIT_REF_SLUG
+  paths:
+    - node_modules/
+
+# Pull-only cache (faster for read-heavy jobs)
+cache:
+  key: deps-$CI_COMMIT_REF_SLUG
+  paths:
+    - node_modules/
+  policy: pull
+
+# Push-only cache (for dependency installation jobs)
+cache:
+  key: deps-$CI_COMMIT_REF_SLUG
+  paths:
+    - node_modules/
+  policy: push
+
+# ──────────────────────────────────────────────────────────────────────
+# ARTIFACTS PATTERNS
+# ──────────────────────────────────────────────────────────────────────
+# Build artifacts
+artifacts:
+  paths:
+    - dist/
+    - build/
+  expire_in: 1 week
+
+# Test reports
+artifacts:
+  when: always
+  reports:
+    junit: coverage/junit.xml
+    coverage_report:
+      coverage_format: cobertura
+      path: coverage/cobertura-coverage.xml
+    codequality: gl-code-quality-report.json
+
+# Environment variables from job
+artifacts:
+  reports:
+    dotenv: build.env
+
+# Conditional artifacts
+artifacts:
+  paths:
+    - logs/
+  when: on_failure
+  expire_in: 1 day
+
+# ──────────────────────────────────────────────────────────────────────
+# DEPENDENCIES WITH NEEDS (DAG)
+# ──────────────────────────────────────────────────────────────────────
+# Basic needs (wait for specific jobs)
+deploy:
+  needs: ["build", "test"]
+
+# Needs with artifacts
+deploy:
+  needs:
+    - job: build
+      artifacts: true
+    - job: test
+      artifacts: false
+
+# Optional needs (don't fail if job doesn't exist)
+deploy:
+  needs:
+    - job: e2e-test
+      optional: true
+
+# Cross-pipeline needs
+deploy:
+  needs:
+    - project: group/other-project
+      job: build
+      ref: main
+      artifacts: true
+
+# ──────────────────────────────────────────────────────────────────────
+# REUSABLE TEMPLATES
+# ──────────────────────────────────────────────────────────────────────
+# Hidden job template (starts with .)
+.base_template:
+  image: node:20-alpine
+  before_script:
+    - npm ci
+  cache:
+    key:
+      files:
+        - package-lock.json
+    paths:
+      - node_modules/
+
+# Extend template
+test:
+  extends: .base_template
+  script:
+    - npm test
+
+# YAML anchors
+.defaults: &defaults
+  image: node:20-alpine
+  tags:
+    - docker
+
+job1:
+  <<: *defaults
+  script: echo "job1"
+
+job2:
+  <<: *defaults
+  script: echo "job2"
+
+# ──────────────────────────────────────────────────────────────────────
+# PARALLEL & MATRIX JOBS
+# ──────────────────────────────────────────────────────────────────────
+# Parallel matrix
+test:
+  parallel:
+    matrix:
+      - NODE_VERSION: ["18", "20", "22"]
+        OS: ["alpine", "slim"]
+  image: node:${NODE_VERSION}-${OS}
+  script:
+    - npm test
+
+# Simple parallel
+test:
+  parallel: 5
+  script:
+    - npm test -- --shard=$CI_NODE_INDEX/$CI_NODE_TOTAL
+
+# ──────────────────────────────────────────────────────────────────────
+# ENVIRONMENTS
+# ──────────────────────────────────────────────────────────────────────
+deploy:staging:
+  environment:
+    name: staging
+    url: https://staging.example.com
+    on_stop: stop:staging
+    auto_stop_in: 1 week
+
+deploy:production:
+  environment:
+    name: production
+    url: https://example.com
+    action: start
+  when: manual
+  resource_group: production
+
+stop:staging:
+  environment:
+    name: staging
+    action: stop
+  when: manual
+
+# ──────────────────────────────────────────────────────────────────────
+# SERVICES (SIDECARS)
+# ──────────────────────────────────────────────────────────────────────
+test:integration:
+  services:
+    - name: postgres:15-alpine
+      alias: db
+    - name: redis:7-alpine
+      alias: cache
+  variables:
+    POSTGRES_DB: test_db
+    POSTGRES_USER: test
+    POSTGRES_PASSWORD: test
+    DATABASE_URL: postgresql://test:test@db:5432/test_db
+    REDIS_URL: redis://cache:6379
+
+# ──────────────────────────────────────────────────────────────────────
+# INCLUDE PATTERNS
+# ──────────────────────────────────────────────────────────────────────
+include:
+  # Local file
+  - local: '.gitlab/ci/templates/test.yml'
+
+  # Remote file
+  - remote: 'https://example.com/ci/template.yml'
+
+  # Project file
+  - project: 'group/shared-ci'
+    ref: main
+    file: '/templates/deploy.yml'
+
+  # GitLab templates
+  - template: Security/SAST.gitlab-ci.yml
+  - template: Security/Dependency-Scanning.gitlab-ci.yml
+
+# ──────────────────────────────────────────────────────────────────────
+# RETRY & TIMEOUT
+# ──────────────────────────────────────────────────────────────────────
+job:
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - stuck_or_timeout_failure
+      - scheduler_failure
+  timeout: 30 minutes
+  interruptible: true
+
+# ──────────────────────────────────────────────────────────────────────
+# SECURITY SCANNING (Quick Setup)
+# ──────────────────────────────────────────────────────────────────────
+include:
+  - template: Security/SAST.gitlab-ci.yml
+  - template: Security/Dependency-Scanning.gitlab-ci.yml
+  - template: Security/Secret-Detection.gitlab-ci.yml
+  - template: Security/Container-Scanning.gitlab-ci.yml
+
+sast:
+  variables:
+    SAST_EXCLUDED_PATHS: "spec,test,tests,node_modules"
+
+container_scanning:
+  variables:
+    CS_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+    CS_SEVERITY_THRESHOLD: "medium"
+```
+
+### Pipeline Structure
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     GITLAB CI/CD PIPELINE STRUCTURE                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  STAGES (Sequential)                                                    │
+│  ═══════════════════                                                    │
+│                                                                         │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │ .pre (built-in)     │ Runs before all stages                     │   │
+│  │                     │ Good for: dependency installation          │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                              │                                          │
+│                              ▼                                          │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │ validate             │ lint:code    lint:commits   verify:issue   │   │
+│  │                      │     │            │              │          │   │
+│  │                      │     └────────────┴──────────────┘          │   │
+│  │                      │            (parallel)                      │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                              │                                          │
+│                              ▼                                          │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │ test                 │ test:unit [18] test:unit [20] test:integ   │   │
+│  │                      │      │              │             │        │   │
+│  │                      │      └──────────────┴─────────────┘        │   │
+│  │                      │            (parallel matrix)               │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                              │                                          │
+│                              ▼                                          │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │ build                │ build:app ───────► build:docker            │   │
+│  │                      │               (needs build:app)            │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                              │                                          │
+│                              ▼                                          │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │ security             │ sast   dast   dependency   container       │   │
+│  │                      │   │      │        │           │            │   │
+│  │                      │   └──────┴────────┴───────────┘            │   │
+│  │                      │          (parallel, can start early        │   │
+│  │                      │           with needs: [])                  │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                              │                                          │
+│                              ▼                                          │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │ deploy               │ deploy:dev ──► deploy:staging ──► deploy:prod│  │
+│  │                      │  (auto)         (auto)          (manual)   │   │
+│  │                      │                                            │   │
+│  │                      │ resource_group: production (prevents       │   │
+│  │                      │ concurrent production deployments)         │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                              │                                          │
+│                              ▼                                          │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │ verify                │ verify:production   │ rollback (on_failure)│  │
+│  │                       │ (smoke tests)       │ (auto rollback)      │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                              │                                          │
+│                              ▼                                          │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │ .post (built-in)     │ Runs after all stages                     │   │
+│  │                      │ Good for: cleanup, notifications          │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                                                                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  DAG VISUALIZATION (with needs:)                                        │
+│  ═══════════════════════════════                                        │
+│                                                                         │
+│     lint ─────────────────────────────────────┐                         │
+│       │                                       │                         │
+│       ▼                                       ▼                         │
+│  test:unit ──────────────────┬────────► deploy:staging                  │
+│       │                      │               │                          │
+│       │                      │               ▼                          │
+│  test:integration ───────────┤         deploy:prod (manual)             │
+│       │                      │               │                          │
+│       ▼                      │               ▼                          │
+│  build:app ──► build:docker ─┘         verify:prod                      │
+│                     │                                                   │
+│                     ▼                                                   │
+│              container_scan                                             │
+│                                                                         │
+│  Legend:                                                                │
+│  ───────► needs (explicit dependency)                                   │
+│  │        stage ordering (implicit)                                     │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+```yaml
+# ═══════════════════════════════════════════════════════════════════════
+# MINIMAL STARTER PIPELINE
+# ═══════════════════════════════════════════════════════════════════════
+
+stages:
+  - validate
+  - test
+  - build
+  - deploy
+
+default:
+  image: node:20-alpine
+  cache:
+    key:
+      files:
+        - package-lock.json
+    paths:
+      - node_modules/
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+lint:
+  stage: validate
+  script:
+    - npm ci
+    - npm run lint
+
+test:
+  stage: test
+  script:
+    - npm ci
+    - npm test
+  coverage: '/All files[^|]*\|[^|]*\s+([\d\.]+)/'
+  artifacts:
+    reports:
+      junit: coverage/junit.xml
+
+build:
+  stage: build
+  script:
+    - npm ci
+    - npm run build
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 1 week
+
+deploy:
+  stage: deploy
+  script:
+    - echo "Deploying..."
+  environment:
+    name: production
+    url: https://example.com
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+```
 
 ---
 

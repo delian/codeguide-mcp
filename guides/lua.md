@@ -1425,3 +1425,89 @@ end
 - Only present working, tested, documented code to the user
 
 **Remember**: Minimalistic, clean, readable, well-documented, performant Lua code with hexagonal architecture, proper error handling, comprehensive testing, and focus on portability and speed. Keep it simple, keep it Lua, keep it working.
+
+---
+
+## 13. Quick Reference
+
+### Common Commands
+
+```bash
+# Parse syntax check
+luac -p script.lua
+
+# Run
+lua script.lua
+luajit script.lua
+
+# Test
+busted test/
+busted --verbose test/
+
+# Lint
+luacheck src/ test/
+
+# Documentation
+ldoc src/
+
+# Package management
+luarocks install <package>
+luarocks list
+```
+
+### Lua Patterns Cheat Sheet
+
+```lua
+-- Table operations
+local items = {1, 2, 3}
+for i, v in ipairs(items) do end  -- Arrays
+for k, v in pairs(items) do end   -- All keys
+
+-- Safe nil access
+local value = (obj or {}).field or "default"
+
+-- Module pattern
+local M = {}
+function M.method() end
+return M
+
+-- Class pattern
+local Class = {}
+Class.__index = Class
+function Class.new() return setmetatable({}, Class) end
+
+-- Error handling
+local ok, result = pcall(risky_function)
+if not ok then handle_error(result) end
+```
+
+### Project Structure
+
+```
+my_project/
+├── src/
+│   ├── init.lua
+│   └── modules/
+├── test/
+│   └── test_*.lua
+├── rockspec
+└── .luacheckrc
+```
+
+### .luacheckrc Template
+
+```lua
+std = "luajit"
+globals = {"myapp"}
+ignore = {"611", "612"}
+max_line_length = 120
+```
+
+---
+
+## References
+
+- [Lua Reference Manual](https://www.lua.org/manual/5.4/)
+- [LuaRocks Documentation](https://luarocks.org/)
+- [Busted Testing Framework](https://olivinelabs.com/busted/)
+- [LDoc Documentation](https://stevedonovan.github.io/ldoc/)

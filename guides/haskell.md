@@ -1095,6 +1095,618 @@ Fixes #456
 
 ---
 
+## 2A. TDD Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new Haskell code.**
+
+### TDD Cycle Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    RED-GREEN-REFACTOR CYCLE                     │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│    ┌─────────┐         ┌─────────┐         ┌──────────┐        │
+│    │   RED   │────────▶│  GREEN  │────────▶│ REFACTOR │        │
+│    │  Write  │         │  Write  │         │ Improve  │        │
+│    │ Failing │         │ Minimal │         │  Code    │        │
+│    │  Test   │         │  Code   │         │ Quality  │        │
+│    └─────────┘         └─────────┘         └──────────┘        │
+│         │                                        │              │
+│         │                                        │              │
+│         └────────────────────────────────────────┘              │
+│                         Repeat                                  │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+Step 1: RED    - Write a test that FAILS (defines expected behavior)
+Step 2: GREEN  - Write MINIMAL code to make the test PASS
+Step 3: REFACTOR - Improve code quality while keeping tests GREEN
+Step 4: VERIFY - Run `cabal test` to ensure all tests pass
+```
+
+### Example TDD Workflow with HSpec
+
+**Feature: Implement a safe division function**
+
+```haskell
+-- ═══════════════════════════════════════════════════════════════
+-- STEP 1: RED - Write failing test first
+-- ═══════════════════════════════════════════════════════════════
+
+-- test/Spec/Math/SafeMathSpec.hs
+{-# LANGUAGE OverloadedStrings #-}
+
+module Spec.Math.SafeMathSpec (spec) where
+
+import Test.Hspec
+import Test.QuickCheck
+import Math.SafeMath (safeDiv)
+
+spec :: Spec
+spec = do
+  describe "safeDiv" $ do
+    it "divides two numbers successfully" $
+      safeDiv 10 2 `shouldBe` Right 5.0
+
+    it "returns error for division by zero" $
+      safeDiv 10 0 `shouldBe` Left "Division by zero"
+
+    it "handles negative numbers" $ do
+      safeDiv (-10) 2 `shouldBe` Right (-5.0)
+      safeDiv 10 (-2) `shouldBe` Right (-5.0)
+
+    -- Property-based test with QuickCheck
+    it "property: dividing then multiplying returns original" $
+      property $ \x y ->
+        y /= 0 ==>
+          case safeDiv x y of
+            Right result -> abs (result * y - x) < 0.0001
+            Left _ -> False
+```
+
+```bash
+# Run test - it FAILS because safeDiv doesn't exist yet
+cabal test safe-math-test
+# Error: Module 'Math.SafeMath' does not export 'safeDiv'
+```
+
+```haskell
+-- ═══════════════════════════════════════════════════════════════
+-- STEP 2: GREEN - Write minimal implementation
+-- ═══════════════════════════════════════════════════════════════
+
+-- src/Math/SafeMath.hs
+module Math.SafeMath
+  ( safeDiv
+  ) where
+
+-- | Safely divide two numbers, returning an error for division by zero.
+safeDiv :: Double -> Double -> Either String Double
+safeDiv _ 0 = Left "Division by zero"
+safeDiv x y = Right (x / y)
+```
+
+```bash
+# Run test - it PASSES
+cabal test safe-math-test
+# All 4 tests passed
+```
+
+```haskell
+-- ═══════════════════════════════════════════════════════════════
+-- STEP 3: REFACTOR - Improve code quality
+-- ═══════════════════════════════════════════════════════════════
+
+-- src/Math/SafeMath.hs
+{-# LANGUAGE DerivingStrategies #-}
+
+-- | Safe mathematical operations that never throw exceptions.
+--
+-- This module provides total functions for mathematical operations
+-- that could otherwise fail (division by zero, overflow, etc.).
+module Math.SafeMath
+  ( -- * Safe Division
+    safeDiv
+  , safeDivInt
+    -- * Error Types
+  , MathError(..)
+  ) where
+
+-- | Mathematical operation errors.
+data MathError
+  = DivisionByZero
+  | Overflow
+  | Underflow
+  deriving stock (Eq, Show)
+
+-- | Safely divide two numbers.
+--
+-- Returns 'Left' 'DivisionByZero' when the divisor is zero.
+--
+-- ==== __Examples__
+--
+-- >>> safeDiv 10 2
+-- Right 5.0
+--
+-- >>> safeDiv 10 0
+-- Left DivisionByZero
+--
+-- ==== __Properties__
+--
+-- prop> y /= 0 ==> safeDiv x y == Right (x / y)
+safeDiv :: Double -> Double -> Either MathError Double
+safeDiv _ 0 = Left DivisionByZero
+safeDiv x y = Right (x / y)
+
+-- | Safely divide two integers with integer division.
+--
+-- >>> safeDivInt 10 3
+-- Right 3
+safeDivInt :: Int -> Int -> Either MathError Int
+safeDivInt _ 0 = Left DivisionByZero
+safeDivInt x y = Right (x `div` y)
+```
+
+```bash
+# Update test to use new error type, then verify
+cabal test safe-math-test
+# All tests pass ✓
+
+# Additional verification
+hlint src/Math/SafeMath.hs
+# No suggestions
+
+cabal haddock
+# Documentation generated successfully
+```
+
+### Example TDD Workflow with QuickCheck
+
+**Feature: Implement a list reversal function with properties**
+
+```haskell
+-- ═══════════════════════════════════════════════════════════════
+-- STEP 1: RED - Define properties first
+-- ═══════════════════════════════════════════════════════════════
+
+-- test/Spec/Data/MyListSpec.hs
+module Spec.Data.MyListSpec (spec) where
+
+import Test.Hspec
+import Test.QuickCheck
+import Data.MyList (myReverse)
+
+spec :: Spec
+spec = do
+  describe "myReverse" $ do
+    -- Property 1: Reversing twice gives original
+    it "reversing twice returns original list" $
+      property $ \xs ->
+        myReverse (myReverse (xs :: [Int])) === xs
+
+    -- Property 2: Length is preserved
+    it "preserves length" $
+      property $ \xs ->
+        length (myReverse (xs :: [Int])) === length xs
+
+    -- Property 3: First becomes last
+    it "first element becomes last" $
+      property $ \x xs ->
+        let list = x : (xs :: [Int])
+        in last (myReverse list) === x
+
+    -- Property 4: Reversing singleton is identity
+    it "singleton list is unchanged" $
+      property $ \x ->
+        myReverse [x :: Int] === [x]
+
+    -- Concrete examples
+    it "reverses a list" $ do
+      myReverse [1, 2, 3] `shouldBe` [3, 2, 1]
+      myReverse "hello" `shouldBe` "olleh"
+
+    it "handles empty list" $
+      myReverse ([] :: [Int]) `shouldBe` []
+```
+
+```haskell
+-- ═══════════════════════════════════════════════════════════════
+-- STEP 2: GREEN - Implement to satisfy properties
+-- ═══════════════════════════════════════════════════════════════
+
+-- src/Data/MyList.hs
+module Data.MyList (myReverse) where
+
+-- | Reverse a list.
+myReverse :: [a] -> [a]
+myReverse [] = []
+myReverse (x:xs) = myReverse xs ++ [x]
+```
+
+```haskell
+-- ═══════════════════════════════════════════════════════════════
+-- STEP 3: REFACTOR - Optimize with accumulator
+-- ═══════════════════════════════════════════════════════════════
+
+-- src/Data/MyList.hs
+{-# LANGUAGE BangPatterns #-}
+
+-- | Custom list operations with total functions.
+module Data.MyList
+  ( myReverse
+  ) where
+
+-- | Reverse a list in O(n) time.
+--
+-- Uses an accumulator for tail-call optimization.
+--
+-- ==== __Examples__
+--
+-- >>> myReverse [1, 2, 3]
+-- [3, 2, 1]
+--
+-- >>> myReverse []
+-- []
+--
+-- ==== __Properties__
+--
+-- prop> myReverse (myReverse xs) == xs
+-- prop> length (myReverse xs) == length xs
+myReverse :: [a] -> [a]
+myReverse = go []
+  where
+    go !acc [] = acc
+    go !acc (x:xs) = go (x:acc) xs
+```
+
+```bash
+# Run property tests with more cases
+cabal test my-list-test --test-options="--qc-max-success=1000"
+# 1000/1000 tests passed for each property ✓
+```
+
+### Visual TDD Step-by-Step
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                    TDD WORKFLOW VISUALIZATION                     │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ITERATION 1: Basic Functionality                                │
+│  ┌─────────┐    ┌─────────┐    ┌─────────┐                      │
+│  │ Write   │───▶│ Write   │───▶│ Improve │                      │
+│  │ Test:   │    │ Code:   │    │ Docs &  │                      │
+│  │ basic   │    │ minimal │    │ Names   │                      │
+│  │ happy   │    │ impl    │    │         │                      │
+│  │ path    │    │         │    │         │                      │
+│  └─────────┘    └─────────┘    └─────────┘                      │
+│       │              │              │                            │
+│       ▼              ▼              ▼                            │
+│  ┌─────────┐    ┌─────────┐    ┌─────────┐                      │
+│  │ FAILS   │    │ PASSES  │    │ PASSES  │                      │
+│  └─────────┘    └─────────┘    └─────────┘                      │
+│                                                                  │
+│  ITERATION 2: Edge Cases                                         │
+│  ┌─────────┐    ┌─────────┐    ┌─────────┐                      │
+│  │ Add     │───▶│ Handle  │───▶│ Extract │                      │
+│  │ Tests:  │    │ edge    │    │ helper  │                      │
+│  │ empty,  │    │ cases   │    │ funcs   │                      │
+│  │ null,   │    │         │    │         │                      │
+│  │ bounds  │    │         │    │         │                      │
+│  └─────────┘    └─────────┘    └─────────┘                      │
+│       │              │              │                            │
+│       ▼              ▼              ▼                            │
+│  ┌─────────┐    ┌─────────┐    ┌─────────┐                      │
+│  │ FAILS   │    │ PASSES  │    │ PASSES  │                      │
+│  └─────────┘    └─────────┘    └─────────┘                      │
+│                                                                  │
+│  ITERATION 3: Properties (QuickCheck)                            │
+│  ┌─────────┐    ┌─────────┐    ┌─────────┐                      │
+│  │ Add     │───▶│ Ensure  │───▶│ Add     │                      │
+│  │ QC      │    │ props   │    │ type    │                      │
+│  │ props   │    │ hold    │    │ safety  │                      │
+│  └─────────┘    └─────────┘    └─────────┘                      │
+│       │              │              │                            │
+│       ▼              ▼              ▼                            │
+│  ┌─────────┐    ┌─────────┐    ┌─────────┐                      │
+│  │ FAILS?  │    │ PASSES  │    │ PASSES  │                      │
+│  │ (finds  │    │ (1000+  │    │ (all    │                      │
+│  │  bugs!) │    │  cases) │    │  safe)  │                      │
+│  └─────────┘    └─────────┘    └─────────┘                      │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      BUG FIX WORKFLOW                           │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  1. BUG REPORTED                                                │
+│     ↓                                                           │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │ 2. REPRODUCE: Write a test that FAILS                    │   │
+│  │    - Test should capture the exact bug behavior          │   │
+│  │    - Include bug ID in test name/comment                 │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│     ↓                                                           │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │ 3. VERIFY: Confirm test fails for the RIGHT reason       │   │
+│  │    - Run test: cabal test                                │   │
+│  │    - Check failure message matches bug description       │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│     ↓                                                           │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │ 4. FIX: Implement the minimal fix                        │   │
+│  │    - Only change what's necessary                        │   │
+│  │    - Document the fix in code comments                   │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│     ↓                                                           │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │ 5. VERIFY: Test now PASSES                               │   │
+│  │    - Run: cabal test                                     │   │
+│  │    - All tests green (no regressions)                    │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│     ↓                                                           │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │ 6. DOCUMENT: Add bug reference to commit                 │   │
+│  │    - Include "Fixes #<bug-id>" in commit message         │   │
+│  │    - Document fix rationale in code                      │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│     ↓                                                           │
+│  7. DEPLOY: Bug fixed, regression prevented forever!            │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Example Bug Fix with Regression Test
+
+**Bug Report #789**: `parseAmount` silently returns 0 for invalid input instead of failing
+
+```haskell
+-- ═══════════════════════════════════════════════════════════════
+-- STEP 1-2: Write test that REPRODUCES the bug
+-- ═══════════════════════════════════════════════════════════════
+
+-- test/Spec/Parser/AmountParserSpec.hs
+{-# LANGUAGE OverloadedStrings #-}
+
+module Spec.Parser.AmountParserSpec (spec) where
+
+import Test.Hspec
+import Test.QuickCheck
+import Parser.AmountParser
+import Data.Text (Text)
+
+spec :: Spec
+spec = do
+  describe "parseAmount" $ do
+    -- Existing tests...
+    it "parses valid amounts" $ do
+      parseAmount "100.00" `shouldBe` Right (Amount 100.00)
+      parseAmount "0.50" `shouldBe` Right (Amount 0.50)
+
+    -- BUG #789: parseAmount returns 0 for invalid input
+    -- These tests document the bug and prevent regression
+    describe "BUG #789: Invalid input handling" $ do
+      it "returns error for non-numeric input" $ do
+        parseAmount "abc" `shouldSatisfy` isLeft
+        parseAmount "not a number" `shouldSatisfy` isLeft
+
+      it "returns error for empty input" $
+        parseAmount "" `shouldSatisfy` isLeft
+
+      it "returns error for partially valid input" $ do
+        parseAmount "12.34abc" `shouldSatisfy` isLeft
+        parseAmount "abc12.34" `shouldSatisfy` isLeft
+
+      it "returns error for multiple decimal points" $
+        parseAmount "12.34.56" `shouldSatisfy` isLeft
+
+      -- Property: valid amounts should round-trip
+      it "property: valid amounts round-trip through formatting" $
+        property $ \(Positive n) ->
+          let amount = Amount (fromIntegral (n :: Int) / 100)
+              formatted = formatAmount amount
+          in case parseAmount formatted of
+               Right parsed -> parsed == amount
+               Left _ -> False
+
+isLeft :: Either a b -> Bool
+isLeft (Left _) = True
+isLeft _ = False
+```
+
+```bash
+# Run test - it FAILS (confirms the bug exists)
+cabal test amount-parser-test
+# FAIL: "abc" returned Right (Amount 0.0), expected Left error
+```
+
+```haskell
+-- ═══════════════════════════════════════════════════════════════
+-- STEP 3: Original buggy code
+-- ═══════════════════════════════════════════════════════════════
+
+-- src/Parser/AmountParser.hs (BEFORE FIX)
+module Parser.AmountParser where
+
+import Data.Text (Text)
+import qualified Data.Text as T
+import Text.Read (readMaybe)
+
+newtype Amount = Amount Double
+  deriving (Eq, Show)
+
+-- BUG #789: This silently returns 0 for invalid input!
+parseAmount :: Text -> Either String Amount
+parseAmount text = case readMaybe (T.unpack text) of
+  Just n -> Right (Amount n)
+  Nothing -> Right (Amount 0)  -- BUG: Should be Left error!
+```
+
+```haskell
+-- ═══════════════════════════════════════════════════════════════
+-- STEP 4: Fix the bug
+-- ═══════════════════════════════════════════════════════════════
+
+-- src/Parser/AmountParser.hs (AFTER FIX)
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE OverloadedStrings #-}
+
+-- | Amount parsing with strict validation.
+module Parser.AmountParser
+  ( Amount(..)
+  , ParseError(..)
+  , parseAmount
+  , formatAmount
+  ) where
+
+import Data.Text (Text)
+import qualified Data.Text as T
+import Text.Read (readMaybe)
+import Data.Char (isDigit)
+
+-- | Monetary amount (non-negative).
+newtype Amount = Amount Double
+  deriving stock (Eq, Show, Ord)
+
+-- | Parsing errors for amounts.
+data ParseError
+  = EmptyInput
+  | InvalidFormat Text
+  | NegativeAmount
+  deriving stock (Eq, Show)
+
+-- | Parse a text representation of an amount.
+--
+-- ==== __Examples__
+--
+-- >>> parseAmount "100.00"
+-- Right (Amount 100.0)
+--
+-- >>> parseAmount "abc"
+-- Left (InvalidFormat "abc")
+--
+-- ==== __Bug Fixes__
+--
+-- * BUG #789: Now returns 'Left' error for invalid input instead of
+--   silently returning 0. Added comprehensive validation.
+parseAmount :: Text -> Either ParseError Amount
+parseAmount text
+  | T.null text = Left EmptyInput
+  | not (isValidFormat text) = Left (InvalidFormat text)
+  | otherwise = case readMaybe (T.unpack text) of
+      Just n
+        | n < 0 -> Left NegativeAmount
+        | otherwise -> Right (Amount n)
+      Nothing -> Left (InvalidFormat text)  -- FIX: Return error, not 0!
+  where
+    -- Validate format: optional minus, digits, optional decimal point, digits
+    isValidFormat :: Text -> Bool
+    isValidFormat t =
+      let stripped = T.dropWhile (== '-') t
+          (before, after) = T.break (== '.') stripped
+          afterDot = T.drop 1 after
+      in not (T.null before)
+         && T.all isDigit before
+         && (T.null after || (not (T.null afterDot) && T.all isDigit afterDot))
+         && T.count "." t <= 1
+
+-- | Format an amount as text.
+formatAmount :: Amount -> Text
+formatAmount (Amount n) = T.pack $ show n
+```
+
+```bash
+# ═══════════════════════════════════════════════════════════════
+# STEP 5: Verify fix
+# ═══════════════════════════════════════════════════════════════
+
+# Run regression test
+cabal test amount-parser-test
+# All tests pass ✓
+
+# Run full test suite to check for regressions
+cabal test
+# All tests pass ✓
+
+# Run property tests with more cases
+cabal test amount-parser-test --test-options="--qc-max-success=1000"
+# 1000 tests passed ✓
+
+# Lint
+hlint src/Parser/AmountParser.hs
+# No suggestions ✓
+```
+
+```bash
+# ═══════════════════════════════════════════════════════════════
+# STEP 6: Commit with bug reference
+# ═══════════════════════════════════════════════════════════════
+
+git add src/Parser/AmountParser.hs test/Spec/Parser/AmountParserSpec.hs
+git commit -m "fix: Return error for invalid amount input
+
+Fixes #789
+
+- parseAmount now returns Left error for invalid input instead of
+  silently returning Amount 0
+- Added ParseError type with specific error variants
+- Added comprehensive input validation
+- Added property-based tests for round-trip parsing
+- Added regression tests to prevent this bug from recurring"
+```
+
+### Bug Fix Checklist
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    BUG FIX CHECKLIST                            │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Before Starting:                                               │
+│  [ ] Bug has a tracking ID (e.g., #789)                        │
+│  [ ] Bug is reproducible                                        │
+│  [ ] Impact is understood                                       │
+│                                                                 │
+│  Regression Test:                                               │
+│  [ ] Test written BEFORE fix                                    │
+│  [ ] Test name/comment includes bug ID                          │
+│  [ ] Test fails with current (buggy) code                       │
+│  [ ] Test captures exact failure mode                           │
+│                                                                 │
+│  Fix Implementation:                                            │
+│  [ ] Minimal change to fix the issue                            │
+│  [ ] Fix documented in code comments                            │
+│  [ ] No unrelated changes included                              │
+│                                                                 │
+│  Verification:                                                  │
+│  [ ] Regression test now passes                                 │
+│  [ ] All existing tests still pass                              │
+│  [ ] cabal test passes                                          │
+│  [ ] hlint reports no issues                                    │
+│  [ ] cabal build -Wall -Werror passes                          │
+│                                                                 │
+│  Documentation:                                                 │
+│  [ ] Haddock updated with bug fix note                          │
+│  [ ] Commit message references bug ID                           │
+│  [ ] CHANGELOG updated (if applicable)                          │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## 3. Project Structure
 
 ### Hexagonal Architecture
@@ -2589,6 +3201,444 @@ vindex (FS i) (VCons _ xs) = vindex i xs
 
 This configuration creates a solid foundation for building reliable,
 maintainable Haskell applications with confidence.
+
+---
+
+## 13. Quick Reference
+
+### Common Commands
+
+```bash
+# ═══════════════════════════════════════════════════════════════
+# BUILD COMMANDS
+# ═══════════════════════════════════════════════════════════════
+
+# Build project
+cabal build
+
+# Build with all warnings as errors
+cabal build --ghc-options="-Wall -Werror"
+
+# Build with optimizations
+cabal build --ghc-options="-O2"
+
+# Clean build artifacts
+cabal clean
+
+# Build and install executable
+cabal install
+
+# ═══════════════════════════════════════════════════════════════
+# TEST COMMANDS
+# ═══════════════════════════════════════════════════════════════
+
+# Run all tests
+cabal test
+
+# Run specific test suite
+cabal test my-project-test
+
+# Run tests with verbose output
+cabal test --test-show-details=direct
+
+# Run tests with more QuickCheck cases
+cabal test --test-options="--qc-max-success=1000"
+
+# Run tests with coverage
+cabal test --enable-coverage
+
+# ═══════════════════════════════════════════════════════════════
+# REPL COMMANDS
+# ═══════════════════════════════════════════════════════════════
+
+# Start GHCi REPL with project
+cabal repl
+
+# Start GHCi with specific module
+cabal repl --repl-options="-e ':load MyModule'"
+
+# GHCi commands (inside REPL)
+:load MyModule      -- Load a module
+:reload             -- Reload all modules
+:type expr          -- Show type of expression
+:info name          -- Show info about name
+:browse MyModule    -- List module exports
+:set -XOverloadedStrings  -- Enable extension
+:quit               -- Exit GHCi
+
+# ═══════════════════════════════════════════════════════════════
+# CODE QUALITY COMMANDS
+# ═══════════════════════════════════════════════════════════════
+
+# Run HLint
+hlint src/ test/
+
+# Run HLint with specific hints
+hlint src/ --hint=.hlint.yaml
+
+# Format with Ormolu
+ormolu --mode inplace src/**/*.hs
+
+# Check formatting (CI mode)
+ormolu --mode check src/**/*.hs
+
+# Format with Fourmolu (alternative)
+fourmolu --mode inplace src/**/*.hs
+
+# ═══════════════════════════════════════════════════════════════
+# DOCUMENTATION COMMANDS
+# ═══════════════════════════════════════════════════════════════
+
+# Generate Haddock documentation
+cabal haddock
+
+# Generate with all options
+cabal haddock --haddock-all --haddock-hyperlink-source --haddock-quickjump
+
+# Open generated docs (Linux)
+xdg-open dist-newstyle/build/*/ghc-*/my-project-*/doc/html/my-project/index.html
+
+# ═══════════════════════════════════════════════════════════════
+# DEPENDENCY COMMANDS
+# ═══════════════════════════════════════════════════════════════
+
+# Update package index
+cabal update
+
+# Add dependency (edit .cabal file, then)
+cabal build --only-dependencies
+
+# Freeze dependencies for reproducible builds
+cabal freeze
+
+# Check for outdated dependencies
+cabal outdated
+
+# ═══════════════════════════════════════════════════════════════
+# RUN COMMANDS
+# ═══════════════════════════════════════════════════════════════
+
+# Run executable
+cabal run my-project
+
+# Run with arguments
+cabal run my-project -- --flag value
+
+# Run benchmarks
+cabal bench
+```
+
+### GHC Compiler Options
+
+```bash
+# Common GHC flags for development
+-Wall                    # Enable all warnings
+-Wcompat                 # Warn about compatibility issues
+-Werror                  # Treat warnings as errors
+-Wincomplete-patterns    # Warn about incomplete pattern matches
+-Wincomplete-uni-patterns # Warn about incomplete patterns in lambdas
+-Wredundant-constraints  # Warn about unnecessary constraints
+
+# Optimization flags
+-O0                      # No optimization (fastest compile)
+-O1                      # Basic optimization
+-O2                      # Full optimization (production)
+
+# Profiling flags
+-prof                    # Enable profiling
+-fprof-auto              # Auto-generate cost centers
+-rtsopts                 # Enable runtime system options
+
+# Runtime options (with -rtsopts)
++RTS -N                  # Use all cores
++RTS -s                  # Print GC statistics
++RTS -h                  # Generate heap profile
+```
+
+### Haskell Patterns Cheat Sheet
+
+```haskell
+-- ═══════════════════════════════════════════════════════════════
+-- NEWTYPES & SMART CONSTRUCTORS
+-- ═══════════════════════════════════════════════════════════════
+
+-- Define a newtype for type safety
+newtype Email = Email Text
+  deriving stock (Eq, Show)
+
+-- Smart constructor with validation
+mkEmail :: Text -> Maybe Email
+mkEmail text
+  | "@" `T.isInfixOf` text = Just (Email text)
+  | otherwise = Nothing
+
+-- ═══════════════════════════════════════════════════════════════
+-- PATTERN MATCHING
+-- ═══════════════════════════════════════════════════════════════
+
+-- Exhaustive pattern matching (ALWAYS do this)
+process :: Maybe Int -> Int
+process (Just n) = n * 2
+process Nothing  = 0
+
+-- With guards
+classify :: Int -> String
+classify n
+  | n > 0     = "positive"
+  | n < 0     = "negative"
+  | otherwise = "zero"
+
+-- LambdaCase for cleaner syntax
+handleResult :: Either Error Value -> IO ()
+handleResult = \case
+  Left err  -> logError err
+  Right val -> process val
+
+-- ═══════════════════════════════════════════════════════════════
+-- ERROR HANDLING
+-- ═══════════════════════════════════════════════════════════════
+
+-- Use Either for recoverable errors
+divide :: Int -> Int -> Either String Int
+divide _ 0 = Left "Division by zero"
+divide x y = Right (x `div` y)
+
+-- Use Maybe for optional values
+safeHead :: [a] -> Maybe a
+safeHead []    = Nothing
+safeHead (x:_) = Just x
+
+-- Chain with do-notation
+processData :: Text -> Either Error Result
+processData input = do
+  parsed <- parseInput input
+  validated <- validateData parsed
+  transform validated
+
+-- ═══════════════════════════════════════════════════════════════
+-- COMMON MONADIC PATTERNS
+-- ═══════════════════════════════════════════════════════════════
+
+-- Traverse a list with effects
+processAll :: [Input] -> IO [Output]
+processAll = traverse processOne
+
+-- Filter with predicate
+filterM' :: Monad m => (a -> m Bool) -> [a] -> m [a]
+filterM' p = foldr go (pure [])
+  where
+    go x acc = do
+      keep <- p x
+      if keep then (x:) <$> acc else acc
+
+-- Map and sequence
+mapM' :: Monad m => (a -> m b) -> [a] -> m [b]
+mapM' f = sequence . map f
+
+-- ═══════════════════════════════════════════════════════════════
+-- FUNCTION COMPOSITION
+-- ═══════════════════════════════════════════════════════════════
+
+-- Point-free style with (.)
+processText :: Text -> Text
+processText = T.toUpper . T.strip . T.pack
+
+-- Pipeline with (&) from Data.Function
+processText' :: Text -> Text
+processText' input = input
+  & T.unpack
+  & map toUpper
+  & T.pack
+
+-- ═══════════════════════════════════════════════════════════════
+-- COMMON TYPE CLASS INSTANCES
+-- ═══════════════════════════════════════════════════════════════
+
+-- DerivingStrategies for clarity
+data User = User
+  { userId   :: UserId
+  , userName :: Text
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+-- DerivingVia for newtype coercion
+newtype Seconds = Seconds Int
+  deriving (Eq, Ord, Num) via Int
+
+-- ═══════════════════════════════════════════════════════════════
+-- STRICT EVALUATION
+-- ═══════════════════════════════════════════════════════════════
+
+-- Use bang patterns for strictness
+sumStrict :: [Int] -> Int
+sumStrict = go 0
+  where
+    go !acc []     = acc
+    go !acc (x:xs) = go (acc + x) xs
+
+-- Or use strict folds
+sumStrict' :: [Int] -> Int
+sumStrict' = foldl' (+) 0
+
+-- StrictData extension (in .cabal)
+-- Makes all fields strict by default
+```
+
+### Project Structure Template
+
+```
+my-haskell-project/
+├── cabal.project                 # Multi-package project config
+├── my-haskell-project.cabal      # Package definition
+├── Setup.hs                      # Build setup (usually simple)
+├── LICENSE                       # License file
+├── README.md                     # Project documentation
+├── CHANGELOG.md                  # Version history
+│
+├── src/                          # Source code
+│   ├── Domain/                   # Pure domain logic
+│   │   ├── Types.hs              # Core domain types
+│   │   ├── User.hs               # User domain module
+│   │   └── Order.hs              # Order domain module
+│   │
+│   ├── Application/              # Use cases / business logic
+│   │   ├── CreateUser.hs         # Create user use case
+│   │   └── Ports/                # Abstract interfaces
+│   │       ├── UserRepository.hs # User repository port
+│   │       └── EmailService.hs   # Email service port
+│   │
+│   └── Infrastructure/           # External adapters
+│       ├── Persistence/          # Database implementations
+│       │   └── PostgreSQL/
+│       │       └── UserRepo.hs   # PostgreSQL user repo
+│       ├── HTTP/                 # HTTP handlers
+│       │   └── Server.hs         # Web server
+│       └── Config.hs             # Configuration loading
+│
+├── app/                          # Application entry points
+│   └── Main.hs                   # Main application
+│
+├── test/                         # Tests
+│   ├── Spec.hs                   # Test entry point
+│   └── Spec/                     # Test modules
+│       ├── Domain/               # Domain tests
+│       │   └── UserSpec.hs
+│       ├── Application/          # Use case tests
+│       │   └── CreateUserSpec.hs
+│       └── Integration/          # Integration tests
+│           └── PostgreSQLSpec.hs
+│
+├── benchmark/                    # Benchmarks
+│   └── Main.hs                   # Benchmark entry point
+│
+└── scripts/                      # Utility scripts
+    ├── format.sh                 # Format all code
+    └── lint.sh                   # Run linters
+```
+
+### Essential .cabal Snippet
+
+```cabal
+cabal-version:      3.0
+name:               my-haskell-project
+version:            0.1.0.0
+synopsis:           Brief description of your project
+license:            MIT
+author:             Your Name
+maintainer:         your.email@example.com
+
+common common-options
+  default-language:   GHC2021
+  default-extensions:
+    DerivingStrategies
+    OverloadedStrings
+    StrictData
+    LambdaCase
+  ghc-options:
+    -Wall
+    -Wcompat
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wredundant-constraints
+
+library
+  import:           common-options
+  hs-source-dirs:   src
+  exposed-modules:
+    Domain.User
+    Application.CreateUser
+  build-depends:
+    , base           >=4.17 && <5
+    , text           >=2.0
+
+executable my-haskell-project
+  import:           common-options
+  hs-source-dirs:   app
+  main-is:          Main.hs
+  build-depends:
+    , base
+    , my-haskell-project
+  ghc-options:
+    -threaded -rtsopts -with-rtsopts=-N
+
+test-suite my-haskell-project-test
+  import:           common-options
+  type:             exitcode-stdio-1.0
+  hs-source-dirs:   test
+  main-is:          Spec.hs
+  build-depends:
+    , base
+    , my-haskell-project
+    , hspec           >=2.10
+    , QuickCheck      >=2.14
+  build-tool-depends:
+    , hspec-discover:hspec-discover
+  ghc-options:
+    -threaded -rtsopts -with-rtsopts=-N
+```
+
+### Testing Quick Reference
+
+```haskell
+-- HSpec basics
+describe "Module" $ do
+  it "does something" $ do
+    result `shouldBe` expected
+
+  it "returns correct type" $
+    result `shouldSatisfy` isJust
+
+  it "throws on invalid input" $
+    evaluate (dangerousOp invalid) `shouldThrow` anyException
+
+-- QuickCheck properties
+it "property holds" $
+  property $ \x y ->
+    myFunction x y === expectedResult x y
+
+-- Conditional properties
+it "property with precondition" $
+  property $ \x ->
+    x > 0 ==> myFunction x > 0
+
+-- Generators
+newtype PositiveInt = PositiveInt Int
+instance Arbitrary PositiveInt where
+  arbitrary = PositiveInt . abs <$> arbitrary
+
+-- Test organization
+spec :: Spec
+spec = do
+  describe "happy path" $ do
+    it "test 1" pending
+    it "test 2" pending
+  describe "edge cases" $ do
+    it "handles empty" pending
+    it "handles null" pending
+  describe "error cases" $ do
+    it "rejects invalid" pending
+```
 
 ---
 

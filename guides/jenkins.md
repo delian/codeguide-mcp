@@ -1059,6 +1059,590 @@ networks:
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL pipeline development.**
+
+### TDD Cycle
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    TDD CYCLE FOR JENKINS                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│    ┌─────────┐                                                  │
+│    │   RED   │  1. Write a failing pipeline test first          │
+│    │ (FAIL)  │     - Define expected behavior                   │
+│    └────┬────┘     - Test should FAIL initially                 │
+│         │                                                       │
+│         ▼                                                       │
+│    ┌─────────┐                                                  │
+│    │  GREEN  │  2. Write minimal pipeline code to pass          │
+│    │ (PASS)  │     - Implement only what's needed               │
+│    └────┬────┘     - All tests should PASS                      │
+│         │                                                       │
+│         ▼                                                       │
+│    ┌─────────┐                                                  │
+│    │REFACTOR │  3. Improve code while keeping tests green       │
+│    │(IMPROVE)│     - Optimize, clean up, DRY                    │
+│    └────┬────┘     - Tests still PASS                           │
+│         │                                                       │
+│         └──────────────► Repeat for next feature                │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Example TDD Workflow for Jenkins Pipelines
+
+**Scenario**: Implement a deployment stage that deploys to Kubernetes with health checks.
+
+```groovy
+// ============================================
+// Step 1: RED - Write failing test first
+// ============================================
+
+// tests/pipeline/DeploymentStageTest.groovy
+import com.lesfurets.jenkins.unit.BasePipelineTest
+import org.junit.Before
+import org.junit.Test
+import static org.junit.Assert.*
+
+class DeploymentStageTest extends BasePipelineTest {
+
+    @Override
+    @Before
+    void setUp() throws Exception {
+        super.setUp()
+        // Register mock commands
+        helper.registerAllowedMethod('sh', [Map.class], { Map args ->
+            if (args.script.contains('kubectl set image')) {
+                return 0  // Success
+            }
+            if (args.script.contains('kubectl rollout status')) {
+                return 0  // Success
+            }
+            return 1  // Failure
+        })
+    }
+
+    @Test
+    void 'deployment stage should deploy to correct namespace'() {
+        // Given
+        def script = loadScript('vars/deployToEnvironment.groovy')
+
+        // When
+        script.call('staging')
+
+        // Then
+        assertTrue(
+            helper.callStack.findAll { it.methodName == 'sh' }
+                .any { it.args[0].script.contains('--namespace=staging') }
+        )
+    }
+
+    @Test
+    void 'deployment stage should wait for rollout completion'() {
+        // Given
+        def script = loadScript('vars/deployToEnvironment.groovy')
+
+        // When
+        script.call('production')
+
+        // Then
+        def shCalls = helper.callStack.findAll { it.methodName == 'sh' }
+        assertTrue(
+            shCalls.any { it.args[0].script.contains('kubectl rollout status') }
+        )
+    }
+
+    @Test
+    void 'deployment should fail if rollout times out'() {
+        // Given
+        helper.registerAllowedMethod('sh', [Map.class], { Map args ->
+            if (args.script.contains('kubectl rollout status')) {
+                throw new Exception('Rollout timeout')
+            }
+            return 0
+        })
+        def script = loadScript('vars/deployToEnvironment.groovy')
+
+        // When/Then
+        assertThrows(Exception) {
+            script.call('production')
+        }
+    }
+}
+
+// Run: ./gradlew test
+// FAILS - deployToEnvironment.groovy doesn't exist yet
+```
+
+```groovy
+// ============================================
+// Step 2: GREEN - Write minimal implementation
+// ============================================
+
+// vars/deployToEnvironment.groovy
+def call(String environment) {
+    echo "Deploying to ${environment}..."
+
+    // Deploy to Kubernetes
+    sh """
+        kubectl set image deployment/\${APP_NAME} \
+            \${APP_NAME}=\${DOCKER_IMAGE}:\${GIT_COMMIT_SHORT} \
+            --namespace=${environment}
+    """
+
+    // Wait for rollout
+    sh """
+        kubectl rollout status deployment/\${APP_NAME} \
+            --namespace=${environment} \
+            --timeout=5m
+    """
+
+    echo "Successfully deployed to ${environment}"
+}
+
+// Run: ./gradlew test
+// PASSES - All 3 tests pass
+```
+
+```groovy
+// ============================================
+// Step 3: REFACTOR - Improve with health checks
+// ============================================
+
+// vars/deployToEnvironment.groovy (improved)
+def call(String environment, Map config = [:]) {
+    def timeout = config.timeout ?: '5m'
+    def healthCheckPath = config.healthCheckPath ?: '/health'
+    def appName = env.APP_NAME
+    def image = "${env.DOCKER_IMAGE}:${env.GIT_COMMIT_SHORT}"
+
+    echo "Deploying ${appName} to ${environment}..."
+
+    // Deploy to Kubernetes
+    sh """
+        kubectl set image deployment/${appName} \
+            ${appName}=${image} \
+            --namespace=${environment}
+    """
+
+    // Wait for rollout with timeout
+    sh """
+        kubectl rollout status deployment/${appName} \
+            --namespace=${environment} \
+            --timeout=${timeout}
+    """
+
+    // Verify health endpoint
+    def healthUrl = getHealthUrl(environment, healthCheckPath)
+    retry(3) {
+        sleep(10)
+        sh "curl -f ${healthUrl}"
+    }
+
+    echo "Successfully deployed ${appName} to ${environment}"
+}
+
+def getHealthUrl(String env, String path) {
+    def baseUrls = [
+        'dev': 'https://dev.example.com',
+        'staging': 'https://staging.example.com',
+        'production': 'https://example.com'
+    ]
+    return "${baseUrls[env]}${path}"
+}
+
+// Run: ./gradlew test
+// PASSES - All tests still pass, code is cleaner
+```
+
+### Visual TDD Example: Pipeline Stage Development
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    TDD WORKFLOW VISUALIZATION                           │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  STEP 1: RED (Write Failing Test)                                       │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │  @Test                                                            │  │
+│  │  void 'stage should verify coverage threshold'() {                │  │
+│  │      def script = loadScript('vars/verifyTDD.groovy')             │  │
+│  │      script.call(threshold: 80)                                   │  │
+│  │      // Assert coverage check was performed                       │  │
+│  │  }                                                                │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                              │                                          │
+│                              ▼                                          │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │  $ ./gradlew test                                               │    │
+│  │  > Task :test FAILED                                            │    │
+│  │  > verifyTDD.groovy not found                                   │    │
+│  │  BUILD FAILED                                                   │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                              │                                          │
+│                              ▼                                          │
+│  STEP 2: GREEN (Make Test Pass)                                         │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │  // vars/verifyTDD.groovy                                         │  │
+│  │  def call(Map config = [:]) {                                     │  │
+│  │      def threshold = config.threshold ?: 80                       │  │
+│  │      sh "npm test -- --coverage"                                  │  │
+│  │      def coverage = readJSON file: 'coverage/coverage-summary.json'│ │
+│  │      if (coverage.total.lines.pct < threshold) {                  │  │
+│  │          error "Coverage ${coverage.total.lines.pct}% < ${threshold}%"│
+│  │      }                                                            │  │
+│  │  }                                                                │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                              │                                          │
+│                              ▼                                          │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │  $ ./gradlew test                                               │    │
+│  │  > Task :test                                                   │    │
+│  │  > All tests passed                                             │    │
+│  │  BUILD SUCCESSFUL                                               │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                              │                                          │
+│                              ▼                                          │
+│  STEP 3: REFACTOR (Improve Code Quality)                                │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │  // vars/verifyTDD.groovy (refactored)                            │  │
+│  │  def call(Map config = [:]) {                                     │  │
+│  │      def threshold = config.threshold ?: 80                       │  │
+│  │      def testCmd = config.testCommand ?: 'npm test -- --coverage' │  │
+│  │                                                                   │  │
+│  │      verifyTestsExist()                                           │  │
+│  │      runTests(testCmd)                                            │  │
+│  │      verifyCoverage(threshold)                                    │  │
+│  │  }                                                                │  │
+│  │                                                                   │  │
+│  │  def verifyTestsExist() { ... }                                   │  │
+│  │  def runTests(String cmd) { ... }                                 │  │
+│  │  def verifyCoverage(int threshold) { ... }                        │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every pipeline bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                 BUG FIX WORKFLOW FOR JENKINS                    │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  1. BUG REPORTED                                                │
+│     ├── Issue #456: "Pipeline fails when branch has slashes"    │
+│     └── Reproduction steps documented                           │
+│         │                                                       │
+│         ▼                                                       │
+│  2. WRITE REGRESSION TEST (Test FAILS)                          │
+│     ├── Test reproduces the exact bug scenario                  │
+│     ├── Test references issue ID: // Bug #456                   │
+│     └── Verify test fails for the RIGHT reason                  │
+│         │                                                       │
+│         ▼                                                       │
+│  3. VERIFY TEST FAILS CORRECTLY                                 │
+│     ├── Run: ./gradlew test                                     │
+│     └── Confirm: Test fails with expected error                 │
+│         │                                                       │
+│         ▼                                                       │
+│  4. FIX THE BUG                                                 │
+│     ├── Implement minimal fix                                   │
+│     └── Do NOT add extra features                               │
+│         │                                                       │
+│         ▼                                                       │
+│  5. VERIFY TEST PASSES                                          │
+│     ├── Run: ./gradlew test                                     │
+│     ├── Confirm: Previously failing test now passes             │
+│     └── Confirm: No other tests broke                           │
+│         │                                                       │
+│         ▼                                                       │
+│  6. DOCUMENT IN COMMIT                                          │
+│     └── git commit -m "fix: handle branch names with slashes    │
+│                                                                 │
+│         Fixes #456                                              │
+│         Added regression test for branch name sanitization"     │
+│         │                                                       │
+│         ▼                                                       │
+│  7. REGRESSION PREVENTED                                        │
+│     └── Future changes cannot reintroduce this bug              │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Example Bug Fix with Regression Test
+
+**Bug Report #789**: Pipeline fails when Docker image tag contains special characters from branch name (e.g., `feature/user-auth` creates invalid tag `feature/user-auth`).
+
+```groovy
+// ============================================
+// Step 1-2: Write test that reproduces the bug
+// ============================================
+
+// tests/pipeline/DockerTagTest.groovy
+import com.lesfurets.jenkins.unit.BasePipelineTest
+import org.junit.Before
+import org.junit.Test
+import static org.junit.Assert.*
+
+class DockerTagTest extends BasePipelineTest {
+
+    @Override
+    @Before
+    void setUp() throws Exception {
+        super.setUp()
+        binding.setVariable('env', [
+            BRANCH_NAME: 'feature/user-auth',
+            BUILD_NUMBER: '42'
+        ])
+    }
+
+    /**
+     * Bug #789: Pipeline fails when branch name contains slashes.
+     * Docker image tags cannot contain slashes, causing docker build to fail.
+     *
+     * This regression test ensures branch names are properly sanitized
+     * before being used as Docker image tags.
+     */
+    @Test
+    void 'Bug #789: should sanitize branch names with slashes for Docker tags'() {
+        // Given - Branch name with slashes
+        def script = loadScript('vars/buildDockerImage.groovy')
+        binding.setVariable('env', [BRANCH_NAME: 'feature/user-auth'])
+
+        // When
+        def tag = script.generateTag()
+
+        // Then - Slashes should be replaced
+        assertFalse("Tag should not contain slashes", tag.contains('/'))
+        assertEquals("feature-user-auth", tag)
+    }
+
+    @Test
+    void 'Bug #789: should handle multiple special characters in branch name'() {
+        // Given - Branch name with multiple special chars
+        def script = loadScript('vars/buildDockerImage.groovy')
+        binding.setVariable('env', [BRANCH_NAME: 'feature/ABC-123/fix_bug'])
+
+        // When
+        def tag = script.generateTag()
+
+        // Then
+        assertEquals("feature-ABC-123-fix-bug", tag)
+    }
+
+    @Test
+    void 'Bug #789: should handle branch names starting with refs'() {
+        // Given - Full ref path
+        def script = loadScript('vars/buildDockerImage.groovy')
+        binding.setVariable('env', [BRANCH_NAME: 'refs/heads/feature/test'])
+
+        // When
+        def tag = script.generateTag()
+
+        // Then
+        assertEquals("feature-test", tag)
+    }
+}
+
+// Run: ./gradlew test
+// FAILS - generateTag() doesn't handle slashes
+// org.junit.ComparisonFailure:
+// Expected: feature-user-auth
+// Actual: feature/user-auth (contains invalid character '/')
+```
+
+```groovy
+// ============================================
+// Step 3: Verify the test fails for the right reason
+// ============================================
+
+// Current buggy implementation in vars/buildDockerImage.groovy
+def generateTag() {
+    // BUG: Does not sanitize branch name
+    return env.BRANCH_NAME
+}
+
+// $ ./gradlew test --tests DockerTagTest
+//
+// DockerTagTest > Bug #789: should sanitize branch names with slashes FAILED
+//     org.junit.ComparisonFailure: Tag should not contain slashes
+//     Expected: feature-user-auth
+//     Actual: feature/user-auth
+//
+// 3 tests completed, 3 failed
+//
+// FAILURE: Build failed with an exception.
+```
+
+```groovy
+// ============================================
+// Step 4: Fix the bug
+// ============================================
+
+// vars/buildDockerImage.groovy (fixed)
+/**
+ * Builds a Docker image with proper tag sanitization.
+ *
+ * Bug #789: Fixed branch name sanitization for Docker tags.
+ */
+def call(Map config = [:]) {
+    def appName = config.appName ?: env.APP_NAME
+    def registry = config.registry ?: env.DOCKER_REGISTRY
+    def tag = generateTag()
+
+    def fullImage = "${registry}/${appName}:${tag}"
+
+    docker.build(fullImage, ".")
+
+    return fullImage
+}
+
+/**
+ * Generates a Docker-safe tag from the branch name.
+ *
+ * Bug #789: Sanitizes branch names by:
+ * - Removing refs/heads/ prefix
+ * - Replacing slashes with hyphens
+ * - Replacing underscores with hyphens
+ * - Converting to lowercase
+ *
+ * @return Sanitized tag string safe for Docker
+ */
+def generateTag() {
+    def branch = env.BRANCH_NAME ?: 'unknown'
+
+    // Remove refs/heads/ prefix if present
+    branch = branch.replaceAll('^refs/heads/', '')
+
+    // Replace invalid Docker tag characters
+    // Docker tags can contain: lowercase/uppercase letters, digits, underscores, periods, hyphens
+    // But slashes are NOT allowed
+    branch = branch
+        .replaceAll('/', '-')      // Replace slashes with hyphens
+        .replaceAll('_', '-')      // Normalize underscores to hyphens
+        .replaceAll('[^a-zA-Z0-9.-]', '-')  // Remove other invalid chars
+        .replaceAll('-+', '-')     // Collapse multiple hyphens
+        .replaceAll('^-|-$', '')   // Remove leading/trailing hyphens
+
+    return branch
+}
+
+// Run: ./gradlew test --tests DockerTagTest
+//
+// DockerTagTest > Bug #789: should sanitize branch names with slashes PASSED
+// DockerTagTest > Bug #789: should handle multiple special characters PASSED
+// DockerTagTest > Bug #789: should handle branch names starting with refs PASSED
+//
+// 3 tests completed, 3 passed
+//
+// BUILD SUCCESSFUL
+```
+
+```groovy
+// ============================================
+// Step 5: Verify all tests still pass
+// ============================================
+
+// Run full test suite to ensure no regressions
+// $ ./gradlew test
+//
+// > Task :test
+//
+// DockerTagTest > Bug #789: should sanitize branch names with slashes PASSED
+// DockerTagTest > Bug #789: should handle multiple special characters PASSED
+// DockerTagTest > Bug #789: should handle branch names starting with refs PASSED
+// DeploymentStageTest > deployment stage should deploy to correct namespace PASSED
+// DeploymentStageTest > deployment stage should wait for rollout completion PASSED
+// ... (all other tests)
+//
+// 47 tests completed, 47 passed
+//
+// BUILD SUCCESSFUL
+```
+
+### Bug Fix Verification in Pipeline
+
+Add this stage to your Jenkinsfile to automatically verify bug fixes include regression tests:
+
+```groovy
+// Stage to verify bug fixes have regression tests
+stage('Verify Bug Fixes') {
+    when {
+        expression {
+            def prTitle = env.CHANGE_TITLE ?: ''
+            def prBody = env.CHANGE_DESCRIPTION ?: ''
+            return prTitle.toLowerCase().contains('fix') ||
+                   prTitle.toLowerCase().contains('bug') ||
+                   prBody.toLowerCase().contains('fixes #')
+        }
+    }
+    steps {
+        script {
+            // Extract issue number from PR
+            def prText = "${env.CHANGE_TITLE} ${env.CHANGE_DESCRIPTION}"
+            def issuePattern = /#(\d+)/
+            def matcher = (prText =~ issuePattern)
+
+            if (!matcher.find()) {
+                error '''
+                    Bug fix PR must reference an issue number.
+                    Use: "Fixes #123" or "Bug #123" in title or description.
+                '''
+            }
+
+            def issueNum = matcher[0][1]
+            echo "Checking for regression test for issue #${issueNum}..."
+
+            // Verify test file references the bug
+            def testFound = sh(
+                script: """
+                    grep -r "Bug #${issueNum}\\|bug.*${issueNum}\\|issue.*${issueNum}\\|Fixes #${issueNum}" \
+                        tests/ test/ src/test/ \
+                        --include="*.groovy" \
+                        --include="*.java" \
+                        || true
+                """,
+                returnStdout: true
+            ).trim()
+
+            if (!testFound) {
+                error """
+                    Bug fix for issue #${issueNum} is missing a regression test.
+
+                    Please add a test that:
+                    1. Reproduces the bug scenario
+                    2. Includes a comment referencing: Bug #${issueNum}
+                    3. Verifies the fix works correctly
+
+                    Example:
+                    /**
+                     * Bug #${issueNum}: [Description of bug]
+                     */
+                    @Test
+                    void 'Bug #${issueNum}: should handle edge case'() {
+                        // Test implementation
+                    }
+                """
+            }
+
+            echo "Regression test found for issue #${issueNum}"
+        }
+    }
+}
+```
+
+---
+
 ## 3. Scripted Pipeline (Use Only When Declarative Insufficient)
 
 ### A. When to Use Scripted Pipeline
@@ -1499,6 +2083,400 @@ pipeline {
 10. **Credential Management**: Secure secret handling with Jenkins credentials store.
 11. **Multi-Branch**: Automatic pipeline creation for branches and tags.
 12. **Quality Gates**: SonarQube prevents low-quality code from deploying.
+
+---
+
+## 8. Quick Reference
+
+### Common Jenkins CLI Commands
+
+```bash
+# ============================================
+# JENKINS CLI COMMANDS
+# ============================================
+
+# Download Jenkins CLI
+wget http://localhost:8080/jnlpJars/jenkins-cli.jar
+
+# Authentication (use API token, not password)
+export JENKINS_URL=http://localhost:8080
+export JENKINS_USER=admin
+export JENKINS_TOKEN=your-api-token
+
+# List all jobs
+java -jar jenkins-cli.jar -s $JENKINS_URL -auth $JENKINS_USER:$JENKINS_TOKEN list-jobs
+
+# Get job info
+java -jar jenkins-cli.jar -s $JENKINS_URL -auth $JENKINS_USER:$JENKINS_TOKEN get-job my-pipeline
+
+# Build a job
+java -jar jenkins-cli.jar -s $JENKINS_URL -auth $JENKINS_USER:$JENKINS_TOKEN build my-pipeline
+
+# Build with parameters
+java -jar jenkins-cli.jar -s $JENKINS_URL -auth $JENKINS_USER:$JENKINS_TOKEN build my-pipeline \
+    -p DEPLOY_ENV=staging \
+    -p RUN_TESTS=true
+
+# Get build console output
+java -jar jenkins-cli.jar -s $JENKINS_URL -auth $JENKINS_USER:$JENKINS_TOKEN console my-pipeline 42
+
+# Restart Jenkins safely (wait for builds to complete)
+java -jar jenkins-cli.jar -s $JENKINS_URL -auth $JENKINS_USER:$JENKINS_TOKEN safe-restart
+
+# Reload JCasC configuration
+java -jar jenkins-cli.jar -s $JENKINS_URL -auth $JENKINS_USER:$JENKINS_TOKEN reload-jcasc-configuration
+
+# List installed plugins
+java -jar jenkins-cli.jar -s $JENKINS_URL -auth $JENKINS_USER:$JENKINS_TOKEN list-plugins
+
+# Install a plugin
+java -jar jenkins-cli.jar -s $JENKINS_URL -auth $JENKINS_USER:$JENKINS_TOKEN install-plugin docker-workflow
+
+# Validate Jenkinsfile syntax (requires Pipeline plugin)
+java -jar jenkins-cli.jar -s $JENKINS_URL -auth $JENKINS_USER:$JENKINS_TOKEN declarative-linter < Jenkinsfile
+
+# ============================================
+# CURL COMMANDS (REST API)
+# ============================================
+
+# Trigger build via REST API
+curl -X POST "$JENKINS_URL/job/my-pipeline/build" \
+    --user "$JENKINS_USER:$JENKINS_TOKEN"
+
+# Trigger parameterized build
+curl -X POST "$JENKINS_URL/job/my-pipeline/buildWithParameters" \
+    --user "$JENKINS_USER:$JENKINS_TOKEN" \
+    --data "DEPLOY_ENV=staging&RUN_TESTS=true"
+
+# Get build status
+curl -s "$JENKINS_URL/job/my-pipeline/lastBuild/api/json" \
+    --user "$JENKINS_USER:$JENKINS_TOKEN" | jq '.result'
+
+# Get queue info
+curl -s "$JENKINS_URL/queue/api/json" \
+    --user "$JENKINS_USER:$JENKINS_TOKEN" | jq '.items[].task.name'
+
+# Get node/agent status
+curl -s "$JENKINS_URL/computer/api/json" \
+    --user "$JENKINS_USER:$JENKINS_TOKEN" | jq '.computer[].displayName'
+
+# Disable a job
+curl -X POST "$JENKINS_URL/job/my-pipeline/disable" \
+    --user "$JENKINS_USER:$JENKINS_TOKEN"
+
+# Enable a job
+curl -X POST "$JENKINS_URL/job/my-pipeline/enable" \
+    --user "$JENKINS_USER:$JENKINS_TOKEN"
+```
+
+### Jenkinsfile Patterns Cheat Sheet
+
+```groovy
+// ============================================
+// DECLARATIVE PIPELINE PATTERNS
+// ============================================
+
+// Pattern 1: Conditional Stage Execution
+stage('Deploy to Prod') {
+    when {
+        allOf {
+            branch 'main'
+            expression { params.DEPLOY_TO_PROD == true }
+        }
+    }
+    steps { /* ... */ }
+}
+
+// Pattern 2: Parallel Stages
+stage('Tests') {
+    parallel {
+        stage('Unit')       { steps { sh 'npm test' } }
+        stage('Integration') { steps { sh 'npm run test:e2e' } }
+        stage('Lint')       { steps { sh 'npm run lint' } }
+    }
+}
+
+// Pattern 3: Matrix Builds
+stage('Build Matrix') {
+    matrix {
+        axes {
+            axis { name 'NODE_VERSION'; values '18', '20', '22' }
+            axis { name 'OS'; values 'linux', 'windows' }
+        }
+        stages {
+            stage('Build') {
+                agent { label "${OS}" }
+                steps { sh "nvm use ${NODE_VERSION} && npm ci && npm run build" }
+            }
+        }
+    }
+}
+
+// Pattern 4: Input with Timeout
+stage('Approval') {
+    steps {
+        timeout(time: 1, unit: 'HOURS') {
+            input message: 'Deploy to production?', ok: 'Deploy'
+        }
+    }
+}
+
+// Pattern 5: Retry with Exponential Backoff
+stage('Deploy') {
+    steps {
+        script {
+            def attempt = 0
+            retry(3) {
+                attempt++
+                sleep(time: Math.pow(2, attempt).toInteger(), unit: 'SECONDS')
+                sh 'kubectl apply -f manifests/'
+            }
+        }
+    }
+}
+
+// Pattern 6: Stash/Unstash for Artifact Passing
+stage('Build') {
+    steps {
+        sh 'npm run build'
+        stash includes: 'dist/**/*', name: 'build-artifacts'
+    }
+}
+stage('Deploy') {
+    steps {
+        unstash 'build-artifacts'
+        sh 'aws s3 sync dist/ s3://my-bucket/'
+    }
+}
+
+// Pattern 7: Docker Agent with Custom Dockerfile
+stage('Test') {
+    agent {
+        dockerfile {
+            filename 'Dockerfile.test'
+            dir 'ci'
+            args '-v /tmp:/tmp'
+            additionalBuildArgs '--build-arg NODE_VERSION=20'
+        }
+    }
+    steps { sh 'npm test' }
+}
+
+// Pattern 8: Post-Stage Actions
+stage('Test') {
+    steps { sh 'npm test -- --coverage' }
+    post {
+        always  { junit 'coverage/junit.xml' }
+        success { echo 'Tests passed!' }
+        failure { slackSend color: 'danger', message: 'Tests failed!' }
+    }
+}
+
+// Pattern 9: Environment-Specific Configuration
+stage('Deploy') {
+    environment {
+        DEPLOY_CONFIG = credentials("${params.ENVIRONMENT}-config")
+    }
+    steps {
+        sh "envsubst < config.template.yaml > config.yaml"
+        sh "kubectl apply -f config.yaml"
+    }
+}
+
+// Pattern 10: Shared Library Call
+@Library('my-shared-lib') _
+
+pipeline {
+    agent any
+    stages {
+        stage('Deploy') {
+            steps {
+                deployToKubernetes(
+                    environment: 'staging',
+                    namespace: 'my-app',
+                    timeout: '10m'
+                )
+            }
+        }
+    }
+}
+```
+
+### Pipeline Structure Reference
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      JENKINSFILE STRUCTURE REFERENCE                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  pipeline {                                                                 │
+│      │                                                                      │
+│      ├── agent { ... }              // WHERE to run                         │
+│      │   ├── any                    // Any available agent                  │
+│      │   ├── none                   // No default agent (define per-stage)  │
+│      │   ├── label 'docker'         // Specific agent label                 │
+│      │   ├── docker { image '...' } // Docker container                     │
+│      │   └── kubernetes { ... }     // Kubernetes pod                       │
+│      │                                                                      │
+│      ├── environment { ... }        // Environment variables                │
+│      │   ├── VAR = 'value'          // Static value                         │
+│      │   ├── VAR = credentials('id')// From credentials store               │
+│      │   └── VAR = sh(script, returnStdout)  // Dynamic value               │
+│      │                                                                      │
+│      ├── options { ... }            // Pipeline options                     │
+│      │   ├── buildDiscarder(...)    // Retain N builds                      │
+│      │   ├── timeout(...)           // Global timeout                       │
+│      │   ├── timestamps()           // Add timestamps to logs               │
+│      │   ├── disableConcurrentBuilds() // No parallel runs                  │
+│      │   └── skipDefaultCheckout()  // Manual checkout                      │
+│      │                                                                      │
+│      ├── triggers { ... }           // Auto-trigger pipeline                │
+│      │   ├── pollSCM('H/5 * * * *') // Poll every 5 min                     │
+│      │   ├── cron('H 2 * * *')      // Nightly at 2 AM                      │
+│      │   └── upstream('job', 'SUCCESS')  // After upstream job              │
+│      │                                                                      │
+│      ├── parameters { ... }         // Build parameters                     │
+│      │   ├── string(...)            // Text input                           │
+│      │   ├── booleanParam(...)      // Checkbox                             │
+│      │   ├── choice(...)            // Dropdown                             │
+│      │   └── password(...)          // Masked input                         │
+│      │                                                                      │
+│      ├── stages { ... }             // Pipeline stages                      │
+│      │   └── stage('Name') {                                                │
+│      │       ├── when { ... }       // Conditional execution                │
+│      │       │   ├── branch 'main'                                          │
+│      │       │   ├── tag pattern: 'v*'                                      │
+│      │       │   ├── expression { ... }                                     │
+│      │       │   ├── allOf { ... }                                          │
+│      │       │   └── anyOf { ... }                                          │
+│      │       │                                                              │
+│      │       ├── agent { ... }      // Stage-specific agent                 │
+│      │       │                                                              │
+│      │       ├── environment { ... }// Stage-specific env vars              │
+│      │       │                                                              │
+│      │       ├── steps { ... }      // Commands to run                      │
+│      │       │   ├── sh '...'       // Shell command                        │
+│      │       │   ├── script { ... } // Groovy script                        │
+│      │       │   ├── checkout scm   // Git checkout                         │
+│      │       │   └── withCredentials([...]) { ... }                         │
+│      │       │                                                              │
+│      │       ├── parallel { ... }   // Parallel stages                      │
+│      │       │                                                              │
+│      │       └── post { ... }       // Post-stage actions                   │
+│      │   }                                                                  │
+│      │                                                                      │
+│      └── post { ... }               // Post-pipeline actions                │
+│          ├── always { ... }         // Run regardless of result             │
+│          ├── success { ... }        // Only on SUCCESS                      │
+│          ├── failure { ... }        // Only on FAILURE                      │
+│          ├── unstable { ... }       // Only on UNSTABLE                     │
+│          ├── aborted { ... }        // Only on ABORTED                      │
+│          ├── cleanup { ... }        // Always, after all others             │
+│          └── changed { ... }        // When result changes from last build  │
+│  }                                                                          │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Credentials Usage Quick Reference
+
+```groovy
+// ============================================
+// CREDENTIALS PATTERNS
+// ============================================
+
+// Username/Password
+environment {
+    CREDS = credentials('my-creds-id')
+    // Creates: CREDS (user:pass), CREDS_USR, CREDS_PSW
+}
+
+// Secret text
+environment {
+    API_KEY = credentials('api-key-id')
+    // Creates: API_KEY (the secret value)
+}
+
+// Secret file
+withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')]) {
+    sh 'kubectl --kubeconfig=$KUBECONFIG get pods'
+}
+
+// SSH key
+withCredentials([sshUserPrivateKey(
+    credentialsId: 'ssh-key',
+    keyFileVariable: 'SSH_KEY',
+    usernameVariable: 'SSH_USER'
+)]) {
+    sh 'ssh -i $SSH_KEY $SSH_USER@server.example.com'
+}
+
+// Multiple credentials
+withCredentials([
+    usernamePassword(credentialsId: 'docker', usernameVariable: 'D_USER', passwordVariable: 'D_PASS'),
+    string(credentialsId: 'slack-token', variable: 'SLACK_TOKEN'),
+    file(credentialsId: 'gcp-key', variable: 'GOOGLE_APPLICATION_CREDENTIALS')
+]) {
+    sh '''
+        docker login -u $D_USER -p $D_PASS
+        gcloud auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
+    '''
+}
+```
+
+### Common Groovy Snippets for Pipelines
+
+```groovy
+// ============================================
+// USEFUL GROOVY SNIPPETS
+// ============================================
+
+// Read JSON file
+def config = readJSON file: 'config.json'
+echo "Version: ${config.version}"
+
+// Read YAML file
+def manifest = readYaml file: 'manifest.yaml'
+echo "App Name: ${manifest.metadata.name}"
+
+// Write file
+writeFile file: 'output.txt', text: 'Hello, World!'
+
+// Get changed files in commit
+def changes = sh(script: 'git diff --name-only HEAD~1', returnStdout: true).trim().split('\n')
+if (changes.any { it.startsWith('src/') }) {
+    echo 'Source files changed, running full build'
+}
+
+// Parse version from package.json
+def packageJson = readJSON file: 'package.json'
+def version = packageJson.version
+echo "Building version: ${version}"
+
+// Create semantic version tag
+def (major, minor, patch) = version.tokenize('.')
+def newPatch = patch.toInteger() + 1
+def newVersion = "${major}.${minor}.${newPatch}"
+
+// HTTP request
+def response = httpRequest(
+    url: 'https://api.example.com/status',
+    httpMode: 'GET',
+    validResponseCodes: '200'
+)
+def status = readJSON text: response.content
+echo "API Status: ${status.healthy}"
+
+// Conditional based on file existence
+if (fileExists('Dockerfile')) {
+    echo 'Dockerfile found, building container'
+    sh 'docker build -t myapp .'
+}
+
+// Get list of files matching pattern
+def testFiles = findFiles(glob: 'tests/**/*.test.js')
+echo "Found ${testFiles.length} test files"
+```
 
 ---
 

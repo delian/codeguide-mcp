@@ -625,6 +625,679 @@ Fixes #890
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new Nix flake code.**
+
+### TDD Cycle Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    TDD CYCLE FOR NIX FLAKES                     │
+└─────────────────────────────────────────────────────────────────┘
+
+         ┌──────────┐
+         │  START   │
+         └────┬─────┘
+              │
+              ▼
+    ┌─────────────────────┐
+    │   1. RED            │◄─────────────────────────────┐
+    │   Write failing     │                              │
+    │   check/test        │                              │
+    │                     │                              │
+    │   nix flake check   │                              │
+    │   → FAILS           │                              │
+    └──────────┬──────────┘                              │
+               │                                         │
+               ▼                                         │
+    ┌─────────────────────┐                              │
+    │   2. GREEN          │                              │
+    │   Write minimal     │                              │
+    │   implementation    │                              │
+    │                     │                              │
+    │   nix flake check   │                              │
+    │   → PASSES          │                              │
+    └──────────┬──────────┘                              │
+               │                                         │
+               ▼                                         │
+    ┌─────────────────────┐                              │
+    │   3. REFACTOR       │                              │
+    │   Improve code      │                              │
+    │   structure         │                              │
+    │                     │                              │
+    │   nix flake check   │                              │
+    │   → STILL PASSES    │                              │
+    └──────────┬──────────┘                              │
+               │                                         │
+               ▼                                         │
+    ┌─────────────────────┐        ┌──────────────┐     │
+    │   More features     │  YES   │  New feature │     │
+    │   needed?           │───────►│  requirement │─────┘
+    └──────────┬──────────┘        └──────────────┘
+               │ NO
+               ▼
+         ┌──────────┐
+         │   DONE   │
+         └──────────┘
+```
+
+### Example TDD Workflow for Nix Flakes
+
+**Scenario**: Create a flake that provides a Python application with proper dependency management.
+
+#### Step 1: RED - Write Failing Check First
+
+```nix
+# flake.nix - Start with checks that define requirements
+{
+  description = "Python app with TDD";
+
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    flake-utils.url = "github:numtide/flake-utils";
+  };
+
+  outputs = { self, nixpkgs, flake-utils }:
+    flake-utils.lib.eachDefaultSystem (system:
+      let
+        pkgs = import nixpkgs { inherit system; };
+      in
+      {
+        # RED: Define checks that express our requirements
+        checks = {
+          # Check 1: Package must build successfully
+          package-builds = pkgs.runCommand "check-package-builds" {
+            buildInputs = [ self.packages.${system}.default ];
+          } ''
+            test -x ${self.packages.${system}.default}/bin/myapp || exit 1
+            echo "Package builds and is executable"
+            touch $out
+          '';
+
+          # Check 2: Python must have required dependencies
+          python-deps = pkgs.runCommand "check-python-deps" {
+            buildInputs = [ self.packages.${system}.default ];
+          } ''
+            ${self.packages.${system}.default}/bin/myapp --check-deps || exit 1
+            touch $out
+          '';
+
+          # Check 3: DevShell must have development tools
+          devshell-tools = pkgs.runCommand "check-devshell-tools" {
+            buildInputs = with pkgs; [ python3Packages.black ruff python3Packages.pytest ];
+          } ''
+            command -v black >/dev/null || exit 1
+            command -v ruff >/dev/null || exit 1
+            command -v pytest >/dev/null || exit 1
+            echo "All dev tools available"
+            touch $out
+          '';
+        };
+      }
+    );
+}
+```
+
+**Verify RED State**:
+```bash
+nix flake check
+# error: attribute 'default' missing
+# ERROR: Checks fail because packages.default doesn't exist yet
+```
+
+#### Step 2: GREEN - Write Minimal Implementation to Pass
+
+```nix
+# flake.nix - Add minimal implementation
+{
+  description = "Python app with TDD";
+
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    flake-utils.url = "github:numtide/flake-utils";
+  };
+
+  outputs = { self, nixpkgs, flake-utils }:
+    flake-utils.lib.eachDefaultSystem (system:
+      let
+        pkgs = import nixpkgs { inherit system; };
+
+        # GREEN: Create Python environment with dependencies
+        pythonEnv = pkgs.python3.withPackages (ps: with ps; [
+          requests
+          pydantic
+        ]);
+      in
+      {
+        # GREEN: Add the package that checks require
+        packages.default = pkgs.writeShellApplication {
+          name = "myapp";
+          runtimeInputs = [ pythonEnv ];
+          text = ''
+            if [ "$1" = "--check-deps" ]; then
+              python3 -c "import requests; import pydantic; print('Dependencies OK')"
+              exit 0
+            fi
+            python3 ${./src/main.py} "$@"
+          '';
+        };
+
+        # GREEN: Add devShell with required tools
+        devShells.default = pkgs.mkShell {
+          buildInputs = [
+            pythonEnv
+            pkgs.python3Packages.black
+            pkgs.ruff
+            pkgs.python3Packages.pytest
+          ];
+        };
+
+        # Keep our checks
+        checks = {
+          package-builds = pkgs.runCommand "check-package-builds" {
+            buildInputs = [ self.packages.${system}.default ];
+          } ''
+            test -x ${self.packages.${system}.default}/bin/myapp || exit 1
+            echo "Package builds and is executable"
+            touch $out
+          '';
+
+          python-deps = pkgs.runCommand "check-python-deps" {
+            buildInputs = [ self.packages.${system}.default ];
+          } ''
+            ${self.packages.${system}.default}/bin/myapp --check-deps || exit 1
+            touch $out
+          '';
+
+          devshell-tools = pkgs.runCommand "check-devshell-tools" {
+            buildInputs = with pkgs; [ python3Packages.black ruff python3Packages.pytest ];
+          } ''
+            command -v black >/dev/null || exit 1
+            command -v ruff >/dev/null || exit 1
+            command -v pytest >/dev/null || exit 1
+            echo "All dev tools available"
+            touch $out
+          '';
+        };
+      }
+    );
+}
+```
+
+**Verify GREEN State**:
+```bash
+nix flake check
+# All checks pass
+```
+
+#### Step 3: REFACTOR - Improve Structure While Keeping Tests Green
+
+```nix
+# flake.nix - Refactored with better organization
+{
+  description = "Python app with TDD - Refactored";
+
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    flake-utils.url = "github:numtide/flake-utils";
+  };
+
+  outputs = { self, nixpkgs, flake-utils }:
+    flake-utils.lib.eachDefaultSystem (system:
+      let
+        pkgs = import nixpkgs { inherit system; };
+
+        # REFACTOR: Extract configuration for reusability
+        pythonVersion = pkgs.python312;
+
+        # REFACTOR: Separate runtime and dev dependencies
+        runtimeDeps = ps: with ps; [ requests pydantic ];
+        devDeps = ps: with ps; [ black pytest mypy ];
+
+        pythonEnv = pythonVersion.withPackages runtimeDeps;
+        pythonDevEnv = pythonVersion.withPackages (ps: (runtimeDeps ps) ++ (devDeps ps));
+
+        # REFACTOR: Extract package definition
+        myapp = pkgs.writeShellApplication {
+          name = "myapp";
+          runtimeInputs = [ pythonEnv ];
+          text = ''
+            case "''${1:-}" in
+              --check-deps)
+                python3 -c "import requests; import pydantic; print('Dependencies OK')"
+                ;;
+              --version)
+                echo "myapp 1.0.0"
+                ;;
+              *)
+                python3 ${./src/main.py} "$@"
+                ;;
+            esac
+          '';
+        };
+
+      in
+      {
+        packages.default = myapp;
+
+        devShells.default = pkgs.mkShell {
+          inputsFrom = [ myapp ];
+          buildInputs = [
+            pythonDevEnv
+            pkgs.ruff
+          ];
+
+          shellHook = ''
+            echo "Development environment ready!"
+            echo "Python: $(python3 --version)"
+          '';
+        };
+
+        # REFACTOR: Organized checks with clear naming
+        checks = {
+          # Build verification
+          build = myapp;
+
+          # Runtime dependency check
+          runtime-deps = pkgs.runCommand "check-runtime-deps" {} ''
+            ${myapp}/bin/myapp --check-deps
+            touch $out
+          '';
+
+          # Development tools check
+          dev-tools = pkgs.runCommand "check-dev-tools" {
+            buildInputs = [ pythonDevEnv pkgs.ruff ];
+          } ''
+            command -v black >/dev/null
+            command -v ruff >/dev/null
+            command -v pytest >/dev/null
+            touch $out
+          '';
+
+          # Format check
+          format = pkgs.runCommand "check-format" {} ''
+            ${pkgs.nixpkgs-fmt}/bin/nixpkgs-fmt --check ${self}
+            touch $out
+          '';
+        };
+
+        formatter = pkgs.nixpkgs-fmt;
+      }
+    );
+}
+```
+
+**Verify REFACTOR State**:
+```bash
+nix flake check
+# All checks still pass
+
+nix build
+# Build succeeds
+
+nix develop -c bash -c "python3 --version"
+# Python 3.12.x
+```
+
+### Visual Step-by-Step TDD Example
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         VISUAL TDD WORKFLOW                                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+STEP 1: RED - Define Requirements as Failing Checks
+═══════════════════════════════════════════════════
+
+  flake.nix                          Terminal
+  ┌────────────────────┐             ┌─────────────────────────┐
+  │ checks = {         │             │ $ nix flake check       │
+  │   package = ...;   │─────────────│                         │
+  │   deps = ...;      │             │ error: attribute        │
+  │ };                 │             │ 'default' missing       │
+  │                    │             │                         │
+  │ # No packages yet! │             │ STATUS: FAILING         │
+  └────────────────────┘             └─────────────────────────┘
+
+
+STEP 2: GREEN - Add Minimal Implementation
+══════════════════════════════════════════
+
+  flake.nix                          Terminal
+  ┌────────────────────┐             ┌─────────────────────────┐
+  │ packages.default = │             │ $ nix flake check       │
+  │   writeShellApp {  │─────────────│                         │
+  │     name = "myapp";│             │ All checks passed       │
+  │     ...            │             │                         │
+  │   };               │             │ STATUS: PASSING         │
+  │                    │             │                         │
+  │ checks = { ... };  │             │                         │
+  └────────────────────┘             └─────────────────────────┘
+
+
+STEP 3: REFACTOR - Improve Organization
+═══════════════════════════════════════
+
+  flake.nix                          Terminal
+  ┌────────────────────┐             ┌─────────────────────────┐
+  │ let                │             │ $ nix flake check       │
+  │   pythonEnv = ...; │             │ All checks passed       │
+  │   myapp = ...;     │─────────────│                         │
+  │ in {               │             │ $ nix build             │
+  │   packages = ...;  │             │ /nix/store/xxx-myapp    │
+  │   devShells = ...; │             │                         │
+  │   checks = ...;    │             │ STATUS: STILL PASSING   │
+  │ }                  │             │                         │
+  └────────────────────┘             └─────────────────────────┘
+
+
+STEP 4: REPEAT - Add New Feature with TDD
+═════════════════════════════════════════
+
+  New Requirement: Add config file support
+
+  ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐
+  │  RED    │───►│  GREEN  │───►│REFACTOR │───►│  DONE   │
+  │         │    │         │    │         │    │         │
+  │ Add     │    │ Add     │    │ Extract │    │ All     │
+  │ config  │    │ config  │    │ config  │    │ checks  │
+  │ check   │    │ loading │    │ module  │    │ pass    │
+  └─────────┘    └─────────┘    └─────────┘    └─────────┘
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    BUG FIX WORKFLOW FOR NIX FLAKES              │
+└─────────────────────────────────────────────────────────────────┘
+
+         ┌──────────────────┐
+         │   Bug Reported   │
+         │   or Discovered  │
+         └────────┬─────────┘
+                  │
+                  ▼
+    ┌─────────────────────────────┐
+    │  1. ANALYZE                 │
+    │  - Identify root cause      │
+    │  - Check if impure build    │
+    │  - Check missing deps       │
+    │  - Review error messages    │
+    └──────────────┬──────────────┘
+                   │
+                   ▼
+    ┌─────────────────────────────┐
+    │  2. REPRODUCE               │
+    │  Write a check that         │
+    │  FAILS due to the bug       │
+    │                             │
+    │  checks.bug-XXX = ...       │
+    │  nix flake check → FAILS    │
+    └──────────────┬──────────────┘
+                   │
+                   ▼
+    ┌─────────────────────────────┐
+    │  3. VERIFY FAILURE          │
+    │  Ensure test fails for      │
+    │  the RIGHT reason           │
+    │                             │
+    │  Check error message        │
+    │  matches bug report         │
+    └──────────────┬──────────────┘
+                   │
+                   ▼
+    ┌─────────────────────────────┐
+    │  4. FIX THE BUG             │
+    │  Implement minimal fix      │
+    │                             │
+    │  - Add missing dependency   │
+    │  - Fix impure reference     │
+    │  - Correct derivation       │
+    └──────────────┬──────────────┘
+                   │
+                   ▼
+    ┌─────────────────────────────┐
+    │  5. VERIFY FIX              │
+    │  nix flake check → PASSES   │
+    │                             │
+    │  Regression test now        │
+    │  protects against           │
+    │  future recurrence          │
+    └──────────────┬──────────────┘
+                   │
+                   ▼
+    ┌─────────────────────────────┐
+    │  6. DOCUMENT                │
+    │  - Add bug ID to check name │
+    │  - Comment explaining fix   │
+    │  - Update flake.lock        │
+    └──────────────┬──────────────┘
+                   │
+                   ▼
+         ┌────────────────┐
+         │   Commit Fix   │
+         │   with Test    │
+         └────────────────┘
+```
+
+### Example Bug Fix with Regression Test
+
+**Bug Report #1234**: Application fails at runtime with "openssl: command not found"
+
+#### Step 1: ANALYZE the Bug
+
+```bash
+# Reproduce the issue
+nix build
+./result/bin/myapp
+# ERROR: openssl: command not found
+
+# Analyze the derivation
+nix show-derivation .#default | grep -i openssl
+# No openssl in dependencies!
+```
+
+#### Step 2: REPRODUCE with Failing Check
+
+```nix
+# flake.nix - Add regression test BEFORE fixing
+{
+  outputs = { self, nixpkgs, flake-utils }:
+    flake-utils.lib.eachDefaultSystem (system:
+      let
+        pkgs = import nixpkgs { inherit system; };
+      in
+      {
+        packages.default = pkgs.writeShellScriptBin "myapp" ''
+          # BUG #1234: This uses openssl but it's not in PATH
+          openssl rand -hex 32
+        '';
+
+        checks = {
+          # BUG #1234: Regression test - verify openssl is available at runtime
+          bug-1234-openssl-available = pkgs.runCommand "check-openssl-runtime" {
+            buildInputs = [ self.packages.${system}.default ];
+          } ''
+            # This check reproduces bug #1234
+            # It will FAIL until openssl is added to runtimeInputs
+            export PATH="${self.packages.${system}.default}/bin:$PATH"
+
+            # Try to run the app - should not fail with "command not found"
+            if ! myapp 2>&1; then
+              echo "BUG #1234: openssl not available at runtime"
+              exit 1
+            fi
+
+            touch $out
+          '';
+        };
+      }
+    );
+}
+```
+
+**Verify Bug Reproduction**:
+```bash
+nix flake check
+# error: BUG #1234: openssl not available at runtime
+# STATUS: Check fails, bug is reproduced
+```
+
+#### Step 3: VERIFY Failure is Correct
+
+```bash
+# Ensure failure matches the bug report
+nix flake check 2>&1 | grep -i "openssl"
+# BUG #1234: openssl not available at runtime
+# Confirmed: Failure matches bug report
+```
+
+#### Step 4: FIX the Bug
+
+```nix
+# flake.nix - Fix the bug
+{
+  outputs = { self, nixpkgs, flake-utils }:
+    flake-utils.lib.eachDefaultSystem (system:
+      let
+        pkgs = import nixpkgs { inherit system; };
+      in
+      {
+        # FIX #1234: Use writeShellApplication with runtimeInputs
+        packages.default = pkgs.writeShellApplication {
+          name = "myapp";
+          # FIX #1234: Add openssl to runtime dependencies
+          runtimeInputs = [ pkgs.openssl ];
+          text = ''
+            # FIX #1234: openssl is now available via runtimeInputs
+            openssl rand -hex 32
+          '';
+        };
+
+        checks = {
+          # BUG #1234: Regression test - verify openssl is available at runtime
+          # This check will now PASS and prevent future regressions
+          bug-1234-openssl-available = pkgs.runCommand "check-openssl-runtime" {} ''
+            # Verify the wrapped script includes openssl in PATH
+            if ! grep -q "openssl" ${self.packages.${system}.default}/bin/myapp; then
+              echo "BUG #1234 REGRESSION: openssl not in runtime path"
+              exit 1
+            fi
+
+            # Run the application to verify it works
+            ${self.packages.${system}.default}/bin/myapp > /dev/null
+
+            echo "BUG #1234: Fix verified - openssl available at runtime"
+            touch $out
+          '';
+
+          # Additional: Verify all runtime deps are in closure
+          runtime-closure = pkgs.runCommand "check-closure" {} ''
+            # Ensure openssl is in the runtime closure
+            ${pkgs.nix}/bin/nix-store -qR ${self.packages.${system}.default} | \
+              grep -q "openssl" || {
+                echo "ERROR: openssl not in runtime closure"
+                exit 1
+              }
+            touch $out
+          '';
+        };
+      }
+    );
+}
+```
+
+#### Step 5: VERIFY the Fix
+
+```bash
+# All checks should now pass
+nix flake check
+# All checks passed
+
+# Test the application
+nix run
+# 7a3b9f2e1d4c5a6b8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d
+# Application works correctly
+```
+
+#### Step 6: DOCUMENT and Commit
+
+```bash
+# Commit with bug reference
+git add flake.nix flake.lock
+git commit -m "fix(flake): Add openssl to runtime dependencies
+
+Fixes #1234
+
+- Changed from writeShellScriptBin to writeShellApplication
+- Added openssl to runtimeInputs for proper PATH handling
+- Added regression test to prevent future recurrence
+- Test verifies openssl is in wrapped script PATH"
+```
+
+### Visual Bug Fix Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│              BUG FIX EXAMPLE: Missing Runtime Dependency                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+BUG REPORTED: "openssl: command not found"
+═══════════════════════════════════════════
+
+  BEFORE (Buggy)                       AFTER (Fixed)
+  ┌────────────────────────┐           ┌────────────────────────┐
+  │ writeShellScriptBin    │           │ writeShellApplication  │
+  │   "myapp"              │           │   name = "myapp";      │
+  │   ''                   │           │   runtimeInputs = [    │
+  │     openssl rand...    │           │     pkgs.openssl       │
+  │   '';                  │           │   ];                   │
+  │                        │           │   text = ''            │
+  │ # openssl NOT in PATH! │           │     openssl rand...    │
+  └────────────────────────┘           │   '';                  │
+              │                        │                        │
+              │                        │ # openssl IS in PATH!  │
+              ▼                        └────────────────────────┘
+     ┌─────────────┐                              │
+     │   FAILS!    │                              ▼
+     │             │                     ┌─────────────┐
+     │ openssl:    │                     │   WORKS!    │
+     │ command     │                     │             │
+     │ not found   │                     │ 7a3b9f2e... │
+     └─────────────┘                     └─────────────┘
+
+
+REGRESSION TEST PROTECTS FUTURE:
+════════════════════════════════
+
+  ┌─────────────────────────────────────────────────────────┐
+  │  checks.bug-1234-openssl-available = runCommand ... {   │
+  │    # Verifies openssl is in runtime PATH                │
+  │    # Will FAIL if someone accidentally removes it       │
+  │  };                                                     │
+  └─────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+  ┌─────────────────────────────────────────────────────────┐
+  │  $ nix flake check                                      │
+  │                                                         │
+  │  Running check 'bug-1234-openssl-available'...          │
+  │  BUG #1234: Fix verified - openssl available at runtime │
+  │                                                         │
+  │  All checks passed.                                     │
+  └─────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## 3. Flake Structure
 
 ### A. Standard Flake Layout
@@ -1967,6 +2640,633 @@ deploy:
 
 This configuration creates a solid foundation for building portable,
 reproducible development environments and applications with Nix flakes.
+
+---
+
+## 11. Quick Reference
+
+### Common Commands
+
+```bash
+# ══════════════════════════════════════════════════════════════════════════════
+# NIX FLAKE COMMON COMMANDS
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BUILDING & RUNNING
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Build the default package
+nix build
+
+# Build a specific package
+nix build .#packageName
+
+# Build with verbose output
+nix build --print-build-logs
+
+# Build with pure evaluation (no impure references)
+nix build --pure-eval
+
+# Run the default application
+nix run
+
+# Run a specific application
+nix run .#appName
+
+# Run with arguments
+nix run .#appName -- --arg1 value1
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DEVELOPMENT SHELLS
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Enter the default development shell
+nix develop
+
+# Enter a specific shell
+nix develop .#shellName
+
+# Run a command in the dev shell without entering it
+nix develop -c bash -c "command here"
+
+# Enter shell with debug output
+nix develop --print-build-logs
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VERIFICATION & TESTING
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Run all flake checks (MANDATORY before commit)
+nix flake check
+
+# Run checks with verbose output
+nix flake check --print-build-logs
+
+# Run checks for all systems
+nix flake check --all-systems
+
+# Run checks with pure evaluation
+nix flake check --pure-eval
+
+# Check a specific check
+nix build .#checks.x86_64-linux.checkName
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FLAKE MANAGEMENT
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Show flake outputs
+nix flake show
+
+# Show flake metadata (inputs, revision, etc.)
+nix flake metadata
+
+# Update all flake inputs
+nix flake update
+
+# Update a specific input
+nix flake lock --update-input nixpkgs
+
+# Lock file without updating
+nix flake lock
+
+# Initialize a new flake in current directory
+nix flake init
+
+# Initialize from a template
+nix flake init -t templates#python
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FORMATTING & LINTING
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Format the flake (uses configured formatter)
+nix fmt
+
+# Check formatting without modifying
+nix fmt -- --check .
+
+# Run statix linter
+nix run nixpkgs#statix -- check .
+
+# Run deadnix (find unused code)
+nix run nixpkgs#deadnix -- .
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DEBUGGING & INSPECTION
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Show derivation details
+nix show-derivation .#default
+
+# Show runtime dependencies (closure)
+nix-store -qR ./result
+
+# Show build-time dependencies
+nix-store -qr ./result
+
+# Find why a package is in the closure
+nix why-depends .#default nixpkgs#openssl
+
+# Evaluate an expression
+nix eval .#packages.x86_64-linux.default.name
+
+# Open a REPL with flake loaded
+nix repl .#
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GARBAGE COLLECTION & CLEANUP
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Remove result symlinks
+rm -f result result-*
+
+# Garbage collect unused store paths
+nix-collect-garbage
+
+# Garbage collect with deletion of old generations
+nix-collect-garbage -d
+
+# Optimize store (deduplicate)
+nix store optimise
+```
+
+### Nix Flake Patterns Cheat Sheet
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      NIX FLAKE PATTERNS CHEAT SHEET                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+BASIC FLAKE STRUCTURE
+═════════════════════
+
+{
+  description = "My flake";                    # Required: flake description
+
+  inputs = {                                   # Dependencies
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    flake-utils.url = "github:numtide/flake-utils";
+  };
+
+  outputs = { self, nixpkgs, flake-utils }:   # What the flake provides
+    flake-utils.lib.eachDefaultSystem (system:
+      let
+        pkgs = import nixpkgs { inherit system; };
+      in {
+        packages.default = ...;                # Default package (nix build)
+        devShells.default = ...;               # Default shell (nix develop)
+        checks = { ... };                      # Tests (nix flake check)
+        apps.default = { ... };                # Runnable apps (nix run)
+        formatter = pkgs.nixpkgs-fmt;          # Formatter (nix fmt)
+      }
+    );
+}
+
+
+INPUT PATTERNS
+══════════════
+
+# Pin to specific commit
+nixpkgs.url = "github:NixOS/nixpkgs/abc123def456";
+
+# Pin to specific branch
+nixpkgs.url = "github:NixOS/nixpkgs/nixos-23.11";
+
+# Follow another input's nixpkgs
+otherFlake.url = "github:user/repo";
+otherFlake.inputs.nixpkgs.follows = "nixpkgs";
+
+# Local path input
+localFlake.url = "path:./subdir";
+
+# Git URL with ref
+myrepo.url = "git+https://example.com/repo.git?ref=main";
+
+
+PACKAGE PATTERNS
+════════════════
+
+# Shell script package (simple)
+packages.default = pkgs.writeShellScriptBin "myapp" ''
+  echo "Hello, World!"
+'';
+
+# Shell application with dependencies (preferred)
+packages.default = pkgs.writeShellApplication {
+  name = "myapp";
+  runtimeInputs = [ pkgs.curl pkgs.jq ];
+  text = ''
+    curl -s "$1" | jq .
+  '';
+};
+
+# Standard derivation
+packages.default = pkgs.stdenv.mkDerivation {
+  pname = "myapp";
+  version = "1.0.0";
+  src = ./.;
+  buildInputs = [ pkgs.pkg-config ];
+  buildPhase = "make";
+  installPhase = "make install PREFIX=$out";
+};
+
+# Python package
+packages.default = pkgs.python3Packages.buildPythonApplication {
+  pname = "myapp";
+  version = "1.0.0";
+  src = ./.;
+  propagatedBuildInputs = with pkgs.python3Packages; [ requests ];
+};
+
+# Build from callPackage
+packages.default = pkgs.callPackage ./nix/package.nix { };
+
+
+DEVSHELL PATTERNS
+═════════════════
+
+# Basic shell
+devShells.default = pkgs.mkShell {
+  buildInputs = [ pkgs.nodejs pkgs.python3 ];
+};
+
+# Shell with environment variables
+devShells.default = pkgs.mkShell {
+  buildInputs = [ pkgs.postgresql ];
+  DATABASE_URL = "postgres://localhost/dev";
+  shellHook = ''
+    echo "Database: $DATABASE_URL"
+  '';
+};
+
+# Shell inheriting from package
+devShells.default = pkgs.mkShell {
+  inputsFrom = [ self.packages.${system}.default ];
+  buildInputs = [ pkgs.gdb ];  # Additional dev tools
+};
+
+# Multiple shells
+devShells = {
+  default = pkgs.mkShell { ... };
+  python = pkgs.mkShell { buildInputs = [ pkgs.python312 ]; };
+  rust = pkgs.mkShell { buildInputs = [ pkgs.rustc pkgs.cargo ]; };
+};
+
+
+CHECK PATTERNS
+══════════════
+
+checks = {
+  # Build check (just build the package)
+  build = self.packages.${system}.default;
+
+  # Format check
+  format = pkgs.runCommand "check-format" {} ''
+    ${pkgs.nixpkgs-fmt}/bin/nixpkgs-fmt --check ${self}
+    touch $out
+  '';
+
+  # Test check
+  tests = pkgs.runCommand "run-tests" {
+    buildInputs = [ self.packages.${system}.default pkgs.python3Packages.pytest ];
+  } ''
+    pytest ${./tests}
+    touch $out
+  '';
+
+  # Lint check
+  lint = pkgs.runCommand "lint" {} ''
+    ${pkgs.statix}/bin/statix check ${self}
+    touch $out
+  '';
+
+  # Runtime dependency check
+  deps = pkgs.runCommand "check-deps" {} ''
+    ${self.packages.${system}.default}/bin/myapp --version
+    touch $out
+  '';
+};
+
+
+APP PATTERNS
+════════════
+
+apps.default = {
+  type = "app";
+  program = "${self.packages.${system}.default}/bin/myapp";
+};
+
+apps = {
+  default = { type = "app"; program = "${packages.myapp}/bin/myapp"; };
+  migrate = { type = "app"; program = "${packages.migrate}/bin/migrate"; };
+  repl = { type = "app"; program = "${pkgs.writeShellScript "repl" ''
+    nix repl ${self}
+  ''}"; };
+};
+
+
+MULTI-PLATFORM PATTERNS
+═══════════════════════
+
+# Using flake-utils (recommended)
+flake-utils.lib.eachDefaultSystem (system: { ... })
+
+# Explicit systems
+flake-utils.lib.eachSystem [
+  "x86_64-linux"
+  "aarch64-linux"
+  "x86_64-darwin"
+  "aarch64-darwin"
+] (system: { ... })
+
+# Platform-specific code
+let
+  platformDeps = if pkgs.stdenv.isLinux then [ pkgs.systemd ]
+                 else if pkgs.stdenv.isDarwin then [ pkgs.darwin.apple_sdk.frameworks.Security ]
+                 else [];
+in { ... }
+
+
+OVERLAY PATTERNS
+════════════════
+
+# Define overlay
+overlays.default = final: prev: {
+  myapp = prev.callPackage ./nix/myapp.nix { };
+  nodejs = prev.nodejs_20;  # Override default nodejs
+};
+
+# Use overlay in outputs
+let
+  pkgs = import nixpkgs {
+    inherit system;
+    overlays = [ self.overlays.default ];
+  };
+in { ... }
+```
+
+### Project Structure Reference
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    RECOMMENDED NIX FLAKE PROJECT STRUCTURE                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+my-project/
+├── flake.nix                    # Main flake definition
+├── flake.lock                   # Locked dependencies (COMMIT THIS!)
+│
+├── nix/                         # Nix-specific files
+│   ├── packages/                # Package definitions
+│   │   ├── default.nix          # Main package
+│   │   └── myapp.nix            # Additional packages
+│   │
+│   ├── shells/                  # Development shells
+│   │   ├── default.nix          # Default dev shell
+│   │   └── ci.nix               # CI-specific shell
+│   │
+│   ├── checks/                  # Custom checks
+│   │   ├── format.nix           # Format checking
+│   │   ├── lint.nix             # Linting
+│   │   └── tests.nix            # Test running
+│   │
+│   ├── modules/                 # NixOS/home-manager modules
+│   │   └── service.nix          # System service definition
+│   │
+│   └── overlays/                # Package overlays
+│       └── default.nix
+│
+├── src/                         # Application source code
+│   ├── main.py                  # Entry point
+│   └── lib/                     # Library code
+│
+├── tests/                       # Test files
+│   ├── unit/                    # Unit tests
+│   └── integration/             # Integration tests
+│
+├── .envrc                       # direnv configuration
+├── .gitignore                   # Git ignore (include result, .direnv)
+└── README.md                    # Documentation
+
+
+MINIMAL FLAKE STRUCTURE (for simple projects):
+══════════════════════════════════════════════
+
+my-simple-project/
+├── flake.nix                    # Everything in one file
+├── flake.lock                   # Locked dependencies
+├── src/                         # Source code
+└── .envrc                       # direnv: use flake
+
+
+MONOREPO STRUCTURE (for multi-package projects):
+════════════════════════════════════════════════
+
+my-monorepo/
+├── flake.nix                    # Root flake importing sub-flakes
+├── flake.lock
+│
+├── packages/
+│   ├── frontend/
+│   │   ├── flake.nix            # Frontend package flake
+│   │   └── src/
+│   │
+│   ├── backend/
+│   │   ├── flake.nix            # Backend package flake
+│   │   └── src/
+│   │
+│   └── shared/
+│       ├── flake.nix            # Shared library flake
+│       └── src/
+│
+├── infrastructure/
+│   └── flake.nix                # Deployment/infra flake
+│
+└── nix/
+    └── overlays/                # Shared overlays
+```
+
+### Makefile / Justfile Template for Nix Projects
+
+```makefile
+# Justfile - Command runner for Nix flake projects
+# Usage: just <command>
+
+# Default command
+default: check
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DEVELOPMENT
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Enter development shell
+dev:
+    nix develop
+
+# Build the default package
+build:
+    nix build --print-build-logs
+
+# Run the application
+run *args:
+    nix run -- {{args}}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VERIFICATION (TDD)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Run all checks (MANDATORY before commit)
+check:
+    nix flake check --print-build-logs
+
+# Run checks with pure evaluation
+check-pure:
+    nix flake check --pure-eval --print-build-logs
+
+# Run checks for all systems
+check-all:
+    nix flake check --all-systems --print-build-logs
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CODE QUALITY
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Format all Nix files
+fmt:
+    nix fmt
+
+# Check formatting without modifying
+fmt-check:
+    nix fmt -- --check .
+
+# Run linter
+lint:
+    nix run nixpkgs#statix -- check .
+
+# Find dead code
+deadcode:
+    nix run nixpkgs#deadnix -- .
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FLAKE MANAGEMENT
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Update all flake inputs
+update:
+    nix flake update
+
+# Update specific input
+update-nixpkgs:
+    nix flake lock --update-input nixpkgs
+
+# Show flake info
+info:
+    nix flake show
+    nix flake metadata
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DEBUGGING
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Show derivation
+show-drv:
+    nix show-derivation .#default
+
+# Show runtime closure
+show-closure:
+    nix-store -qR ./result
+
+# Open Nix REPL
+repl:
+    nix repl .#
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CLEANUP
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Remove build artifacts
+clean:
+    rm -f result result-*
+
+# Garbage collect Nix store
+gc:
+    nix-collect-garbage
+
+# Full cleanup (including old generations)
+gc-full:
+    nix-collect-garbage -d
+    nix store optimise
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CI HELPERS
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Full CI check sequence
+ci: fmt-check lint check
+    @echo "All CI checks passed!"
+
+# Pre-commit hook
+pre-commit: fmt lint check
+    @echo "Ready to commit!"
+```
+
+### .envrc Template for direnv
+
+```bash
+# .envrc - direnv configuration for automatic shell loading
+# Requires: nix-direnv (https://github.com/nix-community/nix-direnv)
+
+# Use the flake's default devShell
+use flake
+
+# Or use a specific devShell:
+# use flake .#python
+
+# Optional: Watch additional files for changes
+watch_file flake.nix
+watch_file flake.lock
+watch_file nix/*.nix
+
+# Optional: Set additional environment variables
+export PROJECT_ENV="development"
+
+# Optional: Load secrets from a gitignored file
+if [ -f .env.local ]; then
+    source .env.local
+fi
+```
+
+### .gitignore Template for Nix Projects
+
+```gitignore
+# Nix build outputs
+result
+result-*
+
+# direnv
+.direnv/
+
+# Editor-specific
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# Local environment overrides (keep secrets out of git)
+.env.local
+.env.*.local
+
+# Do NOT ignore these - they should be committed:
+# flake.lock   <- COMMIT THIS for reproducibility!
+# .envrc       <- COMMIT THIS for team consistency
+```
 
 ---
 

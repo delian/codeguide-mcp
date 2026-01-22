@@ -187,6 +187,555 @@ If verification fails:
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new Chrome extension code.**
+
+### TDD Cycle Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    TDD CYCLE FOR CHROME EXTENSIONS              │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│    ┌─────────┐         ┌─────────┐         ┌──────────┐        │
+│    │   RED   │ ──────► │  GREEN  │ ──────► │ REFACTOR │        │
+│    │  Write  │         │  Write  │         │ Improve  │        │
+│    │ Failing │         │ Minimal │         │   Code   │        │
+│    │  Test   │         │  Code   │         │  Quality │        │
+│    └────┬────┘         └─────────┘         └────┬─────┘        │
+│         │                                       │               │
+│         └───────────────────────────────────────┘               │
+│                         REPEAT                                  │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### TDD Workflow Steps
+
+1. **RED Phase**: Write a failing test that defines expected behavior
+2. **GREEN Phase**: Write the minimum code to make the test pass
+3. **REFACTOR Phase**: Improve code quality while keeping tests green
+
+### Example: TDD for Chrome Extension Message Handler
+
+```typescript
+// ============================================================
+// Step 1: RED - Write failing test first
+// ============================================================
+// test/features/messaging/domain/usecases/message_handler.test.ts
+
+import { MessageHandler } from "../../../../src/features/messaging/domain/usecases/message_handler";
+
+describe("MessageHandler", () => {
+  let handler: MessageHandler;
+
+  beforeEach(() => {
+    handler = new MessageHandler();
+  });
+
+  describe("handleMessage", () => {
+    it("should return settings when action is GET_SETTINGS", async () => {
+      const message = { action: "GET_SETTINGS" };
+
+      const result = await handler.handleMessage(message);
+
+      expect(result).toHaveProperty("success", true);
+      expect(result).toHaveProperty("data");
+    });
+
+    it("should return error for unknown action", async () => {
+      const message = { action: "UNKNOWN_ACTION" };
+
+      const result = await handler.handleMessage(message);
+
+      expect(result).toHaveProperty("success", false);
+      expect(result).toHaveProperty("error");
+    });
+  });
+});
+
+// Run: npm test
+// FAILS - MessageHandler does not exist yet ✗
+
+// ============================================================
+// Step 2: GREEN - Write minimal implementation to pass tests
+// ============================================================
+// src/features/messaging/domain/usecases/message_handler.ts
+
+/**
+ * Handles extension messages.
+ */
+export interface MessageResult {
+  success: boolean;
+  data?: unknown;
+  error?: string;
+}
+
+export interface ExtensionMessage {
+  action: string;
+  payload?: unknown;
+}
+
+/**
+ * Message handler for Chrome extension communication.
+ */
+export class MessageHandler {
+  /**
+   * Handles incoming messages.
+   *
+   * @param message - The message to handle
+   * @returns Result of message handling
+   */
+  async handleMessage(message: ExtensionMessage): Promise<MessageResult> {
+    switch (message.action) {
+      case "GET_SETTINGS":
+        return { success: true, data: {} };
+      default:
+        return { success: false, error: `Unknown action: ${message.action}` };
+    }
+  }
+}
+
+// Run: npm test
+// PASSES - Tests pass with minimal implementation ✓
+
+// ============================================================
+// Step 3: REFACTOR - Improve code while keeping tests green
+// ============================================================
+// src/features/messaging/domain/usecases/message_handler.ts
+
+import type { StorageRepository } from "../../../storage/domain/repositories/storage_repository";
+
+/**
+ * Message handler with dependency injection for testability.
+ */
+export class MessageHandler {
+  constructor(private readonly storageRepository: StorageRepository) {}
+
+  /**
+   * Handles incoming messages with proper error handling.
+   *
+   * @param message - The message to handle
+   * @returns Result of message handling
+   */
+  async handleMessage(message: ExtensionMessage): Promise<MessageResult> {
+    try {
+      switch (message.action) {
+        case "GET_SETTINGS":
+          return await this.handleGetSettings();
+        case "SAVE_SETTINGS":
+          return await this.handleSaveSettings(message.payload);
+        default:
+          return this.createErrorResult(`Unknown action: ${message.action}`);
+      }
+    } catch (error) {
+      return this.createErrorResult(`Handler error: ${error}`);
+    }
+  }
+
+  private async handleGetSettings(): Promise<MessageResult> {
+    const settings = await this.storageRepository.getSettings();
+    return { success: true, data: settings };
+  }
+
+  private async handleSaveSettings(payload: unknown): Promise<MessageResult> {
+    await this.storageRepository.saveSettings(payload as Settings);
+    return { success: true };
+  }
+
+  private createErrorResult(error: string): MessageResult {
+    return { success: false, error };
+  }
+}
+
+// Run: npm test
+// PASSES - Tests still pass after refactoring ✓
+```
+
+### TDD for Content Scripts
+
+```typescript
+// ============================================================
+// Step 1: RED - Write failing test for content script utility
+// ============================================================
+// test/features/content/domain/utils/dom_utils.test.ts
+
+import { DOMUtils } from "../../../../src/features/content/domain/utils/dom_utils";
+
+describe("DOMUtils", () => {
+  describe("extractPageMetadata", () => {
+    it("should extract title from document", () => {
+      // Mock DOM
+      document.title = "Test Page Title";
+
+      const metadata = DOMUtils.extractPageMetadata();
+
+      expect(metadata.title).toBe("Test Page Title");
+    });
+
+    it("should extract meta description", () => {
+      const meta = document.createElement("meta");
+      meta.name = "description";
+      meta.content = "Test description";
+      document.head.appendChild(meta);
+
+      const metadata = DOMUtils.extractPageMetadata();
+
+      expect(metadata.description).toBe("Test description");
+    });
+  });
+});
+
+// Run: npm test
+// FAILS - DOMUtils does not exist ✗
+
+// ============================================================
+// Step 2: GREEN - Minimal implementation
+// ============================================================
+// src/features/content/domain/utils/dom_utils.ts
+
+export interface PageMetadata {
+  title: string;
+  description: string;
+  url: string;
+}
+
+export class DOMUtils {
+  static extractPageMetadata(): PageMetadata {
+    return {
+      title: document.title,
+      description: this.getMetaContent("description"),
+      url: window.location.href,
+    };
+  }
+
+  private static getMetaContent(name: string): string {
+    const meta = document.querySelector(`meta[name="${name}"]`);
+    return meta?.getAttribute("content") ?? "";
+  }
+}
+
+// Run: npm test
+// PASSES ✓
+```
+
+### TDD Benefits for Chrome Extensions
+
+1. **Testable Architecture**: Forces separation of Chrome API calls from business logic
+2. **Reliable Message Handling**: Ensures all message types are properly handled
+3. **Safe Refactoring**: Confidence when updating extension code
+4. **Documentation**: Tests serve as living documentation of expected behavior
+5. **Regression Prevention**: Catch breaking changes before they reach users
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                BUG FIX PROTOCOL FOR CHROME EXTENSIONS           │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌──────────────┐                                               │
+│  │  🐛 BUG      │                                               │
+│  │  REPORTED    │                                               │
+│  └──────┬───────┘                                               │
+│         │                                                       │
+│         ▼                                                       │
+│  ┌──────────────┐                                               │
+│  │  ✍️ WRITE    │  Write test that REPRODUCES the bug           │
+│  │  FAILING     │  (Test MUST fail initially)                   │
+│  │  TEST        │                                               │
+│  └──────┬───────┘                                               │
+│         │                                                       │
+│         ▼                                                       │
+│  ┌──────────────┐                                               │
+│  │  ✅ VERIFY   │  Confirm test fails for the RIGHT reason      │
+│  │  FAILURE     │  (Not a false positive)                       │
+│  └──────┬───────┘                                               │
+│         │                                                       │
+│         ▼                                                       │
+│  ┌──────────────┐                                               │
+│  │  🔧 FIX      │  Implement the fix                            │
+│  │  THE BUG     │  (Make the test pass)                         │
+│  └──────┬───────┘                                               │
+│         │                                                       │
+│         ▼                                                       │
+│  ┌──────────────┐                                               │
+│  │  🟢 VERIFY   │  Run ALL tests to ensure no regressions       │
+│  │  ALL TESTS   │  (All tests MUST pass)                        │
+│  └──────┬───────┘                                               │
+│         │                                                       │
+│         ▼                                                       │
+│  ┌──────────────┐                                               │
+│  │  📝 DOCUMENT │  Add bug ID and description to test           │
+│  │  IN TEST     │  comments for future reference                │
+│  └──────┬───────┘                                               │
+│         │                                                       │
+│         ▼                                                       │
+│  ┌──────────────┐                                               │
+│  │  🚀 DEPLOY   │  Regression permanently prevented             │
+│  │  WITH        │                                               │
+│  │  CONFIDENCE  │                                               │
+│  └──────────────┘                                               │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Example: Storage Bug Fix
+
+```typescript
+// ============================================================
+// Bug Report #456: Settings lost after browser restart
+// ============================================================
+// Symptoms: User settings disappear after closing and reopening browser
+// Root Cause: Using session storage instead of sync storage
+
+// ============================================================
+// Step 1: Write test that REPRODUCES the bug
+// ============================================================
+// test/features/storage/data/repositories/chrome_storage_repository.test.ts
+
+describe("ChromeStorageRepository - Bug #456", () => {
+  it("should persist settings across sessions - Bug #456", async () => {
+    // Bug: Settings not persisted to sync storage
+    // Discovered: 2026-01-18
+    // This test prevents regression
+
+    const repository = new ChromeStorageRepository();
+    const settings: Settings = {
+      theme: "dark",
+      notifications: true,
+      preferences: ["pref1"],
+      lastSync: Date.now(),
+    };
+
+    // Save settings
+    await repository.saveSettings(settings);
+
+    // Verify sync storage was used (not session storage)
+    expect(mockChrome.storage.sync.set).toHaveBeenCalledWith({
+      settings: settings,
+    });
+
+    // Verify session storage was NOT used
+    expect(mockChrome.storage.session?.set).not.toHaveBeenCalled();
+  });
+});
+
+// Run: npm test
+// FAILS - Bug reproduced: using session storage ✗
+
+// ============================================================
+// Step 2: Fix the bug
+// ============================================================
+// src/features/storage/data/repositories/chrome_storage_repository.ts
+
+export class ChromeStorageRepository implements StorageRepository {
+  // BUG FIX #456: Changed from session to sync storage
+  // Previously: chrome.storage.session (data lost on restart)
+  // Fixed: chrome.storage.sync (data persists across sessions)
+
+  async saveSettings(settings: Settings): Promise<void> {
+    try {
+      // Use sync storage for persistence across sessions
+      await chrome.storage.sync.set({ [this.storageKey]: settings });
+    } catch (error) {
+      throw new Error(`Failed to save settings: ${error}`);
+    }
+  }
+}
+
+// Run: npm test
+// PASSES - Bug fixed, regression test in place ✓
+```
+
+### Example: Content Script Bug Fix
+
+```typescript
+// ============================================================
+// Bug Report #789: Content script fails on dynamically loaded pages
+// ============================================================
+// Symptoms: Extension doesn't work on SPAs after navigation
+// Root Cause: Content script not re-initializing on history changes
+
+// ============================================================
+// Step 1: Write test that REPRODUCES the bug
+// ============================================================
+// test/features/content/content_initializer.test.ts
+
+describe("ContentInitializer - Bug #789", () => {
+  it("should reinitialize on history state changes - Bug #789", () => {
+    // Bug: Content script not handling SPA navigation
+    // Discovered: 2026-01-19
+    // This test prevents regression
+
+    const initializer = new ContentInitializer();
+    const initSpy = jest.spyOn(initializer, "init");
+
+    initializer.setupNavigationListeners();
+
+    // Simulate SPA navigation via history.pushState
+    window.dispatchEvent(new PopStateEvent("popstate"));
+
+    expect(initSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("should handle pushState navigation - Bug #789", () => {
+    const initializer = new ContentInitializer();
+    const initSpy = jest.spyOn(initializer, "init");
+
+    initializer.setupNavigationListeners();
+
+    // Simulate pushState (common in React/Vue/Angular apps)
+    history.pushState({}, "", "/new-page");
+    window.dispatchEvent(new Event("pushstate"));
+
+    expect(initSpy).toHaveBeenCalled();
+  });
+});
+
+// Run: npm test
+// FAILS - Navigation listeners not implemented ✗
+
+// ============================================================
+// Step 2: Fix the bug
+// ============================================================
+// src/features/content/content_initializer.ts
+
+/**
+ * Initializes content script with SPA support.
+ * BUG FIX #789: Added navigation listeners for SPA compatibility
+ */
+export class ContentInitializer {
+  private isInitialized = false;
+
+  /**
+   * Sets up listeners for SPA navigation events.
+   * Ensures content script reinitializes on route changes.
+   */
+  setupNavigationListeners(): void {
+    // Handle back/forward navigation
+    window.addEventListener("popstate", () => this.init());
+
+    // Intercept pushState for SPA frameworks
+    const originalPushState = history.pushState;
+    history.pushState = (...args) => {
+      originalPushState.apply(history, args);
+      window.dispatchEvent(new Event("pushstate"));
+      this.init();
+    };
+
+    // Listen for custom pushstate events
+    window.addEventListener("pushstate", () => this.init());
+  }
+
+  init(): void {
+    // Reinitialize content script logic
+    this.isInitialized = true;
+    // ... initialization logic
+  }
+}
+
+// Run: npm test
+// PASSES - Bug fixed, SPA navigation now supported ✓
+```
+
+### Example: Popup Communication Bug Fix
+
+```typescript
+// ============================================================
+// Bug Report #1024: Popup shows stale data after settings change
+// ============================================================
+// Symptoms: Popup doesn't reflect settings changes until manually refreshed
+// Root Cause: Missing storage change listener in popup
+
+// ============================================================
+// Step 1: Write test that REPRODUCES the bug
+// ============================================================
+describe("PopupController - Bug #1024", () => {
+  it("should update UI when storage changes - Bug #1024", async () => {
+    // Bug: Popup not listening to storage changes
+    // Discovered: 2026-01-20
+    // This test prevents regression
+
+    const controller = new PopupController();
+    const updateUISpy = jest.spyOn(controller, "updateUI");
+
+    controller.init();
+
+    // Simulate storage change from options page
+    const storageListener = mockChrome.storage.onChanged.addListener
+      .mock.calls[0][0];
+
+    storageListener(
+      { settings: { newValue: { theme: "dark" } } },
+      "sync"
+    );
+
+    expect(updateUISpy).toHaveBeenCalledWith({ theme: "dark" });
+  });
+});
+
+// Run: npm test
+// FAILS - Storage listener not registered ✗
+
+// ============================================================
+// Step 2: Fix the bug
+// ============================================================
+// src/features/popup/presentation/popup_controller.ts
+
+/**
+ * Popup controller with reactive storage updates.
+ * BUG FIX #1024: Added storage change listener
+ */
+export class PopupController {
+  init(): void {
+    this.loadInitialData();
+    this.setupStorageListener();  // BUG FIX #1024
+  }
+
+  /**
+   * Listens for storage changes and updates UI accordingly.
+   * BUG FIX #1024: Ensures popup reflects real-time changes
+   */
+  private setupStorageListener(): void {
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName === "sync" && changes.settings?.newValue) {
+        this.updateUI(changes.settings.newValue);
+      }
+    });
+  }
+
+  updateUI(settings: Settings): void {
+    // Update popup UI with new settings
+  }
+}
+
+// Run: npm test
+// PASSES - Bug fixed, popup now updates reactively ✓
+```
+
+### Bug Fix Checklist
+
+Before marking a bug as fixed:
+
+- [ ] Regression test written BEFORE implementing fix
+- [ ] Test reproduces the exact bug behavior
+- [ ] Test fails for the correct reason
+- [ ] Fix implemented with minimal changes
+- [ ] Regression test now passes
+- [ ] All existing tests still pass
+- [ ] Bug ID documented in test comments
+- [ ] Code reviewed for similar issues elsewhere
+
+---
+
 ## 3. Dependency Management (MANDATORY)
 
 ### A. package.json Best Practices
@@ -942,54 +1491,301 @@ eval(userInput);  // ❌ Never use eval
 
 ---
 
-## 12. Bug Fix Protocol (MANDATORY)
+## 12. Quick Reference
 
-**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+### Common Commands
 
-### Bug Fix Workflow
+```bash
+# Build extension
+npm run build
 
+# Development mode with watch
+npm run dev
+
+# Type checking
+npm run type-check
+# OR
+tsc --noEmit
+
+# Run tests
+npm test
+
+# Run tests with coverage
+npm test -- --coverage
+
+# Lint code
+npm run lint
+# OR
+eslint src/
+
+# Format code
+npm run format
+# OR
+prettier --write src/
+
+# Generate documentation
+npm run docs
+# OR
+typedoc src/
+
+# Load unpacked extension in Chrome
+# 1. Navigate to chrome://extensions/
+# 2. Enable "Developer mode"
+# 3. Click "Load unpacked"
+# 4. Select dist/ folder
 ```
-1. 🐛 Bug Reported/Discovered
-   ↓
-2. ✍️ Write a test that REPRODUCES the bug (test will FAIL)
-   ↓
-3. ✅ Verify the test fails for the right reason
-   ↓
-4. 🔧 Fix the bug (make the test pass)
-   ↓
-5. 🟢 Verify the test now PASSES
-   ↓
-6. 📝 Document the bug in test comments (include bug ID)
-   ↓
-7. 🚀 Deploy with confidence (regression prevented)
+
+### Manifest V3 Structure Reference
+
+```json
+{
+  "manifest_version": 3,
+  "name": "Extension Name",
+  "version": "1.0.0",
+  "description": "Extension description",
+
+  // Icons (required for Chrome Web Store)
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+
+  // Permissions (follow least privilege)
+  "permissions": [
+    "storage",           // For chrome.storage API
+    "activeTab",         // Access to current tab only when clicked
+    "alarms",            // For scheduled tasks
+    "notifications"      // For chrome.notifications API
+  ],
+
+  // Host permissions (separate from permissions in V3)
+  "host_permissions": [
+    "https://*.example.com/*"
+  ],
+
+  // Background service worker (replaces background pages)
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+
+  // Browser action (popup)
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Extension Title",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png"
+    }
+  },
+
+  // Content scripts
+  "content_scripts": [
+    {
+      "matches": ["https://*.example.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+
+  // Options page
+  "options_page": "options.html",
+  // OR options UI (opens in popup)
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
+  },
+
+  // Web accessible resources (for injected scripts)
+  "web_accessible_resources": [
+    {
+      "resources": ["injected.js", "images/*"],
+      "matches": ["https://*.example.com/*"]
+    }
+  ],
+
+  // Content Security Policy (optional, has defaults)
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}
 ```
 
-### Example Bug Fix
+### Common Chrome Extension Patterns
+
+#### Message Passing Between Components
 
 ```typescript
-// Bug Report #456: Extension popup doesn't save settings when theme is 'dark'
+// Background -> Content Script
+chrome.tabs.sendMessage(tabId, { action: "UPDATE", data });
 
-// Step 1-2: Write test that reproduces the bug
-describe('ChromeStorageRepository - Bug #456', () => {
-  it('should save dark theme settings - Bug #456', async () => {
-    // Bug: Dark theme settings not persisted
-    // Discovered: 2026-01-18
-    // This test prevents regression
-    
-    const repository = new ChromeStorageRepository();
-    const settings = { theme: 'dark', notifications: true };
-    
-    await repository.saveSettings(settings);
-    const retrieved = await repository.getSettings();
-    
-    expect(retrieved?.theme).toBe('dark');
-  });
+// Content Script -> Background
+chrome.runtime.sendMessage({ action: "GET_DATA" }, (response) => {
+  console.log(response);
 });
-// Test FAILS - reproduces bug ✓
 
-// Step 3: Fix the bug (update saveSettings implementation)
-// Test PASSES - bug fixed ✓
+// Popup -> Background
+chrome.runtime.sendMessage({ action: "SAVE" });
+
+// Long-lived connections
+const port = chrome.runtime.connect({ name: "channel" });
+port.postMessage({ action: "SUBSCRIBE" });
+port.onMessage.addListener((msg) => console.log(msg));
 ```
+
+#### Storage Patterns
+
+```typescript
+// Sync storage (syncs across devices, 100KB limit)
+await chrome.storage.sync.set({ key: value });
+const result = await chrome.storage.sync.get("key");
+
+// Local storage (larger limit, device-only)
+await chrome.storage.local.set({ key: largeData });
+
+// Session storage (cleared on browser close)
+await chrome.storage.session.set({ tempKey: value });
+
+// Listen for changes
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (changes.key) {
+    console.log("Old:", changes.key.oldValue);
+    console.log("New:", changes.key.newValue);
+  }
+});
+```
+
+#### Tab Operations
+
+```typescript
+// Get current active tab
+const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+// Create new tab
+const newTab = await chrome.tabs.create({ url: "https://example.com" });
+
+// Execute script in tab
+await chrome.scripting.executeScript({
+  target: { tabId: tab.id },
+  func: () => document.title,
+});
+
+// Insert CSS
+await chrome.scripting.insertCSS({
+  target: { tabId: tab.id },
+  css: "body { background: red; }",
+});
+```
+
+#### Alarms for Scheduled Tasks
+
+```typescript
+// Create alarm (minimum interval: 1 minute)
+chrome.alarms.create("myAlarm", { periodInMinutes: 5 });
+
+// Listen for alarm
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === "myAlarm") {
+    // Handle scheduled task
+  }
+});
+
+// Clear alarm
+chrome.alarms.clear("myAlarm");
+```
+
+#### Context Menus
+
+```typescript
+// Create context menu item
+chrome.contextMenus.create({
+  id: "myContextMenu",
+  title: "Do Something",
+  contexts: ["selection", "page"],
+});
+
+// Handle click
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === "myContextMenu") {
+    console.log("Selected text:", info.selectionText);
+  }
+});
+```
+
+### Project Structure Quick Reference
+
+```
+my-extension/
+├── src/
+│   ├── background/
+│   │   └── background.ts       # Service worker
+│   ├── content/
+│   │   ├── content.ts          # Content script
+│   │   └── content.css         # Content styles
+│   ├── popup/
+│   │   ├── popup.html          # Popup UI
+│   │   ├── popup.ts            # Popup logic
+│   │   └── popup.css           # Popup styles
+│   ├── options/
+│   │   ├── options.html        # Options page
+│   │   └── options.ts          # Options logic
+│   ├── features/               # Feature modules (hexagonal)
+│   │   ├── storage/
+│   │   │   ├── domain/         # Business logic
+│   │   │   ├── data/           # Chrome API adapters
+│   │   │   └── presentation/   # UI controllers
+│   │   └── messaging/
+│   └── shared/
+│       ├── types/              # Shared TypeScript types
+│       └── utils/              # Utility functions
+├── test/
+│   ├── unit/                   # Unit tests
+│   └── integration/            # Integration tests
+├── dist/                       # Build output
+├── icons/                      # Extension icons
+├── manifest.json               # Extension manifest
+├── package.json
+├── tsconfig.json
+├── webpack.config.js           # Build configuration
+└── jest.config.js              # Test configuration
+```
+
+### Testing Patterns Quick Reference
+
+```typescript
+// Mock Chrome API
+const mockChrome = {
+  storage: {
+    sync: {
+      get: jest.fn(),
+      set: jest.fn(),
+    },
+  },
+  runtime: {
+    sendMessage: jest.fn(),
+    onMessage: { addListener: jest.fn() },
+  },
+  tabs: {
+    query: jest.fn(),
+    sendMessage: jest.fn(),
+  },
+};
+(global as any).chrome = mockChrome;
+
+// Reset mocks between tests
+beforeEach(() => jest.clearAllMocks());
+
+// Test async Chrome API calls
+it("should handle storage", async () => {
+  mockChrome.storage.sync.get.mockResolvedValue({ key: "value" });
+  const result = await chrome.storage.sync.get("key");
+  expect(result.key).toBe("value");
+});
+```
+
+---
 
 ## 13. Summary
 

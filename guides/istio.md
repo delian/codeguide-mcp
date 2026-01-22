@@ -253,6 +253,638 @@ spec:
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new Istio configurations.**
+
+### TDD Cycle
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    ISTIO TDD WORKFLOW                               │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│   1. RED: Write failing validation/test first                       │
+│      │                                                              │
+│      │   • Define expected behavior in test                         │
+│      │   • Run istioctl analyze (should report issues)              │
+│      │   • Verify connectivity test fails                           │
+│      ▼                                                              │
+│   2. GREEN: Write minimal config to make it pass                    │
+│      │                                                              │
+│      │   • Create VirtualService/DestinationRule                    │
+│      │   • Apply configuration                                      │
+│      │   • Run istioctl analyze (no issues)                         │
+│      ▼                                                              │
+│   3. REFACTOR: Improve config while keeping tests green             │
+│      │                                                              │
+│      │   • Add traffic policies                                     │
+│      │   • Optimize connection pools                                │
+│      │   • Add observability                                        │
+│      ▼                                                              │
+│   ┌──┴──┐                                                           │
+│   │     │ Repeat for each configuration requirement                 │
+│   └─────┘                                                           │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Example TDD Workflow for VirtualService Configuration
+
+```yaml
+# ═══════════════════════════════════════════════════════════════════════
+# Step 1: RED - Define the test/validation first
+# ═══════════════════════════════════════════════════════════════════════
+
+# test-connectivity.sh - Write this FIRST before any VirtualService
+#!/bin/bash
+set -e
+
+echo "Testing order-service routing..."
+
+# Test 1: Verify VirtualService exists
+kubectl get virtualservice order-service -n production || {
+    echo "FAIL: VirtualService order-service not found"
+    exit 1
+}
+
+# Test 2: Verify traffic reaches the service
+RESPONSE=$(kubectl exec -n production deploy/test-client -- \
+    curl -s -o /dev/null -w "%{http_code}" \
+    http://order-service:8080/health)
+
+if [ "$RESPONSE" != "200" ]; then
+    echo "FAIL: Expected 200, got $RESPONSE"
+    exit 1
+fi
+
+# Test 3: Verify canary header routing works
+CANARY_RESPONSE=$(kubectl exec -n production deploy/test-client -- \
+    curl -s -H "x-canary: true" \
+    http://order-service:8080/version)
+
+if [[ "$CANARY_RESPONSE" != *"canary"* ]]; then
+    echo "FAIL: Canary routing not working"
+    exit 1
+fi
+
+echo "PASS: All routing tests passed"
+
+# Run: ./test-connectivity.sh
+# FAILS - VirtualService not found (expected in RED phase)
+```
+
+```yaml
+# ═══════════════════════════════════════════════════════════════════════
+# Step 2: GREEN - Write minimal VirtualService to pass tests
+# ═══════════════════════════════════════════════════════════════════════
+
+# order-service-virtualservice.yaml
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: order-service
+  namespace: production
+spec:
+  hosts:
+    - order-service
+  http:
+    # Canary routing (required by test)
+    - match:
+        - headers:
+            x-canary:
+              exact: "true"
+      route:
+        - destination:
+            host: order-service
+            subset: canary
+            port:
+              number: 8080
+    # Default routing
+    - route:
+        - destination:
+            host: order-service
+            subset: stable
+            port:
+              number: 8080
+---
+# Minimal DestinationRule for subsets
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: order-service
+  namespace: production
+spec:
+  host: order-service
+  subsets:
+    - name: stable
+      labels:
+        version: stable
+    - name: canary
+      labels:
+        version: canary
+
+# Apply: kubectl apply -f order-service-virtualservice.yaml
+# Run: ./test-connectivity.sh
+# PASSES - minimal configuration satisfies tests
+```
+
+```yaml
+# ═══════════════════════════════════════════════════════════════════════
+# Step 3: REFACTOR - Enhance configuration while keeping tests green
+# ═══════════════════════════════════════════════════════════════════════
+
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: order-service
+  namespace: production
+spec:
+  hosts:
+    - order-service
+    - order-service.production.svc.cluster.local
+  http:
+    # Canary routing with full traffic control
+    - match:
+        - headers:
+            x-canary:
+              exact: "true"
+      route:
+        - destination:
+            host: order-service
+            subset: canary
+            port:
+              number: 8080
+      timeout: 30s
+      retries:
+        attempts: 3
+        perTryTimeout: 10s
+        retryOn: 5xx,reset,connect-failure
+
+    # Production traffic with weighted routing
+    - route:
+        - destination:
+            host: order-service
+            subset: stable
+            port:
+              number: 8080
+          weight: 95
+        - destination:
+            host: order-service
+            subset: canary
+            port:
+              number: 8080
+          weight: 5
+      timeout: 30s
+      retries:
+        attempts: 3
+        perTryTimeout: 10s
+        retryOn: 5xx,reset,connect-failure
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: order-service
+  namespace: production
+spec:
+  host: order-service
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 100
+        connectTimeout: 5s
+      http:
+        h2UpgradePolicy: UPGRADE
+        http1MaxPendingRequests: 100
+        http2MaxRequests: 1000
+    loadBalancer:
+      simple: LEAST_REQUEST
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 10s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+    tls:
+      mode: ISTIO_MUTUAL
+  subsets:
+    - name: stable
+      labels:
+        version: stable
+    - name: canary
+      labels:
+        version: canary
+
+# Apply: kubectl apply -f order-service-virtualservice.yaml
+# Run: ./test-connectivity.sh
+# PASSES - enhanced configuration still satisfies all tests
+
+# Run: istioctl analyze -n production
+# No validation issues found - configuration is valid
+```
+
+### Visual TDD Step-by-Step Example
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ TDD FOR ISTIO AUTHORIZATION POLICY                                      │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│ REQUIREMENT: Only payment-service can call order-service /api/orders/*  │
+│                                                                         │
+│ ┌─────────────────────────────────────────────────────────────────────┐ │
+│ │ STEP 1: RED - Write authorization test                              │ │
+│ ├─────────────────────────────────────────────────────────────────────┤ │
+│ │                                                                     │ │
+│ │  # test-authz.sh                                                    │ │
+│ │  # Test: payment-service CAN access order-service                   │ │
+│ │  kubectl exec -n production deploy/payment-service -- \             │ │
+│ │      curl -s -o /dev/null -w "%{http_code}" \                       │ │
+│ │      http://order-service:8080/api/orders/123                       │ │
+│ │  # Expected: 200                                                    │ │
+│ │                                                                     │ │
+│ │  # Test: other-service CANNOT access order-service                  │ │
+│ │  kubectl exec -n production deploy/other-service -- \               │ │
+│ │      curl -s -o /dev/null -w "%{http_code}" \                       │ │
+│ │      http://order-service:8080/api/orders/123                       │ │
+│ │  # Expected: 403 (RBAC denied)                                      │ │
+│ │                                                                     │ │
+│ │  Result: FAILS (no policy = all traffic allowed)                    │ │
+│ └─────────────────────────────────────────────────────────────────────┘ │
+│                            │                                            │
+│                            ▼                                            │
+│ ┌─────────────────────────────────────────────────────────────────────┐ │
+│ │ STEP 2: GREEN - Create AuthorizationPolicy                          │ │
+│ ├─────────────────────────────────────────────────────────────────────┤ │
+│ │                                                                     │ │
+│ │  apiVersion: security.istio.io/v1beta1                              │ │
+│ │  kind: AuthorizationPolicy                                          │ │
+│ │  metadata:                                                          │ │
+│ │    name: order-service-authz                                        │ │
+│ │    namespace: production                                            │ │
+│ │  spec:                                                              │ │
+│ │    selector:                                                        │ │
+│ │      matchLabels:                                                   │ │
+│ │        app: order-service                                           │ │
+│ │    action: ALLOW                                                    │ │
+│ │    rules:                                                           │ │
+│ │      - from:                                                        │ │
+│ │          - source:                                                  │ │
+│ │              principals:                                            │ │
+│ │                - "cluster.local/ns/production/sa/payment-service"   │ │
+│ │        to:                                                          │ │
+│ │          - operation:                                               │ │
+│ │              paths: ["/api/orders/*"]                               │ │
+│ │                                                                     │ │
+│ │  Result: PASSES (policy enforces access control)                    │ │
+│ └─────────────────────────────────────────────────────────────────────┘ │
+│                            │                                            │
+│                            ▼                                            │
+│ ┌─────────────────────────────────────────────────────────────────────┐ │
+│ │ STEP 3: REFACTOR - Add health check and metrics exceptions          │ │
+│ ├─────────────────────────────────────────────────────────────────────┤ │
+│ │                                                                     │ │
+│ │  rules:                                                             │ │
+│ │    # Health checks from anywhere                                    │ │
+│ │    - to:                                                            │ │
+│ │        - operation:                                                 │ │
+│ │            paths: ["/health/*", "/metrics"]                         │ │
+│ │    # Payment service access                                         │ │
+│ │    - from:                                                          │ │
+│ │        - source:                                                    │ │
+│ │            principals: ["cluster.local/ns/production/sa/payment"]   │ │
+│ │      to:                                                            │ │
+│ │        - operation:                                                 │ │
+│ │            paths: ["/api/orders/*"]                                 │ │
+│ │            methods: ["GET", "POST"]                                 │ │
+│ │                                                                     │ │
+│ │  Result: PASSES (all original tests still pass)                     │ │
+│ └─────────────────────────────────────────────────────────────────────┘ │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every Istio configuration bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    ISTIO BUG FIX WORKFLOW                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   1. Bug Reported/Discovered                                            │
+│      │   (e.g., "503 errors when calling payment-service")              │
+│      │                                                                  │
+│      ▼                                                                  │
+│   2. Write test that REPRODUCES the bug (test will FAIL)                │
+│      │   • Create connectivity test script                              │
+│      │   • Test should demonstrate the failure                          │
+│      │   • Document expected vs actual behavior                         │
+│      │                                                                  │
+│      ▼                                                                  │
+│   3. Verify the test fails for the RIGHT reason                         │
+│      │   • Run istioctl analyze                                         │
+│      │   • Check proxy logs: kubectl logs <pod> -c istio-proxy          │
+│      │   • Verify mTLS status: istioctl x authz check <pod>             │
+│      │                                                                  │
+│      ▼                                                                  │
+│   4. Fix the Istio configuration (make test pass)                       │
+│      │   • Apply DestinationRule/PeerAuthentication fix                 │
+│      │   • Update VirtualService if routing issue                       │
+│      │   • Verify with istioctl analyze                                 │
+│      │                                                                  │
+│      ▼                                                                  │
+│   5. Verify the test now PASSES                                         │
+│      │   • Run regression test                                          │
+│      │   • Verify no other tests broken                                 │
+│      │                                                                  │
+│      ▼                                                                  │
+│   6. Document the bug in test comments (include ticket ID)              │
+│      │                                                                  │
+│      ▼                                                                  │
+│   7. Add to permanent test suite (regression prevented forever)         │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Example Bug Fix: mTLS Mismatch Causing 503 Errors
+
+```yaml
+# ═══════════════════════════════════════════════════════════════════════
+# Bug Report #IST-1234: 503 Service Unavailable when calling payment-service
+#
+# Symptoms:
+# - Intermittent 503 errors from order-service to payment-service
+# - Error in logs: "upstream connect error or disconnect/reset before headers"
+# - Started after enabling STRICT mTLS on payment-service namespace
+# ═══════════════════════════════════════════════════════════════════════
+
+# ───────────────────────────────────────────────────────────────────────
+# Step 1-2: Write test that REPRODUCES the bug
+# ───────────────────────────────────────────────────────────────────────
+
+# test-ist-1234-mtls-regression.sh
+#!/bin/bash
+# Bug #IST-1234: Verify mTLS connectivity between order and payment services
+
+set -e
+
+echo "=== Bug #IST-1234 Regression Test ==="
+echo "Testing mTLS connectivity: order-service -> payment-service"
+
+# Test: order-service can reach payment-service
+RESPONSE=$(kubectl exec -n production deploy/order-service -c order-service -- \
+    curl -s -o /dev/null -w "%{http_code}" \
+    --max-time 10 \
+    http://payment-service.payment.svc.cluster.local:8080/health)
+
+if [ "$RESPONSE" != "200" ]; then
+    echo "FAIL: Bug #IST-1234 - Expected 200, got $RESPONSE"
+    echo "mTLS mismatch likely causing 503 errors"
+
+    # Diagnostic info
+    echo ""
+    echo "=== Diagnostic Information ==="
+    echo "Checking mTLS status..."
+    istioctl x authz check deploy/payment-service -n payment 2>/dev/null || true
+
+    echo ""
+    echo "Checking DestinationRule..."
+    kubectl get destinationrule -n production -o yaml 2>/dev/null | grep -A5 "payment-service" || echo "No DestinationRule found"
+
+    exit 1
+fi
+
+echo "PASS: Bug #IST-1234 regression test passed"
+echo "mTLS connectivity working correctly"
+
+# Run: ./test-ist-1234-mtls-regression.sh
+# FAILS - demonstrates the bug exists
+```
+
+```yaml
+# ───────────────────────────────────────────────────────────────────────
+# Step 3: Root cause analysis
+# ───────────────────────────────────────────────────────────────────────
+
+# Diagnosis commands:
+#
+# 1. Check PeerAuthentication in payment namespace
+#    kubectl get peerauthentication -n payment
+#    > Shows: STRICT mTLS enabled
+#
+# 2. Check if DestinationRule exists for cross-namespace call
+#    kubectl get destinationrule -n production | grep payment
+#    > Shows: No DestinationRule (MISSING!)
+#
+# 3. Check proxy config
+#    istioctl proxy-config cluster deploy/order-service -n production | grep payment
+#    > Shows: outbound|8080||payment-service.payment.svc.cluster.local
+#    > TLS mode: DISABLED (should be ISTIO_MUTUAL)
+#
+# ROOT CAUSE: Missing DestinationRule in production namespace for
+#             cross-namespace mTLS to payment-service
+
+# ───────────────────────────────────────────────────────────────────────
+# Step 4: Fix the bug - Add missing DestinationRule
+# ───────────────────────────────────────────────────────────────────────
+
+# fix-ist-1234-mtls.yaml
+# Bug Fix #IST-1234: Add DestinationRule for cross-namespace mTLS
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: payment-service-mtls
+  namespace: production  # In the CALLER's namespace
+  labels:
+    bug-fix: "IST-1234"
+    description: "mTLS for cross-namespace call to payment-service"
+spec:
+  host: payment-service.payment.svc.cluster.local  # Full FQDN required
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL  # Enable mTLS to match STRICT PeerAuthentication
+    connectionPool:
+      tcp:
+        maxConnections: 100
+        connectTimeout: 5s
+      http:
+        http1MaxPendingRequests: 100
+        http2MaxRequests: 1000
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 10s
+      baseEjectionTime: 30s
+
+# Apply: kubectl apply -f fix-ist-1234-mtls.yaml
+```
+
+```bash
+# ───────────────────────────────────────────────────────────────────────
+# Step 5: Verify the fix
+# ───────────────────────────────────────────────────────────────────────
+
+# Run regression test
+./test-ist-1234-mtls-regression.sh
+# PASSES - bug is fixed
+
+# Verify with istioctl
+istioctl analyze -n production
+# No validation issues found
+
+# Verify mTLS is now active
+istioctl proxy-config cluster deploy/order-service -n production | grep payment
+# outbound|8080||payment-service.payment.svc.cluster.local - TLS: ISTIO_MUTUAL
+
+# ───────────────────────────────────────────────────────────────────────
+# Step 6-7: Document and add to permanent test suite
+# ───────────────────────────────────────────────────────────────────────
+
+# Move test to permanent regression suite
+mv test-ist-1234-mtls-regression.sh tests/regression/
+
+# Add to CI/CD pipeline
+# tests/regression/run-all.sh:
+#   ./test-ist-1234-mtls-regression.sh  # Bug #IST-1234: mTLS cross-namespace
+```
+
+### Visual Bug Fix Example: VirtualService Routing Issue
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ BUG FIX: Canary traffic not being routed correctly                      │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│ Bug #IST-5678: Canary header "x-canary: true" routes to stable instead  │
+│                                                                         │
+│ ┌─────────────────────────────────────────────────────────────────────┐ │
+│ │ STEP 1: Write regression test                                       │ │
+│ ├─────────────────────────────────────────────────────────────────────┤ │
+│ │                                                                     │ │
+│ │  # test-ist-5678-canary-routing.sh                                  │ │
+│ │  VERSION=$(kubectl exec deploy/test-client -n production -- \       │ │
+│ │      curl -s -H "x-canary: true" http://api-service:8080/version)   │ │
+│ │                                                                     │ │
+│ │  if [[ "$VERSION" != *"canary"* ]]; then                            │ │
+│ │      echo "FAIL: Bug #IST-5678 - Got '$VERSION', expected 'canary'" │ │
+│ │      exit 1                                                         │ │
+│ │  fi                                                                 │ │
+│ │                                                                     │ │
+│ │  Result: FAILS - returns "stable" instead of "canary"               │ │
+│ └─────────────────────────────────────────────────────────────────────┘ │
+│                            │                                            │
+│                            ▼                                            │
+│ ┌─────────────────────────────────────────────────────────────────────┐ │
+│ │ STEP 2: Identify root cause                                         │ │
+│ ├─────────────────────────────────────────────────────────────────────┤ │
+│ │                                                                     │ │
+│ │  # Check VirtualService                                             │ │
+│ │  kubectl get vs api-service -n production -o yaml                   │ │
+│ │                                                                     │ │
+│ │  # PROBLEM FOUND: Match order is wrong!                             │ │
+│ │  http:                                                              │ │
+│ │    - route:              # <-- Default route FIRST (catches all)    │ │
+│ │        - destination:                                               │ │
+│ │            subset: stable                                           │ │
+│ │    - match:              # <-- Canary match SECOND (never reached)  │ │
+│ │        - headers:                                                   │ │
+│ │            x-canary:                                                │ │
+│ │              exact: "true"                                          │ │
+│ │      route:                                                         │ │
+│ │        - destination:                                               │ │
+│ │            subset: canary                                           │ │
+│ │                                                                     │ │
+│ └─────────────────────────────────────────────────────────────────────┘ │
+│                            │                                            │
+│                            ▼                                            │
+│ ┌─────────────────────────────────────────────────────────────────────┐ │
+│ │ STEP 3: Fix - Correct match order                                   │ │
+│ ├─────────────────────────────────────────────────────────────────────┤ │
+│ │                                                                     │ │
+│ │  # fix-ist-5678-virtualservice.yaml                                 │ │
+│ │  apiVersion: networking.istio.io/v1beta1                            │ │
+│ │  kind: VirtualService                                               │ │
+│ │  metadata:                                                          │ │
+│ │    name: api-service                                                │ │
+│ │    labels:                                                          │ │
+│ │      bug-fix: "IST-5678"                                            │ │
+│ │  spec:                                                              │ │
+│ │    http:                                                            │ │
+│ │      - match:            # <-- Specific match FIRST                 │ │
+│ │          - headers:                                                 │ │
+│ │              x-canary:                                              │ │
+│ │                exact: "true"                                        │ │
+│ │        route:                                                       │ │
+│ │          - destination:                                             │ │
+│ │              subset: canary                                         │ │
+│ │      - route:            # <-- Default route LAST                   │ │
+│ │          - destination:                                             │ │
+│ │              subset: stable                                         │ │
+│ │                                                                     │ │
+│ └─────────────────────────────────────────────────────────────────────┘ │
+│                            │                                            │
+│                            ▼                                            │
+│ ┌─────────────────────────────────────────────────────────────────────┐ │
+│ │ STEP 4: Verify fix and add to regression suite                      │ │
+│ ├─────────────────────────────────────────────────────────────────────┤ │
+│ │                                                                     │ │
+│ │  kubectl apply -f fix-ist-5678-virtualservice.yaml                  │ │
+│ │  ./test-ist-5678-canary-routing.sh                                  │ │
+│ │                                                                     │ │
+│ │  Result: PASSES - canary routing now works correctly                │ │
+│ │                                                                     │ │
+│ │  # Add to permanent test suite                                      │ │
+│ │  mv test-ist-5678-canary-routing.sh tests/regression/               │ │
+│ │                                                                     │ │
+│ └─────────────────────────────────────────────────────────────────────┘ │
+│                                                                         │
+│ KEY LEARNING: In VirtualService, specific matches MUST come before      │
+│               default routes. Istio evaluates matches in order.         │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Bug Fix Checklist
+
+```
+ISTIO BUG FIX VERIFICATION:
+
+□ Regression Test Written
+  □ Test reproduces the exact bug behavior
+  □ Test fails BEFORE the fix is applied
+  □ Test is documented with bug ID and description
+  □ Test includes diagnostic output on failure
+
+□ Root Cause Identified
+  □ Ran istioctl analyze
+  □ Checked proxy logs (kubectl logs -c istio-proxy)
+  □ Verified mTLS status (istioctl x authz check)
+  □ Inspected relevant resources (VS, DR, PA, AP)
+
+□ Fix Applied
+  □ Configuration change is minimal and targeted
+  □ Fix includes bug ID in labels/annotations
+  □ istioctl analyze passes after fix
+  □ No unintended side effects on other services
+
+□ Verification Complete
+  □ Regression test now PASSES
+  □ All existing tests still pass
+  □ Manual verification performed
+  □ Monitoring confirms fix (no more errors)
+
+□ Documentation Updated
+  □ Test added to permanent regression suite
+  □ Bug documented in runbook/wiki
+  □ Team notified of root cause and fix
+```
+
+---
+
 ## 3. Static Gateway IP Addresses (MANDATORY)
 
 ### A. Generic Kubernetes (MetalLB / On-Premises)

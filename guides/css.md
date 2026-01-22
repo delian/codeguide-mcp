@@ -192,6 +192,185 @@ If verification fails:
 - ❌ Lacks documentation for complex selectors/mixins
 - ❌ Uses inline styles (style="")
 - ❌ Has overly specific selectors (high specificity)
+- ❌ **Fixes bugs without adding regression tests first**
+- ❌ **Writes implementation before writing tests (violates TDD)**
+
+---
+
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new CSS/SCSS development.**
+
+### TDD Cycle for CSS/SCSS
+
+```
+1. 🔴 RED: Write a failing visual/style test first
+   ↓
+2. 🟢 GREEN: Write minimal CSS to make it pass
+   ↓
+3. 🔵 REFACTOR: Improve styles while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for CSS/SCSS
+
+```javascript
+// Step 1: RED - Write failing test first (tests/button.test.js)
+import { test, expect } from 'vitest';
+import { JSDOM } from 'jsdom';
+import fs from 'fs';
+
+test('primary button has correct background color', () => {
+  const html = fs.readFileSync('src/index.html', 'utf-8');
+  const css = fs.readFileSync('dist/styles.css', 'utf-8');
+  const dom = new JSDOM(html, { runScripts: 'dangerously' });
+
+  const style = dom.window.document.createElement('style');
+  style.textContent = css;
+  dom.window.document.head.appendChild(style);
+
+  const button = dom.window.document.querySelector('.btn--primary');
+  const styles = dom.window.getComputedStyle(button);
+
+  expect(styles.backgroundColor).toBe('rgb(59, 130, 246)');
+});
+
+test('button has focus-visible styles', () => {
+  // Verify focus styles are defined in CSS
+  const css = fs.readFileSync('dist/styles.css', 'utf-8');
+  expect(css).toContain(':focus-visible');
+  expect(css).toContain('outline');
+});
+
+// Run: npm test
+// ❌ FAILS - styles don't exist yet
+
+// Step 2: GREEN - Write minimal SCSS
+// src/components/_button.scss
+/*
+.btn--primary {
+  background-color: #3b82f6;
+
+  &:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+  }
+}
+*/
+
+// Run: npm test
+// ✅ PASSES - styles match expectations
+
+// Step 3: REFACTOR - Extract variables
+/*
+$btn-primary-bg: #3b82f6;
+
+.btn--primary {
+  background-color: $btn-primary-bg;
+}
+*/
+// Tests still pass
+```
+
+### Visual Regression Testing
+
+```javascript
+// Using Playwright for visual regression
+import { test, expect } from '@playwright/test';
+
+test('button component visual regression', async ({ page }) => {
+  await page.goto('/components/button');
+
+  // Capture screenshot and compare
+  await expect(page.locator('.btn--primary')).toHaveScreenshot('button-primary.png');
+  await expect(page.locator('.btn--secondary')).toHaveScreenshot('button-secondary.png');
+});
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every CSS bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. 🐛 Bug Reported/Discovered (e.g., focus style missing)
+   ↓
+2. ✍️ Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. ✅ Verify the test fails for the right reason
+   ↓
+4. 🔧 Fix the bug (make the test pass)
+   ↓
+5. 🟢 Verify the test now PASSES
+   ↓
+6. 📝 Document the bug in test comments (include bug ID)
+   ↓
+7. 🚀 Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix
+
+```javascript
+// Bug Report #567: Button focus state not visible on keyboard navigation
+
+// Step 1-2: Write test that reproduces the bug
+test('button has visible focus state - Bug #567', () => {
+  // Bug: Users couldn't see focus indicator when tabbing
+  // Discovered: 2026-01-15
+  // This test prevents regression
+
+  const css = fs.readFileSync('dist/styles.css', 'utf-8');
+
+  // Check that focus-visible is defined with visible outline
+  expect(css).toMatch(/\.btn[^{]*:focus-visible\s*\{[^}]*outline/);
+  expect(css).not.toMatch(/outline:\s*none/);
+});
+
+// Run: npm test
+// ❌ FAILS - focus styles are missing or outline: none
+
+// Step 3: Fix the SCSS
+// Before (buggy):
+/*
+.btn {
+  &:focus {
+    outline: none;  // BAD: removed focus indicator
+  }
+}
+*/
+
+// After (fixed):
+/*
+.btn {
+  &:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+  }
+}
+*/
+
+// Run: npm test
+// ✅ PASSES - bug fixed, regression prevented
+```
+
+### Color Contrast Bug Fix Example
+
+```javascript
+// Bug Report #589: Text fails WCAG contrast on light background
+
+test('text color meets WCAG AA contrast ratio - Bug #589', () => {
+  const css = fs.readFileSync('dist/styles.css', 'utf-8');
+
+  // Verify we're not using light gray on white
+  expect(css).not.toMatch(/color:\s*#[c-f]{3,6}/i); // No light colors
+
+  // Document: Text should be at least #737373 on white for 4.5:1 ratio
+});
+```
 
 ---
 
@@ -1982,6 +2161,122 @@ $card-border-color: $color-gray-200;
 7. **Documentation**: Reduces onboarding time by 50%, enables auto-generated style guides, improves team velocity.
 
 8. **Agent Verification**: Ensures all generated CSS compiles and works, eliminates syntax errors, maintains code quality.
+
+---
+
+## 16. Quick Reference
+
+### Common Commands
+
+```bash
+# Compile SCSS
+npx sass src/styles.scss dist/styles.css
+npx sass --watch src:dist
+
+# Lint CSS/SCSS
+npx stylelint "**/*.{css,scss}"
+npx stylelint "**/*.scss" --fix
+
+# PostCSS with Autoprefixer
+npx postcss src/styles.css --use autoprefixer -o dist/styles.css
+
+# Generate documentation
+npx sassdoc src/
+
+# Check for unused CSS
+npx purgecss --css dist/styles.css --content "**/*.html" --output dist/
+
+# Visual regression tests
+npx playwright test --project=visual
+
+# Minify CSS
+npx csso dist/styles.css -o dist/styles.min.css
+```
+
+### BEM Naming Quick Guide
+
+```scss
+// Block
+.card { }
+
+// Element (double underscore)
+.card__header { }
+.card__body { }
+.card__footer { }
+
+// Modifier (double dash)
+.card--featured { }
+.card--compact { }
+.card__header--large { }
+```
+
+### SCSS Variables Cheat Sheet
+
+```scss
+// Colors
+$color-primary: #3b82f6;
+$color-secondary: #64748b;
+$color-success: #22c55e;
+$color-error: #ef4444;
+
+// Spacing
+$spacing-xs: 0.25rem;  // 4px
+$spacing-sm: 0.5rem;   // 8px
+$spacing-md: 1rem;     // 16px
+$spacing-lg: 1.5rem;   // 24px
+$spacing-xl: 2rem;     // 32px
+
+// Breakpoints
+$breakpoint-sm: 640px;
+$breakpoint-md: 768px;
+$breakpoint-lg: 1024px;
+$breakpoint-xl: 1280px;
+
+// Typography
+$font-size-base: 1rem;
+$line-height-base: 1.5;
+```
+
+### Common Mixins
+
+```scss
+// Flexbox center
+@mixin flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+// Responsive breakpoint
+@mixin respond-to($breakpoint) {
+  @media (min-width: $breakpoint) {
+    @content;
+  }
+}
+
+// Visually hidden (accessible)
+@mixin sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+```
+
+### Accessibility Checklist
+
+```
+[ ] Focus styles on all interactive elements
+[ ] Color contrast ≥ 4.5:1 for text
+[ ] prefers-reduced-motion supported
+[ ] No content in ::before/::after
+[ ] Font size uses rem/em (not px)
+[ ] Touch targets ≥ 44x44px
+```
 
 ---
 

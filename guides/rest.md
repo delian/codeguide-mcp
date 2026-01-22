@@ -161,6 +161,437 @@ If verification fails:
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new REST API endpoints and features.**
+
+### TDD Cycle for REST APIs
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    TDD Cycle for REST APIs                       │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   1. RED: Write a failing API test first                        │
+│      - Define expected request/response                          │
+│      - Write contract test for endpoint                          │
+│      - Test MUST fail (endpoint doesn't exist yet)              │
+│                          ↓                                       │
+│   2. GREEN: Implement minimal endpoint to pass test             │
+│      - Create OpenAPI specification                              │
+│      - Implement handler with minimal logic                      │
+│      - Validate against JSON Schema                              │
+│                          ↓                                       │
+│   3. REFACTOR: Improve while keeping tests green                │
+│      - Add proper error handling                                 │
+│      - Optimize response structure                               │
+│      - Enhance documentation                                     │
+│                          ↓                                       │
+│                      Repeat                                      │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Example TDD Workflow for REST API Endpoint
+
+#### Step 1: RED - Write Failing Contract Test First
+
+```yaml
+# tests/contracts/users_api_test.yaml
+# Contract test for POST /v1/users endpoint
+
+test_create_user:
+  description: "Create a new user via REST API"
+  request:
+    method: POST
+    path: /v1/users
+    headers:
+      Content-Type: application/json
+      Authorization: Bearer ${TEST_TOKEN}
+    body:
+      email: "newuser@example.com"
+      name: "John Doe"
+      role: "user"
+  expected_response:
+    status: 201
+    headers:
+      Content-Type: application/json
+    body:
+      id: "${json-schema: string, minLength: 32}"
+      email: "newuser@example.com"
+      name: "John Doe"
+      role: "user"
+      created_at: "${json-schema: string, format: date-time}"
+      updated_at: "${json-schema: string, format: date-time}"
+
+test_create_user_validation_error:
+  description: "Reject invalid email format"
+  request:
+    method: POST
+    path: /v1/users
+    headers:
+      Content-Type: application/json
+      Authorization: Bearer ${TEST_TOKEN}
+    body:
+      email: "invalid-email"
+      name: "John Doe"
+  expected_response:
+    status: 422
+    body:
+      error: "VALIDATION_ERROR"
+      message: "${json-schema: string}"
+      details:
+        - field: "email"
+          message: "${json-schema: string}"
+```
+
+```bash
+# Run contract test - MUST FAIL (endpoint doesn't exist)
+npx dredd api/openapi.yaml http://localhost:3000 --dry-run
+# Expected: FAIL - endpoint not implemented
+
+# OR using Postman/Newman
+newman run tests/contracts/users_api_test.json
+# Expected: FAIL - 404 Not Found
+```
+
+#### Step 2: GREEN - Write Minimal OpenAPI Specification
+
+```yaml
+# api/openapi.yaml - Minimal implementation to pass test
+paths:
+  /v1/users:
+    post:
+      tags:
+        - Users
+      summary: Create user
+      operationId: createUser
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+      responses:
+        '201':
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+components:
+  schemas:
+    CreateUserRequest:
+      type: object
+      required:
+        - email
+        - name
+      properties:
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        role:
+          type: string
+          enum: [user, admin]
+          default: user
+
+    UserResponse:
+      type: object
+      required:
+        - id
+        - email
+        - name
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          minLength: 32
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        role:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+```
+
+```bash
+# Run contract test - MUST PASS now
+npx dredd api/openapi.yaml http://localhost:3000
+# Expected: PASS - all contract tests pass
+
+# Validate OpenAPI specification
+npx @apidevtools/swagger-cli validate api/openapi.yaml
+# Expected: Exit code 0
+```
+
+#### Step 3: REFACTOR - Enhance with Full Validation Rules
+
+```yaml
+# api/openapi.yaml - Refactored with comprehensive validation
+components:
+  schemas:
+    CreateUserRequest:
+      type: object
+      required:
+        - email
+        - name
+      properties:
+        email:
+          type: string
+          format: email
+          minLength: 5
+          maxLength: 255
+          pattern: '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+          description: Valid email address
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: '^[a-zA-Z\s\-]+$'
+          description: Full name (letters, spaces, hyphens only)
+        role:
+          type: string
+          enum: [user, admin, moderator]
+          default: user
+          description: User role assignment
+      additionalProperties: false
+      examples:
+        - email: "newuser@example.com"
+          name: "John Doe"
+          role: "user"
+```
+
+```bash
+# Re-run all tests - MUST still pass after refactoring
+npx dredd api/openapi.yaml http://localhost:3000
+# Expected: PASS - all tests still green
+
+# Verify OpenAPI is still valid
+npx @apidevtools/swagger-cli validate api/openapi.yaml
+# Expected: Exit code 0
+```
+
+### TDD Checklist for REST APIs
+
+**Before implementing ANY new endpoint:**
+- [ ] Write contract test defining expected request/response
+- [ ] Run test to confirm it FAILS (red)
+- [ ] Implement minimal OpenAPI specification
+- [ ] Run test to confirm it PASSES (green)
+- [ ] Refactor with full validation, documentation, examples
+- [ ] Run test to confirm it still PASSES (green)
+- [ ] Validate OpenAPI specification
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every REST API bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow for REST APIs
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                  REST API Bug Fix Workflow                       │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   1. Bug Reported/Discovered                                    │
+│      - Document: endpoint, method, request, expected vs actual  │
+│                          ↓                                       │
+│   2. Write Contract Test that REPRODUCES the Bug                │
+│      - Create test case with exact failing scenario             │
+│      - Test MUST FAIL (proves bug exists)                       │
+│                          ↓                                       │
+│   3. Verify Test Fails for the RIGHT Reason                     │
+│      - Confirm error matches reported bug                        │
+│      - Not a different/unrelated failure                         │
+│                          ↓                                       │
+│   4. Fix the Bug in OpenAPI/Implementation                      │
+│      - Update schema validation rules                            │
+│      - Fix response format                                       │
+│      - Correct status codes                                      │
+│                          ↓                                       │
+│   5. Verify Test Now PASSES                                     │
+│      - Bug is fixed                                              │
+│      - All other tests still pass (no regressions)              │
+│                          ↓                                       │
+│   6. Document Bug in Test Comments                              │
+│      - Include bug/ticket ID                                     │
+│      - Describe original issue                                   │
+│                          ↓                                       │
+│   7. Deploy with Confidence (Regression Prevented)              │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Example Bug Fix: Incorrect Status Code on Validation Error
+
+```yaml
+# Bug Report #API-427: POST /v1/users returns 400 instead of 422 for validation errors
+# Expected: 422 Unprocessable Entity for schema validation failures
+# Actual: 400 Bad Request
+
+# Step 1-2: Write test that reproduces the bug
+# tests/regression/api_427_validation_status_code.yaml
+
+test_api_427_validation_returns_422:
+  description: |
+    Bug #API-427: Validation errors must return 422 Unprocessable Entity,
+    not 400 Bad Request. 422 indicates the request was well-formed but
+    semantically incorrect (validation failed).
+  request:
+    method: POST
+    path: /v1/users
+    headers:
+      Content-Type: application/json
+      Authorization: Bearer ${TEST_TOKEN}
+    body:
+      email: "invalid-email-format"  # Invalid email triggers validation
+      name: "John Doe"
+  expected_response:
+    status: 422  # MUST be 422, not 400
+    body:
+      error: "VALIDATION_ERROR"
+      message: "${json-schema: string}"
+      details:
+        - field: "email"
+          message: "${json-schema: string}"
+```
+
+```bash
+# Run regression test - MUST FAIL (proves bug exists)
+newman run tests/regression/api_427_validation_status_code.json
+# Expected: FAIL - received 400, expected 422
+```
+
+```yaml
+# Step 3-4: Fix the bug in OpenAPI specification
+# api/openapi.yaml - Ensure 422 is used for validation errors
+
+paths:
+  /v1/users:
+    post:
+      responses:
+        '201':
+          description: User created successfully
+        '400':
+          description: Bad request (malformed JSON, missing Content-Type)
+          # ✅ 400 only for malformed requests
+        '422':
+          description: Validation error (schema validation failed)
+          # ✅ 422 for validation errors
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "VALIDATION_ERROR"
+                message: "Request validation failed"
+                details:
+                  - field: "email"
+                    message: "Invalid email format"
+```
+
+```bash
+# Step 5: Run regression test - MUST PASS now
+newman run tests/regression/api_427_validation_status_code.json
+# Expected: PASS - returns 422 as expected
+
+# Run all tests to ensure no regressions
+npx dredd api/openapi.yaml http://localhost:3000
+# Expected: PASS - all tests pass
+
+# Validate OpenAPI specification
+npx @apidevtools/swagger-cli validate api/openapi.yaml
+# Expected: Exit code 0
+```
+
+### Common REST API Bugs and Regression Tests
+
+#### Bug Type: Missing Required Field in Response
+
+```yaml
+# Bug #API-501: Response missing 'created_at' field
+test_api_501_response_includes_created_at:
+  description: "Bug #API-501: UserResponse must include created_at timestamp"
+  request:
+    method: GET
+    path: /v1/users/${USER_ID}
+    headers:
+      Authorization: Bearer ${TEST_TOKEN}
+  expected_response:
+    status: 200
+    body:
+      id: "${json-schema: string}"
+      email: "${json-schema: string}"
+      created_at: "${json-schema: string, format: date-time}"  # MUST be present
+```
+
+#### Bug Type: Incorrect Error Format
+
+```yaml
+# Bug #API-502: Error response not following standard format
+test_api_502_standard_error_format:
+  description: "Bug #API-502: All errors must follow standard Error schema"
+  request:
+    method: GET
+    path: /v1/users/nonexistent-user-id-12345678901234567890
+    headers:
+      Authorization: Bearer ${TEST_TOKEN}
+  expected_response:
+    status: 404
+    body:
+      error: "NOT_FOUND"  # MUST have error code
+      message: "${json-schema: string}"  # MUST have message
+```
+
+#### Bug Type: Security Issue - Sensitive Data in URL
+
+```yaml
+# Bug #API-503: Email exposed in URL path (security vulnerability)
+test_api_503_no_sensitive_data_in_url:
+  description: |
+    Bug #API-503: SECURITY - Endpoint was using email in URL path.
+    URLs are logged and cached. Use unpredictable IDs only.
+  request:
+    method: GET
+    path: /v1/users/${UNPREDICTABLE_USER_ID}  # ✅ Use ID, not email
+    headers:
+      Authorization: Bearer ${TEST_TOKEN}
+  expected_response:
+    status: 200
+    # Endpoint /v1/users/{email} must NOT exist
+```
+
+### Bug Fix Checklist
+
+**Before fixing ANY REST API bug:**
+- [ ] Document the bug (endpoint, method, expected vs actual behavior)
+- [ ] Write regression test that REPRODUCES the bug
+- [ ] Run test to confirm it FAILS (proves bug exists)
+- [ ] Fix the bug in OpenAPI specification and/or implementation
+- [ ] Run test to confirm it PASSES (bug fixed)
+- [ ] Run ALL tests to ensure no regressions introduced
+- [ ] Validate OpenAPI specification still valid
+- [ ] Add bug ID to test comments for traceability
+
+---
+
 ## 3. OpenAPI Specification (MANDATORY)
 
 ### A. OpenAPI Structure
@@ -1685,7 +2116,234 @@ components:
 
 ---
 
-## 14. Summary
+## 14. Quick Reference
+
+### HTTP Methods Summary
+
+| Method | Purpose | Idempotent | Safe | Request Body | Success Code |
+|--------|---------|------------|------|--------------|--------------|
+| `GET` | Retrieve resource(s) | Yes | Yes | No | 200 OK |
+| `POST` | Create resource | No | No | Yes | 201 Created |
+| `PUT` | Replace resource | Yes | No | Yes | 200 OK |
+| `PATCH` | Partial update | No | No | Yes | 200 OK |
+| `DELETE` | Remove resource | Yes | No | No | 204 No Content |
+| `HEAD` | Get headers only | Yes | Yes | No | 200 OK |
+| `OPTIONS` | Get allowed methods | Yes | Yes | No | 200 OK |
+
+### HTTP Status Codes
+
+#### Success Codes (2xx)
+| Code | Name | When to Use |
+|------|------|-------------|
+| `200` | OK | Successful GET, PUT, PATCH, DELETE with body |
+| `201` | Created | Successful POST creating new resource |
+| `202` | Accepted | Request accepted for async processing |
+| `204` | No Content | Successful DELETE, PUT with no response body |
+
+#### Client Error Codes (4xx)
+| Code | Name | When to Use |
+|------|------|-------------|
+| `400` | Bad Request | Malformed JSON, missing Content-Type |
+| `401` | Unauthorized | Missing or invalid authentication |
+| `403` | Forbidden | Authenticated but insufficient permissions |
+| `404` | Not Found | Resource does not exist |
+| `405` | Method Not Allowed | HTTP method not supported on endpoint |
+| `409` | Conflict | Resource conflict (duplicate, version mismatch) |
+| `422` | Unprocessable Entity | Schema validation failed |
+| `429` | Too Many Requests | Rate limit exceeded |
+
+#### Server Error Codes (5xx)
+| Code | Name | When to Use |
+|------|------|-------------|
+| `500` | Internal Server Error | Unexpected server error |
+| `502` | Bad Gateway | Upstream service unavailable |
+| `503` | Service Unavailable | Server temporarily unavailable |
+| `504` | Gateway Timeout | Upstream service timeout |
+
+### Common URL Patterns
+
+```
+# Collection operations
+GET    /v1/resources              # List resources (paginated)
+POST   /v1/resources              # Create new resource
+
+# Single resource operations
+GET    /v1/resources/{id}         # Get resource by ID
+PUT    /v1/resources/{id}         # Replace resource
+PATCH  /v1/resources/{id}         # Partial update
+DELETE /v1/resources/{id}         # Delete resource
+
+# Sub-resource operations
+GET    /v1/resources/{id}/items          # List sub-resources
+POST   /v1/resources/{id}/items          # Create sub-resource
+GET    /v1/resources/{id}/items/{itemId} # Get sub-resource
+
+# Hierarchical resources (for cacheability)
+GET    /v1/orgs/{orgId}/projects/{projectId}/tasks/{taskId}
+
+# Actions (when REST verbs don't fit)
+POST   /v1/resources/{id}/actions/publish
+POST   /v1/resources/{id}/actions/archive
+```
+
+### Query Parameter Conventions
+
+```yaml
+# Pagination
+?page=1&limit=20              # Page-based
+?offset=0&limit=20            # Offset-based
+?cursor=abc123&limit=20       # Cursor-based (recommended for large datasets)
+
+# Sorting
+?sort=created_at              # Ascending
+?sort=-created_at             # Descending (prefix with -)
+?sort=name,-created_at        # Multiple fields
+
+# Filtering
+?status=active                # Exact match
+?status=active,pending        # Multiple values (OR)
+?created_after=2024-01-01     # Date range
+?search=keyword               # Full-text search
+
+# Field selection
+?fields=id,name,email         # Sparse fieldsets
+?expand=profile,permissions   # Include related resources
+```
+
+### Request/Response Headers
+
+```yaml
+# Required Request Headers
+Content-Type: application/json          # For POST, PUT, PATCH
+Authorization: Bearer <token>           # For protected endpoints
+Accept: application/json                # Expected response format
+
+# Common Response Headers
+Content-Type: application/json          # Response format
+X-Request-ID: uuid                      # Request tracking
+X-RateLimit-Limit: 1000                 # Rate limit max
+X-RateLimit-Remaining: 999              # Rate limit remaining
+X-RateLimit-Reset: 1640000000           # Rate limit reset (Unix timestamp)
+Cache-Control: public, max-age=3600     # Caching directive
+ETag: "abc123"                          # Entity tag for caching
+```
+
+### Standard Error Response Format
+
+```json
+{
+  "error": "VALIDATION_ERROR",
+  "message": "Request validation failed",
+  "details": [
+    {
+      "field": "email",
+      "message": "Invalid email format"
+    },
+    {
+      "field": "password",
+      "message": "Password must be at least 8 characters"
+    }
+  ],
+  "timestamp": "2024-01-01T00:00:00Z",
+  "path": "/v1/users"
+}
+```
+
+### Pagination Response Format
+
+```json
+{
+  "data": [...],
+  "pagination": {
+    "page": 1,
+    "limit": 20,
+    "total": 100,
+    "total_pages": 5,
+    "has_next": true,
+    "has_prev": false
+  },
+  "links": {
+    "self": "/v1/users?page=1&limit=20",
+    "first": "/v1/users?page=1&limit=20",
+    "last": "/v1/users?page=5&limit=20",
+    "next": "/v1/users?page=2&limit=20",
+    "prev": null
+  }
+}
+```
+
+### OpenAPI Validation Commands
+
+```bash
+# Validate OpenAPI specification
+npx @apidevtools/swagger-cli validate api/openapi.yaml
+
+# Lint OpenAPI with Spectral
+npx @stoplight/spectral-cli lint api/openapi.yaml
+
+# Generate documentation
+npx redoc-cli bundle api/openapi.yaml -o docs/api.html
+
+# Run contract tests with Dredd
+npx dredd api/openapi.yaml http://localhost:3000
+
+# Validate JSON Schema
+npx ajv-cli validate -s schema.json -d data.json
+```
+
+### Security Checklist
+
+```yaml
+# Authentication
+- [ ] JWT Bearer tokens for stateless auth
+- [ ] Secure cookie settings (HttpOnly, Secure, SameSite)
+- [ ] Token expiration and refresh mechanism
+- [ ] Password hashing (bcrypt, argon2)
+
+# Authorization
+- [ ] Role-based access control (RBAC)
+- [ ] Resource ownership verification
+- [ ] Rate limiting per user/IP
+
+# URL Security
+- [ ] No passwords in URLs
+- [ ] No tokens in URLs (use headers)
+- [ ] No PII in URL paths
+- [ ] Unpredictable resource IDs (min 32 chars)
+
+# Data Protection
+- [ ] Input validation (JSON Schema)
+- [ ] Output encoding
+- [ ] SQL injection prevention
+- [ ] XSS prevention in responses
+```
+
+### Resource ID Best Practices
+
+```yaml
+# ✅ CORRECT - Unpredictable IDs
+UserID:
+  type: string
+  pattern: '^[a-zA-Z0-9_-]{32,}$'
+  minLength: 32
+  maxLength: 64
+  example: "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6"
+
+# Generation options:
+# - UUID v4: 550e8400-e29b-41d4-a716-446655440000
+# - ULID: 01ARZ3NDEKTSV4RRFFQ69G5FAV
+# - NanoID: V1StGXR8_Z5jdHi6B-myT
+# - CUID: clh2v9qzj0000mk08a5zxw9x5
+
+# ❌ WRONG - Predictable IDs
+UserID:
+  type: integer
+  example: 1, 2, 3  # Sequential, guessable
+```
+
+---
+
+## 15. Summary
 
 **CRITICAL Requirements for All REST API Designs:**
 
