@@ -386,6 +386,181 @@ Design Token Hierarchy
 
 **MANDATORY: All components MUST use design tokens, not hard-coded values.**
 
+### D. Test Selectors for UI Testing (MANDATORY)
+
+**CRITICAL: ALL UI components MUST include test-specific selectors to enable reliable automated testing.**
+
+Every component—with particular attention to buttons, input fields, links, and interactive elements—MUST have a dedicated test selector that:
+
+1. **Is stable**: Remains constant regardless of component position, order, or surrounding DOM structure
+2. **Is readable**: Uses clear, descriptive names that convey the element's purpose
+3. **Supports nesting**: Allows hierarchical organization for complex component trees
+4. **Is unique**: Provides unambiguous identification within the page context
+
+#### Web Applications (Default: `data-testid` with kebab-case)
+
+**MANDATORY: Use `data-testid` attributes with kebab-case naming unless the user specifies a different convention.**
+
+```javascript
+// CORRECT: Clear, stable test selectors
+<button data-testid="submit-order-button">Place Order</button>
+<input data-testid="email-input" type="email" />
+<div data-testid="user-profile-card">
+  <span data-testid="user-profile-card-name">{user.name}</span>
+  <button data-testid="user-profile-card-edit-button">Edit</button>
+</div>
+
+// CORRECT: Nested components with hierarchical naming
+<form data-testid="checkout-form">
+  <div data-testid="checkout-form-billing-section">
+    <input data-testid="checkout-form-billing-address-input" />
+    <input data-testid="checkout-form-billing-city-input" />
+  </div>
+  <button data-testid="checkout-form-submit-button">Complete Purchase</button>
+</form>
+
+// CORRECT: List items with unique identifiers
+<ul data-testid="product-list">
+  {products.map(product => (
+    <li key={product.id} data-testid={`product-list-item-${product.id}`}>
+      <span data-testid={`product-list-item-${product.id}-name`}>{product.name}</span>
+      <button data-testid={`product-list-item-${product.id}-add-to-cart-button`}>
+        Add to Cart
+      </button>
+    </li>
+  ))}
+</ul>
+
+// WRONG: No test selectors
+<button>Place Order</button>
+<input type="email" />
+
+// WRONG: Using CSS classes or element positions for testing
+// Tests that rely on these WILL break when styling or layout changes
+```
+
+#### Naming Convention Guidelines
+
+```
+Test Selector Naming Pattern
+┌─────────────────────────────────────────────────────────────┐
+│                                                              │
+│  Pattern: [context]-[element-description]-[element-type]    │
+│                                                              │
+│  Examples:                                                   │
+│  ├─ login-form                     (container)              │
+│  ├─ login-form-email-input         (input field)            │
+│  ├─ login-form-password-input      (input field)            │
+│  ├─ login-form-submit-button       (button)                 │
+│  ├─ login-form-forgot-password-link (link)                  │
+│  ├─ header-nav                     (navigation container)   │
+│  ├─ header-nav-home-link           (navigation link)        │
+│  ├─ header-nav-user-menu-button    (dropdown trigger)       │
+│  └─ header-nav-user-menu-logout-item (menu item)            │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### Element Type Suffixes (Recommended)
+
+| Element Type | Suffix | Example |
+|--------------|--------|---------|
+| Buttons | `-button` | `submit-order-button` |
+| Input fields | `-input` | `email-input` |
+| Links | `-link` | `forgot-password-link` |
+| Containers/Sections | (none or `-section`) | `billing-section` |
+| Lists | `-list` | `product-list` |
+| List items | `-item` | `product-list-item-123` |
+| Cards | `-card` | `user-profile-card` |
+| Modals/Dialogs | `-modal`, `-dialog` | `confirm-delete-modal` |
+| Dropdowns | `-dropdown`, `-select` | `country-select` |
+| Checkboxes | `-checkbox` | `terms-agreement-checkbox` |
+| Radio buttons | `-radio` | `shipping-method-express-radio` |
+| Text areas | `-textarea` | `feedback-comment-textarea` |
+| Tables | `-table` | `orders-table` |
+| Table rows | `-row` | `orders-table-row-456` |
+
+#### Mobile/Native Applications
+
+For mobile and native applications, use the platform-appropriate testing attributes:
+
+```dart
+// Flutter: Use Key for test identification
+ElevatedButton(
+  key: const Key('submit-order-button'),
+  onPressed: submitOrder,
+  child: const Text('Place Order'),
+)
+
+TextField(
+  key: const Key('email-input'),
+  decoration: const InputDecoration(labelText: 'Email'),
+)
+```
+
+```swift
+// SwiftUI: Use accessibilityIdentifier
+Button("Place Order") {
+    submitOrder()
+}
+.accessibilityIdentifier("submit-order-button")
+
+TextField("Email", text: $email)
+    .accessibilityIdentifier("email-input")
+```
+
+```kotlin
+// Jetpack Compose: Use testTag modifier
+Button(
+    onClick = { submitOrder() },
+    modifier = Modifier.testTag("submit-order-button")
+) {
+    Text("Place Order")
+}
+
+TextField(
+    value = email,
+    onValueChange = { email = it },
+    modifier = Modifier.testTag("email-input")
+)
+```
+
+#### Custom Conventions
+
+If the project specifies a different selector convention (e.g., `data-test`, `data-cy`, `data-qa`), follow that convention consistently:
+
+```javascript
+// If project uses data-cy (Cypress convention)
+<button data-cy="submit-order-button">Place Order</button>
+
+// If project uses data-test
+<button data-test="submit-order-button">Place Order</button>
+
+// If project uses camelCase instead of kebab-case
+<button data-testid="submitOrderButton">Place Order</button>
+```
+
+**IMPORTANT:** Always check for existing test selector conventions in the codebase before adding new selectors. Maintain consistency with established patterns.
+
+#### Prohibited Practices for Test Selectors
+
+**NEVER use these for test selection—they are fragile and will break:**
+
+- [ ] CSS class names (change with styling updates)
+- [ ] Element tag names alone (not specific enough)
+- [ ] DOM position/index (changes with layout)
+- [ ] Text content (changes with i18n, copy updates)
+- [ ] Auto-generated IDs (unpredictable)
+- [ ] XPath based on structure (breaks with refactoring)
+
+```javascript
+// WRONG: All of these will cause flaky tests
+document.querySelector('.btn-primary');           // CSS class
+document.querySelectorAll('button')[2];           // Position
+document.querySelector('div > span > button');    // DOM structure
+cy.contains('Place Order');                       // Text content (fragile)
+```
+
 ---
 
 ## 5. State Management (MANDATORY)
