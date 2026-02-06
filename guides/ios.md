@@ -1,6 +1,5 @@
 # iOS Development Guidelines
-
-This document provides mandatory standards for building native iOS applications using Swift and SwiftUI.
+Mandatory standards for building native iOS applications using Swift and SwiftUI. Xcode 15+, Swift 5.9+, SwiftUI, Swift Concurrency, SwiftData, SPM.
 
 ---
 
@@ -12,6 +11,9 @@ This document provides mandatory standards for building native iOS applications 
 ---
 
 ## 1. Core Philosophies: IOS-FIRST
+
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
 
 - **I**ntuitive: Follow Apple's Human Interface Guidelines
 - **O**ptimized: Leverage native APIs for best performance
@@ -1000,3 +1002,6 @@ NavigationLink(value: item) { }
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** iOS Team
+
+
+**End of iOS Development Guidelines**

@@ -1,35 +1,61 @@
-# Neo4j Graph Database Best Practices Guide
-
-**Version:** 1.0
-**Last Updated:** February 2026
-**Target Version:** Neo4j 5.x+
-
-## Table of Contents
-
-1. [Architecture and Fundamentals](#1-architecture-and-fundamentals)
-2. [Cypher Query Language](#2-cypher-query-language)
-3. [Graph Modeling](#3-graph-modeling)
-4. [Indexes and Constraints](#4-indexes-and-constraints)
-5. [Performance Optimization](#5-performance-optimization)
-6. [APOC Procedures](#6-apoc-procedures)
-7. [Graph Data Science](#7-graph-data-science)
-8. [Data Import and Export](#8-data-import-and-export)
-9. [Transactions and Concurrency](#9-transactions-and-concurrency)
-10. [Clustering and High Availability](#10-clustering-and-high-availability)
-11. [Security Best Practices](#11-security-best-practices)
-12. [Monitoring and Troubleshooting](#12-monitoring-and-troubleshooting)
-13. [Backup and Recovery](#13-backup-and-recovery)
-14. [Application Integration](#14-application-integration)
-15. [Production Deployment](#15-production-deployment)
-16. [Scaling Strategies](#16-scaling-strategies)
-17. [Common Use Cases](#17-common-use-cases)
-18. [Comparison with Other Databases](#18-comparison-with-other-databases)
-19. [Migration Strategies](#19-migration-strategies)
-20. [Production Checklist](#20-production-checklist)
+# Neo4j Development Guidelines
+Mandatory coding standards and development practices for Neo4j graph database development. Neo4j 5.x+, Cypher, APOC, GDS Library.
 
 ---
 
-## 1. Architecture and Fundamentals
+**Agent Profile**: The Neo4j Expert
+**Role**: Senior Graph Database Engineer & Cypher Specialist
+**Objective**: Generate production-ready, performant and maintainable graph data solutions.
+**Tools**: Neo4j 5.x+, Cypher, APOC, GDS Library
+
+---
+
+**Version:** 1.0 | **Last Updated:** February 2026 | **Target Version:** Neo4j 5.x+
+
+## Table of Contents
+
+1. [Core Philosophies: GRAPH-FIRST](#1-core-philosophies-graph-first)
+2. [Architecture and Fundamentals](#2-architecture-and-fundamentals)
+3. [Cypher Query Language](#3-cypher-query-language)
+4. [Graph Modeling](#4-graph-modeling)
+5. [Indexes and Constraints](#5-indexes-and-constraints)
+6. [Performance Optimization](#6-performance-optimization)
+7. [APOC Procedures](#7-apoc-procedures)
+8. [Graph Data Science](#8-graph-data-science)
+9. [Data Import and Export](#9-data-import-and-export)
+10. [Transactions and Concurrency](#10-transactions-and-concurrency)
+11. [Clustering and High Availability](#11-clustering-and-high-availability)
+12. [Security Best Practices](#12-security-best-practices)
+13. [Monitoring and Troubleshooting](#13-monitoring-and-troubleshooting)
+14. [Backup and Recovery](#14-backup-and-recovery)
+15. [Application Integration](#15-application-integration)
+16. [Production Deployment](#16-production-deployment)
+17. [Scaling Strategies](#17-scaling-strategies)
+18. [Common Use Cases](#18-common-use-cases)
+19. [Comparison with Other Databases](#19-comparison-with-other-databases)
+20. [Migration Strategies](#20-migration-strategies)
+21. [Production Checklist](#21-production-checklist)
+
+---
+
+## 1. Core Philosophies: GRAPH-FIRST
+
+The agent must adhere to the **GRAPH-FIRST** principles for every Neo4j implementation:
+
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+
+- **G**raph-native: Model and query connected data as a graph; avoid relational anti-patterns.
+- **R**eproducible: Use parameterized Cypher, version schema and indexes, lock dependencies.
+- **A**nchored: Anchor queries on indexed properties; bound variable-length paths.
+- **P**ure reads when possible: Prefer read transactions; batch writes with UNWIND.
+- **H**ermetic: Isolate integration tests; use test containers or in-memory where applicable.
+
+**Verified Code**: Agent-generated code MUST validate Cypher syntax, use EXPLAIN/PROFILE for non-trivial queries, and run tests before delivery.
+
+---
+
+## 2. Architecture and Fundamentals
 
 ### What is Neo4j?
 
@@ -195,7 +221,7 @@ MATCH (a:Person {name: 'Alice'})-[:FRIEND_OF*2]-(c)
 
 ---
 
-## 2. Cypher Query Language
+## 3. Cypher Query Language
 
 ### Basic Syntax
 
@@ -512,7 +538,7 @@ RETURN p.name, collect(friend.name) AS topFriends
 
 ---
 
-## 3. Graph Modeling
+## 4. Graph Modeling
 
 ### Node vs Relationship
 
@@ -673,7 +699,7 @@ RETURN em
 
 ---
 
-## 4. Indexes and Constraints
+## 5. Indexes and Constraints
 
 ### Index Types
 
@@ -838,7 +864,7 @@ RETURN p
 
 ---
 
-## 5. Performance Optimization
+## 6. Performance Optimization
 
 ### Query Optimization
 
@@ -994,7 +1020,7 @@ db.logs.query.parameter_logging_enabled=true
 
 ---
 
-## 6. APOC Procedures
+## 7. APOC Procedures
 
 ### Installing APOC
 
@@ -1124,7 +1150,7 @@ RETURN apoc.text.slug("Hello World!") AS slug
 
 ---
 
-## 7. Graph Data Science
+## 8. Graph Data Science
 
 ### GDS Library Installation
 
@@ -1322,7 +1348,7 @@ RETURN gds.util.asNode(node1).name, gds.util.asNode(node2).name, probability
 
 ---
 
-## 8. Data Import and Export
+## 9. Data Import and Export
 
 ### LOAD CSV
 
@@ -1457,7 +1483,7 @@ neo4j-admin database load neo4j --from=/backups/neo4j-dump-2024-02-06
 
 ---
 
-## 9. Transactions and Concurrency
+## 10. Transactions and Concurrency
 
 ### ACID Properties
 
@@ -1556,7 +1582,7 @@ def execute_with_retry(tx, query, params, max_retries=3):
 
 ---
 
-## 10. Clustering and High Availability
+## 11. Clustering and High Availability
 
 ### Deployment Architectures
 
@@ -1701,7 +1727,7 @@ CALL dbms.cluster.routing.getRoutingTable({}, "neo4j")
 
 ---
 
-## 11. Security Best Practices
+## 12. Security Best Practices
 
 ### Authentication
 
@@ -1841,7 +1867,7 @@ server.jvm.additional=-Dneo4j.ext.udc.enabled=false
 
 ---
 
-## 12. Monitoring and Troubleshooting
+## 13. Monitoring and Troubleshooting
 
 ### Metrics and Monitoring
 
@@ -2011,7 +2037,7 @@ def retry_transaction(tx_function, max_retries=3):
 
 ---
 
-## 13. Backup and Recovery
+## 14. Backup and Recovery
 
 ### Online Backup (Enterprise)
 
@@ -2145,7 +2171,7 @@ Strategy:
 
 ---
 
-## 14. Application Integration
+## 15. Application Integration
 
 ### Python Driver
 
@@ -2364,7 +2390,7 @@ driver = GraphDatabase.driver(
 
 ---
 
-## 15. Production Deployment
+## 16. Production Deployment
 
 ### Docker Deployment
 
@@ -2581,7 +2607,7 @@ db.index_sampling.sample_size_limit=1000000
 
 ---
 
-## 16. Scaling Strategies
+## 17. Scaling Strategies
 
 ### Vertical Scaling
 
@@ -2696,7 +2722,7 @@ SET s.totalBuyers = buyers,
 
 ---
 
-## 17. Common Use Cases
+## 18. Common Use Cases
 
 ### Social Network
 
@@ -2854,7 +2880,7 @@ RETURN resource
 
 ---
 
-## 18. Comparison with Other Databases
+## 19. Comparison with Other Databases
 
 ### Neo4j vs. Relational Databases
 
@@ -2909,7 +2935,7 @@ RETURN DISTINCT fof.name
 
 ---
 
-## 19. Migration Strategies
+## 20. Migration Strategies
 
 ### From Relational Database
 
@@ -3050,7 +3076,7 @@ class DualWriteService:
 
 ---
 
-## 20. Production Checklist
+## 21. Production Checklist
 
 ### Pre-Deployment
 
@@ -3189,3 +3215,7 @@ class DualWriteService:
 
 **Last Updated:** February 2026
 **Next Review:** May 2026
+
+---
+
+**End of Neo4j Development Guidelines**

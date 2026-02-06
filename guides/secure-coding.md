@@ -1,6 +1,5 @@
 # Secure Coding Guidelines
-
-This document provides mandatory security standards and practices for secure software development across all programming languages.
+Mandatory security standards and practices for secure software development across all programming languages. Static analysis tools (SAST), dependency scanners (SCA), secret scanners, security linters, penetration testing frameworks.
 
 ---
 
@@ -271,8 +270,8 @@ secret = client.get_secret("database-password")
 // ✅ CORRECT - Load from gitignored config file
 
 // .env file (MUST be in .gitignore)
-// API_KEY=sk_live_...
-// DATABASE_URL=postgres://...
+// API_KEY=sk_live_..
+// DATABASE_URL=postgres://..
 
 config = load_dotenv(".env")
 api_key = config.get("API_KEY")
@@ -1123,7 +1122,7 @@ FUNCTION handleRequest(request)
             retry_after: rate_limiter.getRetryAfter(key)
         })
 
-    // Process request...
+    // Process request..
 ```
 
 ### B. API Authentication
@@ -1458,3 +1457,6 @@ Set-Cookie: session=TOKEN; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=36
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** Security Team
+
+
+**End of Secure Coding Guidelines**

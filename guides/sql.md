@@ -1,6 +1,5 @@
 # SQL Development Guidelines
-
-This document provides comprehensive standards for SQL query writing, database schema design, normalization, indexing, performance optimization, security, and migration strategies across all SQL databases and programming languages.
+Comprehensive standards for SQL query writing, database schema design, normalization, indexing, performance optimization, security, and migration strategies across all SQL databases and programming languages. PostgreSQL, MySQL, SQLite, SQL Server, MariaDB, CockroachDB, Query analyzers, EXPLAIN plans, Migration tools, Type-safe query generators.
 
 ---
 
@@ -1042,7 +1041,7 @@ INNER JOIN orders o ON o.user_id = u.id;
 
 -- 2. Join order matters (smaller table first as driver)
 -- Query planner usually optimizes, but for complex queries:
-SELECT /*+ LEADING(small_table) */ ...
+SELECT /*+ LEADING(small_table) */ ..
 
 -- 3. Use appropriate join type
 INNER JOIN  -- Only matching rows (most common)
@@ -1351,7 +1350,7 @@ SET lock_timeout = '5s';  -- Fail rather than wait forever
 -- ❌ WRONG: Long transaction with user interaction
 BEGIN;
 SELECT * FROM products;  -- Display to user
--- ... user thinks for 5 minutes ...
+-- ... user thinks for 5 minutes ..
 UPDATE products SET stock = stock - 1;  -- Lock held entire time!
 COMMIT;
 
@@ -1703,7 +1702,7 @@ users = session.execute(
 # ❌ WRONG: Implicit transactions
 user = session.query(User).get(1)
 user.status = 'active'
-# When does commit happen? Depends on session config...
+# When does commit happen? Depends on session config..
 
 # ✅ CORRECT: Explicit transaction boundaries
 with session.begin():
@@ -2573,7 +2572,7 @@ SELECT
     s.time_key,
     dc.customer_key,
     dp.product_key,
-    ...
+    ..
 FROM staging.orders s
 JOIN dim_customer dc ON dc.customer_id = s.customer_id AND dc.is_current = true
 JOIN dim_product dp ON dp.product_id = s.product_id AND dp.is_current = true;
@@ -2641,7 +2640,7 @@ CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     -- Or use a distributed ID generator like Snowflake
     -- id BIGINT PRIMARY KEY DEFAULT next_snowflake_id(),
-    ...
+    ..
 );
 
 -- Always include tenant/shard key in queries
@@ -2650,7 +2649,7 @@ CREATE TABLE orders (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL,  -- Shard key
     user_id UUID NOT NULL,
-    ...
+    ..
 );
 
 -- Index includes shard key
@@ -2671,10 +2670,10 @@ JOIN users u ON u.id = o.user_id;
 -- ✅ CORRECT: Denormalize or query separately
 -- Option A: Denormalize user info into orders
 CREATE TABLE orders (
-    ...
+    ..
     user_id UUID NOT NULL,
     user_email VARCHAR(255) NOT NULL,  -- Denormalized
-    ...
+    ..
 );
 
 -- Option B: Query in application, join in code
@@ -2690,13 +2689,13 @@ CREATE TABLE orders (
 -- All inserts go to the same "last" partition/shard
 CREATE TABLE events (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    ...
+    ..
 );
 
 -- ✅ BETTER: UUID or time-based distributed ID
 CREATE TABLE events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    ...
+    ..
 );
 
 -- ✅ BETTER: Composite key with shard distribution
@@ -3171,7 +3170,7 @@ CREATE TABLE order_items (
 -- RULE 1: Use UUIDs for primary keys (no auto-increment conflicts)
 CREATE TABLE orders (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    ...
+    ..
 );
 
 -- RULE 2: Include origin/region in composite keys
@@ -3179,7 +3178,7 @@ CREATE TABLE orders (
     id UUID DEFAULT gen_random_uuid(),
     origin_region VARCHAR(20) NOT NULL,
     PRIMARY KEY (origin_region, id),
-    ...
+    ..
 );
 
 -- RULE 3: Use append-only patterns where possible
@@ -3227,7 +3226,7 @@ CREATE TABLE orders (
     user_id UUID NOT NULL,
     user_email VARCHAR(255) NOT NULL,  -- Denormalized
     user_name VARCHAR(200) NOT NULL,   -- Denormalized
-    ...
+    ..
 );
 
 -- ============================================================
@@ -3434,3 +3433,6 @@ SELECT
 **Last Updated:** 2026-02-06
 **Version:** 2.1
 **Maintainer:** Database Architecture Team
+
+
+**End of SQL Development Guidelines**

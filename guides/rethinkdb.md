@@ -1,6 +1,36 @@
-# RethinkDB Development Guide
+# RethinkDB Development Guidelines
 
-## 1. Core Concepts and Architecture
+Mandatory coding standards and development practices for RethinkDB development. RethinkDB server, ReQL, official drivers (Python, Node, etc.), Web Admin UI.
+
+---
+
+**Agent Profile**: The RethinkDB Expert
+**Role**: Senior Real-Time Database Engineer & NoSQL Specialist
+**Objective**: Generate production-ready, real-time and reliable applications using RethinkDB and changefeeds.
+**Tools**: RethinkDB server, ReQL, official drivers (Python, Node, etc.), Web Admin UI
+
+---
+
+## 1. Core Philosophies: REALTIME-FIRST
+
+The agent must adhere to the **REALTIME-FIRST** principles for every RethinkDB implementation:
+
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+
+- **R**ealtime changefeeds: Design for push; subscribe to changes on tables or queries; handle feed lifecycle and reconnects.
+- **E**rror handling: Handle connection failures, query errors, and changefeed disconnects; reconnect and backfill when needed.
+- **A**vailability: Use clustering and replication; design for failover and multi-datacenter when required.
+- **L**anguage (ReQL): Use ReQL composably; prefer server-side operations; avoid N+1 and large in-memory results.
+- **T**esting: Test queries and changefeeds; mock connections in unit tests; integration tests against real or test cluster.
+- **I**dempotent writes: Use upsert and atomic operations; design for at-least-once delivery in changefeeds.
+- **M**odeling: Document-oriented JSON; design indexes for access patterns; use secondary indexes for filters and joins.
+- **E**nd-to-end types: Type application data; validate documents at boundaries; handle RethinkDB types (TIME, BINARY, etc.).
+**Verified Code**: Agent-generated code MUST use parameterized ReQL, handle connection and feed errors, and pass tests before delivery.
+
+---
+
+## 2. Core Concepts and Architecture
 
 RethinkDB is an open-source, distributed NoSQL database designed for real-time applications. It pushes JSON documents to applications in real-time using changefeeds, making it ideal for collaborative apps, streaming analytics, and live dashboards.
 
@@ -96,7 +126,7 @@ RethinkDB Cluster:
 - Real-time cluster monitoring
 - Visual query builder
 
-## 2. Installation and Setup
+## 3. Installation and Setup
 
 ### Ubuntu/Debian Installation
 
@@ -209,7 +239,7 @@ gem install rethinkdb
 go get gopkg.in/rethinkdb/rethinkdb-go.v6
 ```
 
-## 3. ReQL Query Language Basics
+## 4. ReQL Query Language Basics
 
 ReQL is RethinkDB's query language, embedded in your programming language.
 
@@ -483,7 +513,7 @@ async function main() {
 main().catch(console.error);
 ```
 
-## 4. Real-Time Changefeeds
+## 5. Real-Time Changefeeds
 
 Changefeeds are RethinkDB's killer feature - real-time push notifications for data changes.
 
@@ -715,7 +745,7 @@ async function subscribeToDashboard(conn) {
 }
 ```
 
-## 5. Data Modeling
+## 6. Data Modeling
 
 ### Schema Design
 
@@ -831,7 +861,7 @@ def query_metrics(conn, metric_name: str, start_time, end_time):
             .run(conn))
 ```
 
-## 6. Indexing
+## 7. Indexing
 
 ### Creating Indexes
 
@@ -959,7 +989,7 @@ def find_nearby(conn, lat: float, lng: float, radius_meters: float):
             .run(conn))
 ```
 
-## 7. Joins and Aggregations
+## 8. Joins and Aggregations
 
 ### Joins
 
@@ -1133,7 +1163,7 @@ def top_contributors(conn, limit: int = 10):
             .run(conn))
 ```
 
-## 8. Sharding and Replication
+## 9. Sharding and Replication
 
 ### Configuring Shards
 
@@ -1214,7 +1244,7 @@ def check_table_status(conn, table: str):
     return status
 ```
 
-## 9. Clustering and High Availability
+## 10. Clustering and High Availability
 
 ### Cluster Setup
 
@@ -1313,7 +1343,7 @@ def force_primary_replica(conn, table: str, shard_index: int, new_primary: str):
     r.table(table).wait().run(conn)
 ```
 
-## 10. Security Best Practices
+## 11. Security Best Practices
 
 ### User Management
 
@@ -1443,7 +1473,7 @@ def safe_insert(conn, table: str, data: dict):
     return r.table(table).insert(sanitized_data).run(conn)
 ```
 
-## 11. Backup and Recovery
+## 12. Backup and Recovery
 
 ### Backup
 
@@ -1547,7 +1577,7 @@ def incremental_backup(conn, table: str, backup_table: str):
         }).run(conn)
 ```
 
-## 12. Production Deployment
+## 13. Production Deployment
 
 ### Docker Compose
 
@@ -1749,10 +1779,10 @@ pool = RethinkDBPool(host='rethinkdb-lb', port=28015, db='myapp', pool_size=20)
 
 with pool.connection() as conn:
     users = r.table('users').run(conn)
-    # Use connection...
+    # Use connection..
 ```
 
-## 13. Common Patterns
+## 14. Common Patterns
 
 ### Pagination
 
@@ -1881,7 +1911,7 @@ def rate_limit_user(conn, user_id: str, action: str, max_requests: int, window: 
     return True
 ```
 
-## 14. Performance Optimization
+## 15. Performance Optimization
 
 ### Query Optimization
 
@@ -1958,7 +1988,7 @@ def batch_update_users(conn, user_ids: list, updates: dict):
     r.table('users').get_all(*user_ids).update(updates).run(conn)
 ```
 
-## 15. Troubleshooting
+## 16. Troubleshooting
 
 ### Common Issues
 
@@ -2014,7 +2044,7 @@ rethinkdb admin --join localhost:29015
     .run()
 ```
 
-## 16. Resources and References
+## 17. Resources and References
 
 ### Official Documentation
 - **RethinkDB Documentation**: https://rethinkdb.com/docs/
@@ -2089,3 +2119,7 @@ conn.close()
 ```
 
 This guide provides comprehensive coverage of RethinkDB for building real-time applications with its unique push architecture and changefeeds.
+
+---
+
+**End of RethinkDB Development Guidelines**

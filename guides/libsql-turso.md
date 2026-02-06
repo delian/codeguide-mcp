@@ -1,31 +1,41 @@
 # libSQL & Turso Development Guidelines
-
-This document provides comprehensive standards for using libSQL (an open-source SQLite fork) and Turso (a distributed edge database platform built on libSQL).
+Mandatory coding standards and development practices for libSQL and Turso development.
 
 ---
 
-**Database Type**: Distributed Edge SQLite
-**Engine**: libSQL (SQLite fork with extensions)
-**Platform**: Turso (managed distributed deployment)
-**Best For**: Edge applications, serverless functions, low-latency global access, embedded replicas
-**ACID Compliance**: Full ACID guarantees
-**Deployment Models**: Embedded local-first, edge replicas, distributed cloud
+**Agent Profile**: The libSQL/Turso Expert
+**Role**: Senior Edge Database Engineer & SQLite/libSQL Specialist
+**Objective**: Generate production-ready, low-latency and reliable edge and local-first database solutions.
+**Tools**: libSQL, Turso Platform, client SDKs (JS/TS, Rust, Go, Swift), HTTP/WebSocket API, embedded replicas
 
-**Key Features**:
-- SQLite compatibility with extensions
-- Embedded replicas for zero-latency reads
-- Global edge distribution
-- Multi-tenancy support
-- WebAssembly runtime support
-- HTTP/WebSocket API access
-- Schema migrations
-- Point-in-time recovery
+---
 
+**Database Type**: Distributed Edge SQLite | **Engine**: libSQL (SQLite fork) | **Platform**: Turso (managed)  
 **Companion Guides**: sql.md, sqlite.md, postgresql.md, testing.md, docker-compose.md
 
 ---
 
-## 1. Core Concepts
+## 1. Core Philosophies: EDGE-FIRST
+
+The agent must adhere to the **EDGE-FIRST** principles for every libSQL/Turso implementation:
+
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+
+- **E**mbedded and edge: Prefer local replicas for reads; design for sync and offline-first when applicable.
+- **D**istributed awareness: Single primary writer; use replicas for read scale; respect Turso topology.
+- **G**lobal and low-latency: Route reads to nearest replica; use Turso client for replica URLs.
+- **E**rror handling: Check responses and Status; handle replication lag and connection failures.
+- **F**ull SQLite compatibility: Use standard SQL and migrations; avoid unsupported extensions on Turso.
+- **I**dempotent migrations: Schema changes safe to retry; use versioned migrations.
+- **R**eplicas and sync: Understand embedded replica lifecycle; test sync and conflict behavior.
+- **S**ecurity: Use auth tokens and TLS; no secrets in client code; follow Turso IAM.
+- **T**esting: Test against local libSQL and Turso; verify replica and primary behavior.
+- **Verified Code**: Agent-generated code MUST use parameterized SQL, handle errors, and pass tests before delivery.
+
+---
+
+## 2. Core Concepts
 
 ### What is libSQL?
 
@@ -102,7 +112,7 @@ Key Features:
 
 ---
 
-## 2. Architecture and Design
+## 3. Architecture and Design
 
 ### Database Hierarchy
 
@@ -219,7 +229,7 @@ SELECT * FROM tenant_users WHERE tenant_id = ?;
 
 ---
 
-## 3. Setup and Installation
+## 4. Setup and Installation
 
 ### Turso CLI Installation
 
@@ -299,7 +309,7 @@ turso group locations list production
 
 ---
 
-## 4. Client SDKs and Connections
+## 5. Client SDKs and Connections
 
 ### JavaScript/TypeScript SDK
 
@@ -605,7 +615,7 @@ func main() {
 
 ---
 
-## 5. Schema Management
+## 6. Schema Management
 
 ### Schema Design Best Practices
 
@@ -795,7 +805,7 @@ SELECT value FROM schema_info WHERE key = 'version';
 
 ---
 
-## 6. Query Patterns and Optimization
+## 7. Query Patterns and Optimization
 
 ### Efficient Query Patterns
 
@@ -977,7 +987,7 @@ console.log(plan.rows);
 
 ---
 
-## 7. Edge Deployment Patterns
+## 8. Edge Deployment Patterns
 
 ### Cloudflare Workers
 
@@ -1189,7 +1199,7 @@ serve(async (req: Request) => {
 
 ---
 
-## 8. Local-First Applications
+## 9. Local-First Applications
 
 ### Embedded Replica Pattern
 
@@ -1363,7 +1373,7 @@ AppState.addEventListener('change', (nextAppState) => {
 
 ---
 
-## 9. Security Best Practices
+## 10. Security Best Practices
 
 ### Authentication Tokens
 
@@ -1501,14 +1511,14 @@ export async function handleRequest(request: Request, env: Env) {
 ```bash
 # .env.local (never commit!)
 TURSO_DATABASE_URL=libsql://my-app-db-user.turso.io
-TURSO_AUTH_TOKEN=eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9...
+TURSO_AUTH_TOKEN=eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9..
 
 # Use separate tokens for different environments
 TURSO_DATABASE_URL_DEV=libsql://dev-db.turso.io
-TURSO_AUTH_TOKEN_DEV=...
+TURSO_AUTH_TOKEN_DEV=..
 
 TURSO_DATABASE_URL_PROD=libsql://prod-db.turso.io
-TURSO_AUTH_TOKEN_PROD=...
+TURSO_AUTH_TOKEN_PROD=..
 ```
 
 **.env.example (can be committed):**
@@ -1521,7 +1531,7 @@ TURSO_AUTH_TOKEN=your_auth_token_here
 
 ---
 
-## 10. Performance Optimization
+## 11. Performance Optimization
 
 ### Connection Pooling
 
@@ -1675,13 +1685,13 @@ COMMIT;
 
 -- Disable synchronous writes for bulk operations (use with caution!)
 PRAGMA synchronous = OFF; -- Faster but less durable
--- ... bulk operations ...
+-- ... bulk operations ..
 PRAGMA synchronous = FULL; -- Restore safety
 ```
 
 ---
 
-## 11. Monitoring and Observability
+## 12. Monitoring and Observability
 
 ### Database Metrics
 
@@ -1799,7 +1809,7 @@ async function executeQuery(client: Client, sql: string, args: any[]) {
 
 ---
 
-## 12. Backup and Recovery
+## 13. Backup and Recovery
 
 ### Export Database
 
@@ -1878,7 +1888,7 @@ echo "Backup completed: ${BACKUP_FILE}.gz"
 
 ---
 
-## 13. Testing Strategies
+## 14. Testing Strategies
 
 ### Unit Tests with In-Memory Database
 
@@ -2044,7 +2054,7 @@ test.describe('API Endpoints', () => {
 
 ---
 
-## 14. Migration from SQLite
+## 15. Migration from SQLite
 
 ### Export SQLite Database
 
@@ -2118,7 +2128,7 @@ const users = result.rows;
 
 ---
 
-## 15. Common Patterns and Recipes
+## 16. Common Patterns and Recipes
 
 ### Repository Pattern
 
@@ -2381,7 +2391,7 @@ async function auditedUpdate(
 
 ---
 
-## 16. Pricing and Scaling
+## 17. Pricing and Scaling
 
 ### Turso Pricing Tiers (as of 2026)
 
@@ -2425,7 +2435,7 @@ async function auditedUpdate(
 
 ---
 
-## 17. Troubleshooting
+## 18. Troubleshooting
 
 ### Common Issues
 
@@ -2506,7 +2516,7 @@ ANALYZE;
 
 ---
 
-## 18. Best Practices Summary
+## 19. Best Practices Summary
 
 ### Development
 
@@ -2544,7 +2554,7 @@ ANALYZE;
 
 ---
 
-## 19. Resources and References
+## 20. Resources and References
 
 ### Official Documentation
 
@@ -2567,7 +2577,7 @@ ANALYZE;
 
 ---
 
-## 20. Quick Reference
+## 21. Quick Reference
 
 ### CLI Commands
 
@@ -2632,7 +2642,7 @@ CREATE UNIQUE INDEX idx_users_email ON users(email);
 
 -- Transactions
 BEGIN TRANSACTION;
--- ... queries ...
+-- ... queries ..
 COMMIT;
 -- or ROLLBACK;
 ```
@@ -2644,3 +2654,7 @@ COMMIT;
 **Compatible with**: libSQL 0.3+, Turso Platform 2026
 
 For updates and contributions, see the [companion guides](README.md).
+
+---
+
+**End of libSQL & Turso Development Guidelines**

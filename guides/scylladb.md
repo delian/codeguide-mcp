@@ -1,6 +1,5 @@
 # ScyllaDB Development Guidelines
-
-This document provides mandatory standards for ScyllaDB database design, performance optimization, replication, and best practices.
+Mandatory standards for ScyllaDB database design, performance optimization, replication, and best practices. ScyllaDB 5.x+, ScyllaDB Manager, CQL, ScyllaDB Monitoring Stack, cqlsh.
 
 ---
 
@@ -3173,3 +3172,6 @@ if err := session.Query(`SELECT name FROM users WHERE user_id = ?`, userID).Scan
 - v1.2 (2026-02-06): Added comprehensive container deployment section covering Docker (single node, multi-node, Docker Compose), Kubernetes (ScyllaDB Operator, StatefulSets), container best practices, resource configuration, networking, monitoring, backup strategies, migration examples, and troubleshooting.
 - v1.1 (2026-02-06): Added comprehensive sections on migration strategies (Cassandra to ScyllaDB, schema migrations, data migrations), upgrade strategies (rolling upgrades, SSTable upgrades), rollback strategies (version rollback, schema rollback, data restoration), and backup strategies (snapshot backups, ScyllaDB Manager backups, continuous backups, disaster recovery, point-in-time recovery).
 - v1.0 (2026-02-06): Initial release with comprehensive coverage of ScyllaDB 5.x/6.x features including shard-per-core architecture, data modeling, replication strategies, consistency levels, performance optimization, compaction strategies, secondary indexes, materialized views, lightweight transactions, security, monitoring, and deployment best practices.
+
+
+**End of ScyllaDB Development Guidelines**

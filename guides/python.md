@@ -1,26 +1,33 @@
 # Python Development Guidelines
-This document provides mandatory coding standards and development practices for AI agents and human developers working on this Python project.
-
-## Core Principles
-All code contributions **MUST** adhere to these guidelines. Non-compliant code will be rejected during review.
-
-### Mandatory Requirements
-- **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle)
-- **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing
-- **UV Only**: All package management through `uv`
-- **Dynaconf**: All configuration externalized to TOML files
-- **Type Hints**: Strict typing on all functions and classes
-- **Documentation**: Complete docstrings (Google style) for all code
-- **Generated Docs**: API and functional documentation must be generated with pydoc
-- **Comprehensions**: Prefer list/set/dict/generator comprehensions for performance and memory efficiency
-- **Functional Programming**: Prefer functional programming style whenever applicable
-- **Testing**: 100% test coverage with pytest, all tests must pass
-- **Code Quality**: Ruff checks must pass without errors
-- **Agent Verification**: AI-generated code must be syntax-checked and tested before delivery
+Mandatory coding standards and development practices for Python development. Type-safe, documented, test-covered. Python 3.12+, uv, pytest, ruff, Dynaconf, pydoc.
 
 ---
 
-## 1. Agent Code Generation Requirements (MANDATORY)
+**Agent Profile**: The Python Expert
+**Role**: Senior Python Engineer & Quality & Tooling Specialist
+**Objective**: Generate production-ready, type-safe, documented, and test-covered Python code.
+**Tools**: Python 3.12+, uv, pytest, ruff, Dynaconf, pydoc
+
+---
+
+## 1. Core Philosophies: PYTHON-FIRST
+
+All code contributions **MUST** adhere to these guidelines. Non-compliant code will be rejected during review.
+
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+
+- **P**ackage management: UV only; all dependencies and commands via `uv run`.
+- **Y**ield and comprehensions: Prefer list/set/dict/generator comprehensions for performance and clarity.
+- **T**ype hints: Strict typing on all functions and classes; no untyped public APIs.
+- **H**ints and docs: Complete docstrings (Google style); generate API docs with pydoc.
+- **O**utward config: Dynaconf for all configuration; no hardcoded values.
+- **N**on-negotiable tests: 100% coverage with pytest; all tests must pass; Ruff checks must pass.
+**Verified Code**: Agent-generated code MUST be syntax-checked, tested, and pass Ruff before delivery.
+
+---
+
+## 2. Agent Code Generation Requirements (MANDATORY)
 
 When an AI agent generates Python code, the following verification steps are **MANDATORY**:
 
@@ -291,7 +298,7 @@ def parse_date(date_str: str) -> datetime:
 
 ---
 
-## 2. Package Management: UV Only
+## 3. Package Management: UV Only
 ### Requirements
 - **ALWAYS** use `uv` for all package management operations
 - **NEVER** use `pip`, `poetry`, `pipenv`, or other package managers directly
@@ -347,7 +354,7 @@ uv add dynaconf ruff
 
 ---
 
-## 3. Configuration Management: Dynaconf
+## 4. Configuration Management: Dynaconf
 
 ### Requirements
 - **ALWAYS** use `dynaconf` for configuration management
@@ -490,7 +497,7 @@ def process_signal() -> None:
 duration: float = Settings.pulse_duration
 channels: int = Settings.num_channels
 
-# ...
+# ..
 
 # Access via CONF dictionary
 
@@ -500,7 +507,7 @@ def alternative_access() -> None:
 sample_rate: int = CONF['sample_rate']
 bandwidth: float = CONF['bandwidth']
 
-# ...
+# ..
 
 # Environment-specific access
 
@@ -540,7 +547,7 @@ python main.py
 ```
 
 ---
-## 4. Documentation: Comprehensive PyDoc
+## 5. Documentation: Comprehensive PyDoc
 
 ### Requirements
 
@@ -677,7 +684,7 @@ if chirp_duration <= 0:
 assert num_samples >= 1, "num_samples must be at least 1"
 
 # Implementation here
-...
+..
 
 return signal, time
 
@@ -774,7 +781,7 @@ RuntimeError: If generation fails after maximum retries.
 
 # Implementation
 
-...
+..
 
 ```
 
@@ -1088,7 +1095,7 @@ test -f mymodule.html && echo "✓ Documentation generated successfully"
 
 ---
 
-## 5. Type Hints: Strict Typing
+## 6. Type Hints: Strict Typing
 ### Requirements
 - **ALL** function parameters **MUST** have type hints
 - **ALL** function return values **MUST** have type hints
@@ -1152,7 +1159,7 @@ class SignalGenerator(Protocol):
     def generate(self, num_samples: int) -> cp.ndarray:
         """Generate signal samples."""
 
-...
+..
 
 
 # Literal types for restricted values
@@ -1378,7 +1385,7 @@ def complex_func(
 
 ---
 
-## 6. Pythonic Code Patterns: Comprehensions (MANDATORY)
+## 7. Pythonic Code Patterns: Comprehensions (MANDATORY)
 
 ### A. Comprehension Requirements
 
@@ -1757,7 +1764,7 @@ Before writing a loop, ask:
 
 ---
 
-## 7. Functional Programming Style (MANDATORY)
+## 8. Functional Programming Style (MANDATORY)
 
 ### A. Functional Programming Requirements
 
@@ -2347,7 +2354,7 @@ Before writing imperative code, ask:
 ---
 
 
-## 8. Code Quality Enforcement
+## 9. Code Quality Enforcement
 
 
 ### Pre-Commit Checks
@@ -2431,7 +2438,7 @@ uses: astral-sh/setup-uv@v1
 
 ---
 
-## 9. Project Structure
+## 10. Project Structure
 
 ### Standard Layout
 
@@ -2469,7 +2476,7 @@ project-name/
 ---
 
 
-## 10. Development Workflow
+## 11. Development Workflow
 
 ### Starting a New Feature
 
@@ -2559,7 +2566,7 @@ git push origin feature/new-signal-type
 
 ---
 
-## 11. Testing Requirements (MANDATORY)
+## 12. Testing Requirements (MANDATORY)
 
 **ALL code MUST have tests.** Tests are not optional - they are a required part of the development process.
 
@@ -2841,7 +2848,7 @@ def test_raises_value_error() -> None:
 ---
 
 
-## 12. Example: Compliant Function
+## 13. Example: Compliant Function
 
 
 Here's a complete example following all guidelines:
@@ -2959,7 +2966,7 @@ def correlate_two_signals(
 
 
 
-## 13. Quick Reference
+## 14. Quick Reference
 
 
 ### Command Cheat Sheet
@@ -3068,7 +3075,7 @@ ruff check .                        # Missing uv run
 ---
 
 
-## 14. Enforcement
+## 15. Enforcement
 
 ### Automated Checks
 
@@ -3141,3 +3148,7 @@ This guide enforces:
 **Last Updated:** 2026-01-15
 **Version:** 2.0
 **Maintainer:** Development Team
+
+---
+
+**End of Python Development Guidelines**

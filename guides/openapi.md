@@ -1,6 +1,5 @@
 # OpenAPI Specification Guidelines
-
-This document provides mandatory standards for designing and documenting REST APIs using OpenAPI (formerly Swagger).
+Mandatory standards for designing and documenting REST APIs using OpenAPI (formerly Swagger). OpenAPI 3.1, Swagger UI, Redoc, Stoplight, Spectral.
 
 ---
 
@@ -72,10 +71,10 @@ tags:
     description: Product catalog operations
 
 paths:
-  # Path definitions...
+  # Path definitions..
 
 components:
-  # Reusable components...
+  # Reusable components..
 
 security:
   - BearerAuth: []
@@ -933,13 +932,13 @@ paths:
   /public/status:
     get:
       security: []  # No auth required
-      # ...
+      # ..
 
   /admin/users:
     get:
       security:
         - OAuth2: [read:users, admin]
-      # ...
+      # ..
 ```
 
 ---
@@ -1127,3 +1126,6 @@ deprecated: true
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** API Team
+
+
+**End of OpenAPI Specification Guidelines**

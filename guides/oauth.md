@@ -1,6 +1,5 @@
 # OAuth 2.0 & Authentication Guidelines
-
-This document provides mandatory standards for implementing OAuth 2.0 and secure authentication systems.
+Mandatory standards for implementing OAuth 2.0 and secure authentication systems.
 
 ---
 
@@ -935,3 +934,6 @@ jti  // JWT ID (unique identifier)
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** Security Team
+
+
+**End of OAuth 2.0 & Authentication Guidelines**

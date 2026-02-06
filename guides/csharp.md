@@ -1,6 +1,5 @@
 # C# Development Guidelines
-
-This document provides mandatory standards for C# development, following modern .NET patterns and best practices.
+Mandatory standards for C# development, following modern .NET patterns and best practices. .NET 8+, Visual Studio, Rider, Roslyn analyzers, dotnet CLI.
 
 ---
 
@@ -12,6 +11,9 @@ This document provides mandatory standards for C# development, following modern 
 ---
 
 ## 1. Core Philosophies: DOTNET-FIRST
+
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
 
 - **D**efensive: Null safety, validation, and proper exception handling
 - **O**bject-Oriented: Proper use of classes, interfaces, and inheritance
@@ -201,7 +203,7 @@ public class OrderService
         }
 
         // Main logic after guards
-        // ...
+        // ..
     }
 }
 ```
@@ -865,3 +867,6 @@ Raw string literal
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** .NET Team
+
+
+**End of C# Development Guidelines**

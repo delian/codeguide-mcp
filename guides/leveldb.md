@@ -1,6 +1,36 @@
-# LevelDB Development Guide
+# LevelDB Development Guidelines
+Mandatory coding standards and development practices for LevelDB development. LevelDB C++ API, WriteBatch, Snapshots, custom comparators, language bindings.
 
-## 1. Core Concepts and Architecture
+---
+
+**Agent Profile**: The LevelDB Expert
+**Role**: Senior Embedded Storage Engineer & Key-Value Store Specialist
+**Objective**: Generate production-ready, performant and reliable embedded key-value storage solutions.
+**Tools**: LevelDB C++ API, WriteBatch, Snapshots, custom comparators, language bindings
+
+---
+
+## 1. Core Philosophies: LEVELDB-FIRST
+
+The agent must adhere to the **LEVELDB-FIRST** principles for every LevelDB implementation:
+
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+
+- **L**SM-aware: Design for single-writer, batch writes, and compaction; avoid write amplification pitfalls.
+- **E**mbedded model: No network layer; in-process only; application manages concurrency and deployment.
+- **V**alue semantics: Use WriteBatch for atomic multi-key updates; use snapshots for consistent reads.
+- **E**rror handling: Check Status on every operation; handle corruption and I/O errors explicitly.
+- **L**ock ordering: Single writer; multiple readers; document any application-level locking.
+- **D**ata layout: Design keys for range scans and prefix iteration; use custom comparators when needed.
+- **B**ackup and recovery: Use consistent backup procedures; test restore; avoid open DB during backup.
+- **D**eterministic: Avoid undefined behavior; use fixed key/value formats; test on target platforms.
+
+**Verified Code**: Agent-generated code MUST build, pass tests, and handle LevelDB Status/errors before delivery.
+
+---
+
+## 2. Core Concepts and Architecture
 
 LevelDB is a fast key-value storage library developed by Google that provides an ordered mapping from string keys to string values. It's an embedded database library (not a client-server system) built on Log-Structured Merge (LSM) tree architecture.
 
@@ -95,7 +125,7 @@ int main() {
 - No query language
 - Application manages concurrency
 
-## 2. Installation and Setup
+## 3. Installation and Setup
 
 ### Ubuntu/Debian Installation
 
@@ -208,7 +238,7 @@ g++ -std=c++17 -O3 test_leveldb.cpp -lleveldb -o test_leveldb
 ./test_leveldb
 ```
 
-## 3. C++ API - Basic Operations
+## 4. C++ API - Basic Operations
 
 ### Opening and Closing Database
 
@@ -274,7 +304,7 @@ int main() {
         return 1;
     }
 
-    // Use database...
+    // Use database..
 
     return 0;
 }
@@ -580,7 +610,7 @@ void IteratorExamples(leveldb::DB* db) {
 }
 ```
 
-## 4. Snapshots - Consistent Point-in-Time Views
+## 5. Snapshots - Consistent Point-in-Time Views
 
 Snapshots provide a consistent read view of the database at a specific point in time.
 
@@ -705,7 +735,7 @@ void SnapshotDemo(leveldb::DB* db) {
 }
 ```
 
-## 5. Language Bindings
+## 6. Language Bindings
 
 ### Python (plyvel)
 
@@ -1043,7 +1073,7 @@ func main() {
 }
 ```
 
-## 6. Custom Comparators
+## 7. Custom Comparators
 
 LevelDB allows custom key ordering through comparators.
 
@@ -1124,7 +1154,7 @@ void CustomComparatorExample() {
 }
 ```
 
-## 7. Performance Optimization
+## 8. Performance Optimization
 
 ### Write Performance
 
@@ -1247,7 +1277,7 @@ void CheckSizes(leveldb::DB* db) {
 }
 ```
 
-## 8. Backup and Recovery
+## 9. Backup and Recovery
 
 ### Manual Backup
 
@@ -1312,7 +1342,7 @@ public:
 void BackupExample() {
     // Close database before backup
     leveldb::DB* db = nullptr;
-    // ... use database ...
+    // ... use database ..
     delete db;  // Close
 
     // Create backup
@@ -1402,7 +1432,7 @@ public:
 };
 ```
 
-## 9. Monitoring and Statistics
+## 10. Monitoring and Statistics
 
 ### Property Queries
 
@@ -1492,7 +1522,7 @@ void MonitoringExample(leveldb::DB* db) {
 }
 ```
 
-## 10. Security Best Practices
+## 11. Security Best Practices
 
 ### Input Validation
 
@@ -1622,13 +1652,13 @@ private:
 
     std::string Encrypt(const std::string& plaintext) {
         // Implementation using OpenSSL AES-256-GCM
-        // ... encryption code ...
+        // ... encryption code ..
         return "encrypted_data";
     }
 
     std::string Decrypt(const std::string& ciphertext) {
         // Implementation using OpenSSL AES-256-GCM
-        // ... decryption code ...
+        // ... decryption code ..
         return "decrypted_data";
     }
 
@@ -1657,7 +1687,7 @@ public:
 };
 ```
 
-## 11. Testing Strategies
+## 12. Testing Strategies
 
 ### Unit Testing
 
@@ -1874,7 +1904,7 @@ BENCHMARK(BM_Scan);
 BENCHMARK_MAIN();
 ```
 
-## 12. Production Deployment
+## 13. Production Deployment
 
 ### Docker Deployment
 
@@ -1903,7 +1933,7 @@ RUN git clone --recurse-submodules https://github.com/google/leveldb.git && \
 COPY . /app
 WORKDIR /app
 RUN mkdir build && cd build && \
-    cmake -DCMAKE_BUILD_TYPE=Release .. && \
+    cmake -DCMAKE_BUILD_TYPE=Release ... && \
     make -j$(nproc)
 
 # Runtime image
@@ -1976,7 +2006,7 @@ vm.dirty_ratio = 60
 vm.dirty_background_ratio = 5
 ```
 
-## 13. Common Patterns and Anti-Patterns
+## 14. Common Patterns and Anti-Patterns
 
 ### Pattern: Secondary Indexing
 
@@ -2110,7 +2140,7 @@ void BadPattern(leveldb::DB* db) {
 void GoodPattern(leveldb::DB* db) {
     // Store image in filesystem or object storage
     std::string file_path = "/storage/images/image_1.jpg";
-    // ... write to file ...
+    // ... write to file ..
 
     // Store only metadata in LevelDB
     std::string metadata = R"({"path":")" + file_path + R"(","size":10485760})";
@@ -2150,7 +2180,7 @@ void GoodCounterPattern(leveldb::DB* db, int thread_id, int num_threads) {
 }
 ```
 
-## 14. Migration from LevelDB to RocksDB
+## 15. Migration from LevelDB to RocksDB
 
 If you need features like column families, transactions, or better performance, migrate to RocksDB.
 
@@ -2221,7 +2251,7 @@ public:
 };
 ```
 
-## 15. Troubleshooting Guide
+## 16. Troubleshooting Guide
 
 ### Corruption Recovery
 
@@ -2292,7 +2322,7 @@ public:
 };
 ```
 
-## 16. Performance Tuning Checklist
+## 17. Performance Tuning Checklist
 
 ### Hardware Optimization
 
@@ -2350,7 +2380,7 @@ leveldb::Options Balanced() {
 }
 ```
 
-## 17. Comparison with Alternatives
+## 18. Comparison with Alternatives
 
 ### LevelDB vs RocksDB
 
@@ -2388,7 +2418,7 @@ leveldb::Options Balanced() {
 | **Maintenance** | None required | Configuration needed |
 | **Replication** | ❌ No | ✅ Yes |
 
-## 18. Production Checklist
+## 19. Production Checklist
 
 ```markdown
 **Pre-Deployment:**
@@ -2417,7 +2447,7 @@ leveldb::Options Balanced() {
 - [ ] Quarterly: Consider compaction if needed
 ```
 
-## 19. Resources and References
+## 20. Resources and References
 
 ### Official Documentation
 - **LevelDB GitHub**: https://github.com/google/leveldb
@@ -2508,3 +2538,7 @@ g++ -std=c++17 -O3 example.cpp -lleveldb -lpthread -o example
 ```
 
 This guide provides comprehensive coverage of LevelDB for production use, from basic operations to advanced patterns and troubleshooting.
+
+---
+
+**End of LevelDB Development Guidelines**

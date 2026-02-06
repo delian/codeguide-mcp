@@ -1,6 +1,6 @@
 # WebSocket Development Guidelines
 
-This document provides mandatory standards for implementing WebSocket-based real-time communication.
+Mandatory standards for implementing WebSocket-based real-time communication. WebSocket API, Socket.IO, ws (Node.js), gorilla/websocket, Django Channels.
 
 ---
 
@@ -1118,3 +1118,6 @@ ws.close(1000, 'reason');
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** Platform Team
+
+
+**End of WebSocket Development Guidelines**

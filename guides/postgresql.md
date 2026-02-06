@@ -1,6 +1,5 @@
 # PostgreSQL Development Guidelines
-
-This document provides mandatory standards for PostgreSQL database design, query optimization, and administration.
+Mandatory standards for PostgreSQL database design, query optimization, and administration. PostgreSQL 15+, pgAdmin, EXPLAIN ANALYZE, pg_stat_statements, pgBadger.
 
 ---
 
@@ -32,13 +31,13 @@ This document provides mandatory standards for PostgreSQL database design, query
 -- Primary Keys: Use BIGINT with IDENTITY
 CREATE TABLE users (
     id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
-    -- ...
+    -- ..
 );
 
 -- UUIDs: When distributed generation needed
 CREATE TABLE events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    -- ...
+    -- ..
 );
 
 -- Text: Use TEXT, not VARCHAR without limit
@@ -418,17 +417,17 @@ SET app.user_role = 'user';
 ```sql
 -- Read Committed (default) - Good for most cases
 BEGIN;
--- ...
+-- ..
 COMMIT;
 
 -- Repeatable Read - Consistent snapshot
 BEGIN ISOLATION LEVEL REPEATABLE READ;
--- ...
+-- ..
 COMMIT;
 
 -- Serializable - Full isolation (careful: may need retries)
 BEGIN ISOLATION LEVEL SERIALIZABLE;
--- ...
+-- ..
 COMMIT;
 ```
 
@@ -438,7 +437,7 @@ COMMIT;
 -- Application-level locking
 -- Lock for processing order
 SELECT pg_advisory_lock(hashtext('order:' || order_id::text));
--- Process order...
+-- Process order..
 SELECT pg_advisory_unlock(hashtext('order:' || order_id::text));
 
 -- Try lock (non-blocking)
@@ -643,3 +642,6 @@ AND query_start < NOW() - INTERVAL '5 minutes';
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** Database Team
+
+
+**End of PostgreSQL Development Guidelines**

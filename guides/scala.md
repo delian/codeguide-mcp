@@ -1,6 +1,5 @@
 # Scala Development Guidelines
-
-This document provides mandatory standards for Scala development, following functional programming principles and community best practices.
+Mandatory standards for Scala development, following functional programming principles and community best practices. Scala 3, sbt, Metals, ScalaTest, Cats, ZIO.
 
 ---
 
@@ -12,6 +11,9 @@ This document provides mandatory standards for Scala development, following func
 ---
 
 ## 1. Core Philosophies: SCALA-FIRST
+
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
 
 - **S**afe: Leverage the type system for compile-time safety
 - **C**omposable: Build from small, reusable components
@@ -132,7 +134,7 @@ findUser(userId) match
 val user = findUser(userId).get  // Throws on None!
 
 // ❌ WRONG: Manual null checks
-if findUser(userId) != null then ...
+if findUser(userId) != null then ..
 ```
 
 ### B. Either for Error Handling
@@ -771,9 +773,9 @@ io.attempt  // IO[Either[Throwable, A]]
 
 // Pattern matching
 x match
-  case Pattern(a, b) => ...
-  case _ if guard => ...
-  case _ => ...
+  case Pattern(a, b) => ..
+  case _ if guard => ..
+  case _ => ..
 ```
 
 ---
@@ -781,3 +783,6 @@ x match
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** Scala Team
+
+
+**End of Scala Development Guidelines**

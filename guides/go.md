@@ -1,6 +1,5 @@
 # Modern Go Programming Guidelines
-
-This document provides mandatory coding style and practices for Go (Golang) programming.
+Mandatory coding style and practices for Go (Golang) programming. Modular, testable, maintainable. Go 1.23+, go modules, go workspaces, errgroup, generics, structured logging, hexagonal architecture.
 
 ---
 
@@ -53,16 +52,16 @@ The agent must adhere to the **GO-FIRST** principles for every Go implementation
 1. **Compilation Verification**:
    ```bash
    # Build all packages
-   go build ./...
+   go build ./..
    
    # Check for compilation errors
    echo $?  # Must be 0
    
    # Verify with go vet
-   go vet ./...
+   go vet ./..
    
    # Run staticcheck (if available)
-   staticcheck ./...
+   staticcheck ./..
    ```
    - **MUST** compile without errors (exit code 0)
    - No `go vet` warnings
@@ -72,16 +71,16 @@ The agent must adhere to the **GO-FIRST** principles for every Go implementation
 2. **Test Execution Verification**:
    ```bash
    # Run all tests
-   go test ./...
+   go test ./..
    
    # Run tests with race detector
-   go test -race ./...
+   go test -race ./..
    
    # Run tests with coverage
-   go test -cover ./...
+   go test -cover ./..
    
    # Verbose output for debugging
-   go test -v ./...
+   go test -v ./..
    ```
    - **MUST** pass all tests (exit code 0)
    - No race conditions detected
@@ -94,7 +93,7 @@ The agent must adhere to the **GO-FIRST** principles for every Go implementation
    gofmt -l .
    
    # Format code
-   go fmt ./...
+   go fmt ./..
    
    # Tidy dependencies
    go mod tidy
@@ -103,7 +102,7 @@ The agent must adhere to the **GO-FIRST** principles for every Go implementation
    go mod verify
    
    # Check for vulnerabilities
-   go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+   go run golang.org/x/vuln/cmd/govulncheck@latest ./..
    ```
    - Code is `go fmt` formatted
    - No unused dependencies
@@ -113,7 +112,7 @@ The agent must adhere to the **GO-FIRST** principles for every Go implementation
 4. **Documentation Verification**:
    ```bash
    # Generate documentation
-   go doc ./...
+   go doc ./..
    
    # Check specific package
    go doc github.com/user/project/pkg/service
@@ -219,7 +218,7 @@ If verification fails:
 
 3. **Compile and Verify**:
    ```bash
-   go build ./...
+   go build ./..
    # ✓ Build successful
    ```
 
@@ -253,13 +252,13 @@ If verification fails:
 
 5. **Run Tests**:
    ```bash
-   go test ./...
+   go test ./..
    # ✓ ok      myservice/internal/core/domain   0.002s
    ```
 
 6. **Format and Tidy**:
    ```bash
-   go fmt ./...
+   go fmt ./..
    go mod tidy
    # ✓ All clean
    ```
@@ -272,9 +271,9 @@ If verification fails:
 
 8. **Final Verification**:
    ```bash
-   go build ./...
-   go test -race ./...
-   go vet ./...
+   go build ./..
+   go test -race ./..
+   go vet ./..
    # ✓ All checks passed
    ```
 
@@ -353,7 +352,7 @@ func TestValidateEmail(t *testing.T) {
 	}
 }
 
-// Run: go test ./...
+// Run: go test ./..
 // ❌ FAILS - ValidateEmail doesn't exist yet
 
 // Step 2: GREEN - Write minimal implementation (user.go)
@@ -374,7 +373,7 @@ func ValidateEmail(email string) error {
 	return nil
 }
 
-// Run: go test ./...
+// Run: go test ./..
 // ✅ PASSES - tests pass
 
 // Step 3: REFACTOR - Use proper email validation
@@ -439,7 +438,7 @@ func TestParseAge_NegativeNumber_Bug7123(t *testing.T) {
 	}
 }
 
-// Run: go test ./...
+// Run: go test ./..
 // ❌ FAILS - panic: runtime error: index out of range
 
 // Step 3: Fix the bug (parse.go)
@@ -469,7 +468,7 @@ func ParseAge(s string) (int, error) {
 	return age, nil
 }
 
-// Run: go test ./...
+// Run: go test ./..
 // ✅ PASSES - bug fixed, regression prevented ✓
 ```
 
@@ -736,7 +735,7 @@ func (s *userService) CreateUser(ctx context.Context, email, name string) (*doma
     return user, nil
 }
 
-// ... other methods ...
+// ... other methods ..
 
 // internal/adapters/repository/postgres/user_repo.go
 package postgres
@@ -769,7 +768,7 @@ func (r *userRepository) Create(ctx context.Context, user *domain.User) error {
     return err
 }
 
-// ... other methods ...
+// ... other methods ..
 
 // internal/adapters/http/handler.go
 package http
@@ -1930,7 +1929,7 @@ func (m *MockUserRepository) GetByID(ctx context.Context, id string) (*domain.Us
     return user, nil
 }
 
-// ... other methods ...
+// ... other methods ..
 
 // internal/core/services/user_service_test.go
 package services_test
@@ -2001,7 +2000,7 @@ func setupTestDB(t *testing.T) *sql.DB {
     }
     
     // Run migrations
-    // ...
+    // ..
     
     return db
 }
@@ -2121,7 +2120,7 @@ go mod init github.com/username/myservice
 go get github.com/google/uuid@v1.6.0
 
 # Update dependencies
-go get -u ./...
+go get -u ./..
 
 # Clean up dependencies
 go mod tidy
@@ -2235,7 +2234,7 @@ fmt:
 
 .PHONY: test
 test:
-	@go test -race -cover ./...
+	@go test -race -cover ./..
 
 .PHONY: build
 build:
@@ -2317,7 +2316,7 @@ func (u *User) Validate() error {
     if u.Name == "" {
         return ErrInvalidName
     }
-    // Additional validation...
+    // Additional validation..
     return nil
 }
 
@@ -2707,23 +2706,23 @@ go mod init github.com/username/myproject
 go work init .
 
 # Build
-go build ./...
+go build ./..
 go build -o bin/server ./cmd/server
 
 # Test
-go test ./...
-go test -race ./...
-go test -cover ./...
-go test -v ./...
+go test ./..
+go test -race ./..
+go test -cover ./..
+go test -v ./..
 
 # Format
-go fmt ./...
+go fmt ./..
 gofmt -l -w .
 goimports -l -w .
 
 # Lint
-go vet ./...
-staticcheck ./...
+go vet ./..
+staticcheck ./..
 golangci-lint run
 
 # Dependencies
@@ -2733,7 +2732,7 @@ go mod verify
 go mod download
 
 # Documentation
-go doc ./...
+go doc ./..
 go doc package.Type
 go doc -http=:6060
 
@@ -2762,17 +2761,17 @@ build:
 
 test:
 	@echo "Running tests..."
-	@go test -race -cover ./...
+	@go test -race -cover ./..
 
 lint:
 	@echo "Linting..."
-	@go vet ./...
-	@staticcheck ./...
+	@go vet ./..
+	@staticcheck ./..
 	@golangci-lint run
 
 fmt:
 	@echo "Formatting..."
-	@go fmt ./...
+	@go fmt ./..
 	@goimports -l -w .
 
 clean:
@@ -2790,7 +2789,7 @@ run:
 .PHONY: integration
 integration:
 	@echo "Running integration tests..."
-	@go test -tags=integration ./test/integration/...
+	@go test -tags=integration ./test/integration/..
 ```
 
 ---

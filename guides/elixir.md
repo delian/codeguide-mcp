@@ -1,6 +1,5 @@
 # Elixir Development Guidelines
-
-This document provides mandatory standards for Elixir development, following OTP principles and community best practices.
+Mandatory standards for Elixir development, following OTP principles and community best practices. Elixir 1.15+, Phoenix 1.7+, Mix, ExUnit, Credo, Dialyzer.
 
 ---
 
@@ -127,18 +126,18 @@ end
 ```elixir
 # snake_case for variables and functions
 user_name = "Alice"
-def calculate_total(items), do: ...
+def calculate_total(items), do: ..
 
 # Predicate functions end with ?
-def valid?(changeset), do: ...
+def valid?(changeset), do: ..
 def admin?(user), do: user.role == :admin
 
 # Dangerous functions end with !
 def get_user!(id), do: Repo.get!(User, id)
-def create_user!(attrs), do: ...
+def create_user!(attrs), do: ..
 
 # Private functions prefixed with do_ (optional convention)
-defp do_process(data), do: ...
+defp do_process(data), do: ..
 
 # Module attributes in SCREAMING_SNAKE_CASE
 @max_retries 3
@@ -168,7 +167,7 @@ end
 # Implementations match the context
 defmodule MyApp.Payments.Stripe do
   @behaviour MyApp.PaymentBehaviour
-  ...
+  ..
 end
 ```
 
@@ -866,3 +865,6 @@ Map.merge(map1, map2)
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** Elixir Team
+
+
+**End of Elixir Development Guidelines**

@@ -1,35 +1,61 @@
-# MySQL & MariaDB Best Practices Guide
-
-**Version:** 1.0
-**Last Updated:** February 2026
-**Target Versions:** MySQL 8.4+, 9.0+ | MariaDB 11.0+, 11.4+
-
-## Table of Contents
-
-1. [Architecture and Fundamentals](#1-architecture-and-fundamentals)
-2. [Storage Engines (InnoDB vs MyISAM)](#2-storage-engines-innodb-vs-myisam)
-3. [Performance Optimization](#3-performance-optimization)
-4. [Replication Strategies](#4-replication-strategies)
-5. [Sharding and Partitioning](#5-sharding-and-partitioning)
-6. [Indexing Strategies](#6-indexing-strategies)
-7. [Query Optimization](#7-query-optimization)
-8. [Transaction Management](#8-transaction-management)
-9. [Connection Pooling](#9-connection-pooling)
-10. [High Availability](#10-high-availability)
-11. [Security Best Practices](#11-security-best-practices)
-12. [Backup and Recovery](#12-backup-and-recovery)
-13. [Migration Strategies](#13-migration-strategies)
-14. [Schema Design](#14-schema-design)
-15. [Monitoring and Troubleshooting](#15-monitoring-and-troubleshooting)
-16. [Container Deployment](#16-container-deployment)
-17. [MySQL vs MariaDB Differences](#17-mysql-vs-mariadb-differences)
-18. [Version-Specific Features](#18-version-specific-features)
-19. [Performance Tuning Checklist](#19-performance-tuning-checklist)
-20. [Production Deployment Patterns](#20-production-deployment-patterns)
+# MySQL & MariaDB Development Guidelines
+Mandatory coding standards and development practices for MySQL and MariaDB development. MySQL 8.4+/9.0+, MariaDB 11.0+/11.4+, InnoDB, replication, ProxySQL/HAProxy.
 
 ---
 
-## 1. Architecture and Fundamentals
+**Agent Profile**: The MySQL/MariaDB Expert
+**Role**: Senior Database Engineer & OLTP Specialist
+**Objective**: Generate production-ready, reliable and performant relational database solutions.
+**Tools**: MySQL 8.4+/9.0+, MariaDB 11.0+/11.4+, InnoDB, replication, ProxySQL/HAProxy
+
+---
+
+**Version:** 1.0 | **Last Updated:** February 2026 | **Target Versions:** MySQL 8.4+, 9.0+ | MariaDB 11.0+, 11.4+
+
+## Table of Contents
+
+1. [Core Philosophies: OLTP-FIRST](#1-core-philosophies-oltp-first)
+2. [Architecture and Fundamentals](#2-architecture-and-fundamentals)
+3. [Storage Engines (InnoDB vs MyISAM)](#3-storage-engines-innodb-vs-myisam)
+4. [Performance Optimization](#4-performance-optimization)
+5. [Replication Strategies](#5-replication-strategies)
+6. [Sharding and Partitioning](#6-sharding-and-partitioning)
+7. [Indexing Strategies](#7-indexing-strategies)
+8. [Query Optimization](#8-query-optimization)
+9. [Transaction Management](#9-transaction-management)
+10. [Connection Pooling](#10-connection-pooling)
+11. [High Availability](#11-high-availability)
+12. [Security Best Practices](#12-security-best-practices)
+13. [Backup and Recovery](#13-backup-and-recovery)
+14. [Migration Strategies](#14-migration-strategies)
+15. [Schema Design](#15-schema-design)
+16. [Monitoring and Troubleshooting](#16-monitoring-and-troubleshooting)
+17. [Container Deployment](#17-container-deployment)
+18. [MySQL vs MariaDB Differences](#18-mysql-vs-mariadb-differences)
+19. [Version-Specific Features](#19-version-specific-features)
+20. [Performance Tuning Checklist](#20-performance-tuning-checklist)
+21. [Production Deployment Patterns](#21-production-deployment-patterns)
+
+---
+
+## 1. Core Philosophies: OLTP-FIRST
+
+The agent must adhere to the **OLTP-FIRST** principles for every MySQL/MariaDB implementation:
+
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+
+- **O**ptimize for transactions: Use InnoDB; design for ACID and concurrency.
+- **L**ock wisely: Prefer row-level locking; avoid long transactions and deadlock-prone patterns.
+- **T**est with real data: Use representative datasets and replication in tests.
+- **P**repared statements: Always use parameterized queries; never concatenate user input.
+- **F**oreign keys and constraints: Enforce referential integrity; use utf8mb4.
+
+**Verified Code**: Agent-generated code MUST use prepared statements, run migrations safely, and pass tests before delivery.
+
+---
+
+## 2. Architecture and Fundamentals
 
 ### MySQL Architecture Overview
 
@@ -103,7 +129,7 @@ join_buffer_size           -- Table joins
 
 ---
 
-## 2. Storage Engines (InnoDB vs MyISAM)
+## 3. Storage Engines (InnoDB vs MyISAM)
 
 ### InnoDB (Recommended - Default since MySQL 5.5)
 
@@ -194,7 +220,7 @@ GROUP BY day, event_type;
 
 ---
 
-## 3. Performance Optimization
+## 4. Performance Optimization
 
 ### InnoDB Configuration (Critical)
 
@@ -365,7 +391,7 @@ WHERE table_schema = 'myapp';
 
 ---
 
-## 4. Replication Strategies
+## 5. Replication Strategies
 
 ### Master-Slave Replication (Traditional)
 
@@ -566,7 +592,7 @@ SHOW STATUS LIKE 'Rpl_semi_sync%';
 
 ---
 
-## 5. Sharding and Partitioning
+## 6. Sharding and Partitioning
 
 ### Table Partitioning (Single Server)
 
@@ -715,7 +741,7 @@ class ShardManager:
 
 ---
 
-## 6. Indexing Strategies
+## 7. Indexing Strategies
 
 ### Index Types
 
@@ -876,7 +902,7 @@ DROP INDEX idx_users_email ON users;
 
 ---
 
-## 7. Query Optimization
+## 8. Query Optimization
 
 ### EXPLAIN and Query Analysis
 
@@ -1075,7 +1101,7 @@ pt-query-digest /var/log/mysql/slow-query.log
 
 ---
 
-## 8. Transaction Management
+## 9. Transaction Management
 
 ### ACID Properties
 
@@ -1257,7 +1283,7 @@ def transfer_money(from_user, to_user, amount, max_retries=3):
 
 ---
 
-## 9. Connection Pooling
+## 10. Connection Pooling
 
 ### Why Connection Pooling?
 
@@ -1418,7 +1444,7 @@ SHOW STATUS LIKE 'Threads%';
 
 ---
 
-## 10. High Availability
+## 11. High Availability
 
 ### MySQL HA Architectures
 
@@ -1589,7 +1615,7 @@ vrrp_instance VI_1 {
 
 ---
 
-## 11. Security Best Practices
+## 12. Security Best Practices
 
 ### User and Privilege Management
 
@@ -1794,7 +1820,7 @@ cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
 
 ---
 
-## 12. Backup and Recovery
+## 13. Backup and Recovery
 
 ### Backup Strategies
 
@@ -1987,7 +2013,7 @@ mysql -u root -p myapp -e "SELECT COUNT(*) FROM users"
 
 ---
 
-## 13. Migration Strategies
+## 14. Migration Strategies
 
 ### Schema Migration Tools
 
@@ -2222,7 +2248,7 @@ mysql_upgrade -u root -p
 
 ---
 
-## 14. Schema Design
+## 15. Schema Design
 
 ### Normalization
 
@@ -2420,7 +2446,7 @@ DELETE FROM users WHERE deleted_at < DATE_SUB(NOW(), INTERVAL 90 DAY);
 
 ---
 
-## 15. Monitoring and Troubleshooting
+## 16. Monitoring and Troubleshooting
 
 ### Key Metrics to Monitor
 
@@ -2652,7 +2678,7 @@ WHERE command = 'Sleep'
 
 ---
 
-## 16. Container Deployment
+## 17. Container Deployment
 
 ### Docker Deployment
 
@@ -3022,7 +3048,7 @@ az mysql flexible-server create \
 
 ---
 
-## 17. MySQL vs MariaDB Differences
+## 18. MySQL vs MariaDB Differences
 
 ### Feature Comparison
 
@@ -3169,7 +3195,7 @@ WHERE JSON_CONTAINS(tags, '"electronics"');
 
 ---
 
-## 18. Version-Specific Features
+## 19. Version-Specific Features
 
 ### MySQL 9.0 (Released 2025)
 
@@ -3279,7 +3305,7 @@ CREATE TABLE large_data (
 
 ---
 
-## 19. Performance Tuning Checklist
+## 20. Performance Tuning Checklist
 
 ### Server Configuration Checklist
 
@@ -3370,7 +3396,7 @@ long_query_time = 2
 
 ---
 
-## 20. Production Deployment Patterns
+## 21. Production Deployment Patterns
 
 ### Single Server Pattern
 
@@ -3559,3 +3585,7 @@ def get_shard(user_id, num_shards=4):
 
 **Last Updated:** February 2026
 **Next Review:** May 2026
+
+---
+
+**End of MySQL & MariaDB Development Guidelines**

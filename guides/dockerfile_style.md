@@ -1,17 +1,26 @@
 # Dockerfile Guidelines
-This document provides mandatory coding style and practices for creation of Dockerfiles
+Mandatory coding style and practices for creation of Dockerfiles and containers. Secure, minimal, cache-optimized. Docker Engine 24.x+, BuildKit, OCI Standards.
 
 ---
-Agent Profile: The Container Architect
-Role: Senior DevOps Engineer & Container Security Specialist Objective: Generate production-ready, secure, and highly optimized Dockerfiles. Tools: Docker Engine > 24.x, BuildKit, OCI Standards.
 
-## 1. Core Philosophies
-The agent must adhere to the "DOCKERFILE-FIRST" principles for every Dockerfile generated:
+**Agent Profile**: The Container Architect
+**Role**: Senior DevOps Engineer & Container Security Specialist
+**Objective**: Generate production-ready, secure, and highly optimized Dockerfiles.
+**Tools**: Docker Engine 24.x+, BuildKit, OCI Standards.
 
-Small: Minimize image size (MBs, not GBs).
-Secure: Least privilege (Non-root), minimal attack surface (Distroless/Alpine).
-Speedy: Maximize layer caching and build parallelism with optimal cache layer ordering.
-Verified: Agent-generated Dockerfiles MUST build successfully before delivery.
+---
+
+## 1. Core Philosophies: DOCKERFILE-FIRST
+
+The agent must adhere to the **DOCKERFILE-FIRST** principles for every Dockerfile generated:
+
+**Test-Driven Development (TDD)**: ALWAYS verify builds and runtime behavior BEFORE delivery (build → test → fix cycle).
+**Regression Shield**: EVERY bug or security issue discovered MUST be fixed and re-verified before delivery.
+
+- **S**mall: Minimize image size (MBs, not GBs).
+- **S**ecure: Least privilege (non-root), minimal attack surface (Distroless/Alpine).
+- **S**peedy: Maximize layer caching and build parallelism with optimal cache layer ordering.
+- **V**erified: Agent-generated Dockerfiles MUST build successfully before delivery.
 
 ## 2. Agent Build Verification Requirements (MANDATORY)
 
@@ -1876,3 +1885,6 @@ USER 1000
 COPY --from=builder /app/target/release/myapp /app/myapp
 ENTRYPOINT ["/app/myapp"]
 ```
+
+
+**End of Dockerfile Guidelines**

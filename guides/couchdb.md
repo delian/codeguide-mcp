@@ -1,35 +1,65 @@
-# CouchDB Best Practices Guide
-
-**Version:** 1.0
-**Last Updated:** February 2026
-**Target Version:** CouchDB 3.x+
-
-## Table of Contents
-
-1. [Architecture and Fundamentals](#1-architecture-and-fundamentals)
-2. [Document Model and Design](#2-document-model-and-design)
-3. [HTTP API and REST Interface](#3-http-api-and-rest-interface)
-4. [Mango Query Language](#4-mango-query-language)
-5. [MapReduce Views](#5-mapreduce-views)
-6. [Indexes and Performance](#6-indexes-and-performance)
-7. [Replication and Sync](#7-replication-and-sync)
-8. [Clustering and Sharding](#8-clustering-and-sharding)
-9. [Conflict Resolution](#9-conflict-resolution)
-10. [Security and Authentication](#10-security-and-authentication)
-11. [Backup and Recovery](#11-backup-and-recovery)
-12. [Monitoring and Troubleshooting](#12-monitoring-and-troubleshooting)
-13. [PouchDB and Offline-First](#13-pouchdb-and-offline-first)
-14. [Change Feeds and Live Updates](#14-change-feeds-and-live-updates)
-15. [Application Integration](#15-application-integration)
-16. [Production Deployment](#16-production-deployment)
-17. [Performance Optimization](#17-performance-optimization)
-18. [Migration Strategies](#18-migration-strategies)
-19. [Comparison with Other Databases](#19-comparison-with-other-databases)
-20. [Production Checklist](#20-production-checklist)
+# CouchDB Development Guidelines
+Mandatory coding standards and development practices for CouchDB development. CouchDB 3.x+, HTTP/REST API, Mango, MapReduce views, PouchDB, replication.
 
 ---
 
-## 1. Architecture and Fundamentals
+**Agent Profile**: The CouchDB Expert
+**Role**: Senior Document DB Engineer & Offline-First Specialist
+**Objective**: Generate production-ready, sync-friendly and web-native document solutions.
+**Tools**: CouchDB 3.x+, HTTP/REST API, Mango, MapReduce views, PouchDB, replication
+
+---
+
+**Version:** 1.0 | **Last Updated:** February 2026 | **Target Version:** CouchDB 3.x+
+
+## Table of Contents
+
+1. [Core Philosophies: SYNC-FIRST](#1-core-philosophies-sync-first)
+2. [Architecture and Fundamentals](#2-architecture-and-fundamentals)
+3. [Document Model and Design](#3-document-model-and-design)
+4. [HTTP API and REST Interface](#4-http-api-and-rest-interface)
+5. [Mango Query Language](#5-mango-query-language)
+6. [MapReduce Views](#6-mapreduce-views)
+7. [Indexes and Performance](#7-indexes-and-performance)
+8. [Replication and Sync](#8-replication-and-sync)
+9. [Clustering and Sharding](#9-clustering-and-sharding)
+10. [Conflict Resolution](#10-conflict-resolution)
+11. [Security and Authentication](#11-security-and-authentication)
+12. [Backup and Recovery](#12-backup-and-recovery)
+13. [Monitoring and Troubleshooting](#13-monitoring-and-troubleshooting)
+14. [PouchDB and Offline-First](#14-pouchdb-and-offline-first)
+15. [Change Feeds and Live Updates](#15-change-feeds-and-live-updates)
+16. [Application Integration](#16-application-integration)
+17. [Production Deployment](#17-production-deployment)
+18. [Performance Optimization](#18-performance-optimization)
+19. [Migration Strategies](#19-migration-strategies)
+20. [Comparison with Other Databases](#20-comparison-with-other-databases)
+21. [Production Checklist](#21-production-checklist)
+
+---
+
+## 1. Core Philosophies: SYNC-FIRST
+
+The agent must adhere to the **SYNC-FIRST** principles for every CouchDB implementation:
+
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+
+- **S**ync and replication: Design documents and IDs for multi-master sync; handle conflicts explicitly.
+- **Y**ield to eventual consistency: Avoid assuming immediate consistency across nodes.
+- **N**ormalize document design: Use meaningful _id; avoid unbounded arrays; design for views.
+- **C**onflict resolution: Implement and test conflict handling (last-write-wins or custom).
+- **F**ilters and changes: Use _changes and filter functions for replication and feeds.
+- **I**ndexes and views: Create Mango indexes and MapReduce views for query patterns; avoid ad-hoc full scans.
+- **R**EST and HTTP: Use REST API correctly; respect ETags and conditional requests.
+- **S**ecurity: Use _security and roles; validate input; use HTTPS in production.
+- **T**esting: Test replication, conflict resolution, and offline scenarios.
+
+**Verified Code**: Agent-generated code MUST use document revision semantics, handle conflicts, and pass tests before delivery.
+
+---
+
+## 2. Architecture and Fundamentals
 
 ### What is CouchDB?
 
@@ -138,7 +168,7 @@ Cluster:
 ├── _replicator (replication jobs)
 ├── myapp (application database)
 ├── logs (another database)
-└── ...
+└── ..
 
 Each database:
 - Independent namespace
@@ -204,7 +234,7 @@ Each database:
 
 ---
 
-## 2. Document Model and Design
+## 3. Document Model and Design
 
 ### Document Structure
 
@@ -399,7 +429,7 @@ curl -X PUT \
 
 ---
 
-## 3. HTTP API and REST Interface
+## 4. HTTP API and REST Interface
 
 ### Database Operations
 
@@ -509,7 +539,7 @@ curl -X PUT http://localhost:5984/mydb/user:alice \
 **Delete Document:**
 ```bash
 # Delete (requires _rev)
-curl -X DELETE http://localhost:5984/mydb/user:alice?rev=2-7051cbe5...
+curl -X DELETE http://localhost:5984/mydb/user:alice?rev=2-7051cbe5..
 
 # Creates tombstone document (soft delete)
 # Document still exists with _deleted: true
@@ -579,7 +609,7 @@ curl "http://localhost:5984/mydb/_all_docs?startkey=\"user:a\"&endkey=\"user:z\"
 
 ---
 
-## 4. Mango Query Language
+## 5. Mango Query Language
 
 ### Basic Queries
 
@@ -765,7 +795,7 @@ curl http://localhost:5984/mydb/_index
 
 ---
 
-## 5. MapReduce Views
+## 6. MapReduce Views
 
 ### View Basics
 
@@ -897,7 +927,7 @@ function(doc) {
 
 ---
 
-## 6. Indexes and Performance
+## 7. Indexes and Performance
 
 ### Index Types
 
@@ -1059,7 +1089,7 @@ curl http://localhost:5984/mydb/_design/users/_info
 
 ---
 
-## 7. Replication and Sync
+## 8. Replication and Sync
 
 ### Replication Basics
 
@@ -1204,7 +1234,7 @@ curl -X PUT http://localhost:5984/_replicator/b-to-a \
 
 ---
 
-## 8. Clustering and Sharding
+## 9. Clustering and Sharding
 
 ### Cluster Setup
 
@@ -1370,7 +1400,7 @@ curl -X DELETE \
 
 ---
 
-## 9. Conflict Resolution
+## 10. Conflict Resolution
 
 ### Understanding Conflicts
 
@@ -1499,7 +1529,7 @@ curl -X PUT http://localhost:5984/mydb/user:alice \
 
 ---
 
-## 10. Security and Authentication
+## 11. Security and Authentication
 
 ### Admin Party Mode
 
@@ -1668,7 +1698,7 @@ httpsd = {couch_httpd, start_link, [https]}
 
 ---
 
-## 11. Backup and Recovery
+## 12. Backup and Recovery
 
 ### Backup Strategies
 
@@ -1818,7 +1848,7 @@ curl -X POST http://admin:password@localhost:5984/_replicate \
 
 ---
 
-## 12. Monitoring and Troubleshooting
+## 13. Monitoring and Troubleshooting
 
 ### Built-in Monitoring
 
@@ -1997,7 +2027,7 @@ curl -X PUT \
 
 ---
 
-## 13. PouchDB and Offline-First
+## 14. PouchDB and Offline-First
 
 ### PouchDB Basics
 
@@ -2183,7 +2213,7 @@ db.get('user:alice').then(doc => {
 
 ---
 
-## 14. Change Feeds and Live Updates
+## 15. Change Feeds and Live Updates
 
 ### Change Feed Types
 
@@ -2342,7 +2372,7 @@ wss.on('connection', function(ws) {
 
 ---
 
-## 15. Application Integration
+## 16. Application Integration
 
 ### Python Client
 
@@ -2548,7 +2578,7 @@ class User {
     private String name;
     private String email;
 
-    // Getters and setters...
+    // Getters and setters..
 }
 ```
 
@@ -2588,7 +2618,7 @@ curl -X DELETE "$HOST/mydb/user:alice?rev=2-def456" \
 
 ---
 
-## 16. Production Deployment
+## 17. Production Deployment
 
 ### Docker Deployment
 
@@ -2832,7 +2862,7 @@ backend couchdb_back
 
 ---
 
-## 17. Performance Optimization
+## 18. Performance Optimization
 
 ### Database Compaction
 
@@ -2984,7 +3014,7 @@ const nano = require('nano')({
 
 ---
 
-## 18. Migration Strategies
+## 19. Migration Strategies
 
 ### From MongoDB
 
@@ -3202,7 +3232,7 @@ class DualWriteService {
 
 ---
 
-## 19. Comparison with Other Databases
+## 20. Comparison with Other Databases
 
 ### CouchDB vs. MongoDB
 
@@ -3241,7 +3271,7 @@ class DualWriteService {
 
 ---
 
-## 20. Production Checklist
+## 21. Production Checklist
 
 ### Pre-Deployment
 
@@ -3383,3 +3413,7 @@ Critical Metrics:
 
 **Last Updated:** February 2026
 **Next Review:** May 2026
+
+---
+
+**End of CouchDB Development Guidelines**

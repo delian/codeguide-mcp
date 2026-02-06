@@ -1,16 +1,18 @@
-# Modern Jenkins CI/CD Guidelines
-This document provides mandatory standards and best practices for Jenkins usage, emphasizing declarative pipelines, Jenkins as code, and modern CI/CD practices.
+# Jenkins Development Guidelines
+Mandatory coding standards and development practices for Jenkins development. Jenkins Declarative Pipelines, Jenkins Configuration as Code (JCasC), Blue Ocean, Docker, Kubernetes.
 
 ---
 
-**Agent Profile**: The Jenkins DevOps Expert  
-**Role**: Senior DevOps Engineer & Jenkins Specialist  
-**Objective**: Generate efficient, maintainable, secure Jenkins pipelines using declarative syntax and infrastructure as code.  
+**Agent Profile**: The Jenkins DevOps Expert
+**Role**: Senior DevOps Engineer & Jenkins Specialist
+**Objective**: Generate efficient, maintainable, secure Jenkins pipelines using declarative syntax and infrastructure as code.
 **Tools**: Jenkins Declarative Pipelines, Jenkins Configuration as Code (JCasC), Blue Ocean, Docker, Kubernetes.
 
-## Core Philosophies
+---
 
-The agent must adhere to the "JENKINS-FIRST" principles for every Jenkins configuration:
+## 1. Core Philosophies: JENKINS-FIRST
+
+The agent must adhere to the **JENKINS-FIRST** principles for every Jenkins configuration:
 
 **Test-Driven Development (TDD)**: ALL pipelines MUST verify tests pass before deployment (Red-Green-Refactor mandatory).
 **Regression Shield**: EVERY bug fix MUST reference issue ID and include regression test verification in pipeline.
@@ -28,9 +30,11 @@ The agent must adhere to the "JENKINS-FIRST" principles for every Jenkins config
 **Artifact Management**: Nexus/Artifactory integration, semantic versioning.
 **Reproducible Builds**: Locked dependencies, deterministic builds, versioned tools.
 
+**Verified Code**: Agent-generated pipelines MUST validate (syntax/lint) and pass quality gates before delivery.
+
 ---
 
-## 1. Declarative Pipeline Structure (MANDATORY)
+## 2. Declarative Pipeline Structure (MANDATORY)
 
 ### A. Complete Declarative Pipeline Template
 
@@ -741,7 +745,7 @@ def call() {
 
 ---
 
-## 2. Jenkins Configuration as Code (JCasC) (MANDATORY)
+## 3. Jenkins Configuration as Code (JCasC) (MANDATORY)
 
 ### A. JCasC Configuration File
 
@@ -1643,7 +1647,7 @@ stage('Verify Bug Fixes') {
 
 ---
 
-## 3. Scripted Pipeline (Use Only When Declarative Insufficient)
+## 4. Scripted Pipeline (Use Only When Declarative Insufficient)
 
 ### A. When to Use Scripted Pipeline
 
@@ -1752,7 +1756,7 @@ def notifyBuild(String buildStatus) {
 
 ---
 
-## 4. Multi-Branch Pipeline (MANDATORY for Projects)
+## 5. Multi-Branch Pipeline (MANDATORY for Projects)
 
 ### A. Jenkinsfile for Multi-Branch
 
@@ -1874,7 +1878,7 @@ jobs:
 
 ---
 
-## 5. Security Best Practices (MANDATORY)
+## 6. Security Best Practices (MANDATORY)
 
 ### A. Credentials Management
 
@@ -2010,7 +2014,7 @@ pipeline {
 
 ---
 
-## 6. Deployment Checklist
+## 7. Deployment Checklist
 
 ### Jenkins Setup
 - [ ] **Jenkins installed**: LTS version with Java 17
@@ -2069,7 +2073,7 @@ pipeline {
 
 ---
 
-## 7. Why This Configuration Works
+## 8. Why This Configuration Works
 
 1. **Declarative First**: Easier to read, maintain, and validate than scripted pipelines.
 2. **TDD Enforcement**: Automated checks ensure tests exist and pass before deployment.
@@ -2086,7 +2090,7 @@ pipeline {
 
 ---
 
-## 8. Quick Reference
+## 9. Quick Reference
 
 ### Common Jenkins CLI Commands
 
@@ -2493,6 +2497,10 @@ echo "Found ${testFiles.length} test files"
 
 ---
 
-**Last Updated:** 2026-01-18  
-**Version:** 1.0  
+**Last Updated:** 2026-01-18
+**Version:** 1.0
 **Maintainer:** DevOps Team
+
+---
+
+**End of Jenkins Development Guidelines**

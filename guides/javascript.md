@@ -1,14 +1,19 @@
 # Modern JavaScript Development Guidelines
-This document provides mandatory coding standards and development practices for modern JavaScript applications
+
+Mandatory coding standards and development practices for JavaScript development. ESNext (ES2024+), JSDoc, Modern testing frameworks (Vitest/Jest), ESLint, Prettier.
 
 ---
-Agent Profile: The JavaScript Modernist
-Role: Senior JavaScript Engineer & ES2024+ Specialist
-Objective: Generate production-ready, clean, fully documented, minimalistic, and maintainable JavaScript code.
-Tools: ESNext (ES2024+), JSDoc, Modern testing frameworks (Vitest/Jest), ESLint, Prettier.
 
-## 1. Core Philosophies
-The agent must adhere to the "MODERN-JS" principles for every JavaScript project:
+**Agent Profile**: The JavaScript Modernist
+**Role**: Senior JavaScript Engineer & ES2024+ Specialist
+**Objective**: Generate production-ready, clean, fully documented, minimalistic, and maintainable JavaScript code.
+**Tools**: ESNext (ES2024+), JSDoc, Modern testing frameworks (Vitest/Jest), ESLint, Prettier.
+
+---
+
+## 1. Core Philosophies: MODERN-JS-FIRST
+
+The agent must adhere to the **MODERN-JS-FIRST** principles for every JavaScript project:
 
 **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
 **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
@@ -30,6 +35,10 @@ The agent must adhere to the "MODERN-JS" principles for every JavaScript project
 **Only Valid Code**: Agent MUST verify code parses and runs before delivery.
 **Clean Formatting**: Consistent style, readable code, Prettier formatted.
 **Known to Work**: All tests passing, code parsing successfully verified.
+
+**Verified Code**: Agent-generated code MUST parse, pass tests, and pass lint before delivery.
+
+---
 
 ## 2. Agent Code Generation Requirements (MANDATORY)
 
@@ -1300,7 +1309,7 @@ function createBad(email, name, role, send) {
 const badUser = createBad('user@example.com', 'John', 'user', false); // Unclear!
 ```
 
-## 6. Testing Requirements (MANDATORY)
+## 7. Testing Requirements (MANDATORY)
 
 ### A. Test Coverage
 
@@ -1372,7 +1381,7 @@ describe('UserService', () => {
 });
 ```
 
-## 7. Project Structure
+## 8. Project Structure
 
 ```
 project/
@@ -1404,7 +1413,7 @@ project/
 └── README.md
 ```
 
-## 8. Configuration Files
+## 9. Configuration Files
 
 ### A. ESLint Configuration
 
@@ -1487,7 +1496,7 @@ project/
 }
 ```
 
-## 9. Complete Example
+## 10. Complete Example
 
 ```javascript
 /**
@@ -1642,7 +1651,7 @@ export class UserService {
  */
 ```
 
-## 10. Deployment Checklist
+## 11. Deployment Checklist
 
 ### Agent Code Generation (MANDATORY)
 - [ ] **Code parses successfully**: `node --check` on all files passes
@@ -1677,7 +1686,7 @@ export class UserService {
 - [ ] No prototype pollution vulnerabilities
 - [ ] Secrets not hardcoded
 
-## 11. Why This Configuration Works
+## 12. Why This Configuration Works
 
 1. **Modern ECMAScript**: Latest features provide cleaner, more expressive code.
 
@@ -1705,7 +1714,7 @@ export class UserService {
 
 ---
 
-## 12. Quick Reference
+## 13. Quick Reference
 
 ### Common Commands
 
@@ -1792,3 +1801,7 @@ my_project/
 - [Vitest Documentation](https://vitest.dev/)
 - [ESLint Rules](https://eslint.org/docs/latest/rules/)
 - [JavaScript Best Practices](https://github.com/goldbergyoni/nodebestpractices)
+
+---
+
+**End of Modern JavaScript Development Guidelines**

@@ -1,6 +1,5 @@
 # Modern Kotlin Development Guidelines
-
-This document provides mandatory coding standards and development practices for modern Kotlin applications with emphasis on minimal boilerplate, clean readable code, hexagonal architecture, and modern language features.
+Mandatory coding standards and development practices for modern Kotlin applications with emphasis on minimal boilerplate, clean readable code, hexagonal architecture, and modern language features. Kotlin 1.9+, Gradle (preferred) / Maven (fallback), Kotest/JUnit 5, KDoc, Kotlin Coroutines, Kotlinx Serialization.
 
 ---
 
@@ -1352,12 +1351,12 @@ fun List<User>.activeUsers(): List<User> {
 }
 
 // Usage
-val user: User = ...
+val user: User = ..
 if (user.isActive()) {
     println(user.displayName())
 }
 
-val users: List<User> = ...
+val users: List<User> = ..
 val active = users.activeUsers()
 ```
 
@@ -1847,3 +1846,6 @@ my_project/
 - [Kotlin Documentation](https://kotlinlang.org/docs/)
 - [Kotlin Coroutines Guide](https://kotlinlang.org/docs/coroutines-guide.html)
 - [Dokka Documentation](https://kotlin.github.io/dokka/)
+
+
+**End of Modern Kotlin Development Guidelines**

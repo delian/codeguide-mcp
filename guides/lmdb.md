@@ -1,6 +1,31 @@
-# LMDB Development Guide
+# LMDB Development Guidelines
+Mandatory coding standards and development practices for LMDB development. LMDB C API, language bindings (Python, Node, Rust, Go), mdb_stat/mdb_copy, valgrind.
 
-## 1. Core Concepts and Architecture
+---
+
+**Agent Profile**: The LMDB Expert
+**Role**: Senior Embedded Database Engineer & Key-Value Store Specialist
+**Objective**: Generate production-ready, high-performance and reliable LMDB-backed storage solutions.
+**Tools**: LMDB C API, language bindings (Python, Node, Rust, Go), mdb_stat/mdb_copy, valgrind
+
+---
+
+## 1. Core Philosophies: LMDB-FIRST
+
+The agent must adhere to the **LMDB-FIRST** principles for every LMDB implementation:
+
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+
+- **L**ightning-fast reads: Design for read-heavy workloads; prefer zero-copy access; avoid unnecessary copies.
+- **M**emory-mapped semantics: Never hold pointers from read transactions after txn ends; respect mmap and process layout.
+- **D**urable commits: Use sync (or explicit MDB_NOSYNC only when acceptable); open/close env safely; handle disk full.
+- **B**-tree and single-writer: Use one writer at a time; keep write transactions short; use cursors for range scans.
+- **Verified Code**: Agent-generated code MUST use transactions for all access, handle MDB_* errors, and pass tests before delivery.
+
+---
+
+## 2. Core Concepts and Architecture
 
 LMDB (Lightning Memory-Mapped Database) is an ultra-fast, ultra-compact embedded key-value database developed by Symas Corporation. It uses memory-mapped files and a B+ tree architecture for exceptional read performance with ACID transactions.
 
@@ -96,7 +121,7 @@ Space:  Efficient
 | **Concurrent Readers** | Unlimited | Unlimited |
 | **Concurrent Writers** | 1 | 1 (LevelDB), Many (RocksDB) |
 
-## 2. Installation and Setup
+## 3. Installation and Setup
 
 ### Ubuntu/Debian Installation
 
@@ -204,7 +229,7 @@ gcc -O3 test_lmdb.c -llmdb -o test_lmdb
 ./test_lmdb
 ```
 
-## 3. C API - Basic Operations
+## 4. C API - Basic Operations
 
 ### Environment and Database Setup
 
@@ -459,7 +484,7 @@ int main() {
 }
 ```
 
-## 4. Transactions and MVCC
+## 5. Transactions and MVCC
 
 LMDB provides full ACID transactions with snapshot isolation.
 
@@ -677,7 +702,7 @@ int nested_transaction_example(LMDBStore *store) {
 }
 ```
 
-## 5. Cursors and Range Scans
+## 6. Cursors and Range Scans
 
 Cursors provide efficient iteration over key-value pairs.
 
@@ -891,7 +916,7 @@ void position_cursor_example(LMDBStore *store) {
 }
 ```
 
-## 6. Language Bindings
+## 7. Language Bindings
 
 ### Python (lmdb)
 
@@ -1259,7 +1284,7 @@ func main() {
 }
 ```
 
-## 7. Performance Optimization
+## 8. Performance Optimization
 
 ### Configuration Tuning
 
@@ -1415,7 +1440,7 @@ void optimized_read_pattern(LMDBStore *store) {
 }
 ```
 
-## 8. Backup and Recovery
+## 9. Backup and Recovery
 
 ### Online Backup (Hot Backup)
 
@@ -1605,7 +1630,7 @@ int lmdb_check_integrity(const char *db_path) {
 }
 ```
 
-## 9. Monitoring and Statistics
+## 10. Monitoring and Statistics
 
 ### Database Statistics
 
@@ -1717,7 +1742,7 @@ void benchmark_operations(LMDBStore *store) {
 }
 ```
 
-## 10. Security Best Practices
+## 11. Security Best Practices
 
 ### File Permissions
 
@@ -1855,7 +1880,7 @@ int get_decrypted(LMDBStore *store, const char *key, char **plaintext) {
 }
 ```
 
-## 11. Common Patterns and Anti-Patterns
+## 12. Common Patterns and Anti-Patterns
 
 ### Pattern: Secondary Indexing
 
@@ -2004,7 +2029,7 @@ void bad_pattern(MDB_env *env, MDB_dbi dbi) {
     MDB_txn *txn;
     mdb_txn_begin(env, NULL, MDB_RDONLY, &txn);
 
-    // Do lots of work for hours...
+    // Do lots of work for hours..
     sleep(3600);  // Blocks writers from reclaiming old pages!
 
     mdb_txn_abort(txn);
@@ -2071,7 +2096,7 @@ int append_sorted_keys(MDB_env *env, MDB_dbi dbi) {
 }
 ```
 
-## 12. Production Deployment
+## 13. Production Deployment
 
 ### Docker Deployment
 
@@ -2167,7 +2192,7 @@ MDB_env *open_production_lmdb(const char *path) {
 }
 ```
 
-## 13. Troubleshooting Guide
+## 14. Troubleshooting Guide
 
 ### Common Issues
 
@@ -2247,7 +2272,7 @@ mdb_load mydb.mdb < backup.txt
 mdb_copy -c mydb.mdb mydb_compacted.mdb
 ```
 
-## 14. Performance Tuning Checklist
+## 15. Performance Tuning Checklist
 
 ```markdown
 **Hardware:**
@@ -2282,7 +2307,7 @@ mdb_copy -c mydb.mdb mydb_compacted.mdb
 - [ ] Track page utilization
 ```
 
-## 15. Comparison with Alternatives
+## 16. Comparison with Alternatives
 
 ### LMDB vs LevelDB/RocksDB
 
@@ -2309,7 +2334,7 @@ mdb_copy -c mydb.mdb mydb_compacted.mdb
 | **Maintenance** | None | Minimal |
 | **Replication** | No | Yes |
 
-## 16. Migration Strategies
+## 17. Migration Strategies
 
 ### From LevelDB to LMDB
 
@@ -2374,7 +2399,7 @@ int migrate_leveldb_to_lmdb(const char *leveldb_path,
 }
 ```
 
-## 17. Resources and References
+## 18. Resources and References
 
 ### Official Documentation
 - **LMDB Homepage**: http://www.lmdb.tech/doc/
@@ -2481,3 +2506,7 @@ gcc -O3 example.c -llmdb -o example
 ```
 
 This guide provides comprehensive coverage of LMDB for production use, emphasizing its unique memory-mapped architecture and exceptional read performance.
+
+---
+
+**End of LMDB Development Guidelines**

@@ -1,6 +1,5 @@
 # gRPC Development Guidelines
-
-This document provides mandatory standards for designing and implementing gRPC services.
+Mandatory standards for designing and implementing gRPC services. Protocol Buffers 3, gRPC, grpcurl, Evans, Buf, grpc-gateway.
 
 ---
 
@@ -996,3 +995,6 @@ codes.Unauthenticated // 16 - Not authenticated
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** Platform Team
+
+
+**End of gRPC Development Guidelines**

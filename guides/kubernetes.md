@@ -1,6 +1,5 @@
 # Kubernetes Best Practices Guidelines
-
-This document provides mandatory standards and development practices for secure, production-ready Kubernetes deployments with emphasis on security, observability, resilience, and maintainability. This guide is cloud-agnostic and applies to any Kubernetes distribution (on-premises, managed, or self-hosted).
+Mandatory standards and development practices for secure, production-ready Kubernetes deployments with emphasis on security, observability, resilience, and maintainability. This guide is cloud-agnostic and applies to any Kubernetes distribution (on-premises, managed, or self-hosted). Kubernetes 1.28+, Istio 1.20+, Helm 3.x, Kustomize, kubectl, Message Brokers (Kafka/RabbitMQ/Redis/NATS).
 
 ---
 
@@ -2816,3 +2815,6 @@ spec:
 > "Istio is your service mesh. Use it for ingress, traffic management, security policies, and observability. Don't reinvent the wheel."
 
 > "Message brokers decouple your services. The specific broker doesn't matter - Kafka, RabbitMQ, Redis, NATS - what matters is that your services communicate asynchronously."
+
+
+**End of Kubernetes Best Practices Guidelines**

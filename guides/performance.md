@@ -1,6 +1,5 @@
 # Web Performance Guidelines
-
-This document provides mandatory standards for building fast, efficient web applications.
+Mandatory standards for building fast, efficient web applications. Lighthouse, WebPageTest, Chrome DevTools, bundlesize, webpack-bundle-analyzer.
 
 ---
 
@@ -848,3 +847,6 @@ font-display: swap;
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** Performance Team
+
+
+**End of Web Performance Guidelines**

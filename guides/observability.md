@@ -1,6 +1,5 @@
 # Observability Guidelines
-
-This document provides mandatory standards for implementing observability through metrics, logging, tracing, and alerting.
+Mandatory standards for implementing observability through metrics, logging, tracing, and alerting. OpenTelemetry, Prometheus, Grafana, Jaeger, Loki, Datadog, New Relic, ELK Stack.
 
 ---
 
@@ -763,3 +762,6 @@ Error budget burn > 14.4x: Critical
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** SRE Team
+
+
+**End of Observability Guidelines**

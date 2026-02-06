@@ -1,35 +1,65 @@
-# CockroachDB Best Practices Guide
-
-**Version:** 1.0
-**Last Updated:** February 2026
-**Target Version:** CockroachDB 23.x+
-
-## Table of Contents
-
-1. [Architecture and Fundamentals](#1-architecture-and-fundamentals)
-2. [SQL and Query Language](#2-sql-and-query-language)
-3. [Schema Design](#3-schema-design)
-4. [Indexes and Constraints](#4-indexes-and-constraints)
-5. [Performance Optimization](#5-performance-optimization)
-6. [Transactions and Concurrency](#6-transactions-and-concurrency)
-7. [Multi-Region Configuration](#7-multi-region-configuration)
-8. [Cluster Configuration](#8-cluster-configuration)
-9. [Data Distribution and Sharding](#9-data-distribution-and-sharding)
-10. [Backup and Recovery](#10-backup-and-recovery)
-11. [Security Best Practices](#11-security-best-practices)
-12. [Monitoring and Troubleshooting](#12-monitoring-and-troubleshooting)
-13. [High Availability and Survivability](#13-high-availability-and-survivability)
-14. [Application Integration](#14-application-integration)
-15. [Production Deployment](#15-production-deployment)
-16. [Scaling Strategies](#16-scaling-strategies)
-17. [Migration Strategies](#17-migration-strategies)
-18. [Time Travel and Change Data Capture](#18-time-travel-and-change-data-capture)
-19. [Comparison with Other Databases](#19-comparison-with-other-databases)
-20. [Production Checklist](#20-production-checklist)
+# CockroachDB Development Guidelines
+Mandatory coding standards and development practices for CockroachDB development. CockroachDB 23.x+, SQL (PostgreSQL-compatible), multi-region, backup/restore.
 
 ---
 
-## 1. Architecture and Fundamentals
+**Agent Profile**: The CockroachDB Expert
+**Role**: Senior Distributed Database Engineer & SQL Specialist
+**Objective**: Generate production-ready, resilient and scalable distributed SQL solutions.
+**Tools**: CockroachDB 23.x+, SQL (PostgreSQL-compatible), multi-region, backup/restore
+
+---
+
+**Version:** 1.0 | **Last Updated:** February 2026 | **Target Version:** CockroachDB 23.x+
+
+## Table of Contents
+
+1. [Core Philosophies: DISTRIBUTED-FIRST](#1-core-philosophies-distributed-first)
+2. [Architecture and Fundamentals](#2-architecture-and-fundamentals)
+3. [SQL and Query Language](#3-sql-and-query-language)
+4. [Schema Design](#4-schema-design)
+5. [Indexes and Constraints](#5-indexes-and-constraints)
+6. [Performance Optimization](#6-performance-optimization)
+7. [Transactions and Concurrency](#7-transactions-and-concurrency)
+8. [Multi-Region Configuration](#8-multi-region-configuration)
+9. [Cluster Configuration](#9-cluster-configuration)
+10. [Data Distribution and Sharding](#10-data-distribution-and-sharding)
+11. [Backup and Recovery](#11-backup-and-recovery)
+12. [Security Best Practices](#12-security-best-practices)
+13. [Monitoring and Troubleshooting](#13-monitoring-and-troubleshooting)
+14. [High Availability and Survivability](#14-high-availability-and-survivability)
+15. [Application Integration](#15-application-integration)
+16. [Production Deployment](#16-production-deployment)
+17. [Scaling Strategies](#17-scaling-strategies)
+18. [Migration Strategies](#18-migration-strategies)
+19. [Time Travel and Change Data Capture](#19-time-travel-and-change-data-capture)
+20. [Comparison with Other Databases](#20-comparison-with-other-databases)
+21. [Production Checklist](#21-production-checklist)
+
+---
+
+## 1. Core Philosophies: DISTRIBUTED-FIRST
+
+The agent must adhere to the **DISTRIBUTED-FIRST** principles for every CockroachDB implementation:
+
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+
+- **D**istributed by design: Prefer topology-aware schema and locality; use multi-region features.
+- **I**ndexes and constraints: Use appropriate indexes and constraints for distributed execution.
+- **S**erializable isolation: Rely on strong consistency; design for serializable semantics.
+- **T**ransactions: Keep transactions short and avoid cross-region hotspots.
+- **R**esilience: Plan for node/region failure; use backup, restore, and survivability settings.
+- **I**dempotency: Prefer idempotent operations and application-level retries.
+- **B**ackup and time travel: Use backup/restore and AS OF SYSTEM TIME for safety.
+- **U**nified SQL: Use PostgreSQL-compatible SQL; avoid unsupported or deprecated features.
+- **T**esting: Test with multi-node and failure scenarios where possible.
+
+**Verified Code**: Agent-generated code MUST use parameterized SQL, run against a cluster or dev setup, and pass tests before delivery.
+
+---
+
+## 2. Architecture and Fundamentals
 
 ### What is CockroachDB?
 
@@ -85,7 +115,7 @@ Table: users (1GB)
 ├── Range 1: rows 1-100K     → Replicas: Node1, Node2, Node3
 ├── Range 2: rows 100K-200K  → Replicas: Node2, Node3, Node4
 ├── Range 3: rows 200K-300K  → Replicas: Node1, Node3, Node4
-└── Range N: ...
+└── Range N: ..
 ```
 
 **Leaseholders:**
@@ -189,7 +219,7 @@ Requires majority (quorum) for writes
 
 ---
 
-## 2. SQL and Query Language
+## 3. SQL and Query Language
 
 ### PostgreSQL Compatibility
 
@@ -417,7 +447,7 @@ GROUP BY u.id, u.name;
 
 ---
 
-## 3. Schema Design
+## 4. Schema Design
 
 ### Primary Keys
 
@@ -607,7 +637,7 @@ ALTER TABLE users
 
 ---
 
-## 4. Indexes and Constraints
+## 5. Indexes and Constraints
 
 ### Index Types
 
@@ -804,7 +834,7 @@ EXPLAIN SELECT * FROM orders WHERE user_id = 'xxx' AND created_at > 'yyy';
 
 ---
 
-## 5. Performance Optimization
+## 6. Performance Optimization
 
 ### Query Optimization
 
@@ -962,7 +992,7 @@ LIMIT 10;
 
 ---
 
-## 6. Transactions and Concurrency
+## 7. Transactions and Concurrency
 
 ### Transaction Basics
 
@@ -1165,7 +1195,7 @@ COMMIT;
 
 ---
 
-## 7. Multi-Region Configuration
+## 8. Multi-Region Configuration
 
 ### Multi-Region Overview
 
@@ -1336,7 +1366,7 @@ CONFIGURE ZONE USING constraints = '[+region=ap-northeast]';
 
 ---
 
-## 8. Cluster Configuration
+## 9. Cluster Configuration
 
 ### Starting a Cluster
 
@@ -1484,7 +1514,7 @@ ALTER TABLE financial_records CONFIGURE ZONE USING
 
 ---
 
-## 9. Data Distribution and Sharding
+## 10. Data Distribution and Sharding
 
 ### Range Splits
 
@@ -1595,7 +1625,7 @@ CREATE INDEX ON orders (created_at) USING HASH WITH BUCKET_COUNT = 8;
 
 ---
 
-## 10. Backup and Recovery
+## 11. Backup and Recovery
 
 ### Backup Types
 
@@ -1747,7 +1777,7 @@ WITH delimiter = '|', skip = '1';
 
 ---
 
-## 11. Security Best Practices
+## 12. Security Best Practices
 
 ### Authentication
 
@@ -1924,7 +1954,7 @@ SET CLUSTER SETTING sql.log.admin_audit.enabled = true;
 
 ---
 
-## 12. Monitoring and Troubleshooting
+## 13. Monitoring and Troubleshooting
 
 ### Admin UI
 
@@ -2090,7 +2120,7 @@ SELECT count(*) FROM crdb_internal.ranges WHERE unavailable = true;
 cockroach start \
   --cache=50% \           # Increase cache
   --max-sql-memory=50% \  # Increase SQL memory
-  ...
+  ..
 
 # Or reduce per-query memory
 SET CLUSTER SETTING sql.distsql.temp_storage.workmem = '128MB';
@@ -2098,7 +2128,7 @@ SET CLUSTER SETTING sql.distsql.temp_storage.workmem = '128MB';
 
 ---
 
-## 13. High Availability and Survivability
+## 14. High Availability and Survivability
 
 ### Replication
 
@@ -2209,7 +2239,7 @@ FULL BACKUP '@weekly';
 
 ---
 
-## 14. Application Integration
+## 15. Application Integration
 
 ### Python (psycopg2)
 
@@ -2510,7 +2540,7 @@ func runTransaction(db *sql.DB, fn func(*sql.Tx) error) error {
 
 ---
 
-## 15. Production Deployment
+## 16. Production Deployment
 
 ### Docker Deployment
 
@@ -2752,7 +2782,7 @@ listen cockroachdb-ui
 
 ---
 
-## 16. Scaling Strategies
+## 17. Scaling Strategies
 
 ### Vertical Scaling
 
@@ -2894,7 +2924,7 @@ class CachedDB:
 
 ---
 
-## 17. Migration Strategies
+## 18. Migration Strategies
 
 ### From PostgreSQL
 
@@ -3083,7 +3113,7 @@ def validate_migration():
 
 ---
 
-## 18. Time Travel and Change Data Capture
+## 19. Time Travel and Change Data Capture
 
 ### Time Travel Queries
 
@@ -3274,7 +3304,7 @@ SHOW ZONE CONFIGURATION FOR TABLE users;
 
 ---
 
-## 19. Comparison with Other Databases
+## 20. Comparison with Other Databases
 
 ### CockroachDB vs. PostgreSQL
 
@@ -3335,7 +3365,7 @@ SHOW ZONE CONFIGURATION FOR TABLE users;
 
 ---
 
-## 20. Production Checklist
+## 21. Production Checklist
 
 ### Pre-Deployment
 
@@ -3566,3 +3596,7 @@ SHOW CLUSTER SETTING version
 
 **Last Updated:** February 2026
 **Next Review:** May 2026
+
+---
+
+**End of CockroachDB Development Guidelines**

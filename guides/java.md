@@ -1,6 +1,5 @@
 # Modern Java Development Guidelines
-
-This document provides mandatory coding standards and development practices for modern Java applications with emphasis on performance, portability, minimalistic code, and modern language features.
+Mandatory coding standards and development practices for modern Java applications with emphasis on performance, portability, minimalistic code, and modern language features. Java 21+, Gradle (preferred) / Maven (fallback), JUnit 5, JavaDoc, Project Reactor, Virtual Threads.
 
 ---
 
@@ -1213,7 +1212,7 @@ public class User {
         this.createdAt = createdAt;
     }
     
-    // Getters, setters, equals, hashCode, toString...
+    // Getters, setters, equals, hashCode, toString..
     // 50+ lines of boilerplate
 }
 ```
@@ -1348,7 +1347,7 @@ public final class DatabaseConfig {
         return new Builder();
     }
     
-    // Getters...
+    // Getters..
     
     public static final class Builder {
         private String host;
@@ -1364,7 +1363,7 @@ public final class DatabaseConfig {
             return this;
         }
         
-        // Other setters...
+        // Other setters..
         
         public DatabaseConfig build() {
             // Validation
@@ -1438,7 +1437,7 @@ public class CreditCardStrategy implements PaymentStrategy {
         // Implementation
     }
 }
-// More boilerplate...
+// More boilerplate..
 ```
 
 ### B. Enum-Based Registry Strategy
@@ -2654,3 +2653,6 @@ my_project/
 - [Java Documentation](https://docs.oracle.com/en/java/)
 - [Spring Boot Reference](https://docs.spring.io/spring-boot/docs/current/reference/)
 - [JUnit 5 User Guide](https://junit.org/junit5/docs/current/user-guide/)
+
+
+**End of Modern Java Development Guidelines**

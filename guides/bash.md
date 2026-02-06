@@ -1,6 +1,5 @@
 # Modern Bash Shell Scripting Guidelines
-
-This document provides mandatory coding standards and development practices for modern bash shell scripts with emphasis on minimalistic, clean, readable, testable, and maintainable code using hexagonal architecture principles.
+Mandatory coding standards and development practices for modern bash shell scripts with emphasis on minimalistic, clean, readable, testable, and maintainable code using hexagonal architecture principles. Bash 5.0+, zsh compatibility, getopt/getopts, shellcheck, shfmt, bats (testing framework).
 
 ---
 
@@ -358,7 +357,7 @@ script/
 # ❌ No separation of concerns
 # ❌ Hard to test and maintain
 
-# 500+ lines of mixed logic...
+# 500+ lines of mixed logic..
 ```
 
 ---
@@ -536,7 +535,7 @@ main() {
         echo "Processing: $INPUT_FILE -> $OUTPUT_FILE"
     fi
     
-    # Process file...
+    # Process file..
 }
 
 main "$@"
@@ -786,7 +785,7 @@ validate_file() {
 # ❌ No error checking
 download_file() {
     curl "$1" > "$2"
-    # What if curl fails? Script continues...
+    # What if curl fails? Script continues..
 }
 
 # ❌ Vague error messages
@@ -1293,7 +1292,7 @@ process_with_temp_dir() {
     
     # Use temporary directory
     cd "$temp_dir"
-    # ... do work ...
+    # ... do work ..
     
     # Trap will clean up automatically
 }
@@ -1661,3 +1660,6 @@ trap 'rm -f "$tmp_file"' EXIT
 - Only present working, tested scripts to the user
 
 **Remember**: Minimalistic, clean, readable, well-documented, modular bash scripts with hexagonal architecture, zsh compatibility, proper error handling, getopt parameter parsing, and comprehensive testing. Keep it simple, keep it safe, keep it working.
+
+
+**End of Modern Bash Shell Scripting Guidelines**

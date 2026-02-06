@@ -1,6 +1,5 @@
 # Istio Service Mesh Guidelines
-
-This document provides mandatory standards and best practices for secure, production-ready Istio service mesh deployments. Covers generic Kubernetes installations, Azure AKS Istio add-on, and AWS EKS configurations with emphasis on security, static IP addressing, traffic management, and observability.
+Mandatory standards and best practices for secure, production-ready Istio service mesh deployments. Covers generic Kubernetes installations, Azure AKS Istio add-on, and AWS EKS configurations with emphasis on security, static IP addressing, traffic management, and observability. Istio 1.20+, istioctl, Helm 3.x, Kiali, Jaeger, Prometheus, Grafana.
 
 ---
 
@@ -2520,3 +2519,6 @@ ISTIO VERIFICATION CHECKLIST:
 > "Static IPs enable reliable DNS, firewall rules, and external integrations. Configure them from day one."
 
 > "Use the managed Istio add-on on AKS. It's supported, automatically upgraded, and reduces operational burden."
+
+
+**End of Istio Service Mesh Guidelines**

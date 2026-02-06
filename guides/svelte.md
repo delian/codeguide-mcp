@@ -1,15 +1,18 @@
 # Svelte Development Guidelines
-This document provides mandatory coding standards and development practices for modern Svelte applications with TypeScript
+Mandatory coding standards and development practices for Svelte development. Svelte 5+, SvelteKit 2+, TypeScript 5.x, Vitest, TypeDoc, Playwright.
 
 ---
-Agent Profile: The Svelte Expert
-Role: Senior Svelte Engineer & Reactive Systems Specialist
-Objective: Generate production-ready, performant, well-documented, and maintainable Svelte code with TypeScript.
-Tools: Svelte 5+, SvelteKit 2+, TypeScript 5.x, Vitest, TypeDoc, Playwright.
 
-## Core Philosophies
+**Agent Profile**: The Svelte Expert
+**Role**: Senior Svelte Engineer & Reactive Systems Specialist
+**Objective**: Generate production-ready, performant, well-documented, and maintainable Svelte code with TypeScript.
+**Tools**: Svelte 5+, SvelteKit 2+, TypeScript 5.x, Vitest, TypeDoc, Playwright
 
-The agent must adhere to the "SVELTE-FIRST" principles:
+---
+
+## 1. Core Philosophies: SVELTE-FIRST
+
+The agent must adhere to the **SVELTE-FIRST** principles for every Svelte application:
 
 **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
 **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
@@ -20,13 +23,13 @@ The agent must adhere to the "SVELTE-FIRST" principles:
 **Compiled Away**: Write declarative code; let Svelte compile to optimal JavaScript.
 **Component Composition**: Small, focused components with clear interfaces.
 **Tested Code**: Unit tests for all logic, component tests for UI.
-**Verified Builds**: All code must compile and pass tests before delivery.
 **Documented APIs**: JSDoc/TypeDoc for all public APIs.
 **Hexagonal Architecture**: Clear separation of domain, application, and infrastructure.
+**Verified Code**: Agent-generated code MUST compile (`svelte-check`/`npm run build`), pass lint and tests, and pass verification before delivery.
 
 ---
 
-## 1. Agent Code Generation Requirements (MANDATORY)
+## 2. Agent Code Generation Requirements (MANDATORY)
 
 ### A. Verification Protocol
 
@@ -461,7 +464,7 @@ export const userStore = createUserStore();
 
 ---
 
-## 2. Mental Model
+## 3. Mental Model
 
 ### A. Core Concepts
 
@@ -1228,7 +1231,7 @@ describe('LoginForm - Bug #9877', () => {
 
 ---
 
-## 3. Async-First Patterns (MANDATORY)
+## 4. Async-First Patterns (MANDATORY)
 
 ### A. Async/Await Hierarchy
 
@@ -1514,7 +1517,7 @@ describe('LoginForm - Bug #9877', () => {
 
 ---
 
-## 4. Reactivity (Svelte 5 Runes)
+## 5. Reactivity (Svelte 5 Runes)
 
 ### A. State Management
 
@@ -1659,7 +1662,7 @@ If using Svelte 4 syntax:
 
 ---
 
-## 5. Props & Component Interface
+## 6. Props & Component Interface
 
 ### A. Svelte 5 Props
 
@@ -1747,7 +1750,7 @@ If using Svelte 4 syntax:
 
 ---
 
-## 6. TypeScript Integration (MANDATORY)
+## 7. TypeScript Integration (MANDATORY)
 
 ### A. Configuration
 
@@ -1849,7 +1852,7 @@ If using Svelte 4 syntax:
 
 ---
 
-## 7. Control Flow & Templating
+## 8. Control Flow & Templating
 
 ### A. Conditionals
 
@@ -1953,7 +1956,7 @@ If using Svelte 4 syntax:
 
 ---
 
-## 8. Stores (Global State)
+## 9. Stores (Global State)
 
 ### A. Writable Stores
 
@@ -2060,7 +2063,7 @@ If using Svelte 4 syntax:
 
 ---
 
-## 9. Documentation Requirements (MANDATORY)
+## 10. Documentation Requirements (MANDATORY)
 
 ### A. JSDoc Comments
 
@@ -2182,7 +2185,7 @@ If using Svelte 4 syntax:
 
 ---
 
-## 10. Testing (MANDATORY)
+## 11. Testing (MANDATORY)
 
 ### A. Unit Tests with Vitest
 
@@ -2338,7 +2341,7 @@ export default defineConfig({
 
 ---
 
-## 11. Hexagonal Architecture (MANDATORY)
+## 12. Hexagonal Architecture (MANDATORY)
 
 ### A. Project Structure
 
@@ -2729,7 +2732,7 @@ export const container = Container.getInstance();
 
 ---
 
-## 12. SvelteKit Specifics
+## 13. SvelteKit Specifics
 
 ### A. Load Functions
 
@@ -2805,7 +2808,7 @@ export const POST: RequestHandler = async ({ request }) => {
 
 ---
 
-## 13. Deployment Checklist
+## 14. Deployment Checklist
 
 ### Test-Driven Development (TDD) Compliance
 - [ ] **Tests written BEFORE implementation**: Red-Green-Refactor cycle followed for all new code
@@ -2859,7 +2862,7 @@ export const POST: RequestHandler = async ({ request }) => {
 
 ---
 
-## 14. Common Patterns
+## 15. Common Patterns
 
 ### A. Form Handling
 
@@ -3357,7 +3360,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 export const actions = {
   default: async ({ request }) => {
     const data = await request.formData();
-    // Process form...
+    // Process form..
     return { success: true };
   },
   delete: async ({ params }) => {
@@ -3400,3 +3403,7 @@ export const POST: RequestHandler = async ({ request }) => {
 **Last Updated:** 2026-01-18
 **Version:** 1.0
 **Maintainer:** Development Team
+
+---
+
+**End of Svelte Development Guidelines**

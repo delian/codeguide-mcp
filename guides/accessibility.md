@@ -1,6 +1,5 @@
 # Accessibility (a11y) Guidelines
-
-This document provides mandatory standards for building accessible web applications following WCAG 2.1 AA guidelines.
+Mandatory standards for building accessible web applications following WCAG 2.1 AA guidelines. Inclusive, WCAG-compliant. axe-core, WAVE, Lighthouse, NVDA, VoiceOver, JAWS.
 
 ---
 
@@ -147,7 +146,7 @@ Content must be robust enough to work with assistive technologies.
   <figcaption id="diagram-description">
     The system consists of three main components: a React frontend,
     a Node.js API server, and a PostgreSQL database. The frontend
-    communicates with the API via REST endpoints...
+    communicates with the API via REST endpoints..
   </figcaption>
 </figure>
 
@@ -824,3 +823,6 @@ aria-owns="id"
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** UX Team
+
+
+**End of Accessibility (a11y) Guidelines**

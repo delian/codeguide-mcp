@@ -1,6 +1,5 @@
 # Code Comments & Documentation Guidelines
-
-This document provides mandatory standards for writing clean, minimalistic, and maintainable code comments across all programming languages. Comments should enhance understanding without cluttering the codebase.
+Mandatory standards for writing clean, minimalistic, and maintainable code comments across all programming languages. Comments should enhance understanding without cluttering the codebase. Language-specific doc generators (pydoc, javadoc, jsdoc, typedoc, godoc, rustdoc, doxygen, RDoc, yard, etc.).
 
 ---
 
@@ -70,7 +69,7 @@ The agent must adhere to the **COMMENT-WISE** principles for every code comment:
    javadoc -d docs src/*.java
 
    # Go
-   go doc ./...
+   go doc ./..
 
    # Rust
    cargo doc --no-deps
@@ -1054,7 +1053,7 @@ typedoc --validation.notExported
 javadoc -Xdoclint:all
 
 # Go (check for missing comments)
-golint ./...
+golint ./..
 
 # Rust
 cargo doc --document-private-items 2>&1 | grep -i "warning"

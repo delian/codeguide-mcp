@@ -1,6 +1,36 @@
-# RocksDB Development Guide
+# RocksDB Development Guidelines
 
-## 1. Core Concepts and Architecture
+Mandatory coding standards and development practices for RocksDB development. RocksDB C++ API, Python bindings, column families, compaction tuning, backup/restore.
+
+---
+
+**Agent Profile**: The RocksDB Expert
+**Role**: Senior Embedded Storage Engineer & LSM/Key-Value Specialist
+**Objective**: Generate production-ready, high-performance and reliable embedded storage solutions using RocksDB.
+**Tools**: RocksDB C++ API, Python bindings, column families, compaction tuning, backup/restore
+
+---
+
+## 1. Core Philosophies: LSM-FIRST
+
+The agent must adhere to the **LSM-FIRST** principles for every RocksDB implementation:
+
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+
+- **L**SM-aware: Design for write amplification, compaction, and level structure; tune for workload (write-heavy vs read-heavy).
+- **S**tatus checks: Always check Status/Result on every operation; never ignore errors or assume success.
+- **M**emory and cache: Tune block cache, memtable size, and write buffer for your access pattern and hardware.
+- **F**amilies: Use column families for logical partitioning when needed; share WAL, separate LSM trees.
+- **I**dempotent recovery: Handle crash recovery and WAL replay; use backups for point-in-time recovery.
+- **R**esource limits: Set max open files, compaction threads, and memory limits for production stability.
+- **S**tability: Test under failure (disk full, I/O errors); avoid undefined behavior from invalid options.
+- **T**esting: Unit test with in-memory or temp DB; integration test with real storage; benchmark before tuning.
+**Verified Code**: Agent-generated code MUST check every RocksDB return status, use safe options, and pass tests before delivery.
+
+---
+
+## 2. Core Concepts and Architecture
 
 RocksDB is a high-performance embedded key-value store optimized for fast storage (SSD, NVMe). Originally forked from LevelDB by Facebook (Meta), it's built on Log-Structured Merge (LSM) tree architecture and designed for write-heavy workloads with low-latency read requirements.
 
@@ -67,7 +97,7 @@ int main() {
 - Sub-microsecond operations possible
 - Single-process data integrity
 
-## 2. Installation and Setup
+## 3. Installation and Setup
 
 ### C++ Installation
 
@@ -141,7 +171,7 @@ cargo add rocksdb
 </dependency>
 ```
 
-## 3. Modern C++ API - Basic Operations
+## 4. Modern C++ API - Basic Operations
 
 ### Production-Ready Database Setup
 
@@ -350,7 +380,7 @@ void ReverseScan(rocksdb::DB* db, const std::string& start_key, int limit) {
 }
 ```
 
-## 4. Column Families - Advanced Data Organization
+## 5. Column Families - Advanced Data Organization
 
 Column families allow multiple independent LSM trees in a single database, sharing WAL but having separate memtables, SSTables, and compaction.
 
@@ -450,7 +480,7 @@ public:
 - **Isolation**: One CF's compaction doesn't block another
 - **TTL per family**: Different expiration policies
 
-## 5. Python API - Modern Async Patterns
+## 6. Python API - Modern Async Patterns
 
 ```python
 import rocksdb
@@ -585,7 +615,7 @@ if __name__ == '__main__':
     asyncio.run(main())
 ```
 
-## 6. Transactions and Consistency
+## 7. Transactions and Consistency
 
 RocksDB supports optimistic and pessimistic transactions for ACID guarantees.
 
@@ -759,7 +789,7 @@ public:
 };
 ```
 
-## 7. Performance Optimization - Write Amplification
+## 8. Performance Optimization - Write Amplification
 
 Write amplification is the ratio of bytes written to storage vs. bytes written by the application. RocksDB rewrites data during compaction.
 
@@ -823,7 +853,7 @@ rocksdb::Options GetLowWriteAmpOptions() {
 }
 ```
 
-## 8. Performance Optimization - Read Latency
+## 9. Performance Optimization - Read Latency
 
 ### Bloom Filters and Partitioned Indexes
 
@@ -919,7 +949,7 @@ std::vector<rocksdb::Status> FastMultiGet(
 }
 ```
 
-## 9. Compaction Strategies
+## 10. Compaction Strategies
 
 ### Level Compaction (Default)
 
@@ -1001,7 +1031,7 @@ rocksdb::Options GetFIFOCompactionOptions(uint64_t ttl_seconds) {
 }
 ```
 
-## 10. Backup and Recovery
+## 11. Backup and Recovery
 
 ### Incremental Backup
 
@@ -1120,7 +1150,7 @@ void HotBackup(rocksdb::DB* db) {
 }
 ```
 
-## 11. Monitoring and Statistics
+## 12. Monitoring and Statistics
 
 ### Real-Time Statistics
 
@@ -1246,7 +1276,7 @@ void PrintHistograms(const std::shared_ptr<rocksdb::Statistics>& stats) {
 }
 ```
 
-## 12. Security Best Practices
+## 13. Security Best Practices
 
 ### Encryption at Rest
 
@@ -1444,7 +1474,7 @@ void VerifyChecksums(rocksdb::DB* db) {
 }
 ```
 
-## 13. Testing Strategies
+## 14. Testing Strategies
 
 ### Unit Testing with Mock Environment
 
@@ -1648,7 +1678,7 @@ BENCHMARK(BM_Get)->Threads(1)->Threads(4)->Threads(8);
 BENCHMARK_MAIN();
 ```
 
-## 14. Production Deployment Patterns
+## 15. Production Deployment Patterns
 
 ### Container Deployment (Docker)
 
@@ -1843,7 +1873,7 @@ rocksdb::Options GetProductionOptions() {
 }
 ```
 
-## 15. Common Patterns and Anti-Patterns
+## 16. Common Patterns and Anti-Patterns
 
 ### Pattern: Time-Series Data
 
@@ -2031,7 +2061,7 @@ void GoodCounterPattern(rocksdb::DB* db) {
 }
 ```
 
-## 16. Migration Strategies
+## 17. Migration Strategies
 
 ### Migrating from LevelDB
 
@@ -2117,7 +2147,7 @@ public:
 };
 ```
 
-## 17. Troubleshooting Guide
+## 18. Troubleshooting Guide
 
 ### Write Stalls
 
@@ -2230,7 +2260,7 @@ void DiagnoseCompaction(rocksdb::DB* db) {
 }
 ```
 
-## 18. Performance Tuning Checklist
+## 19. Performance Tuning Checklist
 
 ### Hardware Optimization
 
@@ -2328,7 +2358,7 @@ void MonitorCriticalMetrics(rocksdb::DB* db) {
 }
 ```
 
-## 19. RocksDB vs Alternatives
+## 20. RocksDB vs Alternatives
 
 ### RocksDB vs LevelDB
 
@@ -2365,7 +2395,7 @@ void MonitorCriticalMetrics(rocksdb::DB* db) {
 | Write throughput | Much higher | Lower |
 | Use case | High-performance KV | Structured data, SQL |
 
-## 20. Resources and References
+## 21. Resources and References
 
 ### Official Documentation
 - **RocksDB Wiki**: https://github.com/facebook/rocksdb/wiki
@@ -2456,3 +2486,7 @@ g++ -std=c++17 -O3 example.cpp -lrocksdb -lpthread -ldl -lz -lsnappy -llz4 -lzst
 ```
 
 This guide covers the essential aspects of RocksDB with emphasis on modern C++ practices, security, and performance optimization for production deployments.
+
+---
+
+**End of RocksDB Development Guidelines**

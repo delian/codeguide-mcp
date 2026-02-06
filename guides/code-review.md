@@ -1,6 +1,5 @@
 # Code Review Guidelines
-
-This document provides mandatory standards for conducting effective code reviews, providing constructive feedback, and maintaining code quality.
+Mandatory standards for conducting effective code reviews, providing constructive feedback, and maintaining code quality. GitHub, GitLab, Bitbucket, Review tools, Linters, Static analyzers.
 
 ---
 
@@ -773,3 +772,6 @@ jobs:
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** Engineering Team
+
+
+**End of Code Review Guidelines**

@@ -1,35 +1,45 @@
-# Elasticsearch & OpenSearch Best Practices Guide
-
-**Version:** 1.0
-**Last Updated:** February 2026
-**Target Versions:** Elasticsearch 8.x+ | OpenSearch 2.x+
-
-## Table of Contents
-
-1. [Architecture and Fundamentals](#1-architecture-and-fundamentals)
-2. [Index Management and Mappings](#2-index-management-and-mappings)
-3. [Search and Query DSL](#3-search-and-query-dsl)
-4. [Aggregations and Analytics](#4-aggregations-and-analytics)
-5. [Performance Optimization](#5-performance-optimization)
-6. [Cluster Configuration](#6-cluster-configuration)
-7. [Sharding and Replication](#7-sharding-and-replication)
-8. [Data Modeling](#8-data-modeling)
-9. [Ingest Pipelines](#9-ingest-pipelines)
-10. [Index Lifecycle Management](#10-index-lifecycle-management)
-11. [Security Best Practices](#11-security-best-practices)
-12. [Monitoring and Troubleshooting](#12-monitoring-and-troubleshooting)
-13. [Backup and Recovery](#13-backup-and-recovery)
-14. [High Availability](#14-high-availability)
-15. [Scaling Strategies](#15-scaling-strategies)
-16. [Container Deployment](#16-container-deployment)
-17. [Application Integration](#17-application-integration)
-18. [Elasticsearch vs OpenSearch](#18-elasticsearch-vs-opensearch)
-19. [Common Use Cases](#19-common-use-cases)
-20. [Production Checklist](#20-production-checklist)
+# Elasticsearch & OpenSearch Development Guidelines
+Mandatory coding standards and development practices for Elasticsearch and OpenSearch development. Elasticsearch 8.x+, OpenSearch 2.x+, Query DSL, Kibana/OpenSearch Dashboards, ingest pipelines.
 
 ---
 
-## 1. Architecture and Fundamentals
+**Agent Profile**: The Elasticsearch/OpenSearch Expert
+**Role**: Senior Search & Analytics Engineer & Lucene Specialist
+**Objective**: Generate production-ready, performant and scalable search and analytics solutions.
+**Tools**: Elasticsearch 8.x+, OpenSearch 2.x+, Query DSL, Kibana/OpenSearch Dashboards, ingest pipelines
+
+---
+
+**Version:** 1.0 | **Last Updated:** February 2026 | **Target Versions:** Elasticsearch 8.x+ | OpenSearch 2.x+
+
+## Table of Contents
+
+1. [Core Philosophies: SEARCH-FIRST](#1-core-philosophies-search-first)
+2. [Architecture and Fundamentals](#2-architecture-and-fundamentals)
+3. [Index Management and Mappings](#3-index-management-and-mappings)
+4. [Search and Query DSL](#4-search-and-query-dsl)
+
+---
+
+## 1. Core Philosophies: SEARCH-FIRST
+
+The agent must adhere to the **SEARCH-FIRST** principles for every Elasticsearch/OpenSearch implementation:
+
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+
+- **S**chema and mapping: Define explicit mappings where needed; avoid dynamic mapping pitfalls.
+- **E**xploit inverted index: Design for full-text and filters; use appropriate analyzers.
+- **A**ggregations and analytics: Use aggregations for analytics; avoid heavy script usage when possible.
+- **R**esilience: Design for node failure; use replicas and ILM; test failover.
+- **C**luster awareness: Respect sharding and routing; avoid hot spots and oversized shards.
+- **H**TTP and API: Use REST API correctly; parameterize queries; handle errors and retries.
+
+**Verified Code**: Agent-generated code MUST use the Query DSL correctly, run against a cluster or test container, and pass tests before delivery.
+
+---
+
+## 2. Architecture and Fundamentals
 
 ### What is Elasticsearch/OpenSearch?
 
@@ -190,7 +200,7 @@ node.roles: [ml]
 
 ---
 
-## 2. Index Management and Mappings
+## 3. Index Management and Mappings
 
 ### Creating Indices
 
@@ -533,7 +543,7 @@ POST /_aliases
 
 ---
 
-## 3. Search and Query DSL
+## 4. Search and Query DSL
 
 ### Basic Search
 
@@ -934,3 +944,7 @@ DELETE /_search/scroll
 
 **Last Updated:** February 2026
 **Next Review:** May 2026
+
+---
+
+**End of Elasticsearch & OpenSearch Development Guidelines**

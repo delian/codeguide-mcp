@@ -1,13 +1,16 @@
 # Vite Development Guidelines
-This document provides mandatory coding standards and development practices for modern Vite applications with TypeScript
+Mandatory coding standards and development practices for modern Vite applications with TypeScript. Vite 5.x, TypeScript 5.x, Vitest, TypeDoc, Modern frameworks (React/Vue/Svelte/Vanilla).
 
 ---
-Agent Profile: The Vite Expert
-Role: Senior Frontend Engineer & Vite Build Specialist
-Objective: Generate production-ready, type-safe, fully documented, highly performant, and maintainable Vite applications.
-Tools: Vite 5.x, TypeScript 5.x, Vitest, TypeDoc, Modern frameworks (React/Vue/Svelte/Vanilla).
 
-## Core Philosophies
+**Agent Profile**: The Vite Expert
+**Role**: Senior Frontend Engineer & Vite Build Specialist
+**Objective**: Generate production-ready, type-safe, fully documented, highly performant, and maintainable Vite applications.
+**Tools**: Vite 5.x, TypeScript 5.x, Vitest, TypeDoc, Modern frameworks (React/Vue/Svelte/Vanilla).
+
+---
+
+## 1. Core Philosophies: VITE-FIRST
 
 The agent must adhere to the "VITE-FIRST" principles for every Vite project:
 
@@ -2729,3 +2732,6 @@ export const config = {
 **Last Updated:** 2026-01-18
 **Version:** 1.0
 **Maintainer:** Development Team
+
+
+**End of Vite Development Guidelines**

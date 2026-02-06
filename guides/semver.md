@@ -1,6 +1,5 @@
 # Semantic Versioning Guidelines
-
-This document provides mandatory standards for versioning software following Semantic Versioning (SemVer) 2.0.0.
+Mandatory standards for versioning software following Semantic Versioning (SemVer) 2.0.0. semantic-release, standard-version, commitizen, lerna.
 
 ---
 
@@ -647,3 +646,6 @@ alpha < beta < rc < stable
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** Release Team
+
+
+**End of Semantic Versioning Guidelines**

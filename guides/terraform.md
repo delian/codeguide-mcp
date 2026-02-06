@@ -1,6 +1,5 @@
 # Terraform Infrastructure as Code Guidelines (Provider-Agnostic)
-
-This document provides mandatory standards for Terraform development, infrastructure management, and IaC best practices. It is **cloud-agnostic** and must work across Azure, AWS, GCP, and other providers.
+Mandatory standards for Terraform development, infrastructure management, and IaC best practices. Cloud-agnostic (Azure, AWS, GCP). Terraform, OpenTofu, Terragrunt, tflint, tfsec, Checkov, Infracost.
 
 ---
 
@@ -684,3 +683,6 @@ terraform graph | dot -Tpng > graph.png  # Visualize
 **Last Updated:** 2026-01-31
 **Version:** 2.0
 **Maintainer:** Infrastructure Team
+
+
+**End of Terraform Infrastructure as Code Guidelines (Provider-Agnostic)**

@@ -1,6 +1,5 @@
 # SQLAlchemy & Alembic Development Guidelines
-
-This document provides comprehensive standards for using SQLAlchemy ORM and Alembic migrations in Python applications.
+Comprehensive standards for using SQLAlchemy ORM and Alembic migrations in Python applications. SQLAlchemy 2.0+, Alembic, PostgreSQL, MySQL, SQLite, pytest, uv.
 
 ---
 
@@ -2402,3 +2401,6 @@ stmt = select(func.count(User.id)).where(User.status == "active")
 - **Python standards**: See `python.md` for code style requirements
 - **Security practices**: See `secure-coding.md` for security guidelines
 - **Testing practices**: See `testing.md` for test writing standards
+
+
+**End of SQLAlchemy & Alembic Development Guidelines**

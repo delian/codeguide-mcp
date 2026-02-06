@@ -1,6 +1,5 @@
 # Google Cloud Platform (GCP) Development Guidelines
-
-This document provides mandatory standards for building applications on Google Cloud Platform.
+Mandatory standards for building applications on Google Cloud Platform. gcloud CLI, Terraform, Cloud Build, Cloud Run, GKE, BigQuery.
 
 ---
 
@@ -820,3 +819,6 @@ gcloud sql databases list --instance INSTANCE
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** Cloud Team
+
+
+**End of Google Cloud Platform (GCP) Development Guidelines**

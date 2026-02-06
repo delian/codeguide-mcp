@@ -1,6 +1,5 @@
 # Microsoft Azure Development Guidelines
-
-This document provides mandatory standards for building applications on Microsoft Azure.
+Mandatory standards for building applications on Microsoft Azure. Azure CLI, Bicep, Terraform, Azure DevOps, Azure Functions, AKS.
 
 ---
 
@@ -93,7 +92,7 @@ resource appService 'Microsoft.Web/sites@2022-09-01' = {
     }
   }
   properties: {
-    // ...
+    // ..
   }
 }
 
@@ -951,3 +950,6 @@ az bicep build --file main.bicep
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** Cloud Team
+
+
+**End of Microsoft Azure Development Guidelines**

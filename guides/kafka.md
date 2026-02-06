@@ -1,5 +1,5 @@
 # Apache Kafka Best Practices Guidelines
-This document provides mandatory standards and best practices for Apache Kafka as a scalable, reliable commit log and event streaming platform. Emphasis on exactly-once semantics, transactional processing, state recovery from commit log, and guaranteed message delivery. This guide is language-agnostic and focuses on architectural patterns and configuration.
+Mandatory standards and best practices for Apache Kafka as a scalable, reliable commit log and event streaming platform. Emphasis on exactly-once semantics, transactional processing, state recovery from commit log, and guaranteed message delivery. This guide is language-agnostic and focuses on architectural patterns and configuration. Apache Kafka 3.x+, Schema Registry, Kafka Connect, Kafka Streams, Consumer/Producer APIs.
 
 ---
 
@@ -2624,3 +2624,6 @@ BROKER CONFIGURATION (Critical Settings):
 - **[kubernetes.md](kubernetes.md)**: Kubernetes deployment for Kafka consumers and producers
 - **[istio.md](istio.md)**: Service mesh for Kafka-based microservices
 - **[hexagonal.md](hexagonal.md)**: Hexagonal Architecture - structuring Kafka consumers/producers as adapters
+
+
+**End of Apache Kafka Best Practices Guidelines**

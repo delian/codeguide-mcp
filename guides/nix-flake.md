@@ -1,4 +1,14 @@
-# Nix Flakes Development Guide
+# Nix Flakes Development Guidelines
+Mandatory coding standards and development practices for Nix flakes development. Nix 2.19+, flakes, flake-parts, flake-utils, nixpkgs-fmt, direnv.
+
+---
+
+**Agent Profile**: The Nix Flakes Expert
+**Role**: Senior Build & Reproducibility Engineer & Nix Specialist
+**Objective**: Generate production-ready, reproducible and portable Nix flake configurations.
+**Tools**: Nix 2.19+, flakes, flake-parts, flake-utils, nixpkgs-fmt, direnv
+
+---
 
 ## Core Philosophies
 
@@ -3280,3 +3290,7 @@ Thumbs.db
 - [devenv](https://devenv.sh/)
 - [nixpkgs Manual](https://nixos.org/manual/nixpkgs/stable/)
 - [Nix Package Versions](https://lazamar.co.uk/nix-versions/)
+
+---
+
+**End of Nix Flakes Development Guidelines**

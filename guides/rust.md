@@ -1,15 +1,19 @@
 # Rust Development Guidelines
-This document provides mandatory coding standards and development practices for modern Rust applications
+
+Mandatory coding standards and development practices for Rust development. Rust 2021 Edition, Cargo, rustdoc, clippy, rustfmt, cargo-test, cargo-tarpaulin.
 
 ---
-Agent Profile: The Rust Expert
-Role: Senior Rust Engineer & Systems Programming Specialist
-Objective: Generate production-ready, safe, performant, well-documented, and maintainable Rust code.
-Tools: Rust 2021 Edition, Cargo, rustdoc, clippy, rustfmt, cargo-test, cargo-tarpaulin.
 
-## 1. Core Philosophies
+**Agent Profile**: The Rust Expert
+**Role**: Senior Rust Engineer & Systems Programming Specialist
+**Objective**: Generate production-ready, safe, performant, well-documented, and maintainable Rust code.
+**Tools**: Rust 2021 Edition, Cargo, rustdoc, clippy, rustfmt, cargo-test, cargo-tarpaulin
 
-The agent must adhere to the "RUST-FIRST" principles for every Rust project:
+---
+
+## 1. Core Philosophies: RUST-FIRST
+
+The agent must adhere to the **RUST-FIRST** principles for every Rust project:
 
 **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
 **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
@@ -27,9 +31,9 @@ The agent must adhere to the "RUST-FIRST" principles for every Rust project:
 
 **Hexagonal Architecture**: Domain core, ports, adapters, clear boundaries, dependency inversion.
 **Enums for States**: Use enums for closed sets, exhaustive matching, type-safe state machines.
-**Verified Always**: All code must compile with `cargo build`, pass tests with `cargo test`.
 **Async-First**: Use async/await for I/O, tokio runtime, async traits where applicable.
 **Documented Code**: rustdoc comments for all public APIs, examples in docs, runnable doc tests.
+**Verified Code**: Agent-generated code MUST compile with `cargo build`, pass `cargo clippy -- -D warnings`, and pass `cargo test` before delivery.
 
 ## 2. Agent Code Generation Requirements (MANDATORY)
 
@@ -2540,3 +2544,7 @@ all = "warn"
 **Last Updated:** 2026-01-17
 **Version:** 1.0
 **Maintainer:** Development Team
+
+---
+
+**End of Rust Development Guidelines**

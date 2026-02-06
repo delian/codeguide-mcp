@@ -1,6 +1,5 @@
 # AWS Development Guidelines
-
-This document provides mandatory standards for building applications on Amazon Web Services.
+Mandatory standards for building applications on Amazon Web Services. AWS CLI, CloudFormation, CDK, Terraform, SAM, Serverless Framework.
 
 ---
 
@@ -804,3 +803,6 @@ sam logs -n FunctionName --tail
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** Cloud Team
+
+
+**End of AWS Development Guidelines**

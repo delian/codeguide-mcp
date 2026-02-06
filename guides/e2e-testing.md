@@ -1,6 +1,5 @@
 # End-to-End Testing Guidelines
-
-This document provides mandatory standards for end-to-end (E2E) testing using modern testing frameworks like Playwright, Cypress, and Selenium.
+Mandatory standards for end-to-end (E2E) testing using modern testing frameworks like Playwright, Cypress, and Selenium.
 
 ---
 
@@ -932,3 +931,6 @@ npx cypress run --browser chrome
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** QA Team
+
+
+**End of End-to-End Testing Guidelines**

@@ -1,6 +1,5 @@
 # Modern Chrome Extension Development Guidelines
-
-This document provides mandatory coding standards and development practices for modern Chrome extensions with emphasis on minimalistic, clean, readable, well-documented code using hexagonal architecture with focus on performance, portability, security, and maintainability.
+Mandatory coding standards and development practices for modern Chrome extensions with emphasis on minimalistic, clean, readable, well-documented code using hexagonal architecture with focus on performance, portability, security, and maintainability. TypeScript 4.5+, Manifest V3, Webpack 5+/Vite, Jest, ESLint, Prettier, TypeDoc, Chrome Extension APIs.
 
 ---
 
@@ -1818,3 +1817,6 @@ it("should handle storage", async () => {
 - Only present working, tested, documented code to the user
 
 **Remember**: Minimalistic, clean, readable, well-documented, secure Chrome extension code with hexagonal architecture, Manifest V3, TypeScript strict mode, comprehensive testing, TDD, and focus on performance and portability. Test first, fix bugs with regression tests, keep it simple, keep it secure, keep it working.
+
+
+**End of Modern Chrome Extension Development Guidelines**

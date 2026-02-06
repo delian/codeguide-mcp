@@ -1,35 +1,64 @@
-# Couchbase Best Practices Guide
-
-**Version:** 1.0
-**Last Updated:** February 2026
-**Target Version:** Couchbase Server 7.x+
-
-## Table of Contents
-
-1. [Architecture and Fundamentals](#1-architecture-and-fundamentals)
-2. [Document Model and Data Modeling](#2-document-model-and-data-modeling)
-3. [N1QL Query Language](#3-n1ql-query-language)
-4. [Key-Value Operations](#4-key-value-operations)
-5. [Indexes and Query Performance](#5-indexes-and-query-performance)
-6. [Full-Text Search](#6-full-text-search)
-7. [Caching and Memory Management](#7-caching-and-memory-management)
-8. [Clustering and Scaling](#8-clustering-and-scaling)
-9. [Cross-Datacenter Replication (XDCR)](#9-cross-datacenter-replication-xdcr)
-10. [Security and Access Control](#10-security-and-access-control)
-11. [Backup and Recovery](#11-backup-and-recovery)
-12. [Monitoring and Troubleshooting](#12-monitoring-and-troubleshooting)
-13. [Mobile and Edge Sync](#13-mobile-and-edge-sync)
-14. [Analytics Service](#14-analytics-service)
-15. [Eventing Service](#15-eventing-service)
-16. [Application Integration](#16-application-integration)
-17. [Production Deployment](#17-production-deployment)
-18. [Performance Optimization](#18-performance-optimization)
-19. [Migration Strategies](#19-migration-strategies)
-20. [Production Checklist](#20-production-checklist)
+# Couchbase Development Guidelines
+Mandatory coding standards and development practices for Couchbase development. Couchbase Server 7.x+, N1QL, SDKs (Java/Python/Node.js), XDCR, Sync Gateway.
 
 ---
 
-## 1. Architecture and Fundamentals
+**Agent Profile**: The Couchbase Expert
+**Role**: Senior NoSQL/Document DB Engineer & N1QL Specialist
+**Objective**: Generate production-ready, performant and scalable document and cache solutions.
+**Tools**: Couchbase Server 7.x+, N1QL, SDKs (Java/Python/Node.js), XDCR, Sync Gateway
+
+---
+
+**Version:** 1.0 | **Last Updated:** February 2026 | **Target Version:** Couchbase Server 7.x+
+
+## Table of Contents
+
+1. [Core Philosophies: DOCUMENT-FIRST](#1-core-philosophies-document-first)
+2. [Architecture and Fundamentals](#2-architecture-and-fundamentals)
+3. [Document Model and Data Modeling](#3-document-model-and-data-modeling)
+4. [N1QL Query Language](#4-n1ql-query-language)
+5. [Key-Value Operations](#5-key-value-operations)
+6. [Indexes and Query Performance](#6-indexes-and-query-performance)
+7. [Full-Text Search](#7-full-text-search)
+8. [Caching and Memory Management](#8-caching-and-memory-management)
+9. [Clustering and Scaling](#9-clustering-and-scaling)
+10. [Cross-Datacenter Replication (XDCR)](#10-cross-datacenter-replication-xdcr)
+11. [Security and Access Control](#11-security-and-access-control)
+12. [Backup and Recovery](#12-backup-and-recovery)
+13. [Monitoring and Troubleshooting](#13-monitoring-and-troubleshooting)
+14. [Mobile and Edge Sync](#14-mobile-and-edge-sync)
+15. [Analytics Service](#15-analytics-service)
+16. [Eventing Service](#16-eventing-service)
+17. [Application Integration](#17-application-integration)
+18. [Production Deployment](#18-production-deployment)
+19. [Performance Optimization](#19-performance-optimization)
+20. [Migration Strategies](#20-migration-strategies)
+21. [Production Checklist](#21-production-checklist)
+
+---
+
+## 1. Core Philosophies: DOCUMENT-FIRST
+
+The agent must adhere to the **DOCUMENT-FIRST** principles for every Couchbase implementation:
+
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+
+- **D**ocument model: Design around JSON documents and key-value access; use N1QL for querying.
+- **O**perations: Prefer key-value when possible; use N1QL and indexes for complex queries.
+- **C**luster awareness: Design for multi-node and XDCR; avoid single-node assumptions.
+- **U**se indexes: Create and maintain indexes required by N1QL; monitor index usage.
+- **M**emory and cache: Respect memory-first architecture; size buckets and caches appropriately.
+- **E**rror handling: Use SDK retry and backoff; handle transient and replication failures.
+- **N**1QL best practices: Parameterize queries; use EXPLAIN; avoid full bucket scans.
+- **T**esting: Test with representative documents and cluster topology.
+
+**Verified Code**: Agent-generated code MUST use parameterized N1QL, run against a cluster or mock, and pass tests before delivery.
+
+---
+
+## 2. Architecture and Fundamentals
 
 ### What is Couchbase?
 
@@ -218,7 +247,7 @@ Working Set:
 
 ---
 
-## 2. Document Model and Data Modeling
+## 3. Document Model and Data Modeling
 
 ### Document Structure
 
@@ -404,7 +433,7 @@ cas = result.cas()  // For optimistic locking
 
 ---
 
-## 3. N1QL Query Language
+## 4. N1QL Query Language
 
 ### Basic Queries
 
@@ -656,7 +685,7 @@ VALUES ("user::alice", {
 
 ---
 
-## 4. Key-Value Operations
+## 5. Key-Value Operations
 
 ### Basic KV Operations
 
@@ -839,7 +868,7 @@ result = collection.get_and_touch('session::abc123',
 
 ---
 
-## 5. Indexes and Query Performance
+## 6. Indexes and Query Performance
 
 ### Index Types
 
@@ -992,7 +1021,7 @@ WHERE type = "user" AND email = "alice@example.com";
 
 ---
 
-## 6. Full-Text Search
+## 7. Full-Text Search
 
 ### FTS Index Creation
 
@@ -1162,7 +1191,7 @@ query = GeoBoundingBoxQuery(
 
 ---
 
-## 7. Caching and Memory Management
+## 8. Caching and Memory Management
 
 ### Managed Cache
 
@@ -1293,7 +1322,7 @@ for key in important_keys:
 
 ---
 
-## 8. Clustering and Scaling
+## 9. Clustering and Scaling
 
 ### Cluster Setup
 
@@ -1429,7 +1458,7 @@ See [Section 9](#9-cross-datacenter-replication-xdcr)
 
 ---
 
-## 9. Cross-Datacenter Replication (XDCR)
+## 10. Cross-Datacenter Replication (XDCR)
 
 ### XDCR Overview
 
@@ -1570,7 +1599,7 @@ couchbase-cli xdcr-replicate \
 
 ---
 
-## 10. Security and Access Control
+## 11. Security and Access Control
 
 ### Authentication
 
@@ -1713,7 +1742,7 @@ Logged events:
 
 ---
 
-## 11. Backup and Recovery
+## 12. Backup and Recovery
 
 ### cbbackupmgr
 
@@ -1872,7 +1901,7 @@ cbimport json \
 
 ---
 
-## 12. Monitoring and Troubleshooting
+## 13. Monitoring and Troubleshooting
 
 ### Web Console
 
@@ -2030,7 +2059,7 @@ cluster = Cluster('couchbase://localhost',
 
 ---
 
-## 13. Mobile and Edge Sync
+## 14. Mobile and Edge Sync
 
 ### Couchbase Lite
 
@@ -2188,7 +2217,7 @@ class MergeConflictResolver: ConflictResolverProtocol {
        let remoteTime = remote.date(forKey: "updated_at"),
        remoteTime > localTime {
       merged.setDate(remoteTime, forKey: "updated_at")
-      // Copy other fields from remote...
+      // Copy other fields from remote..
     }
 
     return merged
@@ -2198,7 +2227,7 @@ class MergeConflictResolver: ConflictResolverProtocol {
 
 ---
 
-## 14. Analytics Service
+## 15. Analytics Service
 
 ### Analytics Setup
 
@@ -2267,7 +2296,7 @@ Analytics uses columnar format:
 
 ---
 
-## 15. Eventing Service
+## 16. Eventing Service
 
 ### Eventing Functions
 
@@ -2371,7 +2400,7 @@ function OnDelete(meta) {
 
 ---
 
-## 16. Application Integration
+## 17. Application Integration
 
 ### Python SDK
 
@@ -2528,7 +2557,7 @@ public class CouchbaseExample {
 
 ---
 
-## 17. Production Deployment
+## 18. Production Deployment
 
 ### System Requirements
 
@@ -2695,7 +2724,7 @@ backend couchbase_kv_backend
 
 ---
 
-## 18. Performance Optimization
+## 19. Performance Optimization
 
 ### Query Optimization
 
@@ -2796,7 +2825,7 @@ for key, result in results.items():
 
 ---
 
-## 19. Migration Strategies
+## 20. Migration Strategies
 
 ### From MongoDB
 
@@ -2918,7 +2947,7 @@ class DualWriteService:
 
 ---
 
-## 20. Production Checklist
+## 21. Production Checklist
 
 ### Pre-Deployment
 
@@ -3064,3 +3093,7 @@ Critical Metrics:
 
 **Last Updated:** February 2026
 **Next Review:** May 2026
+
+---
+
+**End of Couchbase Development Guidelines**

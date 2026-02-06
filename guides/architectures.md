@@ -1,6 +1,5 @@
 # Software Architecture Reference Guide
-
-This document provides a comprehensive overview of software architecture patterns, their relationships, trade-offs, and guidance for selecting the right architecture based on project requirements. This guide is language-agnostic and focuses on architectural principles and decision-making.
+Comprehensive overview of software architecture patterns, their relationships, trade-offs, and guidance for selecting the right architecture based on project requirements. This guide is language-agnostic and focuses on architectural principles and decision-making. Architecture Decision Records (ADRs), C4 Model, UML, Domain-Driven Design (DDD), SOLID principles.
 
 ---
 
@@ -1929,3 +1928,6 @@ madge --circular --image graph.svg src/
 - **[kafka.md](kafka.md)**: Event streaming with Apache Kafka
 - **[kubernetes.md](kubernetes.md)**: Kubernetes deployment for various architectures
 - **[tdd.md](tdd.md)**: Test-Driven Development across all architectures
+
+
+**End of Software Architecture Reference Guide**

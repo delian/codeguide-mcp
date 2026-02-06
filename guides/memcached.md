@@ -1,6 +1,32 @@
-# Memcached Development Guide
+# Memcached Development Guidelines
+Mandatory coding standards and development practices for Memcached development. Memcached server, client libraries (Python, Node, PHP, Java, Go), text/binary protocol, consistent-hashing clients.
 
-## 1. Core Concepts and Architecture
+---
+
+**Agent Profile**: The Memcached Expert
+**Role**: Senior Cache & Distributed Systems Engineer
+**Objective**: Generate production-ready, fast and reliable caching layers using Memcached.
+**Tools**: Memcached server, client libraries (Python, Node, PHP, Java, Go), text/binary protocol, consistent-hashing clients
+
+---
+
+## 1. Core Philosophies: CACHE-FIRST
+
+The agent must adhere to the **CACHE-FIRST** principles for every Memcached implementation:
+
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+
+- **C**ache semantics: Treat Memcached as cache only; never as source of truth; always handle cache miss and rehydration.
+- **A**vailability: Design for server failure and network issues; use connection pooling, timeouts, and fallback to origin.
+- **C**onsistent hashing: Use client-side consistent hashing; understand key distribution and rebalance on topology change.
+- **H**it/miss and TTL: Design keys and expiry for hit rate; avoid thundering herd on cold cache or stampede.
+- **E**viction awareness: Expect LRU eviction; set sensible memory limits and TTLs; avoid unbounded key growth.
+- **Verified Code**: Agent-generated code MUST handle get/set errors, respect TTL and key size limits, and pass tests before delivery.
+
+---
+
+## 2. Core Concepts and Architecture
 
 Memcached is a high-performance, distributed memory object caching system designed to speed up dynamic web applications by alleviating database load. It's an in-memory key-value store for small chunks of arbitrary data (strings, objects) from results of database calls, API calls, or page rendering.
 
@@ -124,7 +150,7 @@ Memcached Memory Structure:
 └─────────────────────────────────────────┘
 ```
 
-## 2. Installation and Setup
+## 3. Installation and Setup
 
 ### Ubuntu/Debian Installation
 
@@ -272,7 +298,7 @@ go get github.com/bradfitz/gomemcache/memcache
 gem install dalli
 ```
 
-## 3. Basic Operations
+## 4. Basic Operations
 
 ### Python Client (pymemcache)
 
@@ -658,7 +684,7 @@ async function main() {
 main().catch(console.error);
 ```
 
-## 4. Cache Patterns and Strategies
+## 5. Cache Patterns and Strategies
 
 ### Cache-Aside (Lazy Loading)
 
@@ -999,7 +1025,7 @@ class MultiLevelCache:
         self.l1_access.clear()
 ```
 
-## 5. Consistent Hashing and Distribution
+## 6. Consistent Hashing and Distribution
 
 ### Consistent Hashing Implementation
 
@@ -1223,7 +1249,7 @@ print(f"Users: {users}")
 cache.close_all()
 ```
 
-## 6. Performance Optimization
+## 7. Performance Optimization
 
 ### Connection Pooling
 
@@ -1393,7 +1419,7 @@ class CompressedMemcached:
         return pickle.loads(content)
 ```
 
-## 7. Monitoring and Statistics
+## 8. Monitoring and Statistics
 
 ### Statistics Collection
 
@@ -1614,7 +1640,7 @@ class InstrumentedCache:
         self.metrics = PerformanceMetrics()
 ```
 
-## 8. Security Best Practices
+## 9. Security Best Practices
 
 ### Network Security
 
@@ -1771,7 +1797,7 @@ class RateLimitedCache:
         return self.client.get(key)
 ```
 
-## 9. High Availability Patterns
+## 10. High Availability Patterns
 
 ### Active-Active with Client Failover
 
@@ -1904,7 +1930,7 @@ user = cache.get('user:123')
 mcrouter -p 11211 -f config.json
 ```
 
-## 10. Production Deployment
+## 11. Production Deployment
 
 ### Docker Compose
 
@@ -2073,7 +2099,7 @@ sudo systemctl start memcached
 sudo systemctl status memcached
 ```
 
-## 11. Common Anti-Patterns
+## 12. Common Anti-Patterns
 
 ### Anti-Pattern: Storing Sessions in Memcached
 
@@ -2192,7 +2218,7 @@ def get_with_early_expiration(cache, db, item_id, ttl=3600, beta=1.0):
     return value
 ```
 
-## 12. Troubleshooting Guide
+## 13. Troubleshooting Guide
 
 ### Common Issues
 
@@ -2281,7 +2307,7 @@ memcached -vv -m 64 -p 11211
 tail -f /var/log/memcached.log
 ```
 
-## 13. Performance Tuning Checklist
+## 14. Performance Tuning Checklist
 
 ```markdown
 **System Configuration:**
@@ -2322,7 +2348,7 @@ tail -f /var/log/memcached.log
 - [ ] Monitor latency (p50, p95, p99)
 ```
 
-## 14. Comparison with Alternatives
+## 15. Comparison with Alternatives
 
 ### Memcached vs Redis
 
@@ -2351,7 +2377,7 @@ tail -f /var/log/memcached.log
 - Pub/sub messaging
 - Session storage
 
-## 15. Resources and References
+## 16. Resources and References
 
 ### Official Documentation
 - **Memcached Wiki**: https://github.com/memcached/memcached/wiki
@@ -2421,3 +2447,7 @@ client.close()
 ```
 
 This guide provides comprehensive coverage of Memcached for modern production deployments, from basic operations to advanced patterns and optimization strategies.
+
+---
+
+**End of Memcached Development Guidelines**

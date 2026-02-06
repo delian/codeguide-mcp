@@ -1,6 +1,5 @@
 # React Native Development Guidelines
-
-This document provides mandatory standards for building cross-platform mobile applications with React Native.
+Mandatory standards for building cross-platform mobile applications with React Native. React Native 0.73+, Expo, TypeScript, React Navigation, Reanimated.
 
 ---
 
@@ -949,3 +948,6 @@ navigation.navigate('Screen', { params })
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** Mobile Team
+
+
+**End of React Native Development Guidelines**

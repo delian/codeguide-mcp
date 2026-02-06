@@ -1,6 +1,5 @@
 # Modern CUDA Programming Guidelines (C/C++)
-
-This document provides mandatory coding style and practices for CUDA programming in C and C++.
+Mandatory coding style and practices for CUDA programming in C and C++. CUDA Toolkit 12.x+, NVIDIA Nsight Compute (ncu), NVIDIA Nsight Systems, cuFFTdx, cuBLAS, CUDA-X Libraries, NVPL.
 
 ---
 
@@ -54,7 +53,7 @@ The agent must adhere to the **PERFORMANCE-FIRST** standard for every CUDA imple
    
    # OR with CMake
    mkdir build && cd build
-   cmake -DCMAKE_CUDA_ARCHITECTURES="80;86;89;90" ..
+   cmake -DCMAKE_CUDA_ARCHITECTURES="80;86;89;90" .
    cmake --build . --config Release
    ```
    - **MUST** compile without errors (exit code 0)
@@ -430,14 +429,14 @@ If verification fails:
        std::fill(h_B, h_B + N * N, 1.0f);
        
        matrix_multiply_reference(h_C_reference, h_A, h_B, N);
-       // Run CUDA version and compare...
+       // Run CUDA version and compare..
        
        // Test with identity matrix
        std::fill(h_A, h_A + N * N, 0.0f);
        for (int i = 0; i < N; i++) h_A[i * N + i] = 1.0f;  // Identity
        
        matrix_multiply_reference(h_C_reference, h_A, h_B, N);
-       // Run CUDA version and compare...
+       // Run CUDA version and compare..
        
        // Cleanup
        delete[] h_A; delete[] h_B; delete[] h_C_cuda; delete[] h_C_reference;
@@ -1928,7 +1927,7 @@ ncu --import baseline.ncu-rep --page details
 # Output: Memory-bound, 85% DRAM throughput, 45% occupancy
 
 # 3. Optimize memory access (use shared memory)
-# ... modify code ...
+# ... modify code ..
 
 # 4. Re-profile
 ncu --set full -o optimized ./app
@@ -2236,7 +2235,7 @@ endif()
 ```bash
 # Build and run tests
 mkdir build && cd build
-cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES=80 ..
+cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES=80 .
 cmake --build . --config Release
 ctest --output-on-failure
 

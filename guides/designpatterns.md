@@ -1,6 +1,5 @@
 # Software Design Patterns Reference Guide
-
-This document provides a comprehensive overview of essential software design patterns, their modern implementations, comparisons, and guidance for selecting the right pattern. This guide is language-agnostic with examples in pseudocode.
+Comprehensive overview of essential software design patterns, their modern implementations, comparisons, and guidance for selecting the right pattern. This guide is language-agnostic with examples in pseudocode. SOLID principles, Gang of Four patterns, modern functional patterns, domain-driven design patterns.
 
 ---
 
@@ -377,7 +376,7 @@ BUG FIX WORKFLOW FOR PATTERN-BASED CODE:
 
 DIAGNOSIS DECISION TREE:
 
-Is the bug in...
+Is the bug in..
 
 ├── The Pattern Contract (Interface)?
 │   ├── Missing method in interface?
@@ -853,7 +852,7 @@ EXAMPLE - Modern DI Container:
 @injectable()
 class PostgresOrderRepository implements OrderRepository {
     constructor(private db: DatabaseConnection) {}
-    // ...
+    // ..
 }
 
 @injectable()
@@ -1013,7 +1012,7 @@ WHY SERVICE LOCATOR IS AN ANTI-PATTERN:
        process() {
            const x = Locator.get(SomeService)      // Hidden!
            const y = Locator.get(AnotherService)   // Hidden!
-           // ... 500 lines later ...
+           // ... 500 lines later ..
            const z = Locator.get(YetAnother)       // Hidden!
        }
    }
@@ -1560,7 +1559,7 @@ class CheckoutService {
 
     processPayment(order: Order, card: Card): void {
         const result = this.paymentGateway.charge(order.total, card)
-        // ...
+        // ..
     }
 }
 
@@ -3642,3 +3641,6 @@ PATTERN ANTI-PATTERNS:
 - **[cleanarch.md](cleanarch.md)**: Clean Architecture using these patterns
 - **[tdd.md](tdd.md)**: Test-Driven Development - patterns enable testability
 - **[typescript.md](typescript.md)**: TypeScript implementations of these patterns
+
+
+**End of Software Design Patterns Reference Guide**

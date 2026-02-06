@@ -1,6 +1,5 @@
 # GraphQL Development Guidelines
-
-This document provides mandatory standards for GraphQL API design, schema development, and implementation best practices.
+Mandatory standards for GraphQL API design, schema development, and implementation best practices. Apollo Server, GraphQL Yoga, Nexus, TypeGraphQL, GraphQL Code Generator, DataLoader.
 
 ---
 
@@ -1242,3 +1241,6 @@ subscription {
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** API Team
+
+
+**End of GraphQL Development Guidelines**

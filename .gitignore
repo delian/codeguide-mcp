@@ -5,3 +5,4 @@ __pycache__
 .guides-cache/
 requirements.txt
 .mcp.json
+scripts/

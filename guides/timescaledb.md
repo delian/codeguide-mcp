@@ -1,31 +1,60 @@
-# TimescaleDB Best Practices Guide
+# TimescaleDB Development Guidelines
+Mandatory coding standards and development practices for TimescaleDB development. Comprehensive best practices for TimescaleDB 2.x covering architecture, data modeling, performance optimization, compression, and production deployment (Updated 2026).
 
-Comprehensive best practices for TimescaleDB 2.x covering architecture, data modeling, performance optimization, compression, and production deployment (Updated 2026).
+---
+
+**Agent Profile**: The TimescaleDB Expert
+**Role**: Senior Time-Series Database Engineer & PostgreSQL Specialist
+**Objective**: Generate production-ready, performant, and maintainable time-series solutions using TimescaleDB.
+**Tools**: TimescaleDB 2.x, PostgreSQL 12–17, hypertables, continuous aggregates, compression, retention policies
+
+---
+
+## 1. Core Philosophies: TIMESCALE-FIRST
+
+The agent must adhere to the **TIMESCALE-FIRST** principles for every TimescaleDB implementation:
+
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+
+- **T**ime-series first: Design schemas with a time dimension; use hypertables for all time-ordered data.
+- **I**ndexes and chunks: Use chunk-aligned indexes; size chunks for your query and retention patterns.
+- **M**aterialize wisely: Use continuous aggregates for heavy rollups; refresh policies to balance freshness and cost.
+- **E**nable compression: Compress older chunks; tune segment-by and order-by for query and compression ratio.
+- **S**ecurity: Least privilege; secure connections; no secrets in SQL; follow PostgreSQL and TimescaleDB security docs.
+- **C**onsistency: Use transactions; understand time bucketing and time zones; test retention and compression.
+- **A**vailability: Plan for HA (replication, backups); test restore and failover.
+- **L**oad and query: Optimize writes (batch, unlogged when safe); optimize reads (chunk exclusion, indexes).
+- **E**xplain and tune: Use EXPLAIN (ANALYZE, BUFFERS); tune work_mem, shared_buffers, and TimescaleDB params.
+**Verified Code**: Agent-generated code MUST use parameterized SQL, handle errors, and pass tests before delivery.
+
+---
 
 ## Table of Contents
 
-1. [TimescaleDB Architecture](#timescaledb-architecture)
-2. [Data Modeling for Time-Series](#data-modeling-for-time-series)
-3. [Hypertable Creation and Configuration](#hypertable-creation-and-configuration)
-4. [Chunk Sizing and Time Partitioning](#chunk-sizing-and-time-partitioning)
-5. [Compression Strategies](#compression-strategies)
-6. [Continuous Aggregates](#continuous-aggregates)
-7. [Retention Policies and Data Lifecycle](#retention-policies-and-data-lifecycle)
-8. [Write Optimization](#write-optimization)
-9. [Query Optimization](#query-optimization)
-10. [Indexing Best Practices](#indexing-best-practices)
-11. [Memory Optimization and Cache Tuning](#memory-optimization-and-cache-tuning)
-12. [Performance Tuning](#performance-tuning)
-13. [Security](#security)
-14. [High Availability](#high-availability)
-15. [Backup and Restore](#backup-and-restore)
-16. [Monitoring and Operations](#monitoring-and-operations)
-17. [Docker Deployment](#docker-deployment)
-18. [Kubernetes Deployment](#kubernetes-deployment)
-19. [Migration Strategies](#migration-strategies)
-20. [Multi-Node and Distributed Hypertables](#multi-node-and-distributed-hypertables)
+1. [Core Philosophies: TIMESCALE-FIRST](#1-core-philosophies-timescale-first)
+2. [TimescaleDB Architecture](#2-timescaledb-architecture)
+3. [Data Modeling for Time-Series](#3-data-modeling-for-time-series)
+4. [Hypertable Creation and Configuration](#4-hypertable-creation-and-configuration)
+5. [Chunk Sizing and Time Partitioning](#5-chunk-sizing-and-time-partitioning)
+6. [Compression Strategies](#6-compression-strategies)
+7. [Continuous Aggregates](#7-continuous-aggregates)
+8. [Retention Policies and Data Lifecycle](#8-retention-policies-and-data-lifecycle)
+9. [Write Optimization](#9-write-optimization)
+10. [Query Optimization](#10-query-optimization)
+11. [Indexing Best Practices](#11-indexing-best-practices)
+12. [Memory Optimization and Cache Tuning](#12-memory-optimization-and-cache-tuning)
+13. [Performance Tuning](#13-performance-tuning)
+14. [Security](#14-security)
+15. [High Availability](#15-high-availability)
+16. [Backup and Restore](#16-backup-and-restore)
+17. [Monitoring and Operations](#17-monitoring-and-operations)
+18. [Docker Deployment](#18-docker-deployment)
+19. [Kubernetes Deployment](#19-kubernetes-deployment)
+20. [Migration Strategies](#20-migration-strategies)
+21. [Multi-Node and Distributed Hypertables](#21-multi-node-and-distributed-hypertables)
 
-## 1. TimescaleDB Architecture
+## 2. TimescaleDB Architecture
 
 ### Core Concepts
 
@@ -97,7 +126,7 @@ SELECT ST_Distance(location, 'POINT(0 0)') FROM sensors;
 CREATE INDEX idx_fts ON events USING gin(to_tsvector('english', description));
 ```
 
-## 2. Data Modeling for Time-Series
+## 3. Data Modeling for Time-Series
 
 ### Schema Design Principles
 
@@ -226,7 +255,7 @@ JOIN devices d ON m.device_id = d.device_id
 WHERE m.time > NOW() - INTERVAL '1 hour';
 ```
 
-## 3. Hypertable Creation and Configuration
+## 4. Hypertable Creation and Configuration
 
 ### Creating Hypertables
 
@@ -301,7 +330,7 @@ WHERE hypertable_name = 'metrics';
 SELECT set_chunk_time_interval('metrics', INTERVAL '12 hours');
 ```
 
-## 4. Chunk Sizing and Time Partitioning
+## 5. Chunk Sizing and Time Partitioning
 
 ### The 25% Memory Rule
 
@@ -407,7 +436,7 @@ SELECT decompress_chunk('_timescaledb_internal._hyper_1_1_chunk');
 SELECT compress_chunk('_timescaledb_internal._hyper_1_1_chunk', if_not_compressed => TRUE);
 ```
 
-## 5. Compression Strategies
+## 6. Compression Strategies
 
 ### Native Columnar Compression
 
@@ -579,7 +608,7 @@ ON CONFLICT (time, device_id) DO UPDATE
 SET value = EXCLUDED.value;
 ```
 
-## 6. Continuous Aggregates
+## 7. Continuous Aggregates
 
 ### What are Continuous Aggregates?
 
@@ -791,7 +820,7 @@ FROM response_times
 WHERE bucket > NOW() - INTERVAL '1 day';
 ```
 
-## 7. Retention Policies and Data Lifecycle
+## 8. Retention Policies and Data Lifecycle
 
 ### Automatic Data Retention
 
@@ -911,7 +940,7 @@ WHERE proc_name = 'policy_retention'
   AND hypertable_name = 'metrics';
 ```
 
-## 8. Write Optimization
+## 9. Write Optimization
 
 ### Batching Writes
 
@@ -1080,7 +1109,7 @@ SET value = EXCLUDED.value;
 -- Avoid frequent updates to compressed data
 ```
 
-## 9. Query Optimization
+## 10. Query Optimization
 
 ### Chunk Exclusion
 
@@ -1246,7 +1275,7 @@ log_min_duration_statement = 1000  # Log queries > 1 second
 log_statement = 'all'               # Log all statements (dev only)
 ```
 
-## 10. Indexing Best Practices
+## 11. Indexing Best Practices
 
 ### Time-Based Indexes
 
@@ -1424,7 +1453,7 @@ Per_Chunk_Indexes:
   Guideline: Keep indexes minimal (3-5 per hypertable)
 ```
 
-## 11. Memory Optimization and Cache Tuning
+## 12. Memory Optimization and Cache Tuning
 
 ### PostgreSQL Memory Configuration
 
@@ -1613,7 +1642,7 @@ ORDER BY cache_hit_ratio ASC;
 SELECT * FROM pg_buffercache_summary();
 ```
 
-## 12. Performance Tuning
+## 13. Performance Tuning
 
 ### PostgreSQL + TimescaleDB Configuration
 
@@ -1792,7 +1821,7 @@ Application:
   COPY_Command: Use for bulk loading # Fastest insert method
 ```
 
-## 13. Security
+## 14. Security
 
 ### Authentication and SSL/TLS
 
@@ -1964,7 +1993,7 @@ SELECT pg_reload_conf();
 -- - Failed login attempts
 ```
 
-## 14. High Availability
+## 15. High Availability
 
 ### Streaming Replication (Recommended)
 
@@ -2140,7 +2169,7 @@ Failover:
   - Update client connection strings
 ```
 
-## 15. Backup and Restore
+## 16. Backup and Restore
 
 ### Backup Strategies
 
@@ -2318,7 +2347,7 @@ pg_restore --list timescaledb_backup.dump
 pg_restore -d timescaledb_new -L restore_list.txt timescaledb_backup.dump
 ```
 
-## 16. Monitoring and Operations
+## 17. Monitoring and Operations
 
 ### pg_stat_statements
 
@@ -2536,7 +2565,7 @@ groups:
           summary: "More than 100 active connections"
 ```
 
-## 17. Docker Deployment
+## 18. Docker Deployment
 
 ### Official Docker Image
 
@@ -2783,7 +2812,7 @@ Configuration:
   Custom_Config: Mount postgresql.conf
 ```
 
-## 18. Kubernetes Deployment
+## 19. Kubernetes Deployment
 
 ### Helm Chart Deployment
 
@@ -3100,7 +3129,7 @@ spec:
     retentionPolicy: "30d"
 ```
 
-## 19. Migration Strategies
+## 20. Migration Strategies
 
 ### PostgreSQL to TimescaleDB Migration
 
@@ -3275,7 +3304,7 @@ pg_conn.close()
 influx_client.close()
 ```
 
-## 20. Multi-Node and Distributed Hypertables
+## 21. Multi-Node and Distributed Hypertables
 
 ### Multi-Node Architecture (TimescaleDB 2.x)
 
@@ -3488,3 +3517,7 @@ Performance:
 - [TimescaleDB Backup and Restore](https://docs.timescale.com/self-hosted/latest/backup-and-restore/)
 - [Best Practices for Time-Series Data Modeling](https://www.timescale.com/blog/best-practices-for-time-series-data-modeling-narrow-medium-or-wide-table-layout-2/)
 - [TimescaleDB Helm Charts](https://github.com/timescale/helm-charts)
+
+---
+
+**End of TimescaleDB Development Guidelines**

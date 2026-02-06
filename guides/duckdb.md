@@ -1,35 +1,62 @@
-# DuckDB Best Practices Guide
+# DuckDB Development Guidelines
 
-**Version:** 1.0
-**Last Updated:** February 2026
-**Target Version:** DuckDB 1.0+, 1.1+
-
-## Table of Contents
-
-1. [Architecture and Fundamentals](#1-architecture-and-fundamentals)
-2. [Performance Optimization](#2-performance-optimization)
-3. [Data Import and Export](#3-data-import-and-export)
-4. [Query Optimization](#4-query-optimization)
-5. [Analytical Query Patterns](#5-analytical-query-patterns)
-6. [Partitioning and Parallelism](#6-partitioning-and-parallelism)
-7. [Extensions and Plugins](#7-extensions-and-plugins)
-8. [Python Integration](#8-python-integration)
-9. [R Integration](#9-r-integration)
-10. [Pandas and Arrow Integration](#10-pandas-and-arrow-integration)
-11. [Remote File Access](#11-remote-file-access)
-12. [Schema Design for Analytics](#12-schema-design-for-analytics)
-13. [Aggregations and Window Functions](#13-aggregations-and-window-functions)
-14. [Data Types and Storage](#14-data-types-and-storage)
-15. [Transaction and Concurrency](#15-transaction-and-concurrency)
-16. [Use Cases and Limitations](#16-use-cases-and-limitations)
-17. [Comparison with Other Databases](#17-comparison-with-other-databases)
-18. [Deployment Patterns](#18-deployment-patterns)
-19. [Testing and Benchmarking](#19-testing-and-benchmarking)
-20. [Version-Specific Features](#20-version-specific-features)
+Mandatory coding standards and development practices for DuckDB analytical database development. DuckDB 1.0+, SQL, Python/R/Arrow integrations, Parquet/CSV/JSON.
 
 ---
 
-## 1. Architecture and Fundamentals
+**Agent Profile**: The DuckDB Expert
+**Role**: Senior Analytics Engineer & In-Process OLAP Specialist
+**Objective**: Generate production-ready, fast and maintainable analytical data solutions.
+**Tools**: DuckDB 1.0+, SQL, Python/R/Arrow integrations, Parquet/CSV/JSON
+
+---
+
+**Version:** 1.0 | **Last Updated:** February 2026 | **Target Version:** DuckDB 1.0+, 1.1+
+
+## Table of Contents
+
+1. [Core Philosophies: OLAP-FIRST](#1-core-philosophies-olap-first)
+2. [Architecture and Fundamentals](#2-architecture-and-fundamentals)
+3. [Performance Optimization](#3-performance-optimization)
+4. [Data Import and Export](#4-data-import-and-export)
+5. [Query Optimization](#5-query-optimization)
+6. [Analytical Query Patterns](#6-analytical-query-patterns)
+7. [Partitioning and Parallelism](#7-partitioning-and-parallelism)
+8. [Extensions and Plugins](#8-extensions-and-plugins)
+9. [Python Integration](#9-python-integration)
+10. [R Integration](#10-r-integration)
+11. [Pandas and Arrow Integration](#11-pandas-and-arrow-integration)
+12. [Remote File Access](#12-remote-file-access)
+13. [Schema Design for Analytics](#13-schema-design-for-analytics)
+14. [Aggregations and Window Functions](#14-aggregations-and-window-functions)
+15. [Data Types and Storage](#15-data-types-and-storage)
+16. [Transaction and Concurrency](#16-transaction-and-concurrency)
+17. [Use Cases and Limitations](#17-use-cases-and-limitations)
+18. [Comparison with Other Databases](#18-comparison-with-other-databases)
+19. [Deployment Patterns](#19-deployment-patterns)
+20. [Testing and Benchmarking](#20-testing-and-benchmarking)
+21. [Version-Specific Features](#21-version-specific-features)
+
+---
+
+## 1. Core Philosophies: OLAP-FIRST
+
+The agent must adhere to the **OLAP-FIRST** principles for every DuckDB implementation:
+
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+
+- **O**ptimize for analytics: Columnar storage, vectorized execution, predicate pushdown.
+- **L**ock inputs: Use flake.lock / manifest pins; fixed hashes for external data.
+- **A**ggregate efficiently: Prefer APPROX_* and window functions; avoid unnecessary scans.
+- **P**arquet-first: Prefer Parquet over CSV; use partitioning and compression.
+- **F**ile-centric: Query files directly when possible; persist only when needed.
+
+**Verified Code**: Agent-generated code MUST run in pure/sandboxed evaluation, use parameterized SQL, and pass tests before delivery.
+
+---
+
+## 2. Architecture and Fundamentals
 
 ### What is DuckDB?
 
@@ -165,7 +192,7 @@ Vectorized:  Load 2048 ages → filter → load salaries → sum
 
 ---
 
-## 2. Performance Optimization
+## 3. Performance Optimization
 
 ### Memory Configuration
 
@@ -356,7 +383,7 @@ CREATE TABLE events (
 
 ---
 
-## 3. Data Import and Export
+## 4. Data Import and Export
 
 ### Parquet Files
 
@@ -583,7 +610,7 @@ conn.execute("INSERT INTO users SELECT * FROM df")
 
 ---
 
-## 4. Query Optimization
+## 5. Query Optimization
 
 ### EXPLAIN and Query Analysis
 
@@ -803,7 +830,7 @@ SELECT * FROM expensive_computation WHERE avg_value > 50;
 
 ---
 
-## 5. Analytical Query Patterns
+## 6. Analytical Query Patterns
 
 ### Time-Series Analysis
 
@@ -1039,7 +1066,7 @@ ORDER BY rank;
 
 ---
 
-## 6. Partitioning and Parallelism
+## 7. Partitioning and Parallelism
 
 ### File-Based Partitioning
 
@@ -1163,7 +1190,7 @@ SET force_parallelism = true;
 
 ---
 
-## 7. Extensions and Plugins
+## 8. Extensions and Plugins
 
 ### Core Extensions
 
@@ -1359,7 +1386,7 @@ SELECT * FROM (
 
 ---
 
-## 8. Python Integration
+## 9. Python Integration
 
 ### Installation
 
@@ -1610,7 +1637,7 @@ result = rel.df()
 
 ---
 
-## 9. R Integration
+## 10. R Integration
 
 ### Installation
 
@@ -1749,7 +1776,7 @@ con <- dbConnect(duckdb::duckdb())
 
 ---
 
-## 10. Pandas and Arrow Integration
+## 11. Pandas and Arrow Integration
 
 ### Pandas Integration
 
@@ -1928,7 +1955,7 @@ duckdb.query("""
 
 ---
 
-## 11. Remote File Access
+## 12. Remote File Access
 
 ### S3 Access
 
@@ -2065,7 +2092,7 @@ df = conn.execute("SELECT * FROM 's3://bucket/data.parquet'").df()
 
 ---
 
-## 12. Schema Design for Analytics
+## 13. Schema Design for Analytics
 
 ### Star Schema
 
@@ -2230,7 +2257,7 @@ CREATE TABLE analytics_events (
 
 ---
 
-## 13. Aggregations and Window Functions
+## 14. Aggregations and Window Functions
 
 ### Aggregation Functions
 
@@ -2416,7 +2443,7 @@ GROUP BY GROUPING SETS (
 
 ---
 
-## 14. Data Types and Storage
+## 15. Data Types and Storage
 
 ### Numeric Types
 
@@ -2631,7 +2658,7 @@ FROM duckdb_tables();
 
 ---
 
-## 15. Transaction and Concurrency
+## 16. Transaction and Concurrency
 
 ### ACID Properties
 
@@ -2742,7 +2769,7 @@ with Pool(4) as p:
 
 ---
 
-## 16. Use Cases and Limitations
+## 17. Use Cases and Limitations
 
 ### Ideal Use Cases
 
@@ -2883,7 +2910,7 @@ Full-text search        | Extension required
 
 ---
 
-## 17. Comparison with Other Databases
+## 18. Comparison with Other Databases
 
 ### DuckDB vs SQLite
 
@@ -2972,7 +2999,7 @@ result = duckdb.query("SELECT * FROM df WHERE value > 100").pl()
 
 ---
 
-## 18. Deployment Patterns
+## 19. Deployment Patterns
 
 ### In-Memory Analytics
 
@@ -3200,7 +3227,7 @@ def lambda_handler(event, context):
 
 ---
 
-## 19. Testing and Benchmarking
+## 20. Testing and Benchmarking
 
 ### Unit Testing
 
@@ -3343,7 +3370,7 @@ cProfile.run('run_query()')
 
 ---
 
-## 20. Version-Specific Features
+## 21. Version-Specific Features
 
 ### DuckDB 1.1 (2025)
 
@@ -3457,3 +3484,7 @@ new_conn.execute("CREATE TABLE table1 AS SELECT * FROM 'backup/table1.parquet'")
 
 **Last Updated:** February 2026
 **Next Review:** May 2026
+
+---
+
+**End of DuckDB Development Guidelines**

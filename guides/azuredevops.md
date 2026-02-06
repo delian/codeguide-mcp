@@ -1,5 +1,5 @@
 # Modern Azure DevOps Guidelines
-This document provides mandatory standards and best practices for Azure DevOps usage, including pipelines, boards, project management, and DevOps workflows.
+Mandatory standards and best practices for Azure DevOps usage, including pipelines, boards, project management, and DevOps workflows. Azure Pipelines, Azure Boards, Azure Repos, Azure Artifacts, YAML pipelines, ARM templates.
 
 ---
 
@@ -3061,3 +3061,6 @@ stages:
 **Last Updated:** 2026-01-18  
 **Version:** 1.0  
 **Maintainer:** DevOps Team
+
+
+**End of Modern Azure DevOps Guidelines**

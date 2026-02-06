@@ -1,6 +1,6 @@
 # Ruby Development Guidelines
 
-This document provides mandatory standards for Ruby development, following community conventions and best practices.
+Mandatory standards for Ruby development, following community conventions and best practices. Ruby 3.2+, Rails 7+, RuboCop, RSpec, Bundler.
 
 ---
 
@@ -260,11 +260,11 @@ class User
   # Class methods
   class << self
     def find(id)
-      # ...
+      # ..
     end
 
     def all
-      # ...
+      # ..
     end
   end
 
@@ -309,11 +309,11 @@ end
 # Namespace module
 module Authentication
   class Token
-    # ...
+    # ..
   end
 
   class Session
-    # ...
+    # ..
   end
 end
 
@@ -1081,3 +1081,6 @@ n.hours.from_now    # Time calculation
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** Ruby Team
+
+
+**End of Ruby Development Guidelines**

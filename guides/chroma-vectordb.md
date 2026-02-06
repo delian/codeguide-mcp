@@ -1,35 +1,54 @@
-# Chroma Vector Database Best Practices Guide
-
-**Version:** 1.0
-**Last Updated:** February 2026
-**Target Version:** Chroma 0.5.x+
-
-## Table of Contents
-
-1. [Architecture and Fundamentals](#1-architecture-and-fundamentals)
-2. [Installation and Setup](#2-installation-and-setup)
-3. [Collections and Documents](#3-collections-and-documents)
-4. [Embedding Functions](#4-embedding-functions)
-5. [Querying and Similarity Search](#5-querying-and-similarity-search)
-6. [Metadata Filtering](#6-metadata-filtering)
-7. [Distance Metrics](#7-distance-metrics)
-8. [Performance Optimization](#8-performance-optimization)
-9. [Data Persistence](#9-data-persistence)
-10. [Client Libraries](#10-client-libraries)
-11. [LLM Integration](#11-llm-integration)
-12. [RAG (Retrieval Augmented Generation)](#12-rag-retrieval-augmented-generation)
-13. [Production Deployment](#13-production-deployment)
-14. [Scaling Strategies](#14-scaling-strategies)
-15. [Monitoring and Troubleshooting](#15-monitoring-and-troubleshooting)
-16. [Security Best Practices](#16-security-best-practices)
-17. [Comparison with Other Vector DBs](#17-comparison-with-other-vector-dbs)
-18. [Common Use Cases](#18-common-use-cases)
-19. [Migration and Upgrades](#19-migration-and-upgrades)
-20. [Production Checklist](#20-production-checklist)
+# Chroma Vector Database Development Guidelines
+Mandatory coding standards and development practices for Chroma vector database development. Chroma 0.5.x+, Python/JS clients, embedding models, OpenAI/Sentence Transformers.
 
 ---
 
-## 1. Architecture and Fundamentals
+**Agent Profile**: The Chroma Vector DB Expert
+**Role**: Senior ML/Embeddings Engineer & Vector Store Specialist
+**Objective**: Generate production-ready, efficient and maintainable embedding and RAG solutions.
+**Tools**: Chroma 0.5.x+, Python/JS clients, embedding models, OpenAI/Sentence Transformers
+
+---
+
+**Version:** 1.0 | **Last Updated:** February 2026 | **Target Version:** Chroma 0.5.x+
+
+## Table of Contents
+
+1. [Core Philosophies: VECTOR-FIRST](#1-core-philosophies-vector-first)
+2. [Architecture and Fundamentals](#2-architecture-and-fundamentals)
+3. [Installation and Setup](#3-installation-and-setup)
+4. [Collections and Documents](#4-collections-and-documents)
+5. [Embedding Functions](#5-embedding-functions)
+6. [Querying and Similarity Search](#6-querying-and-similarity-search)
+7. [Metadata Filtering](#7-metadata-filtering)
+8. [Distance Metrics](#8-distance-metrics)
+9. [Performance Optimization](#9-performance-optimization)
+10. [Data Persistence](#10-data-persistence)
+11. [Client Libraries](#11-client-libraries)
+12. [LLM Integration](#12-llm-integration)
+13. [RAG (Retrieval Augmented Generation)](#13-rag-retrieval-augmented-generation)
+
+---
+
+## 1. Core Philosophies: VECTOR-FIRST
+
+The agent must adhere to the **VECTOR-FIRST** principles for every Chroma implementation:
+
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+
+- **V**ector-native: Model data as embeddings; use similarity search, not keyword-only.
+- **E**mbedding consistency: Use the same model and config for indexing and querying.
+- **C**ollections and metadata: Design collections and metadata filters for your query patterns.
+- **T**est with real embeddings: Validate distance metrics and thresholds with representative data.
+- **O**ptimize retrieval: Use metadata filtering and appropriate n_results; consider reranking for RAG.
+- **R**eproducible: Pin embedding model and Chroma version; persist and backup collections.
+
+**Verified Code**: Agent-generated code MUST use consistent embedding functions, run similarity tests, and validate RAG flows before delivery.
+
+---
+
+## 2. Architecture and Fundamentals
 
 ### What is Chroma?
 
@@ -170,7 +189,7 @@ Higher similarity → More relevant result
 
 ---
 
-## 2. Installation and Setup
+## 3. Installation and Setup
 
 ### Python Installation
 
@@ -294,7 +313,7 @@ volumes:
 
 ---
 
-## 3. Collections and Documents
+## 4. Collections and Documents
 
 ### Creating Collections
 
@@ -489,7 +508,7 @@ results = collection.get(
 
 ---
 
-## 4. Embedding Functions
+## 5. Embedding Functions
 
 ### Built-in Embedding Functions
 
@@ -642,7 +661,7 @@ collection = client.create_collection(
 
 ---
 
-## 5. Querying and Similarity Search
+## 6. Querying and Similarity Search
 
 ### Basic Query
 
@@ -790,7 +809,7 @@ page_2 = paginated_query(collection, "machine learning", page=1)
 
 ---
 
-## 6. Metadata Filtering
+## 7. Metadata Filtering
 
 ### Filter Operators
 
@@ -927,7 +946,7 @@ results = collection.query(
 
 ---
 
-## 7. Distance Metrics
+## 8. Distance Metrics
 
 ### Supported Distance Functions
 
@@ -1037,7 +1056,7 @@ search_ef (query-time):
 
 ---
 
-## 8. Performance Optimization
+## 9. Performance Optimization
 
 ### Batch Operations
 
@@ -1179,7 +1198,7 @@ quality_ef = embedding_functions.OpenAIEmbeddingFunction(
 
 ---
 
-## 9. Data Persistence
+## 10. Data Persistence
 
 ### Persistent Storage
 
@@ -1313,7 +1332,7 @@ backup_to_s3("./chroma_data", "my-backups", "chroma")
 
 ---
 
-## 10. Client Libraries
+## 11. Client Libraries
 
 ### Python Client
 
@@ -1474,7 +1493,7 @@ asyncio.run(main())
 
 ---
 
-## 11. LLM Integration
+## 12. LLM Integration
 
 ### LangChain Integration
 
@@ -1633,7 +1652,7 @@ print(f"\nSources: {result['sources']}")
 
 ---
 
-## 12. RAG (Retrieval Augmented Generation)
+## 13. RAG (Retrieval Augmented Generation)
 
 ### Basic RAG Implementation
 
@@ -1910,3 +1929,7 @@ print(rag_chat.chat("Can you give an example?"))  # Uses context from previous
 
 **Last Updated:** February 2026
 **Next Review:** May 2026
+
+---
+
+**End of Chroma Vector Database Development Guidelines**

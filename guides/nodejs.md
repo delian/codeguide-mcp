@@ -1,14 +1,19 @@
-# Node.js & TypeScript Guidelines
-This document provides mandatory coding standards and development practices for modern Node.js with TypeScript applications
+# Node.js & TypeScript Development Guidelines
+
+Mandatory coding standards and development practices for Node.js and TypeScript development. Node.js 22.x LTS, TypeScript 5.x, ESM modules, TypeDoc, Modern tooling (Biome/oxc, tsx, npm).
 
 ---
-Agent Profile: The TypeScript Architect
-Role: Senior Full-Stack Engineer & Node.js Performance Specialist
-Objective: Generate production-ready, type-safe, fully documented, highly performant, and maintainable Node.js applications.
-Tools: Node.js 22.x LTS, TypeScript 5.x, ESM modules, TypeDoc, Modern tooling (Biome/oxc, tsx, npm).
 
-## 1. Core Philosophies
-The agent must adhere to the "NODEJS-FIRST" principles for every Node.js/TypeScript project:
+**Agent Profile**: The TypeScript Architect
+**Role**: Senior Full-Stack Engineer & Node.js Performance Specialist
+**Objective**: Generate production-ready, type-safe, fully documented, highly performant, and maintainable Node.js applications.
+**Tools**: Node.js 22.x LTS, TypeScript 5.x, ESM modules, TypeDoc, Modern tooling (Biome/oxc, tsx, npm)
+
+---
+
+## 1. Core Philosophies: NODEJS-FIRST
+
+The agent must adhere to the **NODEJS-FIRST** principles for every Node.js/TypeScript project:
 
 **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
 **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
@@ -19,13 +24,14 @@ The agent must adhere to the "NODEJS-FIRST" principles for every Node.js/TypeScr
 **Efficient**: Optimize for performance, use native APIs, minimize dependencies.
 **Resilient**: Proper error handling, graceful degradation, observability.
 **Documented**: JSDoc comments for all exports, auto-generated API documentation with TypeDoc.
+**Verified Code**: Agent-generated code MUST be type-checked, documented, and pass tests before delivery.
 
 ## 2. Mandatory Setup Requirements
 
 ### A. Node.js Version & Runtime
 * **Version**: Use Node.js 22.x LTS or latest stable (with fallback to 20.x LTS minimum).
 
-* **Module System**: ALWAYS prefer to use use ESM (ECMAScript Modules), instead of CommonJS modules unless a ESM module is not available.
+* **Module System**: ALWAYS prefer ESM (ECMAScript Modules) over CommonJS unless an ESM build is not available.
 
 * **Package Manager**: Always use `npm` v10+. NEVER use `yarn` v1 or pnpm.
 
@@ -513,7 +519,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { UserService } from '../../src/services/user.service.js';
 
 describe('UserService - Bug Fixes', () => {
-  // ... setup ...
+  // ... setup ..
 
   describe('searchUsers - Bug #4721: Special characters in names', () => {
     it("should find users with apostrophes in name - Bug #4721", async () => {
@@ -2727,7 +2733,7 @@ JWT_SECRET=your-256-bit-secret-here
 API_KEY=your-api-key-here
 
 # Monitoring
-SENTRY_DSN=https://...
+SENTRY_DSN=https://..
 ```
 
 ### .gitignore Template
@@ -3262,3 +3268,7 @@ project/
 - [Prisma Best Practices](https://www.prisma.io/docs/guides)
 - [Biome](https://biomejs.dev/)
 - [Vitest](https://vitest.dev/)
+
+---
+
+**End of Node.js & TypeScript Development Guidelines**

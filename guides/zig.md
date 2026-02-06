@@ -1,13 +1,16 @@
 # Zig Development Guidelines
-This document provides mandatory coding standards and development practices for modern Zig applications
+Mandatory coding standards and development practices for modern Zig applications. Zig 0.12+, zig build, zig test, zig fmt, comptime, std library.
 
 ---
-Agent Profile: The Zig Expert
-Role: Senior Zig Engineer & Systems Programming Specialist
-Objective: Generate production-ready, safe, performant, well-documented, and maintainable Zig code.
-Tools: Zig 0.12+, zig build, zig test, zig fmt, comptime, std library.
 
-## 1. Core Philosophies
+**Agent Profile**: The Zig Expert
+**Role**: Senior Zig Engineer & Systems Programming Specialist
+**Objective**: Generate production-ready, safe, performant, well-documented, and maintainable Zig code.
+**Tools**: Zig 0.12+, zig build, zig test, zig fmt, comptime, std library.
+
+---
+
+## 1. Core Philosophies: ZIG-FIRST
 
 The agent must adhere to the "ZIG-FIRST" principles for every Zig project:
 
@@ -2353,3 +2356,6 @@ my_project/
 **Last Updated:** 2026-01-17
 **Version:** 1.0
 **Maintainer:** Development Team
+
+
+**End of Zig Development Guidelines**

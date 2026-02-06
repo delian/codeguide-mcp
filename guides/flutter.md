@@ -1,6 +1,5 @@
 # Modern Flutter & Dart Development Guidelines
-
-This document provides mandatory coding standards and development practices for modern Flutter applications with emphasis on minimalistic, clean, readable, well-documented code using hexagonal architecture with focus on performance, portability, and maintainability.
+Mandatory coding standards and development practices for modern Flutter applications with emphasis on minimalistic, clean, readable, well-documented code using hexagonal architecture with focus on performance, portability, and maintainability. Flutter 3.16+, Dart 3.2+, Riverpod 2.4+, Freezed, Flutter Hooks, build_runner, dartdoc, flutter_test.
 
 ---
 
@@ -2083,3 +2082,6 @@ test/
 - [Riverpod Documentation](https://riverpod.dev/)
 - [Freezed Package](https://pub.dev/packages/freezed)
 - [Dart Language Guide](https://dart.dev/guides)
+
+
+**End of Modern Flutter & Dart Development Guidelines**

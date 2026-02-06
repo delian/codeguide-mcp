@@ -1,31 +1,63 @@
-# InfluxDB Best Practices Guide
+# InfluxDB Development Guidelines
+Mandatory coding standards and development practices for InfluxDB development. InfluxDB 2.x/3.x, Flux, InfluxQL, Telegraf, Parquet/TSM storage.
 
-Comprehensive best practices for InfluxDB 2.x/3.x covering architecture, data modeling, performance optimization, and production deployment (Updated 2026).
+---
+
+**Agent Profile**: The InfluxDB Expert
+**Role**: Senior Time-Series & Observability Engineer
+**Objective**: Generate production-ready, efficient and scalable time-series data solutions.
+**Tools**: InfluxDB 2.x/3.x, Flux, InfluxQL, Telegraf, Parquet/TSM storage
+
+---
 
 ## Table of Contents
 
-1. [InfluxDB Architecture](#influxdb-architecture)
-2. [Data Modeling](#data-modeling)
-3. [Schema Design](#schema-design)
-4. [Write Optimization](#write-optimization)
-5. [Query Optimization](#query-optimization)
-6. [Compaction and TSM Management](#compaction-and-tsm-management)
-7. [Retention Policies and Downsampling](#retention-policies-and-downsampling)
-8. [Continuous Queries and Tasks](#continuous-queries-and-tasks)
-9. [Aggregation Strategies](#aggregation-strategies)
-10. [Cardinality Management](#cardinality-management)
-11. [Memory Optimization](#memory-optimization)
-12. [Security](#security)
-13. [Clustering and High Availability](#clustering-and-high-availability)
-14. [Backup and Restore](#backup-and-restore)
-15. [Monitoring and Operations](#monitoring-and-operations)
-16. [Docker Deployment](#docker-deployment)
-17. [Kubernetes Deployment](#kubernetes-deployment)
-18. [Performance Tuning](#performance-tuning)
-19. [Low Latency Configuration](#low-latency-configuration)
-20. [Migration Strategies](#migration-strategies)
+1. [Core Philosophies: TIMESERIES-FIRST](#1-core-philosophies-timeseries-first)
+2. [InfluxDB Architecture](#2-influxdb-architecture)
+3. [Data Modeling](#3-data-modeling)
+4. [Schema Design](#4-schema-design)
+5. [Write Optimization](#5-write-optimization)
+6. [Query Optimization](#6-query-optimization)
+7. [Compaction and TSM Management](#7-compaction-and-tsm-management)
+8. [Retention Policies and Downsampling](#8-retention-policies-and-downsampling)
+9. [Continuous Queries and Tasks](#9-continuous-queries-and-tasks)
+10. [Aggregation Strategies](#10-aggregation-strategies)
+11. [Cardinality Management](#11-cardinality-management)
+12. [Memory Optimization](#12-memory-optimization)
+13. [Security](#13-security)
+14. [Clustering and High Availability](#14-clustering-and-high-availability)
+15. [Backup and Restore](#15-backup-and-restore)
+16. [Monitoring and Operations](#16-monitoring-and-operations)
+17. [Docker Deployment](#17-docker-deployment)
+18. [Kubernetes Deployment](#18-kubernetes-deployment)
+19. [Performance Tuning](#19-performance-tuning)
+20. [Low Latency Configuration](#20-low-latency-configuration)
+21. [Migration Strategies](#21-migration-strategies)
 
-## 1. InfluxDB Architecture
+---
+
+## 1. Core Philosophies: TIMESERIES-FIRST
+
+The agent must adhere to the **TIMESERIES-FIRST** principles for every InfluxDB implementation:
+
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+
+- **T**ags and fields: Use tags for dimensions and filtering; fields for values; avoid high cardinality in tags where TSM applies.
+- **I**ngestion: Batch writes; use appropriate consistency and retention; design for downsampling and CQs/tasks.
+- **M**odel for query patterns: Schema and retention follow how you query; partition and order by time.
+- **E**xploit retention and downsampling: Define retention policies; use continuous queries or Flux tasks for aggregates.
+- **S**torage and compaction: Understand TSM/Parquet; tune compaction and memory; manage cardinality.
+- **E**rror handling: Handle backpressure and write failures; use retries and backoff.
+- **R**esilience: Clustering, backup, and restore; test failover and recovery.
+- **I**nstrumentation: Monitor ingestion, query latency, and cardinality; use InfluxDB for its own metrics.
+- **E**fficiency: Optimize queries with time ranges and filters; use appropriate aggregation and limits.
+
+**Verified Code**: Agent-generated code MUST use correct line protocol or API usage, run against a test instance, and pass tests before delivery.
+
+---
+
+## 2. InfluxDB Architecture
 
 ### InfluxDB 3.x Architecture (2026 Latest)
 
@@ -85,7 +117,7 @@ TSM File = Compressed columnar data + Index
 - Field values NOT indexed
 ```
 
-## 2. Data Modeling
+## 3. Data Modeling
 
 ### Core Data Elements
 
@@ -151,7 +183,7 @@ metrics,timestamp=2024-01-01T00:00:00Z,host=server-01 value=100 1704067200000000
 4. Tags and fields with same name cause column conflicts
 ```
 
-## 3. Schema Design
+## 4. Schema Design
 
 ### Schema Design Principles
 
@@ -217,7 +249,7 @@ Reason:
   - Aids in join operations
 ```
 
-## 4. Write Optimization
+## 5. Write Optimization
 
 ### Optimal Batch Sizes (2026)
 
@@ -329,7 +361,7 @@ Configuration:
   Longer duration = Less data duplication
 ```
 
-## 5. Query Optimization
+## 6. Query Optimization
 
 ### Flux vs InfluxQL (2026)
 
@@ -429,7 +461,7 @@ SELECT * FROM "cpu" WHERE "region" = 'us-east'
 SELECT * FROM "cpu" WHERE "value" > 80
 ```
 
-## 6. Compaction and TSM Management
+## 7. Compaction and TSM Management
 
 **Note:** This section applies to InfluxDB 2.x and earlier. InfluxDB 3.x uses Parquet files.
 
@@ -505,7 +537,7 @@ Memory_Constrained:
   - Lower max-concurrent-compactions
 ```
 
-## 7. Retention Policies and Downsampling
+## 8. Retention Policies and Downsampling
 
 ### Retention Policy Strategy
 
@@ -593,7 +625,7 @@ Aggregation_Functions:
   Percentiles: Preserve with histogram buckets
 ```
 
-## 8. Continuous Queries and Tasks
+## 9. Continuous Queries and Tasks
 
 ### Migration: CQs to Tasks (2026)
 
@@ -691,7 +723,7 @@ from(bucket: "mydb/autogen")
   |> to(bucket: "mydb/autogen")
 ```
 
-## 9. Aggregation Strategies
+## 10. Aggregation Strategies
 
 ### Pre-Aggregation vs On-Demand
 
@@ -808,7 +840,7 @@ Memory_Management:
   - Monitor query performance
 ```
 
-## 10. Cardinality Management
+## 11. Cardinality Management
 
 ### Understanding Cardinality
 
@@ -939,7 +971,7 @@ Solutions:
   - Limit tag value sets
 ```
 
-## 11. Memory Optimization
+## 12. Memory Optimization
 
 ### Time Series Index (TSI) Configuration
 
@@ -1043,7 +1075,7 @@ curl -G 'http://localhost:8086/debug/vars' | jq '.database.cache'
 curl -G 'http://localhost:8086/debug/vars' | jq '.queryExecutor'
 ```
 
-## 12. Security
+## 13. Security
 
 ### Authentication and Authorization
 
@@ -1170,7 +1202,7 @@ Docker_Network:
   Enable_Network_Isolation: true
 ```
 
-## 13. Clustering and High Availability
+## 14. Clustering and High Availability
 
 ### InfluxDB Version Comparison (2026)
 
@@ -1329,7 +1361,7 @@ spec:
           storage: 100Gi
 ```
 
-## 14. Backup and Restore
+## 15. Backup and Restore
 
 ### Backup Strategies by Version
 
@@ -1523,7 +1555,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-## 15. Monitoring and Operations
+## 16. Monitoring and Operations
 
 ### InfluxDB Metrics Endpoint
 
@@ -1760,7 +1792,7 @@ Compaction_Issues:
     - Consider manual compaction
 ```
 
-## 16. Docker Deployment
+## 17. Docker Deployment
 
 ### Critical 2026 Update
 
@@ -2009,7 +2041,7 @@ Networking:
   ✓ Enable network encryption
 ```
 
-## 17. Kubernetes Deployment
+## 18. Kubernetes Deployment
 
 ### InfluxDB Operator
 
@@ -2358,7 +2390,7 @@ Scaling:
   - Consider read replicas for query workload
 ```
 
-## 18. Performance Tuning
+## 19. Performance Tuning
 
 ### InfluxDB 3.x Performance Configuration
 
@@ -2596,7 +2628,7 @@ Operations:
   ✓ Query optimization
 ```
 
-## 19. Low Latency Configuration
+## 20. Low Latency Configuration
 
 ### Optimal Low-Latency Setup (InfluxDB 3.x)
 
@@ -2849,7 +2881,7 @@ Configuration_for_SLO:
   - Network: < 1ms RTT
 ```
 
-## 20. Migration Strategies
+## 21. Migration Strategies
 
 ### Version Migration Paths (2026)
 
@@ -3142,3 +3174,7 @@ Problems_and_Solutions:
 **Last Updated:** 2026-02-06
 **InfluxDB Versions:** 3.8 (Core/Enterprise), 2.7 (OSS), 1.11 (Legacy)
 **Target Audience:** DevOps Engineers, SREs, Platform Engineers
+
+---
+
+**End of InfluxDB Development Guidelines**

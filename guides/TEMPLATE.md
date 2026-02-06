@@ -1,6 +1,5 @@
 # [TECHNOLOGY_NAME] Development Guidelines
-
-This document provides mandatory coding standards and development practices for [TECHNOLOGY_NAME] development.
+Mandatory coding standards and development practices for [TECHNOLOGY_NAME] development. [SHORT_GOALS_LIST]. [TOOL_LIST].
 
 ---
 

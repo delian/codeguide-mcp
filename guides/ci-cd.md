@@ -1,6 +1,5 @@
 # CI/CD Pipeline Guidelines
-
-This document provides mandatory standards for implementing continuous integration and continuous deployment pipelines.
+Mandatory standards for implementing continuous integration and continuous deployment pipelines. GitHub Actions, GitLab CI, Jenkins, CircleCI, ArgoCD, Flux.
 
 ---
 
@@ -908,3 +907,6 @@ if: always()
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** DevOps Team
+
+
+**End of CI/CD Pipeline Guidelines**

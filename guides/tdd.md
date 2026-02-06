@@ -1,15 +1,19 @@
 # Test-Driven Development (TDD) Guidelines
-This document provides mandatory test-driven development practices applicable to all programming languages
+
+Mandatory coding standards and development practices for test-driven development. Language-agnostic testing frameworks, CI/CD pipelines, coverage analysis tools.
 
 ---
-Agent Profile: The TDD Practitioner
-Role: Senior Software Engineer & Quality Advocate
-Objective: Generate production-ready, thoroughly tested, and maintainable code through test-first development.
-Tools: Language-agnostic testing frameworks, CI/CD pipelines, coverage analysis tools.
 
-## Core Philosophies
+**Agent Profile**: The TDD Practitioner
+**Role**: Senior Software Engineer & Quality Advocate
+**Objective**: Generate production-ready, thoroughly tested, and maintainable code through test-first development.
+**Tools**: Language-agnostic testing frameworks, CI/CD pipelines, coverage analysis tools
 
-The agent must adhere to the "TDD-FIRST" principles:
+---
+
+## 1. Core Philosophies: TDD-FIRST
+
+The agent must adhere to the **TDD-FIRST** principles for every implementation:
 
 **Red-Green-Refactor**: ALWAYS write failing test → make it pass → refactor. Never skip this cycle.
 **Test Before Code**: Write the test before writing implementation code, without exception.
@@ -18,11 +22,11 @@ The agent must adhere to the "TDD-FIRST" principles:
 **Isolated Tests**: Each test must be independent and not rely on execution order.
 **Readable Tests**: Tests are documentation; they must be clear and expressive.
 **Coverage as Proof**: Aim for >90% code coverage, 100% for critical paths.
-**Verified Always**: All tests must pass before code delivery.
+**Verified Code**: All tests MUST pass before code delivery; agent-generated code must be verified by running the test suite.
 
 ---
 
-## 1. The TDD Cycle (MANDATORY)
+## 2. The TDD Cycle (MANDATORY)
 
 ### A. The Red-Green-Refactor Loop
 
@@ -127,7 +131,7 @@ END TEST
 
 ---
 
-## 2. Regression Testing (MANDATORY)
+## 3. Regression Testing (MANDATORY)
 
 ### A. The Golden Rule: Bug = Test
 
@@ -269,7 +273,7 @@ END TEST
 
 ---
 
-## 3. Test Structure & Organization
+## 4. Test Structure & Organization
 
 ### A. Test Naming Conventions
 
@@ -367,7 +371,7 @@ tests/
 
 ---
 
-## 4. Test Types & Coverage
+## 5. Test Types & Coverage
 
 ### A. Test Pyramid
 
@@ -497,7 +501,7 @@ Status: PASS (meets 90% threshold)
 
 ---
 
-## 5. Testing Best Practices (MANDATORY)
+## 6. Testing Best Practices (MANDATORY)
 
 ### A. Test Independence
 
@@ -649,7 +653,7 @@ END FAKE
 
 ---
 
-## 6. Agent TDD Requirements (MANDATORY)
+## 7. Agent TDD Requirements (MANDATORY)
 
 ### A. Code Generation Protocol
 
@@ -787,7 +791,7 @@ END TEST
 
 ---
 
-## 7. TDD Anti-Patterns
+## 8. TDD Anti-Patterns
 
 ### A. Testing Anti-Patterns to AVOID
 
@@ -934,7 +938,7 @@ Tests reveal design problems. If tests are hard to write, the design needs impro
 
 ---
 
-## 8. CI/CD Integration
+## 9. CI/CD Integration
 
 ### A. Continuous Testing Requirements
 
@@ -1017,7 +1021,7 @@ quality_gates:
 
 ---
 
-## 9. Language-Specific Examples
+## 10. Language-Specific Examples
 
 ### A. Python Example
 
@@ -1242,7 +1246,7 @@ mod tests {
 
 ---
 
-## 10. Deployment Checklist
+## 11. Deployment Checklist
 
 ### Code Quality
 - [ ] **All tests pass**: Exit code 0 from test runner
@@ -1313,3 +1317,7 @@ mod tests {
 **Last Updated:** 2026-01-18
 **Version:** 1.0
 **Maintainer:** Development Team
+
+---
+
+**End of Test-Driven Development (TDD) Guidelines**

@@ -1,6 +1,5 @@
 # Modern Lua Development Guidelines
-
-This document provides mandatory coding standards and development practices for modern Lua applications with emphasis on minimalistic, clean, readable, well-documented code using hexagonal architecture with focus on performance, portability, and maintainability.
+Mandatory coding standards and development practices for modern Lua applications with emphasis on minimalistic, clean, readable, well-documented code using hexagonal architecture with focus on performance, portability, and maintainability. Lua 5.4+, LuaRocks, LDoc, Busted, LuaUnit, luacheck, LuaJIT (when applicable).
 
 ---
 
@@ -1087,7 +1086,7 @@ local function process_user_input(input)
           "Name must be between 1 and 100 characters")
    assert(Validator.is_positive_number(input.age),
           "Age must be a positive number")
-   -- Process input...
+   -- Process input..
 end
 ```
 
@@ -1511,3 +1510,6 @@ max_line_length = 120
 - [LuaRocks Documentation](https://luarocks.org/)
 - [Busted Testing Framework](https://olivinelabs.com/busted/)
 - [LDoc Documentation](https://stevedonovan.github.io/ldoc/)
+
+
+**End of Modern Lua Development Guidelines**

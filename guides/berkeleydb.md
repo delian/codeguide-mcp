@@ -1,6 +1,5 @@
 # Berkeley DB Development Guidelines
-
-This document provides comprehensive standards for using Berkeley DB, a high-performance embedded database library providing key-value storage with ACID transactions.
+Comprehensive standards for using Berkeley DB, a high-performance embedded database library providing key-value storage with ACID transactions.
 
 ---
 
@@ -2249,3 +2248,6 @@ db->stat_print(db, DB_STAT_CLEAR);
 **Compatible with**: Berkeley DB 18.1.x
 
 For updates and contributions, see the [companion guides](README.md).
+
+
+**End of Berkeley DB Development Guidelines**

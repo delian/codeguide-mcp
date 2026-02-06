@@ -1,6 +1,16 @@
-# Haskell Development Guide
+# Haskell Development Guidelines
+Mandatory coding standards and development practices for Haskell development. GHC 9.4+, Cabal 3.10+, HLS, Haddock, HSpec, QuickCheck, HLint.
 
-## Core Philosophies
+---
+
+**Agent Profile**: The Haskell Expert
+**Role**: Senior Functional Programming Engineer & Type-System Specialist
+**Objective**: Generate production-ready, correct and maintainable functional code.
+**Tools**: GHC 9.4+, Cabal 3.10+, HLS, Haddock, HSpec, QuickCheck, HLint
+
+---
+
+## 1. Core Philosophies: HASKELL-FIRST
 
 ### HASKELL-FIRST
 1. **Type-Driven Development**: Let the type system guide your design; "make invalid states unrepresentable"
@@ -38,7 +48,7 @@ When generating Haskell code, agents MUST verify:
 
 ---
 
-## 1. Test-Driven Development (TDD)
+## 2. Test-Driven Development (TDD)
 
 ### A. TDD Protocol
 
@@ -637,7 +647,7 @@ hlint src/Domain/Order.hs
 
 ---
 
-## 2. Bug Fix Protocol
+## 3. Bug Fix Protocol
 
 ### Every Bug Fix Requires:
 
@@ -1490,7 +1500,7 @@ import Data.Text (Text)
 spec :: Spec
 spec = do
   describe "parseAmount" $ do
-    -- Existing tests...
+    -- Existing tests..
     it "parses valid amounts" $ do
       parseAmount "100.00" `shouldBe` Right (Amount 100.00)
       parseAmount "0.50" `shouldBe` Right (Amount 0.50)
@@ -1707,7 +1717,7 @@ Fixes #789
 
 ---
 
-## 3. Project Structure
+## 4. Project Structure
 
 ### Hexagonal Architecture
 
@@ -1954,7 +1964,7 @@ main = do
 
 ---
 
-## 4. Cabal Configuration
+## 5. Cabal Configuration
 
 ### Modern cabal.project
 
@@ -2166,7 +2176,7 @@ hlint src/ test/
 
 ---
 
-## 5. Testing Best Practices
+## 6. Testing Best Practices
 
 ### A. Testing Stack
 
@@ -2385,7 +2395,7 @@ find p (x:xs)
 
 ---
 
-## 6. Documentation (Haddock)
+## 7. Documentation (Haddock)
 
 ### A. Module Documentation
 
@@ -2556,7 +2566,7 @@ cabal upload --publish --documentation
 
 ---
 
-## 7. Code Quality Tools
+## 8. Code Quality Tools
 
 ### A. HLint Configuration
 
@@ -2665,7 +2675,7 @@ echo "All checks passed!"
 
 ---
 
-## 8. CI/CD with Cabal
+## 9. CI/CD with Cabal
 
 ### A. GitHub Actions
 
@@ -2803,7 +2813,7 @@ jobs:
 
 ---
 
-## 9. Modern Haskell Features
+## 10. Modern Haskell Features
 
 ### A. GHC2021 Extensions
 
@@ -2941,7 +2951,7 @@ vindex (FS i) (VCons _ xs) = vindex i xs
 
 ---
 
-## 10. Prohibited Practices
+## 11. Prohibited Practices
 
 ### Never Do:
 
@@ -2999,12 +3009,12 @@ vindex (FS i) (VCons _ xs) = vindex i xs
    -- ❌ BAD: Orphan instance (defined in neither type nor class module)
    -- In module Other.hs:
    instance Show MyType where
-     show = ...
+     show = ..
 
    -- ✅ GOOD: Define instance in type's module or newtype
    newtype MyTypeShow = MyTypeShow MyType
    instance Show MyTypeShow where
-     show (MyTypeShow mt) = ...
+     show (MyTypeShow mt) = ..
    ```
 
 6. **Skipping Tests**
@@ -3075,7 +3085,7 @@ vindex (FS i) (VCons _ xs) = vindex i xs
 
 ---
 
-## 11. Deployment Checklist
+## 12. Deployment Checklist
 
 ### Before Every Release:
 
@@ -3154,7 +3164,7 @@ vindex (FS i) (VCons _ xs) = vindex i xs
 
 ---
 
-## 12. Why This Configuration Works
+## 13. Why This Configuration Works
 
 ### Type Safety
 - **Smart Constructors**: Make invalid states unrepresentable
@@ -3204,7 +3214,7 @@ maintainable Haskell applications with confidence.
 
 ---
 
-## 13. Quick Reference
+## 14. Quick Reference
 
 ### Common Commands
 
@@ -3652,3 +3662,7 @@ spec = do
 - [Haddock User Guide](https://haskell-haddock.readthedocs.io/)
 - [HLint Manual](https://github.com/ndmitchell/hlint#readme)
 - [Hexagonal Architecture in Haskell](https://github.com/thma/PolysemyCleanArchitecture)
+
+---
+
+**End of Haskell Development Guidelines**

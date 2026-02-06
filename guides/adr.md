@@ -1,6 +1,5 @@
 # Architecture Decision Records (ADR) Guidelines
-
-This document provides mandatory standards for documenting architecture decisions using ADRs.
+Mandatory standards for documenting architecture decisions using ADRs. Markdown, ADR Tools (adr-tools), Docusaurus, GitHub/GitLab.
 
 ---
 
@@ -702,3 +701,6 @@ Example: 0015-use-react-for-frontend.md
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** Architecture Team
+
+
+**End of Architecture Decision Records (ADR) Guidelines**

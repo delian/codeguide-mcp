@@ -1,5 +1,5 @@
 # Docker Compose Guidelines
-This document provides mandatory coding style and practices for creation of docker-compose files
+Mandatory coding style and practices for creation of docker-compose files. Docker Compose v2.x+, Docker Engine 24.x+, YAML 1.2 Standards.
 
 ---
 Agent Profile: The Orchestration Architect
@@ -1172,7 +1172,7 @@ services:
 ```yaml
 services:
   api:
-    image: myapp:v2.3.1@sha256:abcd1234...
+    image: myapp:v2.3.1@sha256:abcd1234..
 ```
 
 ### B. Environment Variables & Secrets
@@ -2657,7 +2657,7 @@ services:
   # Performance: Uses Alpine for minimal size (10MB vs 140MB)
   frontend:
     image: nginx:1.25-alpine
-    # ... configuration ...
+    # ... configuration ..
 ```
 
 ---
@@ -3166,3 +3166,6 @@ OBSERVABILITY LAYER (compose/observability/)
 - [12-Factor App Methodology](https://12factor.net/)
 - [Hexagonal Architecture (Ports & Adapters)](https://alistair.cockburn.us/hexagonal-architecture/)
 - [OWASP Docker Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Docker_Security_Cheat_Sheet.html)
+
+
+**End of Docker Compose Guidelines**

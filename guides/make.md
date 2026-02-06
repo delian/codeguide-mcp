@@ -1,6 +1,5 @@
 # Modern GNU Makefile Guidelines
-
-This document provides mandatory coding standards and development practices for creating modern, maintainable GNU Makefiles.
+Mandatory coding standards and development practices for creating modern, maintainable GNU Makefiles. GNU Make 4.0+, POSIX shell, minimal external dependencies.
 
 ---
 
@@ -325,7 +324,7 @@ test-install: ## Test install target ## Test
 
 ```bash
 $ make test-install
-Testing install target...
+Testing install target..
 ✗ FAIL: install target not found
 make: *** [test-install] Error 1
 ```
@@ -349,7 +348,7 @@ install: $(BUILD_DIR)/main ## Install the project ## Build
 
 ```bash
 $ make test-install
-Testing install target...
+Testing install target..
   ✓ install target exists
   ✓ install copies binary to PREFIX/bin
 ```
@@ -635,7 +634,7 @@ build:
 
 ```bash
 $ make build
-Building...
+Building..
 $ make build
 Building...  # BUG: Should say "up to date"!
 ```
@@ -698,7 +697,7 @@ build: $(BUILD_DIR)/main
 ```bash
 $ make -n build   # Verify parseability
 $ make test-incremental-build
-Testing incremental build...
+Testing incremental build..
   ✓ Incremental build uses cache
 ```
 
@@ -709,13 +708,13 @@ $ make test-all
 ═══════════════════════════════════════════
         MAKEFILE TEST SUITE
 ═══════════════════════════════════════════
-Testing parseability...
+Testing parseability..
   ✓ Makefile is parseable
-Testing build target...
+Testing build target..
   ✓ build target is parseable
   ✓ build creates expected output
   ✓ incremental build works
-Testing clean target...
+Testing clean target..
   ✓ clean removes build directory
   ✓ clean is idempotent
 ═══════════════════════════════════════════
@@ -1431,7 +1430,7 @@ CFLAGS := -Wall -Wextra
 V ?= 0
 DEBUG ?= 0
 Q := $(if $(filter 1,$(V)),,@)
-# ... hundreds more lines of code ...
+# ... hundreds more lines of code ..
 # This violates the requirement for small, clean, readable main Makefile
 ```
 
@@ -1559,7 +1558,7 @@ test:
 clean:
 	@rm -rf $(BUILD_DIR)
 
-# ... hundreds more lines ...
+# ... hundreds more lines ..
 ```
 
 ---
@@ -1723,7 +1722,7 @@ endef
 build: $(BUILD_DIR)/main
 	@echo "Build complete"
 
-# ... rest of module ...
+# ... rest of module ..
 ```
 
 ### F. Inline Comments
@@ -2765,3 +2764,6 @@ DEBUG ?= 0
 - Only present working Makefiles to the user
 
 **Remember**: Small, minimalistic, modular (in separate `make/` directory), reusable, reproducible, with built-in help, debugging support, incremental caching, progress indicators, and clean comments. Always verify parseability after modifications. Keep it simple, keep it POSIX, keep it working.
+
+
+**End of Modern GNU Makefile Guidelines**

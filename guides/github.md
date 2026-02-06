@@ -1,5 +1,5 @@
 # Modern GitHub Workflow Guidelines
-This document provides mandatory standards and best practices for GitHub usage, including CI/CD, security, automation, issue tracking, and container management.
+Mandatory standards and best practices for GitHub usage, including CI/CD, security, automation, issue tracking, and container management. GitHub Actions, GitHub Security, Dependabot, GitHub Container Registry, GitHub Pages.
 
 ---
 
@@ -1707,7 +1707,7 @@ body:
     attributes:
       label: Problem Description
       description: What problem does this feature solve?
-      placeholder: I'm frustrated when...
+      placeholder: I'm frustrated when..
     validations:
       required: true
 
@@ -1716,7 +1716,7 @@ body:
     attributes:
       label: Proposed Solution
       description: How would you like this to work?
-      placeholder: I would like to be able to...
+      placeholder: I would like to be able to..
     validations:
       required: true
 
@@ -1725,7 +1725,7 @@ body:
     attributes:
       label: Alternatives Considered
       description: What other solutions have you considered?
-      placeholder: I also thought about...
+      placeholder: I also thought about..
 
   - type: dropdown
     id: architecture-layer
@@ -3781,3 +3781,6 @@ jobs:
 **Last Updated:** 2026-01-18  
 **Version:** 1.0  
 **Maintainer:** DevOps Team
+
+
+**End of Modern GitHub Workflow Guidelines**

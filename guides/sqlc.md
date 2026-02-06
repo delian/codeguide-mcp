@@ -1,30 +1,35 @@
 # sqlc Development Guidelines
-
-sqlc generates type-safe code from SQL. Write SQL queries, run sqlc, and get fully type-safe interfaces to those queries. This eliminates runtime SQL errors, provides compile-time verification, and maintains SQL as the source of truth.
-
-## Agent Profile
-
-- **Agent Role**: The SQL-First Database Access Expert
-- **Objective**: Generate type-safe, performant, and secure database code using sqlc with strict SQL-first principles
-- **Core Tools**: sqlc, database-specific CLI tools (psql, mysql, sqlite3), migration tools (golang-migrate, Atlas, Flyway)
-- **Supported Languages**: Go (primary), Python, TypeScript, Kotlin
-- **Supported Databases**: PostgreSQL, MySQL, SQLite
-
-## Core Philosophies: SQL-FIRST
-
-- **S**QL is the Source of Truth - Write real SQL, not ORM abstractions
-- **Q**uery Verification - All queries validated against actual schema at generation time
-- **L**ightweight Generated Code - No runtime reflection, no query building overhead
-
-- **F**ail Fast - Catch SQL errors at build time, not runtime
-- **I**mmutable Queries - Generated code is read-only; modify SQL files only
-- **R**eproducible Builds - Same SQL + schema = same generated code
-- **S**ecurity by Design - Parameterized queries by default, no SQL injection vectors
-- **T**ype Safety - Database types map to language types with no manual casting
+Mandatory coding standards and development practices for sqlc development. sqlc generates type-safe code from SQL; write SQL queries, run sqlc, and get fully type-safe interfaces. Eliminates runtime SQL errors, compile-time verification, SQL as source of truth.
 
 ---
 
-## 1. Agent Code Generation Requirements (MANDATORY)
+**Agent Profile**: The SQL-First Database Access Expert
+**Role**: Senior Database Engineer & Type-Safe Query Specialist
+**Objective**: Generate type-safe, performant, and secure database code using sqlc with strict SQL-first principles.
+**Tools**: sqlc, PostgreSQL/MySQL/SQLite, Go (primary), Python, TypeScript, Kotlin, migration tools (golang-migrate, Atlas, Flyway)
+
+---
+
+## 1. Core Philosophies: SQL-FIRST
+
+The agent must adhere to the **SQL-FIRST** principles for every sqlc implementation:
+
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+
+- **S**QL is the Source of Truth: Write real SQL, not ORM abstractions.
+- **Q**uery Verification: All queries validated against actual schema at generation time.
+- **L**ightweight Generated Code: No runtime reflection, no query building overhead.
+- **F**ail Fast: Catch SQL errors at build time, not runtime.
+- **I**mmutable Queries: Generated code is read-only; modify SQL files only.
+- **R**eproducible Builds: Same SQL + schema = same generated code.
+- **S**ecurity by Design: Parameterized queries by default, no SQL injection vectors.
+- **T**ype Safety: Database types map to language types with no manual casting.
+**Verified Code**: Agent-generated code MUST pass `sqlc compile`/`sqlc generate`, compile in the target language, and pass query tests before delivery.
+
+---
+
+## 2. Agent Code Generation Requirements (MANDATORY)
 
 ### A. Pre-Generation Verification Protocol
 
@@ -63,7 +68,7 @@ sqlc vet
 sqlc generate
 
 # Verify generated code compiles (Go example)
-go build ./...
+go build ./..
 
 # Run query tests
 go test ./db/... -v
@@ -77,7 +82,7 @@ npx tsc --noEmit
 
 ---
 
-## 2. Project Structure (MANDATORY)
+## 3. Project Structure (MANDATORY)
 
 ### A. Recommended Directory Layout
 
@@ -120,7 +125,7 @@ project/
 
 ---
 
-## 3. Configuration (MANDATORY)
+## 4. Configuration (MANDATORY)
 
 ### A. sqlc.yaml Structure
 
@@ -287,7 +292,7 @@ sql:
 
 ---
 
-## 4. Query Writing Standards (MANDATORY)
+## 5. Query Writing Standards (MANDATORY)
 
 ### A. Query Annotation Format
 
@@ -486,7 +491,7 @@ WHERE id = $1;
 
 ---
 
-## 5. Schema Design Guidelines (MANDATORY)
+## 6. Schema Design Guidelines (MANDATORY)
 
 ### A. PostgreSQL Schema
 
@@ -669,7 +674,7 @@ END;
 
 ---
 
-## 6. Security Best Practices (MANDATORY)
+## 7. Security Best Practices (MANDATORY)
 
 ### A. SQL Injection Prevention
 
@@ -791,7 +796,7 @@ sql:
 
 ---
 
-## 7. CI/CD Pipeline Integration (MANDATORY)
+## 8. CI/CD Pipeline Integration (MANDATORY)
 
 ### A. GitHub Actions Workflow
 
@@ -869,7 +874,7 @@ jobs:
       - name: Run tests
         env:
           DATABASE_URL: postgres://test:test@localhost:5432/test?sslmode=disable
-        run: go test -v ./internal/db/...
+        run: go test -v ./internal/db/..
 ```
 
 ### B. GitLab CI Pipeline
@@ -928,7 +933,7 @@ sqlc-test:
     - curl -L https://github.com/golang-migrate/migrate/releases/download/v4.17.0/migrate.linux-amd64.tar.gz | tar xz
     - ./migrate -path db/migrations -database "$DATABASE_URL" up
   script:
-    - go test -v -race ./internal/db/...
+    - go test -v -race ./internal/db/..
   only:
     changes:
       - db/**/*
@@ -1016,7 +1021,7 @@ validate: sqlc-compile sqlc-vet sqlc-diff
 
 ---
 
-## 8. Testing Strategies (MANDATORY)
+## 9. Testing Strategies (MANDATORY)
 
 ### A. Integration Test Setup (Go)
 
@@ -1283,7 +1288,7 @@ func TestTransferBalance(t *testing.T) {
 
 ---
 
-## 9. Language-Specific Patterns
+## 10. Language-Specific Patterns
 
 ### A. Go (Primary Support)
 
@@ -1521,7 +1526,7 @@ class UserRepository(private val dataSource: DataSource) {
 
 ---
 
-## 10. Error Handling Patterns (MANDATORY)
+## 11. Error Handling Patterns (MANDATORY)
 
 ### A. Database Error Classification
 
@@ -1630,7 +1635,7 @@ func WithRetry[T any](ctx context.Context, maxRetries int, fn func() (T, error))
 
 ---
 
-## 11. Performance Optimization
+## 12. Performance Optimization
 
 ### A. Prepared Statements
 
@@ -1735,7 +1740,7 @@ LIMIT $3;
 
 ---
 
-## 12. Migrations Best Practices
+## 13. Migrations Best Practices
 
 ### A. Migration Naming Convention
 
@@ -1809,7 +1814,7 @@ END $$;
 
 ---
 
-## 13. Deployment Checklist
+## 14. Deployment Checklist
 
 ### Pre-Deployment
 
@@ -1838,7 +1843,7 @@ END $$;
 
 ---
 
-## 14. Quick Reference
+## 15. Quick Reference
 
 ### Common Commands
 
@@ -1922,7 +1927,7 @@ overrides:
 
 ---
 
-## 15. Related Guidelines
+## 16. Related Guidelines
 
 - [SQL Guidelines](sql.md) - General SQL best practices
 - [PostgreSQL Guidelines](postgresql.md) - PostgreSQL-specific patterns
@@ -1932,3 +1937,7 @@ overrides:
 - [Testing Guidelines](testing.md) - Testing strategies
 - [CI/CD Guidelines](ci-cd.md) - Pipeline configuration
 - [Secure Coding Guidelines](secure-coding.md) - Security practices
+
+---
+
+**End of sqlc Development Guidelines**

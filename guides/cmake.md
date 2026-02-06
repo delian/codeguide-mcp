@@ -1,6 +1,5 @@
 # Modern CMake Development Guidelines
-
-This document provides mandatory coding standards and development practices for creating modern, maintainable CMake build systems with emphasis on minimalistic, clean, modular, and portable CMake files.
+Mandatory coding standards and development practices for creating modern, maintainable CMake build systems with emphasis on minimalistic, clean, modular, and portable CMake files. CMake 3.15+, Ninja (preferred) / Make (fallback), Conan 2.x, CMake FetchContent, Doxygen.
 
 ---
 
@@ -51,14 +50,14 @@ The agent must adhere to the **CLEAN-CMAKE** standard for every CMake implementa
    ```bash
    # Configure with CMake
    mkdir -p build && cd build
-   cmake ..
+   cmake .
    
    # Check for configuration errors
    echo $?  # Must be 0
    
    # Verify with different generators
-   cmake -G Ninja ..
-   cmake -G "Unix Makefiles" ..
+   cmake -G Ninja .
+   cmake -G "Unix Makefiles" .
    ```
    - **MUST** configure without errors (exit code 0)
    - No CMake warnings (or address all warnings)
@@ -71,7 +70,7 @@ The agent must adhere to the **CLEAN-CMAKE** standard for every CMake implementa
    cmake --build . --config Release
    
    # Build with Make (fallback)
-   cmake -G "Unix Makefiles" ..
+   cmake -G "Unix Makefiles" .
    cmake --build .
    
    # Check for build errors
@@ -108,7 +107,7 @@ The agent must adhere to the **CLEAN-CMAKE** standard for every CMake implementa
    # After ANY modification, ALWAYS run:
    # 1. Clean and reconfigure
    rm -rf build && mkdir build && cd build
-   cmake ..
+   cmake .
    # Exit code MUST be 0
    
    # 2. Build
@@ -699,7 +698,7 @@ endif()
 cmake_minimum_required(VERSION 3.15)
 project(MyProject)
 
-# 500+ lines of configuration, dependencies, targets...
+# 500+ lines of configuration, dependencies, targets..
 # Should be split into modules
 ```
 
@@ -1089,7 +1088,7 @@ if(CMAKE_VERBOSE_MAKEFILE)
 endif()
 
 # Usage in build
-# cmake -DCMAKE_VERBOSE_MAKEFILE=ON ..
+# cmake -DCMAKE_VERBOSE_MAKEFILE=ON .
 # OR
 # cmake --build . --verbose
 ```
@@ -1119,7 +1118,7 @@ debug_message("CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}")
 debug_message("CMAKE_GENERATOR: ${CMAKE_GENERATOR}")
 
 # Usage in build
-# cmake -DCMAKE_DEBUG_MODE=ON ..
+# cmake -DCMAKE_DEBUG_MODE=ON .
 ```
 
 ---
@@ -1399,7 +1398,7 @@ add_library(core src/types.cpp)
 # Root CMakeLists.txt - Complete automation
 
 # Configure step (automatic dependency resolution)
-# User runs: cmake ..
+# User runs: cmake .
 # CMake handles: dependency detection, configuration, setup
 
 # Build step (automatic)
@@ -1944,7 +1943,7 @@ FetchContent_Declare(json
 # From URL archive
 FetchContent_Declare(catch2
     URL https://github.com/catchorg/Catch2/archive/v3.4.0.tar.gz
-    URL_HASH SHA256=...
+    URL_HASH SHA256=..
 )
 
 # Make available (downloads and configures)
@@ -2159,3 +2158,6 @@ gtest_discover_tests(test_core)
 - Only present working CMake files to the user
 
 **Remember**: Minimalistic, modular, clean, portable CMake files with hexagonal architecture, everything driven from CMake, support for Ninja and Make, verbose/debug modes, and proper dependency management. Keep it simple, keep it clean, keep it working.
+
+
+**End of Modern CMake Development Guidelines**

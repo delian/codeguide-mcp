@@ -28,6 +28,8 @@ async def verify():
         print(f"\nGuides list ({len(guides.split(chr(10)))} items):")
         print(guides[:500] + "..." if len(guides) > 500 else guides)
         
+        print(guides)
+        
         if not guides or "not found" in guides.lower():
             print("\n⚠️  WARNING: No guides found or error message returned")
         else:

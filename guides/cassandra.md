@@ -1,6 +1,5 @@
 # Apache Cassandra Development Guidelines
-
-This document provides mandatory standards for Apache Cassandra database design, data modeling, operations, and best practices for production deployments.
+Mandatory standards for Apache Cassandra database design, data modeling, operations, and best practices for production deployments. Apache Cassandra 4.1+/5.x, cqlsh, nodetool, K8ssandra, Reaper, DataStax DevCenter.
 
 ---
 

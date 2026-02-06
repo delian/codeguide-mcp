@@ -1,6 +1,5 @@
 # Android Development Guidelines
-
-This document provides mandatory standards for building native Android applications using Kotlin and Jetpack.
+Mandatory standards for building native Android applications using Kotlin and Jetpack. Android Studio, Kotlin 1.9+, Jetpack Compose, Coroutines, Hilt, Room.
 
 ---
 
@@ -12,6 +11,9 @@ This document provides mandatory standards for building native Android applicati
 ---
 
 ## 1. Core Philosophies: ANDROID-FIRST
+
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
 
 - **A**rchitecture: Clean Architecture with MVVM
 - **N**ative: Leverage platform capabilities
@@ -927,3 +929,6 @@ Flow<List<T>>
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** Android Team
+
+
+**End of Android Development Guidelines**

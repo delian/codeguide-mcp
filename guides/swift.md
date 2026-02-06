@@ -1,6 +1,5 @@
 # Swift Development Guidelines
-
-This document provides mandatory standards for Swift development, following Apple's guidelines and community best practices.
+Mandatory standards for Swift development, following Apple's guidelines and community best practices. Xcode, Swift 5.9+, SwiftLint, SwiftFormat, Instruments.
 
 ---
 
@@ -12,6 +11,9 @@ This document provides mandatory standards for Swift development, following Appl
 ---
 
 ## 1. Core Philosophies: SWIFT-FIRST
+
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
 
 - **S**afe: Leverage optionals, guard statements, and type safety
 - **W**ell-named: Clear, expressive API names that read like prose
@@ -244,7 +246,7 @@ class NetworkManager {
 class DataFetcher: NSObject, URLSessionDelegate {
     weak var delegate: DataFetcherDelegate?
 
-    // ...
+    // ..
 }
 ```
 
@@ -448,7 +450,7 @@ func loadUserProfile() async {
 ```swift
 // Use Result for async callbacks
 func fetchData(completion: @escaping (Result<Data, NetworkError>) -> Void) {
-    // ...
+    // ..
     completion(.success(data))
     // or
     completion(.failure(.noConnection))
@@ -949,3 +951,6 @@ private   // Visible in enclosing scope
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** iOS Team
+
+
+**End of Swift Development Guidelines**

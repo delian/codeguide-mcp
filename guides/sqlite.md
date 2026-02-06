@@ -1,35 +1,69 @@
-# SQLite Best Practices Guide
-
-**Version:** 1.0
-**Last Updated:** February 2026
-**Target SQLite Version:** 3.45+ (2024-2026 releases)
-
-## Table of Contents
-
-1. [Architecture and Fundamentals](#1-architecture-and-fundamentals)
-2. [WAL Mode Configuration](#2-wal-mode-configuration)
-3. [Performance Optimization](#3-performance-optimization)
-4. [Transaction Management](#4-transaction-management)
-5. [Concurrency and Locking](#5-concurrency-and-locking)
-6. [Indexing Strategies](#6-indexing-strategies)
-7. [Full-Text Search (FTS5)](#7-full-text-search-fts5)
-8. [JSON Support](#8-json-support)
-9. [Memory Management](#9-memory-management)
-10. [Security with SQLCipher](#10-security-with-sqlcipher)
-11. [Backup Strategies](#11-backup-strategies)
-12. [Migration Strategies](#12-migration-strategies)
-13. [Schema Design](#13-schema-design)
-14. [Query Optimization](#14-query-optimization)
-15. [Connection Management](#15-connection-management)
-16. [Container Deployment](#16-container-deployment)
-17. [Use Cases and Limitations](#17-use-cases-and-limitations)
-18. [Monitoring and Troubleshooting](#18-monitoring-and-troubleshooting)
-19. [Testing Strategies](#19-testing-strategies)
-20. [Version-Specific Features](#20-version-specific-features)
+# SQLite Development Guidelines
+Mandatory coding standards and development practices for SQLite development. SQLite 3.45+, WAL mode, FTS5, SQLCipher, backup/restore.
 
 ---
 
-## 1. Architecture and Fundamentals
+**Agent Profile**: The SQLite Expert
+**Role**: Senior Embedded Database Engineer & Serverless DB Specialist
+**Objective**: Generate production-ready, reliable and portable embedded database solutions.
+**Tools**: SQLite 3.45+, WAL mode, FTS5, SQLCipher, backup/restore
+
+---
+
+**Version:** 1.0 | **Last Updated:** February 2026 | **Target SQLite Version:** 3.45+ (2024-2026 releases)
+
+## Table of Contents
+
+1. [Core Philosophies: EMBEDDED-FIRST](#1-core-philosophies-embedded-first)
+2. [Architecture and Fundamentals](#2-architecture-and-fundamentals)
+3. [WAL Mode Configuration](#3-wal-mode-configuration)
+4. [Performance Optimization](#4-performance-optimization)
+5. [Transaction Management](#5-transaction-management)
+6. [Concurrency and Locking](#6-concurrency-and-locking)
+7. [Indexing Strategies](#7-indexing-strategies)
+8. [Full-Text Search (FTS5)](#8-full-text-search-fts5)
+9. [JSON Support](#9-json-support)
+10. [Memory Management](#10-memory-management)
+11. [Security with SQLCipher](#11-security-with-sqlcipher)
+12. [Backup Strategies](#12-backup-strategies)
+13. [Migration Strategies](#13-migration-strategies)
+14. [Schema Design](#14-schema-design)
+15. [Query Optimization](#15-query-optimization)
+16. [Connection Management](#16-connection-management)
+17. [Container Deployment](#17-container-deployment)
+18. [Use Cases and Limitations](#18-use-cases-and-limitations)
+19. [Monitoring and Troubleshooting](#19-monitoring-and-troubleshooting)
+20. [Testing Strategies](#20-testing-strategies)
+21. [Version-Specific Features](#21-version-specific-features)
+
+---
+
+## 1. Core Philosophies: EMBEDDED-FIRST
+
+The agent must adhere to the **EMBEDDED-FIRST** principles for every SQLite implementation:
+
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+
+- **E**mbedded and serverless: Design for single-process, file-based deployment; no server daemon.
+- **M**emory and WAL: Use WAL mode; size caches appropriately; avoid unbounded growth.
+- **B**ackup and recovery: Use checkpoint and backup APIs; test restore procedures.
+- **E**scape NFS: Avoid storing databases on network file systems; use local or replicated storage.
+- **D**eterministic SQL: Prefer deterministic functions and explicit ordering for reproducibility.
+- **D**urable writes: Use PRAGMA synchronous and fsync where required; respect power-loss safety.
+- **E**rror handling: Check return codes and use prepared statements; handle busy/locked gracefully.
+- **D**ata types: Use SQLite storage classes correctly; avoid type affinity pitfalls.
+- **F**oreign keys: Enable and use foreign keys for integrity; test cascade behavior.
+- **I**ndexes: Create indexes for query patterns; use EXPLAIN QUERY PLAN.
+- **R**ead/write balance: Optimize for single-writer; batch writes in transactions.
+- **S**ecurity: Use SQLCipher for encryption at rest when required; avoid SQL injection.
+- **T**esting: Test with real file I/O and WAL; verify backup/restore and migrations.
+
+**Verified Code**: Agent-generated code MUST use parameterized statements, run tests against a real SQLite file, and pass before delivery.
+
+---
+
+## 2. Architecture and Fundamentals
 
 ### Embedded Serverless Architecture
 
@@ -79,7 +113,7 @@ SQLite is a **serverless**, **self-contained**, **zero-configuration** embedded 
 
 ---
 
-## 2. WAL Mode Configuration
+## 3. WAL Mode Configuration
 
 ### Write-Ahead Logging (WAL)
 
@@ -147,7 +181,7 @@ PRAGMA busy_timeout = 5000;  -- 5 seconds
 
 ---
 
-## 3. Performance Optimization
+## 4. Performance Optimization
 
 ### Critical PRAGMA Statements
 
@@ -236,7 +270,7 @@ CREATE INDEX idx_covering ON table(col1, col2, col3);
 
 ---
 
-## 4. Transaction Management
+## 5. Transaction Management
 
 ### ACID Compliance
 
@@ -321,7 +355,7 @@ COMMIT;
 
 ---
 
-## 5. Concurrency and Locking
+## 6. Concurrency and Locking
 
 ### Locking Mechanism
 
@@ -403,7 +437,7 @@ PRAGMA journal_mode = WAL;
 
 ---
 
-## 6. Indexing Strategies
+## 7. Indexing Strategies
 
 ### Index Types
 
@@ -504,7 +538,7 @@ ORDER BY size_bytes DESC;
 
 ---
 
-## 7. Full-Text Search (FTS5)
+## 8. Full-Text Search (FTS5)
 
 ### FTS5 Overview
 
@@ -621,7 +655,7 @@ INSERT INTO documents_fts(documents_fts) VALUES('integrity-check');
 
 ---
 
-## 8. JSON Support
+## 9. JSON Support
 
 ### JSON Functions (SQLite 3.38+)
 
@@ -716,7 +750,7 @@ SELECT * FROM api_logs WHERE user_id = 123;
 
 ---
 
-## 9. Memory Management
+## 10. Memory Management
 
 ### Cache Configuration
 
@@ -809,7 +843,7 @@ PRAGMA locking_mode = EXCLUSIVE; -- Reduce lock overhead
 
 ---
 
-## 10. Security with SQLCipher
+## 11. Security with SQLCipher
 
 ### SQLCipher Overview
 
@@ -927,7 +961,7 @@ cursor.execute("SELECT * FROM users WHERE name = ?", (user_input,))
 
 ---
 
-## 11. Backup Strategies
+## 12. Backup Strategies
 
 ### Online Backup API
 
@@ -1059,7 +1093,7 @@ def logged_execute(conn, sql, params=()):
 
 ---
 
-## 12. Migration Strategies
+## 13. Migration Strategies
 
 ### Schema Versioning
 
@@ -1243,7 +1277,7 @@ def import_csv(db_path, csv_path, table_name):
 
 ---
 
-## 13. Schema Design
+## 14. Schema Design
 
 ### Data Type Best Practices
 
@@ -1446,7 +1480,7 @@ CREATE TABLE enrollments (
 
 ---
 
-## 14. Query Optimization
+## 15. Query Optimization
 
 ### Query Planner
 
@@ -1583,7 +1617,7 @@ for user_id in user_ids:
 
 ---
 
-## 15. Connection Management
+## 16. Connection Management
 
 ### Connection Pooling
 
@@ -1726,7 +1760,7 @@ conn.execute("PRAGMA query_only=ON")
 
 ---
 
-## 16. Container Deployment
+## 17. Container Deployment
 
 ### Docker Deployment
 
@@ -1905,7 +1939,7 @@ spec:
 
 ---
 
-## 17. Use Cases and Limitations
+## 18. Use Cases and Limitations
 
 ### Ideal Use Cases
 
@@ -2014,7 +2048,7 @@ spec:
 
 ---
 
-## 18. Monitoring and Troubleshooting
+## 19. Monitoring and Troubleshooting
 
 ### Database Statistics
 
@@ -2231,7 +2265,7 @@ finally:
 
 ---
 
-## 19. Testing Strategies
+## 20. Testing Strategies
 
 ### Unit Testing with SQLite
 
@@ -2394,7 +2428,7 @@ def test_user_service():
 
 ---
 
-## 20. Version-Specific Features
+## 21. Version-Specific Features
 
 ### SQLite 3.45 (2024)
 
@@ -2587,3 +2621,7 @@ except sqlite3.OperationalError:
 
 **Last Updated:** February 2026
 **Next Review:** May 2026
+
+---
+
+**End of SQLite Development Guidelines**

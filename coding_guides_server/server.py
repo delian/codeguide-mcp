@@ -163,6 +163,9 @@ def extract_brief(content: str, max_length: int = Settings.brief_max_length) -> 
         line = line.strip()
         if not line:
             continue
+        # Stop at YAML frontmatter delimiter
+        if line == '---':
+            break
         # Skip markdown headers and code blocks
         if line.startswith('#') or line.startswith('```'):
             continue

@@ -1,6 +1,5 @@
 # Pre-commit Framework Guidelines
-
-This document provides mandatory standards for using the pre-commit framework to enforce code quality, security, and consistency across all programming languages.
+Mandatory standards for using the pre-commit framework to enforce code quality, security, and consistency across all programming languages.
 
 ---
 
@@ -308,7 +307,7 @@ repos:
       # Go compilation
       - id: go-build
         name: "Build: Go compilation"
-        entry: go build ./...
+        entry: go build ./..
         language: system
         types: [go]
         pass_filenames: false
@@ -519,7 +518,7 @@ repos:
       # Go tests
       - id: go-test
         name: "Test: Go unit tests"
-        entry: go test -short ./...
+        entry: go test -short ./..
         language: system
         types: [go]
         pass_filenames: false
@@ -791,7 +790,7 @@ repos:
     hooks:
       - id: go-sec
         name: Go security scan
-        entry: gosec ./...
+        entry: gosec ./..
         language: system
         pass_filenames: false
         types: [go]
@@ -801,7 +800,7 @@ repos:
     hooks:
       - id: go-build
         name: Go build
-        entry: go build ./...
+        entry: go build ./..
         language: system
         pass_filenames: false
         types: [go]
@@ -832,7 +831,7 @@ repos:
     hooks:
       - id: go-test
         name: Go tests
-        entry: go test -short ./...
+        entry: go test -short ./..
         language: system
         pass_filenames: false
         types: [go]
@@ -1503,3 +1502,6 @@ Linting/formatting:
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** Development Team
+
+
+**End of Pre-commit Framework Guidelines**

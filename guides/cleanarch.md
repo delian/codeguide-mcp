@@ -1,6 +1,5 @@
 # Clean Architecture Guidelines
-
-This document provides mandatory architectural standards and development practices for Clean Architecture as defined by Robert C. Martin (Uncle Bob). Emphasis on the Dependency Rule, use case-driven design, and framework independence. This guide is language-agnostic and focuses on architectural principles.
+Mandatory architectural standards and development practices for Clean Architecture as defined by Robert C. Martin (Uncle Bob). Emphasis on the Dependency Rule, use case-driven design, and framework independence. This guide is language-agnostic and focuses on architectural principles. Any programming language, SOLID principles, DDD concepts, TDD practices.
 
 ---
 
@@ -1742,7 +1741,7 @@ class Order {
 // Use case importing framework
 class PlaceOrderUseCase {
     execute(req: HttpRequest) {  // ❌ HTTP type in use case
-        // ...
+        // ..
     }
 }
 
@@ -2282,3 +2281,6 @@ CLEAN ARCHITECTURE CODE REVIEW CHECKLIST:
 - **[microservices.md](microservices.md)**: Microservices Architecture - applying Clean Architecture to distributed systems
 - **[tdd.md](tdd.md)**: Test-Driven Development - essential practice for implementing Clean Architecture
 - **[rest.md](rest.md)**: REST API Design - designing APIs that respect architectural boundaries
+
+
+**End of Clean Architecture Guidelines**
