@@ -1,5 +1,5 @@
 [default]
-mcp_name = "coding-guides"
+mcp_name = "codeguide-mcp"
 guides_dir = "guides"
 instructions = "MCP-instructions.md"
 log_level = "INFO"

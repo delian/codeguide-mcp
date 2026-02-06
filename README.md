@@ -19,7 +19,7 @@ This MCP server exposes coding guidelines and style guides as resources that can
 ## Available Resources
 
 - `guides://list` - Lists all available coding guides
-- `guides://{guide_name}` - Retrieves the content of a specific guide (e.g., `guides://python_style.md`)
+- `guides://{guide_name}` - Retrieves the content of a specific guide (e.g., `guides://python.md`)
 
 ## Installation
 
@@ -56,7 +56,7 @@ To load guides from a GitHub repository:
 github_repo = "owner/repository"  # e.g., "delian/codeguide-mcp"
 github_path = "guides"            # Path to guides directory in repo
 github_branch = "main"            # Branch to fetch from
-cache_dir = ".guides_cache"       # Local cache directory
+  cache_dir = ".guides-cache"       # Local cache directory
 log_level = "INFO"
 ```
 
@@ -74,7 +74,7 @@ log_level = "INFO"
 - `GUIDES_GITHUB_REPO` - GitHub repository (format: `owner/repo`)
 - `GUIDES_GITHUB_PATH` - Path to guides directory in repository (default: `guides`)
 - `GUIDES_GITHUB_BRANCH` - Branch to fetch from (default: `main`)
-- `GUIDES_CACHE_DIR` - Local cache directory (default: `.guides_cache`)
+- `GUIDES_CACHE_DIR` - Local cache directory (default: `.guides-cache`)
 - `GUIDES_DIR` - Local directory containing guide files (default: `guides`)
 - `GUIDES_LOG_LEVEL` - Logging level (default: `INFO`)
 
@@ -96,7 +96,7 @@ Add Markdown files to the `guides/` directory. Each file will be automatically a
 
 Example:
 ```bash
-echo "# Python Style Guide\n\nUse PEP 8..." > guides/python_style.md
+echo "# Python Style Guide\n\nUse PEP 8..." > guides/python.md
 ```
 
 ## Usage with MCP Clients
@@ -110,7 +110,7 @@ Add to your `mcp.json`:
   "mcpServers": {
     "coding-guides": {
       "command": "python",
-      "args": ["-m", "main.py"]
+      "args": ["-m", "main"]
     }
   }
 }

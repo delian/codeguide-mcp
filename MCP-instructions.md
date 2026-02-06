@@ -13,7 +13,7 @@ It provides a simple API for listing and retrieving the content of coding guidel
    guide_name.md - brief description extracted from the guide
    ```
    Each line contains:
-   - The guide filename (e.g., `python_style.md`)
+   - The guide filename (e.g., `python.md`)
    - A dash separator
    - A brief description (up to 150 characters) explaining what the guide provides
 
@@ -28,5 +28,5 @@ It provides a simple API for listing and retrieving the content of coding guidel
   - **Always use this first** to discover available guides
   
 - `guides://{guide_name}`: Get the full content of a specific coding guide.
-  - **Example**: `guides://python_style.md`
+  - **Example**: `guides://python.md`
   - **Use after** identifying relevant guides from the list
