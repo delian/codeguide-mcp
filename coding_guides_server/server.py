@@ -191,6 +191,12 @@ def get_guides_list() -> str:
     # Try GitHub first if network is available
     if check_network_available():
         logger.info("Network available, fetching guides from GitHub")
+        
+        brief_path = f"{GITHUB_REPO}/brief.md"
+        brief_content = fetch_github_file_content(brief_path)
+        if brief_content:
+            return brief_content
+        
         github_files = fetch_github_directory_listing()
         
         if github_files:
