@@ -192,7 +192,7 @@ def get_guides_list() -> str:
     if check_network_available():
         logger.info("Network available, fetching guides from GitHub")
         
-        brief_path = f"{GITHUB_REPO}/brief.md"
+        brief_path = f"brief.md"
         brief_content = fetch_github_file_content(brief_path)
         if brief_content:
             return brief_content
