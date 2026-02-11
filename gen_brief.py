@@ -44,9 +44,9 @@ def main() -> None:
         try:
             content = guide_file.read_text(encoding="utf-8")
             brief = extract_brief(content)
-            entries.append(f"{guide_file.name} - {brief}")
+            entries.append(f"guides://{guide_file.name} - {brief}")
         except Exception as e:
-            entries.append(f"{guide_file.name} - Error reading description ({e})")
+            entries.append(f"guides://{guide_file.name} - Error reading description ({e})")
 
     BRIEF_OUTPUT.write_text("\n".join(entries) + "\n", encoding="utf-8")
     print(f"Wrote {len(entries)} entries to {BRIEF_OUTPUT}")

@@ -182,6 +182,24 @@ def extract_brief(content: str, max_length: int = Settings.brief_max_length) -> 
     return brief if brief else "No description available."
 
 
+def _normalize_list_to_guide_uris(list_text: str) -> str:
+    """Ensure each list line starts with guides:// so clients get full resource URIs."""
+    lines = []
+    for line in list_text.strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("guides://"):
+            lines.append(line)
+        elif " - " in line:
+            name, _, rest = line.partition(" - ")
+            name = name.strip()
+            lines.append(f"guides://{name} - {rest.strip()}")
+        else:
+            lines.append(line)
+    return "\n".join(lines) if lines else list_text
+
+
 @cached(cache=TTLCache(maxsize=1, ttl=600))
 def get_guides_list() -> str:
     """
@@ -195,7 +213,7 @@ def get_guides_list() -> str:
         brief_path = f"brief.md"
         brief_content = fetch_github_file_content(brief_path)
         if brief_content:
-            return brief_content
+            return _normalize_list_to_guide_uris(brief_content)
         
         github_files = fetch_github_directory_listing()
         
@@ -217,10 +235,10 @@ def get_guides_list() -> str:
                         
                         if content:
                             brief = extract_brief(content)
-                            guides.append(f"{guide_name} - {brief}")
+                            guides.append(f"guides://{guide_name} - {brief}")
                     except Exception as e:
                         logger.warning(f"Error processing guide {guide_name}: {e}")
-                        guides.append(f"{guide_name} - Error reading description")
+                        guides.append(f"guides://{guide_name} - Error reading description")
             
             if guides:
                 return "\n".join(sorted(guides))
@@ -235,7 +253,7 @@ def get_guides_list() -> str:
             try:
                 content = cached_read_text(guide_file)
                 brief = extract_brief(content)
-                guides[guide_file.name] = f"{guide_file.name} - {brief}"
+                guides[guide_file.name] = f"guides://{guide_file.name} - {brief}"
             except Exception as e:
                 logger.warning(f"Error reading cached guide {guide_file.name}: {e}")
     
@@ -247,7 +265,7 @@ def get_guides_list() -> str:
             try:
                 content = cached_read_text(guide_file)
                 brief = extract_brief(content)
-                guides[guide_file.name] = f"{guide_file.name} - {brief}"
+                guides[guide_file.name] = f"guides://{guide_file.name} - {brief}"
             except Exception as e:
                 logger.warning(f"Error reading guide {guide_file.name}: {e}")
     
@@ -260,8 +278,8 @@ def get_guides_list() -> str:
     return "\n".join(guides)
 
 
-@mcp.resource("list_guides")
-async def list_guides() -> str:
+@mcp.resource("guides://list")
+def list_guides() -> str:
     """
     List all available coding guides.
     Fetches from GitHub if network is available, otherwise uses local cache.
@@ -270,6 +288,36 @@ async def list_guides() -> str:
         A string containing a list of available guides.
     """
     return get_guides_list()
+
+
+def _guide_name_from_uri(name_or_uri: str) -> str:
+    """Return guide filename, stripping guides:// prefix if present."""
+    s = (name_or_uri or "").strip()
+    if s.startswith("guides://"):
+        s = s[9:]
+    return s
+
+
+@mcp.resource(
+    "guides://{guide_name}",
+    name="guide",
+    description="Get the content of a specific coding guide by name (e.g. python.md).",
+)
+def get_guide_resource(guide_name: str) -> str:
+    """
+    Resource handler for guides://{guide_name}.
+    Returns the full content of the requested guide.
+    Accepts the value from the URI (e.g. python.md); also accepts guides://python.md.
+    """
+    guide_name = _guide_name_from_uri(guide_name)
+    if not guide_name or "/" in guide_name or "\\" in guide_name or ".." in guide_name:
+        raise ValueError("Invalid guide name.")
+
+    content = fetch_guide_content(guide_name)
+    if content:
+        return content
+
+    raise ValueError(f"Guide '{guide_name}' not found.")
 
 
 @lru_cache(maxsize=32)
@@ -313,18 +361,19 @@ def fetch_guide_content(guide_name: str) -> Optional[str]:
     return None
 
 
-@mcp.resource("get_guide {guide_name: str}")
-async def get_guide(guide_name: str) -> str:
+@mcp.tool(name="get_guide", description="Get the content of a specific coding guide.")
+def get_guide(guide_name: str) -> str:
     """
     Get the content of a specific coding guide.
     Fetches from GitHub if network is available, otherwise uses local cache.
 
     Args:
-        guide_name: The name of the guide file (e.g., 'python_style.md').
+        guide_name: The name of the guide file (e.g., 'python.md') or URI (e.g., 'guides://python.md').
 
     Returns:
         The content of the guide.
     """
+    guide_name = _guide_name_from_uri(guide_name)
     if not guide_name or "/" in guide_name or "\\" in guide_name or ".." in guide_name:
         return "Invalid guide name."
 
@@ -333,7 +382,8 @@ async def get_guide(guide_name: str) -> str:
         return content
     
     # Return MCP error if guide not found
-    return f"ERROR: Guide '{guide_name}' not found! Retry later!"
+    raise ValueError(f"Guide '{guide_name}' not found.")
+    # return f"ERROR: Guide '{guide_name}' not found! Retry later!"
 
 
 def main() -> None:
