@@ -260,7 +260,7 @@ def get_guides_list() -> str:
     return "\n".join(guides)
 
 
-@mcp.resource("guides://list")
+@mcp.resource("list_guides")
 async def list_guides() -> str:
     """
     List all available coding guides.
@@ -313,7 +313,7 @@ def fetch_guide_content(guide_name: str) -> Optional[str]:
     return None
 
 
-@mcp.resource("guides://{guide_name}")
+@mcp.resource("get_guide {guide_name: str}")
 async def get_guide(guide_name: str) -> str:
     """
     Get the content of a specific coding guide.

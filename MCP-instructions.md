@@ -17,11 +17,11 @@ Typical triggers:
 
 **IMPORTANT: Always start by listing available guides before selecting any specific guide.**
 
-1. **List Guides**: Always begin by requesting `guides://list` to discover all available coding guides and their descriptions.
+1. **List Guides**: Always begin by requesting `list_guides` to discover all available coding guides and their descriptions.
 
 2. **Select Guides Based on Software Stack**: After reviewing the list, select **all** guides that are relevant to the current project's languages, frameworks, tools, and infrastructure. Guides are composable — for example, a Python REST API with Docker would need `python.md`, `rest.md`, and `dockerfile.md`.
 
-3. **Fetch Guide Content**: For each selected guide, request its full content using `guides://{guide_name}`.
+3. **Fetch Guide Content**: For each selected guide, request its full content using `get_guide {guide_name}`.
 
 4. **Apply Guidelines**: Follow the fetched guidelines as mandatory standards when writing, reviewing, or modifying code. If multiple guides apply, follow all of them. Treat the guides the same way as you would treat AGENTS.md file or Skills
 
