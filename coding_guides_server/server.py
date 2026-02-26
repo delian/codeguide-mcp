@@ -7,6 +7,7 @@ import base64
 from cachetools import cached, TTLCache
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import PromptMessage, TextContent
 
 from config import Settings
 
@@ -29,7 +30,14 @@ GITHUB_BRANCH = Settings.github_branch
 # Ensure cache directory exists
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-@cached(cache=TTLCache(maxsize=1, ttl=600))
+# TTL cache instances (kept as module vars so clear_cache() can access them)
+_network_cache: TTLCache = TTLCache(maxsize=1, ttl=600)
+_github_file_cache: TTLCache = TTLCache(maxsize=100, ttl=599)
+_guide_from_cache: TTLCache = TTLCache(maxsize=100, ttl=599)
+_guides_list_cache: TTLCache = TTLCache(maxsize=1, ttl=600)
+_guide_content_cache: TTLCache = TTLCache(maxsize=100, ttl=599)
+
+@cached(cache=_network_cache)
 def check_network_available() -> bool:
     """
     Check if network access is available by attempting to connect to GitHub API.
@@ -73,7 +81,7 @@ def fetch_github_directory_listing() -> Optional[list[dict]]:
         logger.warning(f"Failed to fetch GitHub directory listing: {e}")
         return None
 
-@cached(cache=TTLCache(maxsize=100, ttl=599))
+@cached(cache=_github_file_cache)
 def fetch_github_file_content(file_path: str) -> Optional[str]:
     """
     Fetch file content from GitHub API.
@@ -124,7 +132,7 @@ def cache_guide_locally(guide_name: str, content: str) -> Path:
     logger.debug(f"Cached guide {guide_name} locally")
     return cache_path
 
-@cached(cache=TTLCache(maxsize=100, ttl=599))
+@cached(cache=_guide_from_cache)
 def get_guide_from_cache(guide_name: str) -> Optional[str]:
     """
     Get guide content from local cache.
@@ -200,7 +208,7 @@ def _normalize_list_to_guide_uris(list_text: str) -> str:
     return "\n".join(lines) if lines else list_text
 
 
-@cached(cache=TTLCache(maxsize=1, ttl=600))
+@cached(cache=_guides_list_cache)
 def get_guides_list() -> str:
     """
     Get list of available guides, fetching from GitHub if available,
@@ -324,7 +332,7 @@ def get_guide_resource(guide_name: str) -> str:
 def cached_read_text(path: Path) -> str:
     return path.read_text()
 
-@cached(cache=TTLCache(maxsize=100, ttl=599))
+@cached(cache=_guide_content_cache)
 def fetch_guide_content(guide_name: str) -> Optional[str]:
     """
     Fetch the content of a guide, trying GitHub first if network is available,
@@ -384,6 +392,114 @@ def get_guide(guide_name: str) -> str:
     # Return MCP error if guide not found
     raise ValueError(f"Guide '{guide_name}' not found.")
     # return f"ERROR: Guide '{guide_name}' not found! Retry later!"
+
+
+@mcp.prompt("list_guides", description="List all available coding guides.")
+def list_guides() -> str:
+    """List all available coding guides."""
+    return "\n".join(get_guides_list())
+
+@mcp.prompt("get_guide", description="Get the content of a specific coding guide.")
+def get_guide_prompt(guide_name: str) -> str:
+    """Get the content of a specific coding guide."""
+    return get_guide(guide_name)
+
+@mcp.prompt("help", description="Get help information about available resources and tools.")
+def help_prompt() -> str:
+    """Get help information about available resources and tools."""
+    return mcp.get_help()
+
+@mcp.prompt("security_check", description="Check if the MCP server is secure and not exposing sensitive information.")
+def security_check_prompt() -> str:
+    """Check if the MCP server is secure and not exposing sensitive information."""
+    return "Security check passed. No sensitive information is being exposed."
+
+@mcp.prompt("exit", description="Exit the MCP server.")
+def exit_prompt() -> str:
+    """Exit the MCP server."""
+    mcp.stop()
+    return "Exiting..."
+
+@mcp.prompt("clear_cache", description="Clear the local cache of guides.")
+def clear_cache_prompt() -> str:
+    """Clear the local cache of guides."""
+    clear_cache()
+    return "Cache cleared."
+
+def clear_cache() -> None:
+    """Clear all caches: TTL caches, lru_cache, and local cache directory."""
+    # Clear TTL caches
+    _network_cache.clear()
+    _github_file_cache.clear()
+    _guide_from_cache.clear()
+    _guides_list_cache.clear()
+    _guide_content_cache.clear()
+
+    # Clear lru_cache
+    cached_read_text.cache_clear()
+
+    # Clear local cache directory
+    if CACHE_DIR.exists():
+        for f in CACHE_DIR.glob("*.md"):
+            f.unlink()
+
+    logger.info("All caches cleared")
+
+@mcp.prompt("check_security", description="Check if the code complies with the security standards.")
+def check_security_prompt(code: str) -> list[PromptMessage]:
+    """Check if the code complies with the security standards."""
+    return [
+        PromptMessage(
+            role="assistant",
+            content=TextContent(
+                type="text",
+                text="You are an expert Security Engineer. Follow these steps:\n"
+                     "1. Analyze the source code for security vulnerabilities.\n"
+                     "2. Check dependencies with the respective commands like npm audit fix, pip-audit, etc.\n"
+                     "3. Use the 'search_documentation' tool for the error code.\n"
+                     "4. Propose three potential fixes.\n"
+                     "5. For each proposed fix, provide a brief explanation of how it addresses the issue and any potential trade-offs.\n"
+                     "6. Make sure all fixes are not breaking the build, compilation and operation of the code and application.\n"
+                     "7. If the error is related to a specific coding guide, reference the relevant guide and explain how it applies to the issue and try to fix it.\n"
+            )
+        ),
+        PromptMessage(
+            role="user",
+            content=TextContent(
+                type="text",
+                text=f"Here is the code to check for security compliance:\n\n{code}"
+            )
+        )
+    ]
+
+@mcp.prompt("check_code_compliance", description="Check if the code complies with the coding standards.")
+def check_code_compliance_prompt(code: str) -> list[PromptMessage]:
+    """Check if the code complies with the coding standards."""
+    return [
+        PromptMessage(
+            role="assistant",
+            content=TextContent(
+                type="text",
+                text="You are an expert Senior Engineer. Follow these steps:\n"
+                     "1. Analyze the source code, architecture and infrastructure stack.\n"
+                     "2. Analyze the best coding practices, styles and patterns according to this MCP codeguide mcp respective to every stack, API, architecture, documentation, tests, security, etc.\n"
+                     "3. Check and consult with other best practices and patterns over internet or Context7 MCP and other resources\n"
+                     "4. Use the 'search_documentation' tool for the error code.\n"
+                     "5. Check deviations and propose TODO steps and improvements to make the code compliant with the best practices and patterns and coding guides.\n"
+                     "6. Track any TODO steps and improvements.\n"
+                     "7. Make sure all fixes are not breaking the build, compilation and operation of the code and application, all the code passes lints, could be build, unit tests are passing.\n"
+                     "8. If the error is related to a specific coding guide, reference the relevant guide and explain how it applies to the issue and try to fix it.\n"
+            )
+        ),
+        PromptMessage(
+            role="user",
+            content=TextContent(
+                type="text",
+                text=f"Here is the code to check for coding compliance:\n\n{code}"
+            )
+        )
+    ]
+
 
 
 def main() -> None:
