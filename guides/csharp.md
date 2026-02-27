@@ -81,6 +81,178 @@ MySolution/
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. RED: Write a failing test first
+   ↓
+2. GREEN: Write minimal code to make it pass
+   ↓
+3. REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for C#
+
+```csharp
+// Step 1: RED - Write failing test first
+using Xunit;
+
+public class EmailValidatorTests
+{
+    [Fact]
+    public void Validate_WithValidEmail_ReturnsEmail()
+    {
+        var result = EmailValidator.Validate("user@example.com");
+
+        Assert.True(result.IsValid);
+        Assert.Equal("user@example.com", result.Email);
+    }
+
+    [Fact]
+    public void Validate_WithoutAtSymbol_ReturnsInvalid()
+    {
+        var result = EmailValidator.Validate("invalid-email");
+
+        Assert.False(result.IsValid);
+        Assert.Equal("Invalid email format", result.Error);
+    }
+
+    [Fact]
+    public void Validate_WithEmptyString_ReturnsInvalid()
+    {
+        var result = EmailValidator.Validate("");
+
+        Assert.False(result.IsValid);
+    }
+}
+
+// Run: dotnet test --filter "FullyQualifiedName~EmailValidatorTests"
+// FAILS - EmailValidator class does not exist
+
+// Step 2: GREEN - Write minimal implementation
+public record EmailValidationResult(bool IsValid, string? Email = null, string? Error = null);
+
+public static class EmailValidator
+{
+    public static EmailValidationResult Validate(string email)
+    {
+        if (email.Contains('@'))
+            return new EmailValidationResult(true, Email: email);
+
+        return new EmailValidationResult(false, Error: "Invalid email format");
+    }
+}
+
+// Run: dotnet test --filter "FullyQualifiedName~EmailValidatorTests"
+// PASSES - all tests pass
+
+// Step 3: REFACTOR - Improve with regex validation
+using System.Text.RegularExpressions;
+
+public static partial class EmailValidator
+{
+    [GeneratedRegex(@"^[^\s@]+@[^\s@]+\.[^\s@]+$")]
+    private static partial Regex EmailRegex();
+
+    public static EmailValidationResult Validate(string email)
+    {
+        if (EmailRegex().IsMatch(email))
+            return new EmailValidationResult(true, Email: email.ToLowerInvariant());
+
+        return new EmailValidationResult(false, Error: "Invalid email format");
+    }
+}
+// Tests still pass
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. Bug Reported/Discovered
+   ↓
+2. Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. Verify the test fails for the right reason
+   ↓
+4. Fix the bug (make the test pass)
+   ↓
+5. Verify the test now PASSES
+   ↓
+6. Document the bug in test comments (include bug ID)
+   ↓
+7. Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix
+
+```csharp
+// Bug Report #1042: EmailValidator accepts emails with spaces like "user @example.com"
+
+// Step 1-2: Write test that reproduces the bug
+public class EmailValidatorTests
+{
+    // Regression test for Bug #1042
+    [Theory]
+    [InlineData("user @example.com")]
+    [InlineData(" user@example.com")]
+    [InlineData("user@example.com ")]
+    public void Validate_WithSpacesInEmail_ReturnsInvalid(string email)
+    {
+        var result = EmailValidator.Validate(email);
+
+        Assert.False(result.IsValid);
+    }
+}
+
+// Run: dotnet test --filter "FullyQualifiedName~EmailValidatorTests"
+// FAILS - Validate returns IsValid=true for emails with spaces
+
+// Step 3: Fix the bug
+public static partial class EmailValidator
+{
+    [GeneratedRegex(@"^[^\s@]+@[^\s@]+\.[^\s@]+$")]
+    private static partial Regex EmailRegex();
+
+    public static EmailValidationResult Validate(string email)
+    {
+        if (email != email.Trim())
+            return new EmailValidationResult(false, Error: "Invalid email format");
+
+        if (EmailRegex().IsMatch(email))
+            return new EmailValidationResult(true, Email: email.ToLowerInvariant());
+
+        return new EmailValidationResult(false, Error: "Invalid email format");
+    }
+}
+
+// Run: dotnet test --filter "FullyQualifiedName~EmailValidatorTests"
+// PASSES - bug fixed, regression prevented
+```
+
+### Prohibited Practices for Bug Fixes
+
+**NEVER:**
+- Fix a bug without adding a regression test first
+- Write implementation before writing tests (violates TDD)
+- Skip the Red-Green-Refactor cycle
+- Commit code with failing tests
+- Remove tests to make code pass
+- Use `[Fact(Skip = "...")]` to bypass failing tests instead of fixing them
+
+---
+
 ## 3. Naming Conventions (MANDATORY)
 
 ### A. General Rules

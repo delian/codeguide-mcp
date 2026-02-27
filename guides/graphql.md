@@ -200,6 +200,184 @@ const resolvers = {
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. RED: Write a failing test first
+   ↓
+2. GREEN: Write minimal code to make it pass
+   ↓
+3. REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for GraphQL
+
+```typescript
+// Step 1: RED - Write failing test
+import { createTestClient } from 'apollo-server-testing';
+import { ApolloServer, gql } from 'apollo-server';
+
+const GET_USER = gql`
+  query GetUser($id: ID!) {
+    user(id: $id) {
+      id
+      email
+      displayName
+      role
+    }
+  }
+`;
+
+describe('User Resolver', () => {
+  let server: ApolloServer;
+
+  beforeAll(() => {
+    server = new ApolloServer({
+      typeDefs,
+      resolvers,
+      context: () => createTestContext(),
+    });
+  });
+
+  it('should return user with all required fields', async () => {
+    const { query } = createTestClient(server);
+
+    const result = await query({
+      query: GET_USER,
+      variables: { id: 'user-abc123' },
+    });
+
+    expect(result.errors).toBeUndefined();
+    expect(result.data.user).toEqual({
+      id: 'user-abc123',
+      email: 'jane@example.com',
+      displayName: 'Jane Doe',
+      role: 'USER',
+    });
+  });
+});
+// FAILS - resolver not implemented yet
+
+// Step 2: GREEN - Implement the resolver
+const resolvers = {
+  Query: {
+    user: async (_, { id }, { dataSources }) => {
+      return dataSources.users.findById(id);
+    },
+  },
+};
+// PASSES
+
+// Step 3: REFACTOR - Add authorization, input validation, DataLoader
+const resolvers = {
+  Query: {
+    user: async (_, { id }, { dataSources, user }) => {
+      if (!user) throw new AuthenticationError('Not authenticated');
+      return dataSources.users.findById(id);
+    },
+  },
+};
+// All tests still PASS
+```
+
+### GraphQL-Specific TDD Practices
+
+- Test resolvers in isolation with mocked data sources and context.
+- Validate schema correctness with `buildSchema()` in dedicated schema tests.
+- Test query responses, mutation payloads, and error structures.
+- Use `createTestClient` or `supertest` for integration-level resolver testing.
+- Always verify that `result.errors` is undefined for success cases.
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. Bug Reported/Discovered
+   ↓
+2. Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. Verify the test fails for the right reason
+   ↓
+4. Fix the bug (make the test pass)
+   ↓
+5. Verify the test now PASSES
+   ↓
+6. Document the bug in test comments (include bug ID)
+   ↓
+7. Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix
+
+```typescript
+// Bug Report: BUG-3201 - User query returns null email for admin users
+// due to field-level auth incorrectly filtering admin's own email.
+
+describe('BUG-3201: Admin user email visibility', () => {
+  it('should return email when admin queries their own profile', async () => {
+    const server = new ApolloServer({
+      typeDefs,
+      resolvers,
+      context: () => ({
+        user: { id: 'admin-001', role: 'ADMIN' },
+        dataSources: createMockDataSources(),
+      }),
+    });
+
+    const { query } = createTestClient(server);
+
+    const result = await query({
+      query: gql`
+        query GetUser($id: ID!) {
+          user(id: $id) {
+            id
+            email
+          }
+        }
+      `,
+      variables: { id: 'admin-001' },
+    });
+
+    expect(result.errors).toBeUndefined();
+    // BUG-3201: email was null here before the fix
+    expect(result.data.user.email).toBe('admin@example.com');
+  });
+});
+
+// Fix: Updated field resolver to check user.id === parent.id OR user.role === 'ADMIN'
+// User: {
+//   email: (parent, _, { user }) => {
+//     if (user?.id === parent.id || user?.role === 'ADMIN') {
+//       return parent.email;
+//     }
+//     return null;
+//   },
+// },
+```
+
+### Prohibited Practices for Bug Fixes
+
+**NEVER:**
+- Fix a bug without adding a regression test first
+- Write implementation before writing tests (violates TDD)
+- Skip the Red-Green-Refactor cycle
+- Commit code with failing tests
+- Remove tests to make code pass
+- Skip validation of schema changes with `buildSchema()` or GraphQL Code Generator
+
+---
+
 ## 3. Resolver Implementation (MANDATORY)
 
 ### A. Resolver Structure

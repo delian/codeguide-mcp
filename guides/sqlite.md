@@ -63,6 +63,197 @@ The agent must adhere to the **EMBEDDED-FIRST** principles for every SQLite impl
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. RED: Write a failing test first
+   ↓
+2. GREEN: Write minimal code to make it pass
+   ↓
+3. REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for SQLite
+
+```python
+# Step 1: RED - Write failing test for a query on a users table
+import pytest
+import sqlite3
+
+@pytest.fixture
+def db():
+    conn = sqlite3.connect(':memory:')
+    conn.execute("PRAGMA foreign_keys = ON")
+    yield conn
+    conn.close()
+
+def test_get_active_users_by_signup_date(db):
+    """Test query returns only active users sorted by signup date."""
+    db.execute("""
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY,
+            email TEXT UNIQUE NOT NULL,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            signed_up_at TEXT NOT NULL
+        )
+    """)
+    db.execute("INSERT INTO users VALUES (1, 'alice@test.com', 1, '2025-01-10')")
+    db.execute("INSERT INTO users VALUES (2, 'bob@test.com', 0, '2025-02-20')")
+    db.execute("INSERT INTO users VALUES (3, 'carol@test.com', 1, '2025-01-05')")
+    db.commit()
+
+    cursor = db.execute(
+        "SELECT email FROM active_users_view ORDER BY signed_up_at ASC"
+    )
+    results = [row[0] for row in cursor.fetchall()]
+    assert results == ['carol@test.com', 'alice@test.com']
+
+# Run: pytest test_users.py::test_get_active_users_by_signup_date
+# FAILS - no such table: active_users_view
+
+# Step 2: GREEN - Create the view
+def apply_schema(db):
+    db.execute("""
+        CREATE VIEW active_users_view AS
+        SELECT id, email, signed_up_at
+        FROM users
+        WHERE is_active = 1
+    """)
+
+# Run: pytest test_users.py::test_get_active_users_by_signup_date
+# PASSES
+
+# Step 3: REFACTOR - Add index to speed up active user queries
+def optimize_schema(db):
+    db.execute("""
+        CREATE INDEX idx_users_active_signup
+        ON users(is_active, signed_up_at)
+        WHERE is_active = 1
+    """)
+# Tests still pass
+```
+
+### Example TDD for Schema Constraints
+
+```python
+def test_email_uniqueness_constraint(db):
+    """Test that duplicate emails are rejected."""
+    db.execute("""
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY,
+            email TEXT UNIQUE NOT NULL
+        )
+    """)
+    db.execute("INSERT INTO users (email) VALUES ('test@example.com')")
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute("INSERT INTO users (email) VALUES ('test@example.com')")
+
+def test_foreign_key_cascade_delete(db):
+    """Test that deleting a user cascades to their posts."""
+    db.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
+    db.execute("""
+        CREATE TABLE posts (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    """)
+    db.execute("INSERT INTO users VALUES (1, 'Alice')")
+    db.execute("INSERT INTO posts VALUES (1, 1, 'Hello World')")
+    db.execute("DELETE FROM users WHERE id = 1")
+
+    cursor = db.execute("SELECT COUNT(*) FROM posts")
+    assert cursor.fetchone()[0] == 0
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. Bug Reported/Discovered
+   ↓
+2. Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. Verify the test fails for the right reason
+   ↓
+4. Fix the bug (make the test pass)
+   ↓
+5. Verify the test now PASSES
+   ↓
+6. Document the bug in test comments (include bug ID)
+   ↓
+7. Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix
+
+```python
+# Bug Report BUG-305: Case-sensitive email lookup causes duplicate accounts.
+# Users can register 'Alice@test.com' and 'alice@test.com' as separate accounts.
+
+import pytest
+import sqlite3
+
+def test_email_lookup_is_case_insensitive(db):
+    """Regression test for BUG-305: email uniqueness must be case-insensitive."""
+    db.execute("""
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY,
+            email TEXT NOT NULL COLLATE NOCASE UNIQUE
+        )
+    """)
+    db.execute("INSERT INTO users (email) VALUES ('Alice@test.com')")
+
+    # Attempting to insert same email with different case must fail
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute("INSERT INTO users (email) VALUES ('alice@test.com')")
+
+# Run: pytest test_users.py::test_email_lookup_is_case_insensitive
+# FAILS with original schema (TEXT NOT NULL UNIQUE without COLLATE NOCASE)
+
+# Fix: Alter schema to use COLLATE NOCASE on email column
+# Migration: Recreate table with corrected collation
+def fix_email_collation(db):
+    db.execute("BEGIN TRANSACTION")
+    db.execute("""
+        CREATE TABLE users_new (
+            id INTEGER PRIMARY KEY,
+            email TEXT NOT NULL COLLATE NOCASE UNIQUE
+        )
+    """)
+    db.execute("INSERT INTO users_new SELECT * FROM users")
+    db.execute("DROP TABLE users")
+    db.execute("ALTER TABLE users_new RENAME TO users")
+    db.execute("COMMIT")
+
+# Run: pytest test_users.py::test_email_lookup_is_case_insensitive
+# PASSES - bug fixed, regression prevented
+```
+
+### Prohibited Practices for Bug Fixes
+
+**NEVER:**
+- Fix a bug without adding a regression test first
+- Write implementation before writing tests (violates TDD)
+- Skip the Red-Green-Refactor cycle
+- Commit code with failing tests
+- Remove tests to make code pass
+- Modify production schema without migration tests
+
+---
+
 ## 2. Architecture and Fundamentals
 
 ### Embedded Serverless Architecture

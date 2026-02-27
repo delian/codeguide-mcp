@@ -55,6 +55,197 @@ The agent must adhere to the **OLTP-FIRST** principles for every MySQL/MariaDB i
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. RED: Write a failing test first
+   ↓
+2. GREEN: Write minimal code to make it pass
+   ↓
+3. REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for MySQL/MariaDB
+
+```python
+# Step 1: RED - Write failing test for a stored procedure
+import pytest
+import mysql.connector
+
+@pytest.fixture
+def db():
+    conn = mysql.connector.connect(
+        host='localhost', database='test_db',
+        user='test_user', password='test_pass'
+    )
+    cursor = conn.cursor()
+    cursor.execute("CREATE TABLE IF NOT EXISTS orders ("
+                   "  id INT AUTO_INCREMENT PRIMARY KEY,"
+                   "  user_id INT NOT NULL,"
+                   "  total_amount DECIMAL(12,2) NOT NULL,"
+                   "  status ENUM('pending','confirmed','shipped') DEFAULT 'pending',"
+                   "  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                   ") ENGINE=InnoDB")
+    conn.commit()
+    yield conn
+    cursor.execute("DROP TABLE IF EXISTS orders")
+    conn.commit()
+    conn.close()
+
+def test_get_user_order_summary(db):
+    """Test stored procedure returns correct order summary per user."""
+    cursor = db.cursor()
+    cursor.execute("INSERT INTO orders (user_id, total_amount, status) VALUES "
+                   "(1, 50.00, 'confirmed'), (1, 75.00, 'shipped'), "
+                   "(2, 120.00, 'pending')")
+    db.commit()
+
+    cursor.callproc('get_user_order_summary', [1])
+    for result in cursor.stored_results():
+        row = result.fetchone()
+    assert row[0] == 2       # order_count
+    assert row[1] == 125.00  # total_spent
+
+# Run: pytest test_orders.py::test_get_user_order_summary
+# FAILS - Procedure test_db.get_user_order_summary does not exist
+
+# Step 2: GREEN - Create the stored procedure
+def apply_migration(db):
+    cursor = db.cursor()
+    cursor.execute("""
+        CREATE PROCEDURE get_user_order_summary(IN p_user_id INT)
+        BEGIN
+            SELECT
+                COUNT(*) AS order_count,
+                COALESCE(SUM(total_amount), 0) AS total_spent
+            FROM orders
+            WHERE user_id = p_user_id
+              AND status IN ('confirmed', 'shipped');
+        END
+    """)
+    db.commit()
+
+# Run: pytest test_orders.py::test_get_user_order_summary
+# PASSES
+
+# Step 3: REFACTOR - Add composite index for the query
+def optimize_migration(db):
+    cursor = db.cursor()
+    cursor.execute("""
+        CREATE INDEX ix_orders_user_status
+        ON orders(user_id, status, total_amount)
+    """)
+    db.commit()
+# Tests still pass
+```
+
+### Example TDD for Constraints and Triggers
+
+```python
+def test_order_amount_must_be_positive(db):
+    """Test CHECK constraint rejects negative order amounts."""
+    cursor = db.cursor()
+    cursor.execute("""
+        ALTER TABLE orders
+        ADD CONSTRAINT chk_positive_amount CHECK (total_amount >= 0)
+    """)
+    db.commit()
+
+    with pytest.raises(mysql.connector.errors.DatabaseError):
+        cursor.execute("INSERT INTO orders (user_id, total_amount) VALUES (1, -10.00)")
+        db.commit()
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. Bug Reported/Discovered
+   ↓
+2. Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. Verify the test fails for the right reason
+   ↓
+4. Fix the bug (make the test pass)
+   ↓
+5. Verify the test now PASSES
+   ↓
+6. Document the bug in test comments (include bug ID)
+   ↓
+7. Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix
+
+```python
+# Bug Report BUG-782: get_user_order_summary counts cancelled orders in
+# the total, inflating user spend figures.
+
+import pytest
+import mysql.connector
+
+def test_cancelled_orders_excluded_from_summary(db):
+    """Regression test for BUG-782: cancelled orders must not count in summary."""
+    cursor = db.cursor()
+    cursor.execute("INSERT INTO orders (user_id, total_amount, status) VALUES "
+                   "(1, 50.00, 'confirmed'), (1, 200.00, 'cancelled')")
+    db.commit()
+
+    cursor.callproc('get_user_order_summary', [1])
+    for result in cursor.stored_results():
+        row = result.fetchone()
+
+    assert row[0] == 1       # order_count - only confirmed
+    assert row[1] == 50.00   # total_spent - excludes cancelled
+
+# Run: pytest test_orders.py::test_cancelled_orders_excluded_from_summary
+# FAILS - cancelled orders are included (returns count=2, total=250.00)
+
+# Fix: Update stored procedure to explicitly exclude cancelled status
+def fix_procedure(db):
+    cursor = db.cursor()
+    cursor.execute("DROP PROCEDURE IF EXISTS get_user_order_summary")
+    cursor.execute("""
+        CREATE PROCEDURE get_user_order_summary(IN p_user_id INT)
+        BEGIN
+            SELECT
+                COUNT(*) AS order_count,
+                COALESCE(SUM(total_amount), 0) AS total_spent
+            FROM orders
+            WHERE user_id = p_user_id
+              AND status IN ('confirmed', 'shipped')
+              AND status != 'cancelled';
+        END
+    """)
+    db.commit()
+
+# Run: pytest test_orders.py::test_cancelled_orders_excluded_from_summary
+# PASSES - bug fixed, regression prevented
+```
+
+### Prohibited Practices for Bug Fixes
+
+**NEVER:**
+- Fix a bug without adding a regression test first
+- Write implementation before writing tests (violates TDD)
+- Skip the Red-Green-Refactor cycle
+- Commit code with failing tests
+- Remove tests to make code pass
+- Modify production schema without migration tests
+
+---
+
 ## 2. Architecture and Fundamentals
 
 ### MySQL Architecture Overview

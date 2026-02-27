@@ -102,6 +102,132 @@ case class UserProfile(
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. RED: Write a failing test first
+   ↓
+2. GREEN: Write minimal code to make it pass
+   ↓
+3. REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for Scala
+
+```scala
+// Step 1: RED - Write failing test first
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
+
+class EmailValidatorSpec extends AnyFlatSpec with Matchers:
+
+  "EmailValidator.validate" should "return Right for a valid email" in:
+    EmailValidator.validate("user@example.com") shouldBe Right("user@example.com")
+
+  it should "return Left for an email without @" in:
+    EmailValidator.validate("invalid-email").isLeft shouldBe true
+
+  it should "return Left for an empty string" in:
+    EmailValidator.validate("").isLeft shouldBe true
+
+// Run: sbt test
+// FAILS - EmailValidator object does not exist
+
+// Step 2: GREEN - Write minimal implementation
+object EmailValidator:
+  def validate(email: String): Either[String, String] =
+    if email.contains("@") then Right(email)
+    else Left("Invalid email format")
+
+// Run: sbt test
+// PASSES - all tests pass
+
+// Step 3: REFACTOR - Improve with regex validation
+object EmailValidator:
+  private val emailRegex = """^[^\s@]+@[^\s@]+\.[^\s@]+$""".r
+
+  def validate(email: String): Either[String, String] =
+    emailRegex.findFirstIn(email) match
+      case Some(_) => Right(email.toLowerCase)
+      case None    => Left("Invalid email format")
+// Tests still pass
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. Bug Reported/Discovered
+   ↓
+2. Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. Verify the test fails for the right reason
+   ↓
+4. Fix the bug (make the test pass)
+   ↓
+5. Verify the test now PASSES
+   ↓
+6. Document the bug in test comments (include bug ID)
+   ↓
+7. Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix
+
+```scala
+// Bug Report #1042: EmailValidator accepts emails with spaces like "user @example.com"
+
+// Step 1-2: Write test that reproduces the bug
+class EmailValidatorSpec extends AnyFlatSpec with Matchers:
+
+  // Regression test for Bug #1042
+  "EmailValidator.validate" should "reject emails containing spaces" in:
+    EmailValidator.validate("user @example.com").isLeft shouldBe true
+    EmailValidator.validate(" user@example.com").isLeft shouldBe true
+    EmailValidator.validate("user@example.com ").isLeft shouldBe true
+
+// Run: sbt test
+// FAILS - validate returns Right for emails with spaces
+
+// Step 3: Fix the bug
+object EmailValidator:
+  private val emailRegex = """^[^\s@]+@[^\s@]+\.[^\s@]+$""".r
+
+  def validate(email: String): Either[String, String] =
+    val trimmed = email.trim
+    if trimmed != email then Left("Invalid email format: contains whitespace")
+    else
+      emailRegex.findFirstIn(email) match
+        case Some(_) => Right(email.toLowerCase)
+        case None    => Left("Invalid email format")
+
+// Run: sbt test
+// PASSES - bug fixed, regression prevented
+```
+
+### Prohibited Practices for Bug Fixes
+
+**NEVER:**
+- Fix a bug without adding a regression test first
+- Write implementation before writing tests (violates TDD)
+- Skip the Red-Green-Refactor cycle
+- Commit code with failing tests
+- Remove tests to make code pass
+- Use `.get` on `Option`/`Either` or `asInstanceOf` to work around type errors in tests
+
+---
+
 ## 3. Functional Patterns (MANDATORY)
 
 ### A. Option Handling

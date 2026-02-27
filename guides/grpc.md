@@ -173,6 +173,181 @@ message DeleteUserRequest {
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. RED: Write a failing test first
+   ↓
+2. GREEN: Write minimal code to make it pass
+   ↓
+3. REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for gRPC
+
+```go
+// Step 1: RED - Write failing test
+package service_test
+
+import (
+    "context"
+    "testing"
+
+    pb "github.com/myorg/myapp/gen/go/api/v1"
+    "github.com/stretchr/testify/assert"
+    "github.com/stretchr/testify/require"
+    "google.golang.org/grpc/codes"
+    "google.golang.org/grpc/status"
+)
+
+func TestUserService_CreateUser(t *testing.T) {
+    svc := NewUserService(NewMockUserRepository())
+
+    req := &pb.CreateUserRequest{
+        User: &pb.User{
+            Email:       "alice@example.com",
+            DisplayName: "Alice",
+            Role:        pb.UserRole_USER_ROLE_USER,
+        },
+        RequestId: "req-001",
+    }
+
+    resp, err := svc.CreateUser(context.Background(), req)
+
+    require.NoError(t, err)
+    assert.NotEmpty(t, resp.Id)
+    assert.Equal(t, "alice@example.com", resp.Email)
+    assert.Equal(t, "Alice", resp.DisplayName)
+}
+// FAILS - CreateUser not implemented yet
+
+// Step 2: GREEN - Implement the RPC method
+func (s *UserService) CreateUser(ctx context.Context, req *pb.CreateUserRequest) (*pb.User, error) {
+    if req.User == nil {
+        return nil, status.Error(codes.InvalidArgument, "user is required")
+    }
+
+    user, err := s.repo.Create(ctx, req.User)
+    if err != nil {
+        return nil, status.Errorf(codes.Internal, "failed to create user: %v", err)
+    }
+
+    return user, nil
+}
+// PASSES
+
+// Step 3: REFACTOR - Add idempotency check, input validation, logging
+func (s *UserService) CreateUser(ctx context.Context, req *pb.CreateUserRequest) (*pb.User, error) {
+    if err := s.validator.Validate(req); err != nil {
+        return nil, status.Errorf(codes.InvalidArgument, "validation failed: %v", err)
+    }
+
+    if req.RequestId != "" {
+        if existing, err := s.repo.FindByRequestID(ctx, req.RequestId); err == nil {
+            return existing, nil // Idempotent: return previously created user
+        }
+    }
+
+    user, err := s.repo.Create(ctx, req.User)
+    if err != nil {
+        return nil, status.Errorf(codes.Internal, "failed to create user: %v", err)
+    }
+
+    return user, nil
+}
+// All tests still PASS
+```
+
+### gRPC-Specific TDD Practices
+
+- Use Go's `testing` package (or the equivalent in your language: pytest, JUnit) for unit tests.
+- Test service implementations with mock repositories, not live servers.
+- Validate proto message constraints and gRPC status codes in every test case.
+- Use table-driven tests for comprehensive coverage of success and error paths.
+- Test streaming RPCs by verifying send/receive sequences.
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. Bug Reported/Discovered
+   ↓
+2. Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. Verify the test fails for the right reason
+   ↓
+4. Fix the bug (make the test pass)
+   ↓
+5. Verify the test now PASSES
+   ↓
+6. Document the bug in test comments (include bug ID)
+   ↓
+7. Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix
+
+```go
+// Bug Report: BUG-2890 - GetUser returns Internal error instead of
+// NotFound when user does not exist.
+
+func TestGetUser_NotFound_Bug2890(t *testing.T) {
+    mockRepo := &MockUserRepository{
+        users: map[string]*pb.User{}, // empty repository
+    }
+    svc := NewUserService(mockRepo)
+
+    resp, err := svc.GetUser(context.Background(), &pb.GetUserRequest{
+        Id: "non-existent-user-id",
+    })
+
+    // BUG-2890: Previously returned codes.Internal instead of codes.NotFound
+    require.Error(t, err)
+    assert.Nil(t, resp)
+
+    st, ok := status.FromError(err)
+    require.True(t, ok)
+    assert.Equal(t, codes.NotFound, st.Code(), "BUG-2890: must return NotFound for missing user")
+}
+
+// Fix: Updated GetUser to check for ErrNotFound from the repository
+// and return status.Errorf(codes.NotFound, ...) instead of codes.Internal.
+//
+// func (s *UserService) GetUser(ctx context.Context, req *pb.GetUserRequest) (*pb.User, error) {
+//     user, err := s.repo.FindByID(ctx, req.Id)
+//     if err != nil {
+//         if errors.Is(err, ErrNotFound) {
+//             return nil, status.Errorf(codes.NotFound, "user %s not found", req.Id)
+//         }
+//         return nil, status.Errorf(codes.Internal, "failed to fetch user: %v", err)
+//     }
+//     return user, nil
+// }
+```
+
+### Prohibited Practices for Bug Fixes
+
+**NEVER:**
+- Fix a bug without adding a regression test first
+- Write implementation before writing tests (violates TDD)
+- Skip the Red-Green-Refactor cycle
+- Commit code with failing tests
+- Remove tests to make code pass
+- Skip validation of proto message constraints and gRPC status codes
+
+---
+
 ## 3. Error Handling (MANDATORY)
 
 ### Protocol-Specific Design Note

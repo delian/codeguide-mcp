@@ -120,6 +120,168 @@ SQL
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. RED: Write a failing test first
+   ↓
+2. GREEN: Write minimal code to make it pass
+   ↓
+3. REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for Ruby
+
+```ruby
+# Step 1: RED - Write failing test first
+# spec/validators/email_validator_spec.rb
+require 'rails_helper'
+
+RSpec.describe EmailValidator do
+  describe '.validate' do
+    it 'returns the email for a valid address' do
+      result = EmailValidator.validate('user@example.com')
+
+      expect(result).to be_success
+      expect(result.value).to eq('user@example.com')
+    end
+
+    it 'returns an error for an email without @' do
+      result = EmailValidator.validate('invalid-email')
+
+      expect(result).to be_failure
+      expect(result.error).to eq(:invalid_format)
+    end
+
+    it 'returns an error for an empty string' do
+      result = EmailValidator.validate('')
+
+      expect(result).to be_failure
+      expect(result.error).to eq(:invalid_format)
+    end
+  end
+end
+
+# Run: bundle exec rspec spec/validators/email_validator_spec.rb
+# FAILS - EmailValidator class does not exist
+
+# Step 2: GREEN - Write minimal implementation
+# app/validators/email_validator.rb
+class EmailValidator
+  Result = Struct.new(:value, :error, :success?, keyword_init: true)
+
+  def self.validate(email)
+    if email.include?('@')
+      Result.new(value: email, success?: true)
+    else
+      Result.new(error: :invalid_format, success?: false)
+    end
+  end
+end
+
+# Run: bundle exec rspec spec/validators/email_validator_spec.rb
+# PASSES - all tests pass
+
+# Step 3: REFACTOR - Improve with regex and downcase
+# app/validators/email_validator.rb
+class EmailValidator
+  EMAIL_REGEX = /\A[^\s@]+@[^\s@]+\.[^\s@]+\z/
+
+  Result = Struct.new(:value, :error, :success?, keyword_init: true)
+
+  def self.validate(email)
+    if email.match?(EMAIL_REGEX)
+      Result.new(value: email.downcase, success?: true)
+    else
+      Result.new(error: :invalid_format, success?: false)
+    end
+  end
+end
+# Tests still pass
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. Bug Reported/Discovered
+   ↓
+2. Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. Verify the test fails for the right reason
+   ↓
+4. Fix the bug (make the test pass)
+   ↓
+5. Verify the test now PASSES
+   ↓
+6. Document the bug in test comments (include bug ID)
+   ↓
+7. Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix
+
+```ruby
+# Bug Report #1042: EmailValidator accepts emails with spaces like "user @example.com"
+
+# Step 1-2: Write test that reproduces the bug
+# spec/validators/email_validator_spec.rb
+RSpec.describe EmailValidator do
+  describe '.validate' do
+    # Regression test for Bug #1042
+    it 'rejects emails containing spaces' do
+      expect(EmailValidator.validate('user @example.com')).to be_failure
+      expect(EmailValidator.validate(' user@example.com')).to be_failure
+      expect(EmailValidator.validate('user@example.com ')).to be_failure
+    end
+  end
+end
+
+# Run: bundle exec rspec spec/validators/email_validator_spec.rb
+# FAILS - validate returns success for emails with spaces
+
+# Step 3: Fix the bug
+class EmailValidator
+  EMAIL_REGEX = /\A[^\s@]+@[^\s@]+\.[^\s@]+\z/
+
+  def self.validate(email)
+    if email != email.strip
+      Result.new(error: :invalid_format, success?: false)
+    elsif email.match?(EMAIL_REGEX)
+      Result.new(value: email.downcase, success?: true)
+    else
+      Result.new(error: :invalid_format, success?: false)
+    end
+  end
+end
+
+# Run: bundle exec rspec spec/validators/email_validator_spec.rb
+# PASSES - bug fixed, regression prevented
+```
+
+### Prohibited Practices for Bug Fixes
+
+**NEVER:**
+- Fix a bug without adding a regression test first
+- Write implementation before writing tests (violates TDD)
+- Skip the Red-Green-Refactor cycle
+- Commit code with failing tests
+- Remove tests to make code pass
+- Use `skip` or `pending` to bypass failing tests instead of fixing them
+
+---
+
 ## 3. Idiomatic Ruby (MANDATORY)
 
 ### A. Blocks and Iterators

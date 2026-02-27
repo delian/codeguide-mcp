@@ -117,6 +117,188 @@ TSM File = Compressed columnar data + Index
 - Field values NOT indexed
 ```
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. RED: Write a failing test first
+   ↓
+2. GREEN: Write minimal code to make it pass
+   ↓
+3. REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for InfluxDB
+
+```python
+# Step 1: RED - Write failing test
+import pytest
+from datetime import datetime, timedelta, timezone
+from influxdb_client import InfluxDBClient, Point
+from influxdb_client.client.write_api import SYNCHRONOUS
+
+@pytest.fixture
+def influx_client():
+    client = InfluxDBClient(url="http://localhost:8086", token="test-token", org="test-org")
+    yield client
+    # Cleanup: delete test bucket data
+    delete_api = client.delete_api()
+    delete_api.delete(
+        start=datetime(1970, 1, 1, tzinfo=timezone.utc),
+        stop=datetime(2100, 1, 1, tzinfo=timezone.utc),
+        predicate="",
+        bucket="test-bucket",
+        org="test-org"
+    )
+    client.close()
+
+def test_hourly_mean_cpu_aggregation(influx_client):
+    """Test that hourly mean aggregation correctly averages CPU usage per host."""
+    write_api = influx_client.write_api(write_options=SYNCHRONOUS)
+
+    # Write test data: 4 points across 1 hour for one host
+    base_time = datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
+    values = [40.0, 60.0, 80.0, 20.0]  # mean = 50.0
+    for i, val in enumerate(values):
+        point = Point("cpu_usage") \
+            .tag("host", "server-01") \
+            .field("value", val) \
+            .time(base_time + timedelta(minutes=i * 15))
+        write_api.write(bucket="test-bucket", record=point)
+
+    # Query hourly mean
+    query_api = influx_client.query_api()
+    result = query_api.query(f'''
+        from(bucket: "test-bucket")
+          |> range(start: 2024-01-15T10:00:00Z, stop: 2024-01-15T11:00:00Z)
+          |> filter(fn: (r) => r._measurement == "cpu_usage")
+          |> filter(fn: (r) => r.host == "server-01")
+          |> aggregateWindow(every: 1h, fn: mean, createEmpty: false)
+    ''')
+
+    records = result[0].records
+    assert len(records) == 1
+    assert records[0].get_value() == 50.0
+
+# FAILS - aggregation query or write path not yet implemented in production code
+
+# Step 2: GREEN - Implement the aggregation function
+def get_hourly_cpu_mean(client, bucket, host, start, stop):
+    query_api = client.query_api()
+    result = query_api.query(f'''
+        from(bucket: "{bucket}")
+          |> range(start: {start}, stop: {stop})
+          |> filter(fn: (r) => r._measurement == "cpu_usage")
+          |> filter(fn: (r) => r.host == "{host}")
+          |> aggregateWindow(every: 1h, fn: mean, createEmpty: false)
+    ''')
+    return [{"time": r.get_time(), "mean": r.get_value()} for table in result for r in table.records]
+
+# PASSES
+
+# Step 3: REFACTOR - Add parameterized bucket, error handling, multiple hosts
+def get_hourly_cpu_mean(client, bucket, hosts, start, stop):
+    host_filter = " or ".join([f'r.host == "{h}"' for h in hosts])
+    query_api = client.query_api()
+    result = query_api.query(f'''
+        from(bucket: "{bucket}")
+          |> range(start: {start}, stop: {stop})
+          |> filter(fn: (r) => r._measurement == "cpu_usage")
+          |> filter(fn: (r) => {host_filter})
+          |> aggregateWindow(every: 1h, fn: mean, createEmpty: false)
+          |> group(columns: ["host"])
+    ''')
+    return {
+        table.records[0].values["host"]: [
+            {"time": r.get_time(), "mean": r.get_value()} for r in table.records
+        ]
+        for table in result
+    }
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. Bug Reported/Discovered
+   ↓
+2. Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. Verify the test fails for the right reason
+   ↓
+4. Fix the bug (make the test pass)
+   ↓
+5. Verify the test now PASSES
+   ↓
+6. Document the bug in test comments (include bug ID)
+   ↓
+7. Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix
+
+```python
+# Bug Report: BUG-3091 - Downsampling task drops data points written
+# during the last 10 seconds of each hour due to incorrect range boundary.
+
+import pytest
+from datetime import datetime, timezone
+from influxdb_client import InfluxDBClient, Point
+from influxdb_client.client.write_api import SYNCHRONOUS
+
+def test_bug_3091_downsample_boundary_data_not_lost(influx_client):
+    """Regression test: Data written at hour boundary must be included in downsample."""
+    write_api = influx_client.write_api(write_options=SYNCHRONOUS)
+
+    # Write a point at 10:59:55 (5 seconds before hour boundary)
+    boundary_point = Point("cpu_usage") \
+        .tag("host", "server-01") \
+        .field("value", 99.0) \
+        .time(datetime(2024, 1, 15, 10, 59, 55, tzinfo=timezone.utc))
+    write_api.write(bucket="test-bucket", record=boundary_point)
+
+    # Query the window that should include this point
+    query_api = influx_client.query_api()
+    result = query_api.query('''
+        from(bucket: "test-bucket")
+          |> range(start: 2024-01-15T10:00:00Z, stop: 2024-01-15T11:00:00Z)
+          |> filter(fn: (r) => r._measurement == "cpu_usage")
+          |> filter(fn: (r) => r.host == "server-01")
+          |> aggregateWindow(every: 1h, fn: mean, createEmpty: false)
+    ''')
+
+    records = result[0].records
+    assert len(records) == 1, "Boundary data point was dropped from aggregation window"
+    assert records[0].get_value() == 99.0
+
+# Fix: Changed downsample task range from
+#   range(start: -1h, stop: -10s)   <-- BUG: excluded last 10 seconds
+# to:
+#   range(start: -1h)               <-- FIXED: includes all data up to task execution
+```
+
+### Prohibited Practices for Bug Fixes
+
+**NEVER:**
+- Fix a bug without adding a regression test first
+- Write implementation before writing tests (violates TDD)
+- Skip the Red-Green-Refactor cycle
+- Commit code with failing tests
+- Remove tests to make code pass
+- Modify production schema without migration tests
+
+---
+
 ## 3. Data Modeling
 
 ### Core Data Elements

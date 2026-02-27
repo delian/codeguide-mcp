@@ -190,6 +190,169 @@ Vectorized:  Load 2048 ages → filter → load salaries → sum
    - Limited by single-node resources
    - Use distributed systems (ClickHouse, BigQuery)
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. RED: Write a failing test first
+   ↓
+2. GREEN: Write minimal code to make it pass
+   ↓
+3. REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for DuckDB
+
+```python
+# Step 1: RED - Write failing test
+import pytest
+import duckdb
+import os
+
+@pytest.fixture
+def db():
+    conn = duckdb.connect(':memory:')
+    yield conn
+    conn.close()
+
+def test_sales_aggregation_from_parquet(db, tmp_path):
+    """Test that sales aggregation query correctly sums by category from parquet."""
+    import pandas as pd
+
+    # Create test parquet file
+    df = pd.DataFrame({
+        'category': ['Electronics', 'Electronics', 'Books', 'Books', 'Books'],
+        'amount': [100.0, 200.0, 50.0, 30.0, 20.0],
+        'sale_date': pd.to_datetime(['2024-01-01', '2024-01-02', '2024-01-01',
+                                      '2024-01-02', '2024-01-03'])
+    })
+    parquet_path = str(tmp_path / "sales.parquet")
+    df.to_parquet(parquet_path)
+
+    result = db.execute(f"""
+        SELECT category, SUM(amount) AS total_sales, COUNT(*) AS num_sales
+        FROM '{parquet_path}'
+        GROUP BY category
+        ORDER BY total_sales DESC
+    """).fetchall()
+
+    assert len(result) == 2
+    assert result[0] == ('Electronics', 300.0, 2)
+    assert result[1] == ('Books', 100.0, 3)
+
+# FAILS - aggregation logic not yet implemented in production code
+
+# Step 2: GREEN - Implement the aggregation function
+def get_sales_by_category(conn, parquet_path):
+    return conn.execute(f"""
+        SELECT category, SUM(amount) AS total_sales, COUNT(*) AS num_sales
+        FROM '{parquet_path}'
+        GROUP BY category
+        ORDER BY total_sales DESC
+    """).fetchdf()
+
+# PASSES
+
+# Step 3: REFACTOR - Use parameterized path, add date filtering
+def get_sales_by_category(conn, parquet_path, start_date=None, end_date=None):
+    query = f"""
+        SELECT category, SUM(amount) AS total_sales, COUNT(*) AS num_sales
+        FROM '{parquet_path}'
+        WHERE 1=1
+    """
+    params = []
+    if start_date:
+        query += " AND sale_date >= ?"
+        params.append(start_date)
+    if end_date:
+        query += " AND sale_date <= ?"
+        params.append(end_date)
+    query += " GROUP BY category ORDER BY total_sales DESC"
+    return conn.execute(query, params).fetchdf()
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. Bug Reported/Discovered
+   ↓
+2. Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. Verify the test fails for the right reason
+   ↓
+4. Fix the bug (make the test pass)
+   ↓
+5. Verify the test now PASSES
+   ↓
+6. Document the bug in test comments (include bug ID)
+   ↓
+7. Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix
+
+```python
+# Bug Report: BUG-2087 - COPY TO parquet with PARTITION_BY drops rows
+# when partition column contains NULL values.
+
+import duckdb
+import pytest
+import os
+
+def test_bug_2087_parquet_partition_null_values(tmp_path):
+    """Regression test: COPY TO parquet must not drop rows with NULL partition keys."""
+    conn = duckdb.connect(':memory:')
+
+    conn.execute("""
+        CREATE TABLE sales AS
+        SELECT * FROM (VALUES
+            ('Electronics', 100.0),
+            (NULL, 50.0),
+            ('Books', 75.0),
+            (NULL, 25.0)
+        ) AS t(category, amount)
+    """)
+
+    output_dir = str(tmp_path / "partitioned_output")
+    conn.execute(f"""
+        COPY (SELECT * FROM sales)
+        TO '{output_dir}' (FORMAT PARQUET, PARTITION_BY (category))
+    """)
+
+    # Read back all partitioned files and verify no rows are lost
+    result = conn.execute(f"""
+        SELECT COUNT(*) AS cnt, SUM(amount) AS total
+        FROM '{output_dir}/**/*.parquet'
+    """).fetchone()
+
+    assert result[0] == 4, f"Expected 4 rows but got {result[0]} - NULL partition rows dropped"
+    assert result[1] == 250.0, f"Expected total 250.0 but got {result[1]}"
+
+# Fix: Coalesce NULL partition values to a sentinel directory name before COPY,
+# or filter NULLs into a separate non-partitioned file and union on read.
+```
+
+### Prohibited Practices for Bug Fixes
+
+**NEVER:**
+- Fix a bug without adding a regression test first
+- Write implementation before writing tests (violates TDD)
+- Skip the Red-Green-Refactor cycle
+- Commit code with failing tests
+- Remove tests to make code pass
+- Modify production schema without migration tests
+
 ---
 
 ## 3. Performance Optimization

@@ -8,6 +8,7 @@ github_repo = "delian/codeguide-mcp"
 github_path = "guides"
 github_branch = "main"
 cache_dir = ".guides-cache"
+prompts_dir = "prompts"
 
 [development]
 log_level = "DEBUG"

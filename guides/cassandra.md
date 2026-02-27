@@ -37,6 +37,216 @@ The agent must adhere to the **CASSANDRA-FIRST** principles:
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. RED: Write a failing test first
+   ↓
+2. GREEN: Write minimal code to make it pass
+   ↓
+3. REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for Cassandra
+
+```python
+# Step 1: RED - Write failing test for a time-series query
+import pytest
+from cassandra.cluster import Cluster
+from datetime import datetime, timedelta
+from uuid import uuid4
+
+@pytest.fixture(scope='module')
+def session():
+    cluster = Cluster(['127.0.0.1'])
+    session = cluster.connect()
+    session.execute("""
+        CREATE KEYSPACE IF NOT EXISTS test_ks
+        WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}
+    """)
+    session.set_keyspace('test_ks')
+    yield session
+    session.execute("DROP KEYSPACE IF EXISTS test_ks")
+    cluster.shutdown()
+
+def test_get_sensor_readings_by_time_range(session):
+    """Test CQL query returns sensor readings within a time range."""
+    session.execute("""
+        CREATE TABLE IF NOT EXISTS sensor_readings (
+            sensor_id TEXT,
+            reading_time TIMESTAMP,
+            value DOUBLE,
+            PRIMARY KEY (sensor_id, reading_time)
+        ) WITH CLUSTERING ORDER BY (reading_time DESC)
+    """)
+    now = datetime.utcnow()
+    session.execute(
+        "INSERT INTO sensor_readings (sensor_id, reading_time, value) VALUES (%s, %s, %s)",
+        ('sensor-1', now - timedelta(hours=2), 23.5)
+    )
+    session.execute(
+        "INSERT INTO sensor_readings (sensor_id, reading_time, value) VALUES (%s, %s, %s)",
+        ('sensor-1', now - timedelta(hours=1), 24.1)
+    )
+    session.execute(
+        "INSERT INTO sensor_readings (sensor_id, reading_time, value) VALUES (%s, %s, %s)",
+        ('sensor-1', now - timedelta(days=2), 20.0)  # outside range
+    )
+
+    rows = list(session.execute(
+        "SELECT value FROM sensor_readings "
+        "WHERE sensor_id = %s AND reading_time >= %s AND reading_time <= %s",
+        ('sensor-1', now - timedelta(hours=3), now)
+    ))
+
+    assert len(rows) == 2
+    assert rows[0].value == 24.1  # DESC order: most recent first
+    assert rows[1].value == 23.5
+
+# Run: pytest test_sensors.py::test_get_sensor_readings_by_time_range
+# FAILS - table does not exist yet (first run before schema is applied)
+
+# Step 2: GREEN - Apply the schema (table creation above makes it pass)
+
+# Run: pytest test_sensors.py::test_get_sensor_readings_by_time_range
+# PASSES
+
+# Step 3: REFACTOR - Add TTL and optimize compaction for time-series
+def optimize_table(session):
+    session.execute("""
+        ALTER TABLE sensor_readings
+        WITH default_time_to_live = 2592000
+        AND compaction = {
+            'class': 'TimeWindowCompactionStrategy',
+            'compaction_window_unit': 'DAYS',
+            'compaction_window_size': 1
+        }
+    """)
+# Tests still pass
+```
+
+### Example TDD for Materialized Views
+
+```python
+def test_sensor_readings_by_value_view(session):
+    """Test materialized view allows querying readings by value threshold."""
+    session.execute("""
+        CREATE MATERIALIZED VIEW IF NOT EXISTS high_readings AS
+        SELECT sensor_id, reading_time, value
+        FROM sensor_readings
+        WHERE value IS NOT NULL AND sensor_id IS NOT NULL AND reading_time IS NOT NULL
+        PRIMARY KEY (sensor_id, value, reading_time)
+        WITH CLUSTERING ORDER BY (value DESC, reading_time DESC)
+    """)
+
+    # Allow view to propagate
+    import time
+    time.sleep(2)
+
+    rows = list(session.execute(
+        "SELECT value FROM high_readings WHERE sensor_id = %s AND value > %s",
+        ('sensor-1', 23.0)
+    ))
+    assert len(rows) >= 1
+    assert all(row.value > 23.0 for row in rows)
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. Bug Reported/Discovered
+   ↓
+2. Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. Verify the test fails for the right reason
+   ↓
+4. Fix the bug (make the test pass)
+   ↓
+5. Verify the test now PASSES
+   ↓
+6. Document the bug in test comments (include bug ID)
+   ↓
+7. Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix
+
+```python
+# Bug Report BUG-623: Sensor readings query returns stale data because
+# tombstones from deleted readings are not being cleaned up within
+# gc_grace_seconds, causing ghost rows to reappear after repair.
+
+import pytest
+from cassandra.cluster import Cluster
+from datetime import datetime, timedelta
+
+def test_deleted_readings_do_not_reappear(session):
+    """Regression test for BUG-623: deleted readings must not return in queries."""
+    sensor_id = 'sensor-bug-623'
+    now = datetime.utcnow()
+
+    # Insert a reading
+    session.execute(
+        "INSERT INTO sensor_readings (sensor_id, reading_time, value) VALUES (%s, %s, %s)",
+        (sensor_id, now, 99.9)
+    )
+
+    # Delete the reading
+    session.execute(
+        "DELETE FROM sensor_readings WHERE sensor_id = %s AND reading_time = %s",
+        (sensor_id, now)
+    )
+
+    # Query should return no results
+    rows = list(session.execute(
+        "SELECT * FROM sensor_readings WHERE sensor_id = %s",
+        (sensor_id,)
+    ))
+    assert len(rows) == 0, "Deleted reading should not appear in query results"
+
+# Run: pytest test_sensors.py::test_deleted_readings_do_not_reappear
+# FAILS - ghost rows reappear after compaction/repair cycle
+
+# Fix: Set gc_grace_seconds appropriately and ensure repair runs within window
+def fix_gc_grace(session):
+    session.execute("""
+        ALTER TABLE sensor_readings
+        WITH gc_grace_seconds = 864000
+        AND compaction = {
+            'class': 'TimeWindowCompactionStrategy',
+            'compaction_window_unit': 'DAYS',
+            'compaction_window_size': 1
+        }
+    """)
+
+# Run: pytest test_sensors.py::test_deleted_readings_do_not_reappear
+# PASSES - bug fixed, regression prevented
+```
+
+### Prohibited Practices for Bug Fixes
+
+**NEVER:**
+- Fix a bug without adding a regression test first
+- Write implementation before writing tests (violates TDD)
+- Skip the Red-Green-Refactor cycle
+- Commit code with failing tests
+- Remove tests to make code pass
+- Modify production schema without migration tests
+
+---
+
 ## 2. Architecture Overview
 
 ### A. Cassandra 4.x/5.x Architecture

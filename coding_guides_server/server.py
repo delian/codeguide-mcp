@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 from functools import lru_cache
 from typing import Optional
+from collections.abc import Iterator
 import httpx
 import base64
 from cachetools import cached, TTLCache
@@ -26,6 +27,7 @@ CACHE_DIR = Path(Settings.cache_dir)
 GITHUB_REPO = Settings.github_repo
 GITHUB_PATH = Settings.github_path
 GITHUB_BRANCH = Settings.github_branch
+PROMPTS_DIR = Path(Settings.prompts_dir)
 
 # Ensure cache directory exists
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -36,6 +38,147 @@ _github_file_cache: TTLCache = TTLCache(maxsize=100, ttl=599)
 _guide_from_cache: TTLCache = TTLCache(maxsize=100, ttl=599)
 _guides_list_cache: TTLCache = TTLCache(maxsize=1, ttl=600)
 _guide_content_cache: TTLCache = TTLCache(maxsize=100, ttl=599)
+
+
+def _next_non_empty(lines: list[str], start_idx: int) -> tuple[int, Optional[str]]:
+    idx = start_idx
+    while idx < len(lines):
+        value = lines[idx].strip()
+        if value:
+            return idx, value
+        idx += 1
+    return idx, None
+
+
+def _parse_meta_value(line: str, key: str) -> Optional[str]:
+    prefix = f"{key}:"
+    if line.lower().startswith(prefix):
+        return line[len(prefix):].strip()
+    return None
+
+
+def _parse_prompt_definition_from_markdown(content: str, file_stem: str) -> Optional[dict[str, object]]:
+    lines = content.splitlines()
+    idx, first = _next_non_empty(lines, 0)
+    if not first:
+        return None
+
+    prompt_name = file_stem
+    if first.startswith("# "):
+        prompt_name = first[2:].strip() or file_stem
+        idx += 1
+
+    messages: list[dict[str, str]] = []
+    prompt_description = ""
+
+    while True:
+        idx, current = _next_non_empty(lines, idx)
+        if current is None:
+            break
+
+        description = ""
+        role = "assistant"
+        content_type = "text"
+
+        maybe_description = _parse_meta_value(current, "description")
+        if maybe_description is not None:
+            description = maybe_description
+            idx += 1
+            idx, current = _next_non_empty(lines, idx)
+            if current is None:
+                break
+
+        maybe_role = _parse_meta_value(current, "role")
+        if maybe_role is not None:
+            role = maybe_role
+            idx += 1
+            idx, current = _next_non_empty(lines, idx)
+            if current is None:
+                break
+
+        maybe_type = _parse_meta_value(current, "type")
+        if maybe_type is not None:
+            content_type = maybe_type
+            idx += 1
+
+        body_lines: list[str] = []
+        while idx < len(lines):
+            raw_line = lines[idx]
+            if not raw_line.strip():
+                break
+            body_lines.append(raw_line)
+            idx += 1
+
+        text = "\n".join(body_lines).strip()
+        if text:
+            if description and not prompt_description:
+                prompt_description = description
+            messages.append(
+                {
+                    "role": role,
+                    "type": content_type,
+                    "text": text,
+                }
+            )
+
+        while idx < len(lines) and not lines[idx].strip():
+            idx += 1
+
+    if not messages:
+        return None
+
+    return {
+        "name": prompt_name,
+        "description": prompt_description,
+        "messages": messages,
+    }
+
+
+def _iter_prompt_markdown_files(directory: Path) -> Iterator[Path]:
+    if not directory.exists() or not directory.is_dir():
+        return iter(())
+    return iter(sorted(directory.glob("*.md")))
+
+
+def register_prompts_from_markdown() -> None:
+    """Register prompts dynamically from markdown files in the configured prompts directory."""
+    files = list(_iter_prompt_markdown_files(PROMPTS_DIR))
+    if not files:
+        logger.info(f"No dynamic prompt files found in {PROMPTS_DIR}")
+        return
+
+    registered = 0
+    for prompt_file in files:
+        try:
+            content = prompt_file.read_text(encoding="utf-8")
+            prompt = _parse_prompt_definition_from_markdown(content, prompt_file.stem)
+            if not prompt:
+                continue
+
+            prompt_name = str(prompt["name"])
+            prompt_description = str(prompt["description"])
+            prompt_messages = list(prompt["messages"])
+
+            def _build_prompt(messages: list[dict[str, str]]):
+                def _dynamic_prompt() -> list[PromptMessage]:
+                    return [
+                        PromptMessage(
+                            role=message["role"],
+                            content=TextContent(type=message["type"], text=message["text"]),
+                        )
+                        for message in messages
+                    ]
+
+                return _dynamic_prompt
+
+            mcp.prompt(name=prompt_name, description=prompt_description)(
+                _build_prompt(prompt_messages)
+            )
+            registered += 1
+        except Exception as e:
+            logger.warning(f"Failed to register prompts from {prompt_file.name}: {e}")
+
+    logger.info(f"Registered {registered} dynamic prompts from {PROMPTS_DIR}")
 
 @cached(cache=_network_cache)
 def check_network_available() -> bool:
@@ -445,176 +588,9 @@ def clear_cache() -> None:
 
     logger.info("All caches cleared")
 
-@mcp.prompt("check_security", description="Check if the code complies with the security standards.")
-def check_security_prompt() -> list[PromptMessage]:
-    """Check if the code complies with the security standards."""
-    return [
-        PromptMessage(
-            role="assistant",
-            content=TextContent(
-                type="text",
-                text="You are an expert Security Engineer. Follow these steps:\n"
-                     "1. Analyze the source code for security vulnerabilities.\n"
-                     "2. Check dependencies with the respective commands like npm audit --fix, pip-audit, etc.\n"
-                     "3. Use the 'search_documentation' tool for the error code.\n"
-                     "4. Propose three potential fixes.\n"
-                     "5. For each proposed fix, provide a brief explanation of how it addresses the issue and any potential trade-offs.\n"
-                     "6. Make sure all fixes are not breaking the build, compilation and operation of the code and application.\n"
-                     "7. If the error is related to a specific coding guide, reference the relevant guide and explain how it applies to the issue and try to fix it.\n"
-            )
-        ),
-        PromptMessage(
-            role="user",
-            content=TextContent(
-                type="text",
-                text=f"Here is the code to check for security compliance:\n"
-            )
-        )
-    ]
-
-@mcp.prompt("check_code_compliance", description="Check if the code complies with the coding standards.")
-def check_code_compliance_prompt() -> list[PromptMessage]:
-    """Check if the code complies with the coding standards."""
-    return [
-        PromptMessage(
-            role="assistant",
-            content=TextContent(
-                type="text",
-                text="You are an expert Senior Engineer. Follow these steps:\n"
-                     "1. Analyze the source code, architecture and infrastructure stack.\n"
-                     "2. Analyze the best coding practices, styles and patterns according to this MCP codeguide mcp respective to every stack, API, architecture, documentation, tests, security, etc.\n"
-                     "3. Check and consult with other best practices and patterns over internet or Context7 MCP and other resources\n"
-                     "4. Use the 'search_documentation' tool for the error code.\n"
-                     "5. Check deviations and propose TODO steps and improvements to make the code compliant with the best practices and patterns and coding guides.\n"
-                     "6. Track any TODO steps and improvements.\n"
-                     "7. Make sure all fixes are not breaking the build, compilation and operation of the code and application, all the code passes lints, could be build, unit tests are passing.\n"
-                     "8. If the error is related to a specific coding guide, reference the relevant guide and explain how it applies to the issue and try to fix it.\n"
-            )
-        ),
-        PromptMessage(
-            role="user",
-            content=TextContent(
-                type="text",
-                text=f"Here is the check for coding compliance:\n"
-            )
-        )
-    ]
-
-@mcp.prompt("check_code_quality", description="Check if the code complies with the quality standards.")
-def check_code_quality_prompt() -> list[PromptMessage]:
-    """Check if the code complies with the quality standards."""
-    return [
-        PromptMessage(
-            role="assistant",
-            content=TextContent(
-                type="text",
-                text="You are an expert Senior Engineer. Follow these steps:\n"
-                     "1. Analyze the source code, architecture and infrastructure stack.\n"
-                     "2. Analyze the best coding practices, styles and patterns according to this MCP codeguide mcp respective to every stack, API, architecture, documentation, tests, security, etc.\n"
-                     "3. Check and consult with other best practices and patterns over internet or Context7 MCP and other resources\n"
-                     "4. Use the 'search_documentation' tool for the error code.\n"
-                     "5. Check deviations and propose TODO steps and improvements to make the code compliant with the best practices and patterns and coding guides.\n"
-                     "6. Track any TODO steps and improvements.\n"
-                     "7. Make sure all fixes are not breaking the build, compilation and operation of the code and application, all the code passes lints, could be build, unit tests are passing.\n"
-                     "8. If the error is related to a specific coding guide, reference the relevant guide and explain how it applies to the issue and try to fix it.\n"
-            )
-        ),
-        PromptMessage(
-            role="user",
-            content=TextContent(
-                type="text",
-                text=f"Here is the check for coding compliance:\n"
-            )
-        )
-    ]
-
-# # Check the stack used within this application and verify with the latest guides (refresh if needed) provided by the codeguide-mcp (`guides://list`), context7 mcp, and compare the recommendations and best styles with the current status of the implementation of this application and show what are the deviations and if they are serious propose steps to correct them.
-# @mcp.prompt("check_code_quality", description="Check if the code complies with the quality standards.")
-# def check_code_quality_prompt() -> list[PromptMessage]:
-#     """Check if the code complies with the quality standards."""
-#     return [
-#         PromptMessage(
-#             role="assistant",
-#             content=TextContent(
-#                 type="text",
-#                 text="You are an expert Senior Engineer. Follow these steps:\n"
-#                      "1. Analyze the source code, architecture and infrastructure stack.\n"
-#                      "2. Analyze the best coding practices, styles and patterns according to this MCP codeguide mcp respective to every stack, API, architecture, documentation, tests, security, etc.\n"
-#                      "3. Check and consult with other best practices and patterns over internet or Context7 MCP and other resources\n"
-#                      "4. Use the 'search_documentation' tool for the error code.\n"
-#                      "5. Check deviations and propose TODO steps and improvements to make the code compliant with the best practices and patterns and coding guides.\n"
-#                      "6. Track any TODO steps and improvements.\n"
-#                      "7. Make sure all fixes are not breaking the build, compilation and operation of the code and application, all the code passes lints, could be build, unit tests are passing.\n"
-#                      "8. If the error is related to a specific coding guide, reference the relevant guide and explain how it applies to the issue and try to fix it.\n" 
-#             )
-#         ),
-#         PromptMessage(
-#             role="user",
-#             content=TextContent(
-#                 type="text",
-#                 text=f"Here is the check for coding compliance:\n"
-#             )
-#         )
-#     ]
-
-# Check every part of the code for code that could be deduplicated and abstracted and proceed with the deduplication in order to make minimize the surface area that could produce bugs. This should be done for every part of the code - typescript, python, even dockerfiles and docker-compose. Always make sure the changes are not breaking the application build and behavior. Create and update gitea issue for the task.
-@mcp.prompt("deduplicate_code", description="Check the code for duplication and propose deduplication steps.")
-def deduplicate_code_prompt() -> list[PromptMessage]:
-    """Check the code for duplication and propose deduplication steps."""
-    return [
-        PromptMessage(
-            role="assistant",
-            content=TextContent(
-                type="text",
-                text="You are an expert Senior Engineer. Follow these steps:\n"
-                     "1. Analyze the source code, architecture and infrastructure stack.\n"
-                     "2. Identify any duplicated code across the codebase, including TypeScript, Python, Dockerfiles, docker-compose, etc.\n"
-                     "3. Propose specific steps to abstract and deduplicate the identified code while ensuring that the changes do not break the application build and behavior.\n"
-                     "4. Make sure all fixes are not breaking the build, compilation and operation of the code and application, all the code passes lints, could be build, unit tests are passing.\n"
-                     "5. For each proposed deduplication step, provide a brief explanation of how it improves the codebase and any potential trade-offs.\n"
-                     "6. All the changes should produce nice, compact, readable and maintainable code.\n"
-                     "7. Create or update a Git issue, commit for the deduplication task with clear instructions and references to the relevant coding guides if applicable.\n"
-            )
-        ),
-        PromptMessage(
-            role="user",
-            content=TextContent(
-                type="text",
-                text=f"Here is the check for code duplication:\n"
-            )
-        )
-    ]
-
-# Upgrade and update the dependencies
-@mcp.prompt("update_dependencies", description="Check for outdated dependencies and propose updates.")
-def update_dependencies_prompt() -> list[PromptMessage]:
-    """Check for outdated dependencies and propose updates."""
-    return [
-        PromptMessage(
-            role="assistant",
-            content=TextContent(
-                type="text",
-                text="You are an expert Senior Engineer. Follow these steps:\n"
-                     "1. Analyze the project's dependencies across all relevant files (e.g., package.json, requirements.txt, Dockerfiles, images, docker-compose, etc.).\n"
-                     "2. Identify any outdated dependencies and check for known vulnerabilities using appropriate tools (e.g., npm audit, pip-audit).\n"
-                     "3. Identify major and minor version changes, API changes, package name changes, etc. that could produce breaking changes and incompatibilities.\n"
-                     "4. Propose specific updates for the identified outdated dependencies while ensuring that the changes do not break the application build and behavior.\n"
-                     "5. Make sure all fixes are not breaking the build, compilation and operation of the code and application, all the code passes lints, could be build, unit tests are passing.\n"
-                     "6. For each proposed dependency update, provide a brief explanation of how it improves the project and any potential trade-offs.\n"
-                     "7. Create or update a Git issue, commit for the dependency update task with clear instructions and references to the relevant coding guides if applicable.\n"
-            )
-        ),
-        PromptMessage(
-            role="user",
-            content=TextContent(
-                type="text",
-                text=f"Here is the check for outdated dependencies:\n"
-            )
-        )
-    ]
-
 def main() -> None:
     """Run the MCP server."""
+    register_prompts_from_markdown()
     mcp.run()
 
 

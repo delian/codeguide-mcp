@@ -219,6 +219,149 @@ MATCH (a:Person {name: 'Alice'})-[:FRIEND_OF*2]-(c)
    - Use InfluxDB, TimescaleDB
    - Better specialized solutions exist
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. RED: Write a failing test first
+   ↓
+2. GREEN: Write minimal code to make it pass
+   ↓
+3. REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for Neo4j
+
+```python
+# Step 1: RED - Write failing test
+import pytest
+from neo4j import GraphDatabase
+
+@pytest.fixture
+def neo4j_session():
+    driver = GraphDatabase.driver("bolt://localhost:7687", auth=("neo4j", "test"))
+    with driver.session() as session:
+        yield session
+    driver.close()
+
+def test_friend_recommendation_returns_mutual_connections(neo4j_session):
+    """Test that recommendation query returns friends-of-friends not already connected."""
+    # Setup test graph
+    neo4j_session.run("MATCH (n) DETACH DELETE n")
+    neo4j_session.run("""
+        CREATE (alice:Person {name: 'Alice'})
+        CREATE (bob:Person {name: 'Bob'})
+        CREATE (carol:Person {name: 'Carol'})
+        CREATE (alice)-[:KNOWS]->(bob)
+        CREATE (bob)-[:KNOWS]->(carol)
+    """)
+
+    result = neo4j_session.run("""
+        MATCH (me:Person {name: $name})-[:KNOWS]->(friend)-[:KNOWS]->(fof:Person)
+        WHERE NOT (me)-[:KNOWS]->(fof) AND me <> fof
+        RETURN fof.name AS recommended, count(friend) AS mutual_friends
+        ORDER BY mutual_friends DESC
+    """, name="Alice")
+
+    records = list(result)
+    assert len(records) == 1
+    assert records[0]["recommended"] == "Carol"
+    assert records[0]["mutual_friends"] == 1
+
+# FAILS - recommendation query or graph setup not yet implemented in production code
+
+# Step 2: GREEN - Implement the recommendation function
+def get_friend_recommendations(tx, person_name):
+    result = tx.run("""
+        MATCH (me:Person {name: $name})-[:KNOWS]->(friend)-[:KNOWS]->(fof:Person)
+        WHERE NOT (me)-[:KNOWS]->(fof) AND me <> fof
+        RETURN fof.name AS recommended, count(friend) AS mutual_friends
+        ORDER BY mutual_friends DESC
+    """, name=person_name)
+    return [{"name": r["recommended"], "mutual_friends": r["mutual_friends"]} for r in result]
+
+# PASSES
+
+# Step 3: REFACTOR - Add index hint, bound traversal depth, parameterize limit
+def get_friend_recommendations(tx, person_name, limit=10):
+    result = tx.run("""
+        MATCH (me:Person {name: $name})-[:KNOWS]->(friend)-[:KNOWS]->(fof:Person)
+        WHERE NOT (me)-[:KNOWS]->(fof) AND me <> fof
+        RETURN fof.name AS recommended, count(friend) AS mutual_friends
+        ORDER BY mutual_friends DESC
+        LIMIT $limit
+    """, name=person_name, limit=limit)
+    return [{"name": r["recommended"], "mutual_friends": r["mutual_friends"]} for r in result]
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. Bug Reported/Discovered
+   ↓
+2. Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. Verify the test fails for the right reason
+   ↓
+4. Fix the bug (make the test pass)
+   ↓
+5. Verify the test now PASSES
+   ↓
+6. Document the bug in test comments (include bug ID)
+   ↓
+7. Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix
+
+```python
+# Bug Report: BUG-1042 - Uniqueness constraint on Person.email not enforced,
+# causing duplicate nodes on MERGE when email casing differs.
+
+def test_bug_1042_case_insensitive_email_merge(neo4j_session):
+    """Regression test: MERGE on Person.email must be case-insensitive."""
+    neo4j_session.run("MATCH (n) DETACH DELETE n")
+
+    # Insert with lowercase email
+    neo4j_session.run(
+        "MERGE (p:Person {email: toLower($email)}) SET p.name = $name",
+        email="Alice@Example.COM", name="Alice"
+    )
+    # Insert with mixed-case email (should match existing node)
+    neo4j_session.run(
+        "MERGE (p:Person {email: toLower($email)}) SET p.name = $name",
+        email="alice@example.com", name="Alice"
+    )
+
+    result = neo4j_session.run("MATCH (p:Person) RETURN count(p) AS cnt")
+    assert result.single()["cnt"] == 1, "Duplicate Person nodes created for same email"
+
+# Fix: Normalize email to lowercase in all MERGE operations using toLower()
+# and create a unique constraint on the normalized value:
+#   CREATE CONSTRAINT person_email_unique FOR (p:Person) REQUIRE p.email IS UNIQUE
+```
+
+### Prohibited Practices for Bug Fixes
+
+**NEVER:**
+- Fix a bug without adding a regression test first
+- Write implementation before writing tests (violates TDD)
+- Skip the Red-Green-Refactor cycle
+- Commit code with failing tests
+- Remove tests to make code pass
+- Modify production schema without migration tests
+
 ---
 
 ## 3. Cypher Query Language

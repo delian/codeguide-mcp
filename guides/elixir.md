@@ -119,6 +119,160 @@ end
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. RED: Write a failing test first
+   ↓
+2. GREEN: Write minimal code to make it pass
+   ↓
+3. REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for Elixir
+
+```elixir
+# Step 1: RED - Write failing test first
+defmodule MyApp.Accounts.EmailValidatorTest do
+  use ExUnit.Case, async: true
+
+  alias MyApp.Accounts.EmailValidator
+
+  describe "validate/1" do
+    test "returns :ok for a valid email" do
+      assert {:ok, "user@example.com"} = EmailValidator.validate("user@example.com")
+    end
+
+    test "returns :error for an email without @" do
+      assert {:error, :invalid_format} = EmailValidator.validate("invalid-email")
+    end
+
+    test "returns :error for an empty string" do
+      assert {:error, :invalid_format} = EmailValidator.validate("")
+    end
+  end
+end
+
+# Run: mix test test/my_app/accounts/email_validator_test.exs
+# FAILS - EmailValidator module does not exist
+
+# Step 2: GREEN - Write minimal implementation
+defmodule MyApp.Accounts.EmailValidator do
+  @spec validate(String.t()) :: {:ok, String.t()} | {:error, :invalid_format}
+  def validate(email) when is_binary(email) do
+    if String.contains?(email, "@") do
+      {:ok, email}
+    else
+      {:error, :invalid_format}
+    end
+  end
+end
+
+# Run: mix test test/my_app/accounts/email_validator_test.exs
+# PASSES - all tests pass
+
+# Step 3: REFACTOR - Improve with regex validation
+defmodule MyApp.Accounts.EmailValidator do
+  @email_regex ~r/^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+  @spec validate(String.t()) :: {:ok, String.t()} | {:error, :invalid_format}
+  def validate(email) when is_binary(email) do
+    if Regex.match?(@email_regex, email) do
+      {:ok, String.downcase(email)}
+    else
+      {:error, :invalid_format}
+    end
+  end
+end
+# Tests still pass
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. Bug Reported/Discovered
+   ↓
+2. Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. Verify the test fails for the right reason
+   ↓
+4. Fix the bug (make the test pass)
+   ↓
+5. Verify the test now PASSES
+   ↓
+6. Document the bug in test comments (include bug ID)
+   ↓
+7. Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix
+
+```elixir
+# Bug Report #1042: EmailValidator accepts emails with spaces like "user @example.com"
+
+# Step 1-2: Write test that reproduces the bug
+defmodule MyApp.Accounts.EmailValidatorTest do
+  use ExUnit.Case, async: true
+
+  alias MyApp.Accounts.EmailValidator
+
+  describe "validate/1" do
+    # Regression test for Bug #1042
+    test "rejects emails containing spaces" do
+      assert {:error, :invalid_format} = EmailValidator.validate("user @example.com")
+      assert {:error, :invalid_format} = EmailValidator.validate(" user@example.com")
+      assert {:error, :invalid_format} = EmailValidator.validate("user@example.com ")
+    end
+  end
+end
+
+# Run: mix test test/my_app/accounts/email_validator_test.exs
+# FAILS - validate/1 returns {:ok, ...} for emails with spaces
+
+# Step 3: Fix the bug
+defmodule MyApp.Accounts.EmailValidator do
+  @email_regex ~r/^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+  @spec validate(String.t()) :: {:ok, String.t()} | {:error, :invalid_format}
+  def validate(email) when is_binary(email) do
+    trimmed = String.trim(email)
+
+    if trimmed == email and Regex.match?(@email_regex, email) do
+      {:ok, String.downcase(email)}
+    else
+      {:error, :invalid_format}
+    end
+  end
+end
+
+# Run: mix test test/my_app/accounts/email_validator_test.exs
+# PASSES - bug fixed, regression prevented
+```
+
+### Prohibited Practices for Bug Fixes
+
+**NEVER:**
+- Fix a bug without adding a regression test first
+- Write implementation before writing tests (violates TDD)
+- Skip the Red-Green-Refactor cycle
+- Commit code with failing tests
+- Remove tests to make code pass
+- Use `@tag :skip` to bypass failing tests instead of fixing them
+
+---
+
 ## 3. Naming Conventions (MANDATORY)
 
 ### A. Variables and Functions
@@ -203,14 +357,11 @@ def find(_), do: :not_found
 ### B. Case and With
 
 ```elixir
-# ✅ CORRECT: case for branching
-def process_status(order) do
-  case order.status do
-    :pending -> handle_pending(order)
-    :processing -> handle_processing(order)
-    :shipped -> handle_shipped(order)
-    status -> {:error, {:unknown_status, status}}
-  end
+# ✅ CORRECT: case for branching on a single value
+case order.status do
+  :pending -> handle_pending(order)
+  :processing -> handle_processing(order)
+  status -> {:error, {:unknown_status, status}}
 end
 
 # ✅ CORRECT: with for happy path chaining
@@ -478,6 +629,34 @@ defmodule MyApp.Workers.OrderProcessor do
 end
 ```
 
+### A2. GenServer Best Practices
+
+```elixir
+# ✅ CORRECT: Use handle_continue for expensive init work
+# Avoids blocking the supervisor during init/1
+@impl true
+def init(opts) do
+  {:ok, %{data: nil, opts: opts}, {:continue, :warm_cache}}
+end
+
+@impl true
+def handle_continue(:warm_cache, state) do
+  data = expensive_load(state.opts)
+  {:noreply, %{state | data: data}}
+end
+
+# ✅ CORRECT: Use timeout of 0 to trigger immediate first action
+@impl true
+def init(opts) do
+  {:ok, %{endpoint: opts[:endpoint]}, 0}
+end
+
+# Key rules:
+# - Always annotate callbacks with @impl true
+# - Separate client API from server callbacks clearly
+# - Prefer GenServer over Agent when you need handle_info or complex logic
+```
+
 ### B. Supervisor
 
 ```elixir
@@ -493,56 +672,77 @@ defmodule MyApp.Application do
       # PubSub
       {Phoenix.PubSub, name: MyApp.PubSub},
 
+      # Process registry
+      {Registry, keys: :unique, name: MyApp.Registry},
+
       # Background workers
       {MyApp.Workers.OrderProcessor, []},
 
       # Dynamic supervisor for on-demand processes
-      {DynamicSupervisor, strategy: :one_for_one, name: MyApp.TaskSupervisor},
+      {DynamicSupervisor, strategy: :one_for_one, name: MyApp.DynamicSupervisor},
 
-      # Web endpoint
+      # Task supervisor for fire-and-forget async work
+      {Task.Supervisor, name: MyApp.TaskSupervisor},
+
+      # Telemetry
+      MyApp.Telemetry,
+
+      # Web endpoint (must be last)
       MyAppWeb.Endpoint
     ]
 
     opts = [strategy: :one_for_one, name: MyApp.Supervisor]
     Supervisor.start_link(children, opts)
   end
-end
 
-# Supervisor strategies:
-# :one_for_one  - Only restart failed child
-# :one_for_all  - Restart all children if one fails
-# :rest_for_one - Restart failed child and all started after it
+  @impl true
+  def config_change(changed, _new, removed) do
+    MyAppWeb.Endpoint.config_change(changed, removed)
+    :ok
+  end
+end
 ```
 
-### C. Task and Agent
+```elixir
+# Supervisor strategies:
+# :one_for_one  - Only restart failed child (children are independent)
+# :rest_for_one - Restart failed child + all started after it (ordered dependencies)
+# :one_for_all  - Restart all children (tightly coupled processes)
+#
+# ✅ Always set max_restarts and max_seconds in production:
+# opts = [strategy: :one_for_one, max_restarts: 5, max_seconds: 10]
+```
+
+### B3. DynamicSupervisor and Registry
 
 ```elixir
-# ✅ CORRECT: Task for async work
-def send_notifications(users) do
-  users
-  |> Enum.map(fn user ->
-    Task.Supervisor.async_nolink(MyApp.TaskSupervisor, fn ->
-      send_notification(user)
-    end)
-  end)
-  |> Task.await_many(5_000)
-end
+# DynamicSupervisor adds children on demand; Registry provides named lookup.
+# Combine them for per-user/per-tenant processes.
 
-# ✅ CORRECT: Agent for simple state
-defmodule MyApp.Counter do
-  use Agent
+# Start in supervisor: {DynamicSupervisor, name: MyApp.DynSup, strategy: :one_for_one}
+# Start in supervisor: {Registry, keys: :unique, name: MyApp.Registry}
 
-  def start_link(initial_value) do
-    Agent.start_link(fn -> initial_value end, name: __MODULE__)
-  end
+# Add children dynamically:
+DynamicSupervisor.start_child(MyApp.DynSup, {MyApp.UserSession, user_id: id})
 
-  def value do
-    Agent.get(__MODULE__, & &1)
-  end
+# Name processes via Registry:
+defp via(user_id), do: {:via, Registry, {MyApp.Registry, {:session, user_id}}}
+```
 
-  def increment do
-    Agent.update(__MODULE__, &(&1 + 1))
-  end
+### C. Task and Task.Supervisor
+
+```elixir
+# Async work with results:
+tasks = Enum.map(users, &Task.Supervisor.async_nolink(MyApp.TaskSupervisor, fn -> notify(&1) end))
+results = Task.await_many(tasks, 5_000)
+
+# Fire-and-forget (no result needed):
+Task.Supervisor.start_child(MyApp.TaskSupervisor, fn -> AuditLog.record(user, action) end)
+
+# Timeout handling with yield/shutdown:
+case Task.yield(task, 5_000) || Task.shutdown(task) do
+  {:ok, result} -> result
+  nil -> {:error, :timeout}
 end
 ```
 
@@ -596,24 +796,8 @@ defmodule MyAppWeb.UserController do
   end
 end
 
-# Fallback controller for error handling
-defmodule MyAppWeb.FallbackController do
-  use MyAppWeb, :controller
-
-  def call(conn, {:error, :not_found}) do
-    conn
-    |> put_status(:not_found)
-    |> put_view(json: MyAppWeb.ErrorJSON)
-    |> render(:"404")
-  end
-
-  def call(conn, {:error, %Ecto.Changeset{} = changeset}) do
-    conn
-    |> put_status(:unprocessable_entity)
-    |> put_view(json: MyAppWeb.ChangesetJSON)
-    |> render(:error, changeset: changeset)
-  end
-end
+# FallbackController handles errors from action_fallback:
+# {:error, :not_found} -> 404, {:error, %Changeset{}} -> 422
 ```
 
 ### B. LiveView
@@ -670,9 +854,249 @@ defmodule MyAppWeb.UserLive.Index do
 end
 ```
 
+### B2. LiveView Lifecycle
+
+```
+mount/3 -> handle_params/3 -> render/1 -> (handle_event/3 | handle_info/2) -> render/1 -> ...
+```
+
+mount runs twice (static render + WebSocket connect). Use `connected?/1` to gate subscriptions and async work:
+
+```elixir
+@impl true
+def mount(_params, _session, socket) do
+  if connected?(socket), do: Phoenix.PubSub.subscribe(MyApp.PubSub, "orders")
+  {:ok, assign(socket, loading: not connected?(socket), orders: [])}
+end
+```
+
+### B3. LiveComponent Patterns
+
+```elixir
+# LiveComponents encapsulate reusable UI with their own state and events.
+# Use phx-target={@myself} to route events to the component, not the parent.
+
+defmodule MyAppWeb.Components.UserCard do
+  use MyAppWeb, :live_component
+
+  @impl true
+  def update(assigns, socket) do
+    {:ok, socket |> assign(assigns) |> assign_new(:editing, fn -> false end)}
+  end
+
+  @impl true
+  def handle_event("edit", _, socket) do
+    {:noreply, assign(socket, editing: true)}
+  end
+end
+
+# Usage: <.live_component module={UserCard} id={"user-#{user.id}"} user={user} />
+```
+
+### B4. Streams for Large Collections
+
+```elixir
+# Streams send only changed DOM elements over the wire.
+# Use them instead of assigns for any list that may grow large or change frequently.
+
+@impl true
+def mount(_params, _session, socket) do
+  {:ok, stream(socket, :orders, Orders.list_recent(limit: 50))}
+end
+
+# Insert, update, or remove individual items without re-rendering the full list:
+def handle_info({:order_created, order}, socket) do
+  {:noreply, stream_insert(socket, :orders, order, at: 0)}
+end
+
+def handle_info({:order_deleted, order}, socket) do
+  {:noreply, stream_delete(socket, :orders, order)}
+end
+
+# In template, use phx-update="stream" and iterate with @streams:
+# <div id="orders" phx-update="stream">
+#   <div :for={{dom_id, order} <- @streams.orders} id={dom_id}>...</div>
+# </div>
+```
+
+### B5. JavaScript Hooks and pushEvent
+
+```elixir
+# JS hooks integrate client-side JS with LiveView (charts, maps, clipboard).
+# Define hooks in app.js, pass to LiveSocket. Attach with phx-hook="Name".
+# Push data from server: push_event(socket, "event-name", %{data: data})
+# Receive on client: this.handleEvent("event-name", ({data}) => ...)
+# Use phx-update="ignore" on hook elements so LiveView does not overwrite them.
+```
+
+### B6. File Uploads with LiveView
+
+```elixir
+# In mount: allow_upload(socket, :avatar, accept: ~w(.jpg .png), max_entries: 1)
+# In handle_event("save"): consume_uploaded_entries(socket, :avatar, fn %{path: path}, entry -> ... end)
+# Template: <.live_file_input upload={@uploads.avatar} />
+# Preview:  <.live_img_preview entry={entry} />
+```
+
 ---
 
-## 9. Testing (MANDATORY)
+## 9. Ecto Patterns (MANDATORY)
+
+### A. Embedded Schemas
+
+```elixir
+# Embedded schemas define structured data without a database table (JSON columns, value objects).
+
+defmodule MyApp.Accounts.Address do
+  use Ecto.Schema
+  import Ecto.Changeset
+
+  @primary_key false
+  embedded_schema do
+    field :street, :string
+    field :city, :string
+    field :zip, :string
+  end
+
+  def changeset(address, attrs) do
+    address |> cast(attrs, [:street, :city, :zip]) |> validate_required([:street, :city, :zip])
+  end
+end
+
+# In parent schema: embeds_one :address, Address, on_replace: :update
+# In changeset: cast_embed(:address, required: true)
+```
+
+### B. Schemaless Changesets
+
+```elixir
+# Validate data without a schema. Useful for search forms, API params, filters.
+
+@types %{query: :string, category: :string, min_price: :decimal, page: :integer}
+
+def validate_search(params) do
+  {%{}, @types}
+  |> cast(params, Map.keys(@types))
+  |> validate_required([:query])
+  |> validate_length(:query, min: 2)
+  |> apply_action(:validate)
+end
+```
+
+### C. Ecto.Multi for Transactions
+
+```elixir
+# Ecto.Multi composes operations into a single transaction. If any step fails, all roll back.
+
+def place_order(user, items) do
+  Ecto.Multi.new()
+  |> Ecto.Multi.insert(:order, Order.changeset(%Order{}, %{user_id: user.id, status: :pending}))
+  |> Ecto.Multi.run(:line_items, fn repo, %{order: order} ->
+    entries = Enum.map(items, &%{order_id: order.id, product_id: &1.product_id, quantity: &1.qty})
+    {count, _} = repo.insert_all(LineItem, entries)
+    {:ok, count}
+  end)
+  |> Repo.transaction()
+  |> case do
+    {:ok, %{order: order}} -> {:ok, order}
+    {:error, step, changeset, _} -> {:error, {step, changeset}}
+  end
+end
+```
+
+### D. Dynamic Queries
+
+```elixir
+# Build queries dynamically with Enum.reduce or Ecto.Query.dynamic/2.
+
+defmodule MyApp.Products.Filters do
+  import Ecto.Query
+
+  def filter(params) do
+    Product
+    |> apply_filters(params)
+    |> order_by([p], desc: p.inserted_at)
+    |> limit(20)
+  end
+
+  defp apply_filters(query, params) do
+    Enum.reduce(params, query, fn
+      {"category", val}, q -> where(q, [p], p.category == ^val)
+      {"min_price", val}, q -> where(q, [p], p.price >= ^val)
+      {"search", val}, q -> where(q, [p], ilike(p.name, ^"%#{val}%"))
+      _, q -> q
+    end)
+  end
+end
+
+# Use dynamic/2 for composable where clauses:
+conditions = dynamic([p], p.active == true)
+conditions = if name, do: dynamic([p], ^conditions and ilike(p.name, ^"%#{name}%")), else: conditions
+from(p in Product, where: ^conditions)
+```
+
+### E. Custom Ecto Types
+
+```elixir
+# Implement Ecto.Type for custom serialization (e.g., encryption, money).
+# Callbacks: type/0, cast/1, dump/1, load/1
+defmodule MyApp.Types.EncryptedString do
+  use Ecto.Type
+  def type, do: :binary
+  def cast(v) when is_binary(v), do: {:ok, v}
+  def cast(_), do: :error
+  def dump(v) when is_binary(v), do: {:ok, MyApp.Encryption.encrypt(v)}
+  def dump(_), do: :error
+  def load(v) when is_binary(v), do: {:ok, MyApp.Encryption.decrypt(v)}
+  def load(_), do: :error
+end
+# Usage: field :email_encrypted, MyApp.Types.EncryptedString
+```
+
+### F. Multi-Tenancy with Prefixes
+
+```elixir
+# Use Ecto prefix option for PostgreSQL schema-based multi-tenancy.
+# Override default_options/1 in Repo to set prefix from Process dictionary.
+# Set tenant in Plug: MyApp.Repo.put_tenant(tenant_id)
+# Migrations per tenant: Ecto.Migrator.run(Repo, path, :up, prefix: "tenant_#{id}")
+```
+
+### G. Migration Best Practices
+
+```elixir
+# ✅ CORRECT: Always write reversible migrations using change/0
+defmodule MyApp.Repo.Migrations.AddOrdersTable do
+  use Ecto.Migration
+
+  def change do
+    create table(:orders, primary_key: false) do
+      add :id, :binary_id, primary_key: true
+      add :number, :string, null: false
+      add :status, :string, null: false, default: "pending"
+      add :user_id, references(:users, type: :binary_id, on_delete: :restrict), null: false
+      timestamps(type: :utc_datetime)
+    end
+
+    create unique_index(:orders, [:number])
+    create index(:orders, [:user_id])
+  end
+end
+
+# Safe migration rules:
+# - Add columns as nullable or with a default (never NOT NULL without default)
+# - Never rename columns in one step (add new, migrate data, drop old)
+# - Use @disable_ddl_transaction true and concurrently: true for indexes on large tables
+# - Use up/down instead of change when the migration is not reversible
+```
+
+### H. Repo Callbacks and Telemetry
+
+Attach `:telemetry` handlers to `[:my_app, :repo, :query]` events for slow query logging and monitoring. Ecto emits telemetry automatically for every query with `total_time`, `queue_time`, and `decode_time` measurements.
+
+---
+
+## 10. Testing (MANDATORY)
 
 ### A. Unit Tests
 
@@ -738,89 +1162,313 @@ end
 defmodule MyAppWeb.UserControllerTest do
   use MyAppWeb.ConnCase
 
-  alias MyApp.Accounts
-
-  @create_attrs %{email: "test@example.com", name: "Test User"}
-  @update_attrs %{name: "Updated Name"}
-  @invalid_attrs %{email: nil}
-
   setup %{conn: conn} do
     {:ok, conn: put_req_header(conn, "accept", "application/json")}
   end
 
-  describe "index" do
-    test "lists all users", %{conn: conn} do
-      conn = get(conn, ~p"/api/users")
-      assert json_response(conn, 200)["data"] == []
-    end
+  test "create and get user", %{conn: conn} do
+    conn = post(conn, ~p"/api/users", user: %{email: "test@example.com", name: "Test"})
+    assert %{"id" => id} = json_response(conn, 201)["data"]
+
+    conn = get(conn, ~p"/api/users/#{id}")
+    assert %{"email" => "test@example.com"} = json_response(conn, 200)["data"]
   end
 
-  describe "create user" do
-    test "renders user when data is valid", %{conn: conn} do
-      conn = post(conn, ~p"/api/users", user: @create_attrs)
-      assert %{"id" => id} = json_response(conn, 201)["data"]
-
-      conn = get(conn, ~p"/api/users/#{id}")
-      assert %{
-        "id" => ^id,
-        "email" => "test@example.com",
-        "name" => "Test User"
-      } = json_response(conn, 200)["data"]
-    end
-
-    test "renders errors when data is invalid", %{conn: conn} do
-      conn = post(conn, ~p"/api/users", user: @invalid_attrs)
-      assert json_response(conn, 422)["errors"] != %{}
-    end
-  end
-
-  describe "update user" do
-    setup [:create_user]
-
-    test "renders user when data is valid", %{conn: conn, user: user} do
-      conn = put(conn, ~p"/api/users/#{user}", user: @update_attrs)
-      assert %{"id" => id} = json_response(conn, 200)["data"]
-
-      conn = get(conn, ~p"/api/users/#{id}")
-      assert %{"name" => "Updated Name"} = json_response(conn, 200)["data"]
-    end
-  end
-
-  defp create_user(_) do
-    {:ok, user} = Accounts.create_user(@create_attrs)
-    %{user: user}
+  test "returns 422 for invalid data", %{conn: conn} do
+    conn = post(conn, ~p"/api/users", user: %{email: nil})
+    assert json_response(conn, 422)["errors"] != %{}
   end
 end
 ```
 
+### C. LiveView Tests
+
+```elixir
+defmodule MyAppWeb.UserLive.IndexTest do
+  use MyAppWeb.ConnCase
+  import Phoenix.LiveViewTest
+
+  test "lists all users", %{conn: conn} do
+    {:ok, user} = Accounts.create_user(%{email: "test@example.com", name: "Test"})
+    {:ok, _live, html} = live(conn, ~p"/users")
+    assert html =~ user.name
+  end
+
+  test "navigates and creates user", %{conn: conn} do
+    {:ok, live, _html} = live(conn, ~p"/users/new")
+    live |> form("#user-form", user: %{email: "new@example.com", name: "New"}) |> render_submit()
+    assert_patch(live, ~p"/users")
+    assert render(live) =~ "new@example.com"
+  end
+
+  test "deletes user", %{conn: conn} do
+    {:ok, user} = Accounts.create_user(%{email: "del@example.com", name: "Del"})
+    {:ok, live, _html} = live(conn, ~p"/users")
+    live |> element("#user-#{user.id} a", "Delete") |> render_click()
+    refute has_element?(live, "#user-#{user.id}")
+  end
+end
+```
+
+### D. Mox for Mock Dependencies
+
+```elixir
+# Mox defines mocks based on behaviours, ensuring mocks match the real interface.
+
+# 1. Define behaviour:
+defmodule MyApp.PaymentGateway do
+  @callback charge(integer(), String.t()) :: {:ok, map()} | {:error, String.t()}
+end
+
+# 2. In test/support/mocks.ex: Mox.defmock(MyApp.MockPaymentGateway, for: MyApp.PaymentGateway)
+# 3. In config/test.exs: config :my_app, payment_gateway: MyApp.MockPaymentGateway
+# 4. In production code: @gateway Application.compile_env(:my_app, :payment_gateway)
+
+# 5. In tests:
+defmodule MyApp.OrdersTest do
+  use MyApp.DataCase, async: true
+  import Mox
+  setup :verify_on_exit!
+
+  test "charges the payment gateway" do
+    MyApp.MockPaymentGateway
+    |> expect(:charge, fn 5000, "tok_test" -> {:ok, %{id: "ch_123"}} end)
+
+    assert {:ok, %{id: "ch_123"}} = Orders.charge_order(%{total_cents: 5000, payment_token: "tok_test"})
+  end
+end
+```
+
+### E. Property-Based Testing with StreamData
+
+```elixir
+# Property-based testing generates random inputs to find edge cases.
+# Add {:stream_data, "~> 1.0"} and use ExUnitProperties.
+
+property "valid emails always contain @" do
+  check all local <- string(:alphanumeric, min_length: 1),
+            domain <- string(:alphanumeric, min_length: 1),
+            tld <- member_of(["com", "org", "net"]) do
+    assert {:ok, _} = EmailValidator.validate("#{local}@#{domain}.#{tld}")
+  end
+end
+```
+
+### F. Database Sandbox and Async Tests
+
+```elixir
+# Ecto.Adapters.SQL.Sandbox wraps each test in a rolled-back transaction.
+# Use async: true for speed. Share sandbox with spawned processes:
+# Ecto.Adapters.SQL.Sandbox.allow(MyApp.Repo, self(), pid)
+
+setup tags do
+  pid = Ecto.Adapters.SQL.Sandbox.start_owner!(MyApp.Repo, shared: not tags[:async])
+  on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(pid) end)
+end
+```
+
+### G. Integration Testing with Wallaby
+
+Wallaby drives a real browser for end-to-end testing. Use it sparingly for critical flows. Tag integration tests with `@moduletag :integration` and use `use Wallaby.Feature` with `visit/2`, `fill_in/3`, `click/2`, and `assert_has/2`.
+
 ---
 
-## 10. Deployment Checklist
+## 11. Deployment with Releases (MANDATORY)
 
-### Code Quality
-- [ ] Credo passes with no warnings
-- [ ] Dialyzer passes with no warnings
-- [ ] All tests passing
-- [ ] No IO.inspect or dbg in production code
+### A. Mix Releases Configuration
 
-### OTP
-- [ ] Supervisor trees properly configured
-- [ ] Restart strategies appropriate
-- [ ] Process names registered correctly
+```elixir
+# In mix.exs, define releases:
+defp releases do
+  [
+    my_app: [
+      include_executables_for: [:unix],
+      applications: [runtime_tools: :permanent],
+      steps: [:assemble, :tar]
+    ]
+  ]
+end
 
-### Performance
-- [ ] Ecto queries optimized (preloads, indexes)
-- [ ] Background jobs for slow operations
-- [ ] Caching where appropriate
+# Build: MIX_ENV=prod mix release
+# Start: _build/prod/rel/my_app/bin/my_app start
+```
 
-### Security
-- [ ] Input validation on all public interfaces
-- [ ] Authentication/authorization in place
-- [ ] Secrets in runtime.exs, not code
+### B. Runtime Configuration (runtime.exs)
+
+```elixir
+# config/runtime.exs runs at release boot, not at compile time.
+# All secrets and environment-specific values belong here.
+
+import Config
+
+if config_env() == :prod do
+  database_url = System.get_env("DATABASE_URL") || raise "DATABASE_URL not set"
+  secret_key_base = System.get_env("SECRET_KEY_BASE") || raise "SECRET_KEY_BASE not set"
+  host = System.get_env("PHX_HOST") || raise "PHX_HOST not set"
+  port = String.to_integer(System.get_env("PORT") || "4000")
+
+  config :my_app, MyApp.Repo,
+    url: database_url,
+    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10")
+
+  config :my_app, MyAppWeb.Endpoint,
+    url: [host: host, port: 443, scheme: "https"],
+    http: [ip: {0, 0, 0, 0, 0, 0, 0, 0}, port: port],
+    secret_key_base: secret_key_base,
+    server: true
+end
+```
+
+### C. Release Migration Hooks
+
+```elixir
+# Run migrations without Mix: bin/my_app eval MyApp.Release.migrate
+defmodule MyApp.Release do
+  @app :my_app
+  def migrate do
+    Application.load(@app)
+    for repo <- Application.fetch_env!(@app, :ecto_repos) do
+      {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :up, all: true))
+    end
+  end
+end
+```
+
+### D. Docker Builds
+
+Use multi-stage Dockerfiles: build stage (hexpm/elixir, build-essential) runs `mix deps.get`, `mix compile`, `mix release`. Runtime stage (debian-slim) copies only the release. Copy `runtime.exs` after compile so secrets are not baked in. Run as non-root user.
+
+### E. Health Check Endpoints
+
+Add a `/health` endpoint that verifies database connectivity (`SELECT 1`) and returns 200/503 with version info. Load balancers and orchestrators use this for readiness checks.
 
 ---
 
-## 11. Quick Reference
+## 12. Modern Ecosystem Patterns
+
+### A. Telemetry for Instrumentation
+
+```elixir
+# Telemetry is the standard instrumentation library for the BEAM.
+# Phoenix, Ecto, and most libraries emit telemetry events automatically.
+
+defmodule MyApp.Telemetry do
+  use Supervisor
+  import Telemetry.Metrics
+
+  def start_link(arg), do: Supervisor.start_link(__MODULE__, arg, name: __MODULE__)
+
+  @impl true
+  def init(_arg) do
+    Supervisor.init([{:telemetry_poller, period: 10_000}], strategy: :one_for_one)
+  end
+
+  def metrics do
+    [
+      summary("phoenix.router_dispatch.stop.duration", tags: [:route], unit: {:native, :millisecond}),
+      summary("my_app.repo.query.total_time", unit: {:native, :millisecond}),
+      summary("vm.memory.total", unit: {:byte, :megabyte}),
+      counter("my_app.orders.created.count")
+    ]
+  end
+end
+
+# Emit custom events: :telemetry.execute([:my_app, :orders, :created], %{duration: dur}, %{})
+```
+
+### B. Oban for Background Jobs
+
+```elixir
+# Oban provides reliable, persistent background job processing backed by PostgreSQL.
+# Prefer Oban over GenServer-based workers for any job that must survive restarts.
+
+defmodule MyApp.Workers.SendWelcomeEmail do
+  use Oban.Worker, queue: :mailers, max_attempts: 3, unique: [period: 300]
+
+  @impl Oban.Worker
+  def perform(%Oban.Job{args: %{"user_id" => user_id}}) do
+    user = MyApp.Accounts.get_user!(user_id)
+    MyApp.Mailer.deliver_welcome(user)
+  end
+end
+
+# Enqueue: %{user_id: id} |> SendWelcomeEmail.new() |> Oban.insert()
+# Schedule: SendWelcomeEmail.new(%{user_id: id}, scheduled_at: ~U[...]) |> Oban.insert()
+
+# Testing with Oban.Testing:
+# use Oban.Testing, repo: MyApp.Repo
+# assert_enqueued(worker: SendWelcomeEmail, args: %{user_id: user.id})
+# assert :ok = perform_job(SendWelcomeEmail, %{user_id: user.id})
+```
+
+### C. Broadway for Data Processing Pipelines
+
+```elixir
+# Broadway builds concurrent data pipelines with back-pressure and batching.
+# Built on GenStage. Use for consuming SQS, RabbitMQ, Kafka.
+# Implement handle_message/3 (per-message processing) and handle_batch/4 (bulk ops).
+
+defmodule MyApp.Pipeline.OrderEvents do
+  use Broadway
+
+  def start_link(_opts) do
+    Broadway.start_link(__MODULE__,
+      name: __MODULE__,
+      producer: [module: {BroadwaySQS.Producer, queue_url: System.get_env("SQS_QUEUE_URL")}],
+      processors: [default: [concurrency: 10]],
+      batchers: [default: [batch_size: 50, batch_timeout: 1_000]]
+    )
+  end
+
+  @impl true
+  def handle_message(_, %Broadway.Message{data: data} = msg, _) do
+    case Jason.decode(data) do
+      {:ok, event} -> Broadway.Message.update_data(msg, fn _ -> event end)
+      {:error, _} -> Broadway.Message.failed(msg, "invalid JSON")
+    end
+  end
+end
+```
+
+### D. JSON Handling with Jason
+
+```elixir
+# Jason is the standard JSON library. Use @derive for automatic encoding.
+
+defmodule MyApp.Money do
+  @derive {Jason.Encoder, only: [:amount, :currency]}
+  defstruct [:amount, :currency]
+end
+
+# Decode: Jason.decode!(json_string)
+# Decode to atoms (trusted input only): Jason.decode!(str, keys: :atoms!)
+# Encode: Jason.encode!(%{name: "Alice"})
+# Phoenix uses Jason by default in 1.7+.
+```
+
+### E. Nx and Machine Learning
+
+Nx (Numerical Elixir) brings tensors and numerical computing to the BEAM. Use `defn` for compiled numerical functions with GPU/TPU acceleration. Bumblebee provides pre-trained models for text, image, and audio classification via `Nx.Serving`.
+
+### F. Ash Framework Awareness
+
+Ash is an optional declarative, resource-oriented framework that generates CRUD, authorization, and API layers (GraphQL, JSON:API) from resource definitions. It is best suited for projects with complex domain models and multiple API surfaces. Evaluate whether your project benefits from its declarative approach vs. traditional Phoenix contexts.
+
+---
+
+## 13. Deployment Checklist
+
+- [ ] Credo and Dialyzer pass with no warnings
+- [ ] All tests passing, no IO.inspect/dbg in production code
+- [ ] Supervisor trees configured with appropriate strategies
+- [ ] Ecto queries optimized (preloads, indexes), background jobs for slow ops
+- [ ] Secrets in runtime.exs, CSRF protection enabled
+- [ ] Mix release builds/starts correctly, migrations via release commands
+- [ ] Health check endpoint, telemetry, and monitoring configured
+
+---
+
+## 14. Quick Reference
 
 ```elixir
 # Pattern matching
@@ -862,8 +1510,8 @@ Map.merge(map1, map2)
 
 ---
 
-**Last Updated:** 2026-01-31
-**Version:** 1.0
+**Last Updated:** 2026-02-27
+**Version:** 2.0
 **Maintainer:** Elixir Team
 
 

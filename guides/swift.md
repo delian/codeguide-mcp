@@ -95,6 +95,157 @@ func set(_ value: Int, animated: Bool)    // ✅
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. RED: Write a failing test first
+   ↓
+2. GREEN: Write minimal code to make it pass
+   ↓
+3. REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for Swift
+
+```swift
+// Step 1: RED - Write failing test first
+import XCTest
+@testable import MyApp
+
+final class EmailValidatorTests: XCTestCase {
+
+    func test_validate_withValidEmail_returnsEmail() throws {
+        let result = try EmailValidator.validate("user@example.com")
+        XCTAssertEqual(result, "user@example.com")
+    }
+
+    func test_validate_withoutAtSymbol_throwsInvalidFormat() {
+        XCTAssertThrowsError(try EmailValidator.validate("invalid-email")) { error in
+            XCTAssertEqual(error as? EmailValidationError, .invalidFormat)
+        }
+    }
+
+    func test_validate_withEmptyString_throwsInvalidFormat() {
+        XCTAssertThrowsError(try EmailValidator.validate("")) { error in
+            XCTAssertEqual(error as? EmailValidationError, .invalidFormat)
+        }
+    }
+}
+
+// Run: swift test --filter EmailValidatorTests
+// FAILS - EmailValidator type does not exist
+
+// Step 2: GREEN - Write minimal implementation
+enum EmailValidationError: Error, Equatable {
+    case invalidFormat
+}
+
+struct EmailValidator {
+    static func validate(_ email: String) throws -> String {
+        guard email.contains("@") else {
+            throw EmailValidationError.invalidFormat
+        }
+        return email
+    }
+}
+
+// Run: swift test --filter EmailValidatorTests
+// PASSES - all tests pass
+
+// Step 3: REFACTOR - Improve with regex validation
+struct EmailValidator {
+    private static let emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+    static func validate(_ email: String) throws -> String {
+        guard (try? emailPattern.wholeMatch(in: email)) != nil else {
+            throw EmailValidationError.invalidFormat
+        }
+        return email.lowercased()
+    }
+}
+// Tests still pass
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. Bug Reported/Discovered
+   ↓
+2. Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. Verify the test fails for the right reason
+   ↓
+4. Fix the bug (make the test pass)
+   ↓
+5. Verify the test now PASSES
+   ↓
+6. Document the bug in test comments (include bug ID)
+   ↓
+7. Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix
+
+```swift
+// Bug Report #1042: EmailValidator accepts emails with spaces like "user @example.com"
+
+// Step 1-2: Write test that reproduces the bug
+final class EmailValidatorTests: XCTestCase {
+
+    // Regression test for Bug #1042
+    func test_validate_withSpacesInEmail_throwsInvalidFormat() {
+        XCTAssertThrowsError(try EmailValidator.validate("user @example.com"))
+        XCTAssertThrowsError(try EmailValidator.validate(" user@example.com"))
+        XCTAssertThrowsError(try EmailValidator.validate("user@example.com "))
+    }
+}
+
+// Run: swift test --filter EmailValidatorTests
+// FAILS - validate does not throw for emails with spaces
+
+// Step 3: Fix the bug
+struct EmailValidator {
+    private static let emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+    static func validate(_ email: String) throws -> String {
+        guard email == email.trimmingCharacters(in: .whitespaces) else {
+            throw EmailValidationError.invalidFormat
+        }
+        guard (try? emailPattern.wholeMatch(in: email)) != nil else {
+            throw EmailValidationError.invalidFormat
+        }
+        return email.lowercased()
+    }
+}
+
+// Run: swift test --filter EmailValidatorTests
+// PASSES - bug fixed, regression prevented
+```
+
+### Prohibited Practices for Bug Fixes
+
+**NEVER:**
+- Fix a bug without adding a regression test first
+- Write implementation before writing tests (violates TDD)
+- Skip the Red-Green-Refactor cycle
+- Commit code with failing tests
+- Remove tests to make code pass
+- Force-unwrap (`!`) optionals in production code to work around test failures
+
+---
+
 ## 3. Optionals and Safety (MANDATORY)
 
 ### A. Optional Handling

@@ -338,7 +338,42 @@ resource functionApp 'Microsoft.Web/sites@2022-09-01' = {
 }
 ```
 
-### B. Function Code
+### B. Function App Scaling and Deployment Slots
+
+```bicep
+// Consumption plan (serverless, pay-per-execution)
+resource consumptionPlan 'Microsoft.Web/serverfarms@2022-09-01' = {
+  name: 'plan-func-${appName}-${environment}'
+  location: location
+  sku: { name: 'Y1', tier: 'Dynamic' }
+  properties: { reserved: true }
+}
+
+// Premium plan (pre-warmed instances, VNet integration, no cold start)
+resource premiumPlan 'Microsoft.Web/serverfarms@2022-09-01' = {
+  name: 'plan-func-${appName}-${environment}'
+  location: location
+  sku: { name: 'EP1', tier: 'ElasticPremium' }
+  properties: {
+    reserved: true
+    maximumElasticWorkerCount: 20
+    zoneRedundant: true
+  }
+}
+```
+
+```bash
+# Deploy to staging slot, then swap to production (zero-downtime)
+az functionapp deployment source config-zip \
+  --name func-myapp-prod --resource-group rg-myapp-prod \
+  --slot staging --src app.zip
+
+az functionapp deployment slot swap \
+  --name func-myapp-prod --resource-group rg-myapp-prod \
+  --slot staging --target-slot production
+```
+
+### C. Function Code (HTTP, Queue, Timer Triggers)
 
 ```csharp
 // Function with HTTP trigger
@@ -397,6 +432,58 @@ public class OrderFunctions
         await _orderService.GenerateDailyReportAsync();
     }
 }
+```
+
+### D. Durable Functions
+
+Use Durable Functions for long-running orchestrations. Key patterns: Fan-out/Fan-in (`CallActivityAsync` in parallel + `Task.WhenAll`), Function Chaining (sequential activities), and Human Interaction (with timers). Start orchestrations via HTTP trigger using `DurableTaskClient.ScheduleNewOrchestrationInstanceAsync`.
+
+### E. v4 Programming Model (Node.js)
+
+```javascript
+// function.js - Azure Functions v4 programming model (Node.js)
+const { app, output } = require('@azure/functions');
+const serviceBusOutput = output.serviceBusQueue({ queueName: 'orders', connection: 'ServiceBusConnection' });
+
+app.http('createOrder', {
+    methods: ['POST'], authLevel: 'function', route: 'orders',
+    extraOutputs: [serviceBusOutput],
+    handler: async (request, context) => {
+        const order = await request.json();
+        if (!order?.customerId) return { status: 400, jsonBody: { error: 'Invalid order data' } };
+        const enriched = { id: crypto.randomUUID(), ...order, createdAt: new Date().toISOString() };
+        context.extraOutputs.set(serviceBusOutput, enriched);
+        return { status: 201, jsonBody: enriched };
+    },
+});
+
+app.timer('dailyCleanup', {
+    schedule: '0 0 2 * * *',
+    handler: async (myTimer, context) => { context.log('Running daily cleanup'); },
+});
+
+app.serviceBusQueue('processOrder', {
+    queueName: 'orders', connection: 'ServiceBusConnection',
+    handler: async (message, context) => { context.log('Processing order:', message.id); },
+});
+```
+
+### F. v4 Programming Model (Python)
+
+```python
+# function_app.py
+app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
+
+@app.route(route="orders", methods=["POST"])
+@app.service_bus_queue_output(arg_name="message", queue_name="orders", connection="ServiceBusConnection")
+def create_order(req: func.HttpRequest, message: func.Out[str]) -> func.HttpResponse:
+    order = req.get_json()
+    message.set(json.dumps(order))
+    return func.HttpResponse(json.dumps(order), status_code=201, mimetype="application/json")
+
+@app.timer_trigger(schedule="0 0 6 * * *", arg_name="timer")
+def daily_report(timer: func.TimerRequest) -> None:
+    logging.info("Generating daily report")
 ```
 
 ---
@@ -730,6 +817,16 @@ public class ServiceBusService
 }
 ```
 
+### C. Session-Enabled Queues and Dead-Letter Handling
+
+Use `requiresSession: true` on queues for ordered processing per group (e.g., per customer). Set `SessionId` on messages, process with `CreateSessionProcessor` with `MaxConcurrentCallsPerSession: 1`.
+
+Monitor dead-letter queues at `{queueName}/$deadletterqueue` for poison messages. Log `DeadLetterReason` and `DeadLetterErrorDescription`, then complete or resubmit.
+
+### D. Topic Subscriptions with Filters
+
+Use `CorrelationFilter` for exact property matching and `SqlFilter` for expression-based routing on topic subscriptions. Always enable `deadLetteringOnMessageExpiration` on subscriptions.
+
 ---
 
 ## 9. Application Insights (MANDATORY)
@@ -764,49 +861,51 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
 ### B. Integration in .NET
 
 ```csharp
-// Program.cs
+// Program.cs - Add telemetry
 builder.Services.AddApplicationInsightsTelemetry(options =>
 {
     options.ConnectionString = builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"];
 });
 
-// Custom telemetry
-public class OrderService
-{
-    private readonly TelemetryClient _telemetry;
-
-    public OrderService(TelemetryClient telemetry)
-    {
-        _telemetry = telemetry;
-    }
-
-    public async Task<Order> CreateOrderAsync(CreateOrderRequest request)
-    {
-        using var operation = _telemetry.StartOperation<RequestTelemetry>("CreateOrder");
-
-        try
-        {
-            var order = new Order { /* ... */ };
-
-            _telemetry.TrackEvent("OrderCreated", new Dictionary<string, string>
-            {
-                ["OrderId"] = order.Id,
-                ["CustomerId"] = order.CustomerId
-            }, new Dictionary<string, double>
-            {
-                ["OrderTotal"] = (double)order.Total
-            });
-
-            return order;
-        }
-        catch (Exception ex)
-        {
-            _telemetry.TrackException(ex);
-            throw;
-        }
-    }
-}
+// Custom telemetry: TrackEvent, TrackException, StartOperation
+_telemetry.TrackEvent("OrderCreated", new Dictionary<string, string>
+    { ["OrderId"] = order.Id }, new Dictionary<string, double> { ["Total"] = (double)order.Total });
+_telemetry.TrackException(ex);
 ```
+
+### C. KQL Queries for Azure Monitor
+
+```kql
+// Failed requests in the last 24 hours
+requests
+| where timestamp > ago(24h) and success == false
+| summarize count() by resultCode, name, bin(timestamp, 1h)
+
+// Slow API endpoints (>2s response time)
+requests
+| where timestamp > ago(1h) and duration > 2000
+| summarize avg(duration), max(duration), count() by name
+| order by avg_duration desc
+
+// Dependency failures (SQL, HTTP, Service Bus)
+dependencies
+| where timestamp > ago(1h) and success == false
+| summarize count() by type, target, resultCode
+
+// End-to-end transaction tracing
+union requests, dependencies, exceptions, traces
+| where operation_Id == "specific-operation-id"
+| order by timestamp asc
+
+// Availability and P95 latency by endpoint
+requests
+| where timestamp > ago(24h)
+| summarize availability = countif(success) * 100.0 / count(), p95 = percentile(duration, 95) by name
+```
+
+### D. Alert Rules
+
+Configure `Microsoft.Insights/metricAlerts` for key metrics (Http5xx, response time, CPU). Create `Microsoft.Insights/actionGroups` for email/SMS/webhook notifications. Set `evaluationFrequency: PT5M` and `windowSize: PT15M` for production alerts.
 
 ---
 
@@ -905,50 +1004,364 @@ stages:
                     SourceSlot: 'staging'
 ```
 
----
+### B. Pipeline Templates
 
-## 11. Deployment Checklist
-
-### Security
-- [ ] Managed Identity configured
-- [ ] Key Vault for secrets
-- [ ] Private endpoints enabled
-- [ ] Azure AD authentication
-
-### Reliability
-- [ ] Zone redundancy enabled
-- [ ] Backup configured
-- [ ] Health probes set up
-- [ ] Auto-scaling configured
-
-### Operations
-- [ ] Application Insights enabled
-- [ ] Log Analytics workspace
-- [ ] Alerts configured
-- [ ] Cost management tags
+Use YAML templates for reusable multi-environment deployments. Each template accepts parameters for environment, subscription, app name, and resource group. Include Bicep `az deployment group create` and `AzureWebApp@1` tasks.
 
 ---
 
-## 12. Quick Reference
+## 11. Bicep Patterns (MANDATORY)
+
+### A. Module Organization
+
+```
+infra/
+├── main.bicep                  # Entry point
+├── parameters/
+│   ├── dev.bicepparam          # Environment parameters
+│   ├── staging.bicepparam
+│   └── prod.bicepparam
+├── modules/
+│   ├── networking/vnet.bicep, nsg.bicep, private-endpoints.bicep
+│   ├── compute/app-service.bicep, function-app.bicep, container-app.bicep
+│   ├── data/sql-database.bicep, cosmos-db.bicep, storage-account.bicep
+│   ├── security/key-vault.bicep, managed-identity.bicep
+│   └── monitoring/app-insights.bicep, log-analytics.bicep
+└── bicepconfig.json
+```
+
+### B. Main Entry Point
+
+```bicep
+// main.bicep
+targetScope = 'resourceGroup'
+param appName string
+@allowed(['dev', 'staging', 'prod'])
+param environment string
+param location string = resourceGroup().location
+param tags object = { Application: appName, Environment: environment, ManagedBy: 'Bicep' }
+
+module networking 'modules/networking/vnet.bicep' = {
+  name: 'networking-${uniqueString(deployment().name)}'
+  params: { appName: appName, environment: environment, location: location, tags: tags }
+}
+module identity 'modules/security/managed-identity.bicep' = {
+  name: 'identity-${uniqueString(deployment().name)}'
+  params: { appName: appName, environment: environment, location: location, tags: tags }
+}
+module keyVault 'modules/security/key-vault.bicep' = {
+  name: 'keyvault-${uniqueString(deployment().name)}'
+  params: {
+    appName: appName, environment: environment, location: location, tags: tags
+    subnetId: networking.outputs.privateEndpointSubnetId
+    managedIdentityPrincipalId: identity.outputs.principalId
+  }
+}
+output appServiceUrl string = appService.outputs.defaultHostname
+```
+
+### C. Parameter Files, Types, Conditionals, and Loops
+
+```bicep
+// parameters/prod.bicepparam
+using '../main.bicep'
+param appName = 'myapp'
+param environment = 'prod'
+
+// User-defined types (types.bicep)
+@export()
+type environmentType = 'dev' | 'staging' | 'prod'
+
+// Conditional: Deploy resource only in production
+resource pe 'Microsoft.Network/privateEndpoints@2023-05-01' = if (environment == 'prod') {
+  name: 'pe-st-${appName}'
+  // ...
+}
+
+// Loop: Create multiple resources from array
+resource queues 'Microsoft.ServiceBus/namespaces/queues@2022-10-01-preview' = [
+  for queueName in ['orders', 'notifications', 'audit-log']: {
+    parent: serviceBusNamespace
+    name: queueName
+    properties: { maxDeliveryCount: 5, deadLetteringOnMessageExpiration: true }
+  }
+]
+```
+
+### D. Linting and Migration
+
+```json
+// bicepconfig.json - key rules
+{ "analyzers": { "core": { "rules": {
+  "no-hardcoded-env-urls": { "level": "error" },
+  "no-unused-params": { "level": "error" },
+  "secure-parameter-default": { "level": "error" },
+  "no-hardcoded-location": { "level": "error" },
+  "use-recent-api-versions": { "level": "warning", "configuration": { "maxAgeInDays": 730 } }
+}}}}
+```
 
 ```bash
-# Azure CLI common commands
-az login
-az account set --subscription "Name"
-az group create --name rg-myapp --location eastus
-az webapp up --name app-myapp --resource-group rg-myapp
-az keyvault secret show --vault-name kv-myapp --name secret-name
-az functionapp deployment source config-zip --name func-myapp --src app.zip
-
-# Bicep
-az deployment group create --resource-group rg-myapp --template-file main.bicep
-az bicep build --file main.bicep
+az bicep decompile --file azuredeploy.json          # Convert ARM to Bicep
+az deployment group what-if --resource-group rg-myapp --template-file main.bicep
 ```
 
 ---
 
-**Last Updated:** 2026-01-31
-**Version:** 1.0
+## 12. Container Apps (MANDATORY)
+
+### A. Container App Environment and App
+
+```bicep
+resource containerAppEnv 'Microsoft.App/managedEnvironments@2023-05-01' = {
+  name: 'cae-${appName}-${environment}'
+  location: location
+  properties: {
+    appLogsConfiguration: {
+      destination: 'log-analytics'
+      logAnalyticsConfiguration: { customerId: logAnalytics.properties.customerId, sharedKey: logAnalytics.listKeys().primarySharedKey }
+    }
+    vnetConfiguration: { infrastructureSubnetId: containerAppSubnet.id }
+    zoneRedundant: environment == 'prod'
+  }
+}
+
+resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
+  name: 'ca-${appName}-${environment}'
+  location: location
+  identity: { type: 'UserAssigned', userAssignedIdentities: { '${managedIdentity.id}': {} } }
+  properties: {
+    managedEnvironmentId: containerAppEnv.id
+    configuration: {
+      activeRevisionsMode: 'Multiple'
+      ingress: { external: true, targetPort: 8080, traffic: [{ latestRevision: true, weight: 100 }] }
+      secrets: [{ name: 'db-conn', keyVaultUrl: '${keyVault.properties.vaultUri}secrets/db-conn', identity: managedIdentity.id }]
+      registries: [{ server: '${acr.name}.azurecr.io', identity: managedIdentity.id }]
+    }
+    template: {
+      containers: [{
+        name: 'api'
+        image: '${acr.name}.azurecr.io/${appName}:latest'
+        resources: { cpu: json('0.5'), memory: '1Gi' }
+        env: [{ name: 'ConnectionStrings__Db', secretRef: 'db-conn' }]
+        probes: [{ type: 'Liveness', httpGet: { path: '/health', port: 8080 } }]
+      }]
+      scale: {
+        minReplicas: environment == 'prod' ? 2 : 0
+        maxReplicas: 20
+        rules: [
+          { name: 'http', http: { metadata: { concurrentRequests: '50' } } }
+          { name: 'queue', custom: { type: 'azure-servicebus', metadata: { queueName: 'orders', messageCount: '10' } } }
+        ]
+      }
+    }
+  }
+}
+```
+
+### B. Revision Management and Dapr
+
+```bash
+# Canary: split traffic between revisions
+az containerapp ingress traffic set --name ca-myapp-prod --resource-group rg-myapp-prod \
+  --revision-weight ca-myapp-prod--v1=80 ca-myapp-prod--v2=20
+# Promote: az containerapp ingress traffic set ... --revision-weight ca-myapp-prod--v2=100
+```
+
+Enable Dapr sidecar with `dapr: { enabled: true, appId: appName, appPort: 8080 }` in configuration. Register Dapr components as `managedEnvironments/daprComponents` resources.
+
+---
+
+## 13. Cosmos DB (MANDATORY)
+
+### A. Account, Container, and Partition Key
+
+```bicep
+resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2023-04-15' = {
+  name: 'cosmos-${appName}-${environment}'
+  location: location
+  kind: 'GlobalDocumentDB'
+  properties: {
+    consistencyPolicy: { defaultConsistencyLevel: 'Session' }
+    locations: [
+      { locationName: location, failoverPriority: 0, isZoneRedundant: true }
+      { locationName: secondaryLocation, failoverPriority: 1, isZoneRedundant: true }
+    ]
+    enableAutomaticFailover: true
+    publicNetworkAccess: 'Disabled'
+    disableLocalAuth: true
+  }
+}
+
+resource ordersContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2023-04-15' = {
+  parent: cosmosDb
+  name: 'orders'
+  properties: {
+    resource: {
+      id: 'orders'
+      partitionKey: { paths: ['/customerId'], kind: 'Hash', version: 2 }
+      indexingPolicy: {
+        includedPaths: [{ path: '/customerId/?' }, { path: '/status/?' }]
+        excludedPaths: [{ path: '/description/?' }]
+      }
+    }
+    options: { autoscaleSettings: { maxThroughput: 4000 } }
+  }
+}
+```
+
+### B. Client and Change Feed
+
+```csharp
+var client = new CosmosClient(endpoint, new DefaultAzureCredential(),
+    new CosmosClientOptions { ConnectionMode = ConnectionMode.Direct, ConsistencyLevel = ConsistencyLevel.Session });
+var container = client.GetContainer(dbName, "orders");
+
+// Point read (most efficient), parameterized queries, Change Feed
+var item = await container.ReadItemAsync<Order>(id, new PartitionKey(custId));
+
+// Change Feed for event-driven processing
+var processor = monitoredContainer
+    .GetChangeFeedProcessorBuilder<Order>("proc", async (ctx, changes, ct) => {
+        foreach (var order in changes) await HandleChangeAsync(order);
+    })
+    .WithInstanceName(Environment.MachineName)
+    .WithLeaseContainer(leaseContainer).Build();
+await processor.StartAsync();
+```
+
+```
+PARTITION KEY: High cardinality, even distribution, aligned with queries.
+GOOD: /tenantId, /customerId    BAD: /status, /createdDate
+CONSISTENCY: Strong > Bounded Staleness > Session (DEFAULT) > Consistent Prefix > Eventual
+```
+
+---
+
+## 14. Networking (MANDATORY)
+
+### A. VNet and NSG
+
+```bicep
+resource vnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
+  name: 'vnet-${appName}-${environment}'
+  location: location
+  properties: {
+    addressSpace: { addressPrefixes: ['10.0.0.0/16'] }
+    subnets: [
+      { name: 'snet-app', properties: { addressPrefix: '10.0.1.0/24', delegations: [{ name: 'web', properties: { serviceName: 'Microsoft.Web/serverFarms' } }], networkSecurityGroup: { id: appNsg.id } } }
+      { name: 'snet-pe', properties: { addressPrefix: '10.0.2.0/24', privateEndpointNetworkPolicies: 'Disabled' } }
+      { name: 'snet-aca', properties: { addressPrefix: '10.0.16.0/21', delegations: [{ name: 'aca', properties: { serviceName: 'Microsoft.App/environments' } }] } }
+    ]
+  }
+}
+
+// NSG: AllowHTTPS (100), AllowAzureLB (110), DenyAllInbound (4096)
+// PE NSG: AllowVNetInbound (100), DenyAllInbound (4096)
+```
+
+### B. Private Endpoints and DNS
+
+```bicep
+resource kvPe 'Microsoft.Network/privateEndpoints@2023-05-01' = {
+  name: 'pe-kv-${appName}'
+  location: location
+  properties: {
+    subnet: { id: peSubnet.id }
+    privateLinkServiceConnections: [{ name: 'kv', properties: { privateLinkServiceId: keyVault.id, groupIds: ['vault'] } }]
+  }
+}
+// Create privateDnsZone + virtualNetworkLink + privateDnsZoneGroup for each PE
+// DNS zones: Key Vault=privatelink.vaultcore.azure.net, SQL=privatelink.database.windows.net
+// Storage=privatelink.blob.core.windows.net, Cosmos=privatelink.documents.azure.com
+```
+
+---
+
+## 15. Front Door, WAF, and Policy (MANDATORY)
+
+Use Azure Front Door Premium for global load balancing with WAF. Enable `Microsoft_DefaultRuleSet` 2.1, `Microsoft_BotManagerRuleSet`, and rate limiting custom rules. Use private link origins to keep backends private.
+
+```bash
+az afd profile create --profile-name afd-myapp --resource-group rg-myapp --sku Premium_AzureFrontDoor
+az policy assignment create --name "require-tls-12" \
+  --policy "/providers/Microsoft.Authorization/policyDefinitions/f0e6e85b-9b9f-4a4b-b67b-f730d42f1b0b" \
+  --scope "/subscriptions/${SUBSCRIPTION_ID}"
+az policy state summarize --subscription "${SUBSCRIPTION_ID}" --output table
+```
+
+---
+
+## 16. Managed Identity Best Practices (MANDATORY)
+
+```
+System-Assigned: Tied to resource lifecycle. User-Assigned (RECOMMENDED): Independent, shared.
+NEVER: Store keys in app settings, use account keys, hardcode credentials.
+ALWAYS: Use DefaultAzureCredential, least-privilege RBAC, user-assigned identity.
+```
+
+```csharp
+var credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions {
+    ManagedIdentityClientId = Environment.GetEnvironmentVariable("AZURE_CLIENT_ID")
+});
+// Use with: SecretClient, BlobServiceClient, ServiceBusClient, CosmosClient
+```
+
+Key role IDs: Key Vault Secrets User (`4633458b`), Storage Blob Data Contributor (`ba92f5b4`), Service Bus Data Sender (`69a216fc`), AcrPull (`7f951dda`).
+
+---
+
+## 17. Key Vault Advanced Patterns (MANDATORY)
+
+Use `@Microsoft.KeyVault` references in App Service settings so secrets load as environment variables without code changes. Set `keyVaultReferenceIdentity` to the managed identity.
+
+```bicep
+{ name: 'DbPassword', value: '@Microsoft.KeyVault(VaultName=${kv.name};SecretName=db-password)' }
+```
+
+Cache secrets with short TTL (15 minutes) using `IMemoryCache` for automatic rotation support.
+
+---
+
+## 18. Deployment Checklist
+
+### Security
+- [ ] Managed Identity (user-assigned), Key Vault for secrets, private endpoints
+- [ ] Entra ID auth (disable local auth), NSGs on all subnets, WAF enabled
+- [ ] Azure Policy compliant, TLS 1.2 minimum, least-privilege RBAC
+
+### Reliability
+- [ ] Zone redundancy, multi-region failover, backups configured
+- [ ] Health probes (liveness + readiness), auto-scaling, deployment slots
+- [ ] Dead-letter queue monitoring, circuit breaker patterns
+
+### Networking & Operations
+- [ ] VNet with subnet segmentation, private endpoints + DNS for all PaaS
+- [ ] Application Insights + Log Analytics, alerts for errors/latency, cost tags
+- [ ] Bicep modules per environment, what-if validation, pipeline templates
+
+---
+
+## 19. Quick Reference
+
+```bash
+az login && az account set --subscription "Name"
+az group create --name rg-myapp --location eastus
+az webapp up --name app-myapp --resource-group rg-myapp
+az functionapp deployment source config-zip --name func-myapp --src app.zip
+az containerapp create --name ca-myapp --resource-group rg-myapp --environment cae-myapp --image myacr.azurecr.io/myapp:latest
+az keyvault secret show --vault-name kv-myapp --name secret-name
+az bicep build --file main.bicep
+az deployment group create --resource-group rg-myapp --template-file main.bicep --parameters @parameters/prod.bicepparam
+az deployment group what-if --resource-group rg-myapp --template-file main.bicep
+az network private-endpoint list --resource-group rg-myapp --output table
+az policy state summarize --subscription "${SUBSCRIPTION_ID}"
+```
+
+---
+
+**Last Updated:** 2026-02-27
+**Version:** 2.0
 **Maintainer:** Cloud Team
 
 

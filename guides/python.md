@@ -161,7 +161,7 @@ Always verify first, fix issues, then present the working solution.
 
 ---
 
-## 1A. Test-Driven Development (TDD) Protocol (MANDATORY)
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
 
 **CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
 
@@ -216,7 +216,7 @@ def validate_email(email: str) -> bool:
 
 ---
 
-## 1B. Bug Fix Protocol (MANDATORY)
+## 2B. Bug Fix Protocol (MANDATORY)
 
 **CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
 

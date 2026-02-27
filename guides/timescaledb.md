@@ -126,6 +126,227 @@ SELECT ST_Distance(location, 'POINT(0 0)') FROM sensors;
 CREATE INDEX idx_fts ON events USING gin(to_tsvector('english', description));
 ```
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. RED: Write a failing test first
+   ↓
+2. GREEN: Write minimal code to make it pass
+   ↓
+3. REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for TimescaleDB
+
+```python
+# Step 1: RED - Write failing test
+import pytest
+import psycopg2
+from datetime import datetime, timedelta, timezone
+
+@pytest.fixture
+def db_conn():
+    conn = psycopg2.connect("dbname=testdb user=postgres host=localhost")
+    conn.autocommit = True
+    cur = conn.cursor()
+    # Setup: create hypertable and continuous aggregate
+    cur.execute("DROP TABLE IF EXISTS sensor_data CASCADE;")
+    cur.execute("""
+        CREATE TABLE sensor_data (
+            time TIMESTAMPTZ NOT NULL,
+            sensor_id INTEGER NOT NULL,
+            temperature DOUBLE PRECISION,
+            humidity DOUBLE PRECISION
+        );
+    """)
+    cur.execute("SELECT create_hypertable('sensor_data', 'time');")
+    yield conn
+    cur.execute("DROP TABLE IF EXISTS sensor_data CASCADE;")
+    conn.close()
+
+def test_continuous_aggregate_hourly_avg(db_conn):
+    """Test that continuous aggregate correctly computes hourly averages."""
+    cur = db_conn.cursor()
+
+    # Create continuous aggregate
+    cur.execute("""
+        CREATE MATERIALIZED VIEW sensor_hourly
+        WITH (timescaledb.continuous) AS
+        SELECT
+            time_bucket('1 hour', time) AS bucket,
+            sensor_id,
+            AVG(temperature) AS avg_temp,
+            AVG(humidity) AS avg_humidity
+        FROM sensor_data
+        GROUP BY bucket, sensor_id
+        WITH NO DATA;
+    """)
+
+    # Insert test data: 4 readings in one hour for sensor 1
+    base_time = datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
+    temps = [20.0, 22.0, 24.0, 26.0]  # avg = 23.0
+    for i, temp in enumerate(temps):
+        cur.execute(
+            "INSERT INTO sensor_data (time, sensor_id, temperature, humidity) VALUES (%s, %s, %s, %s)",
+            (base_time + timedelta(minutes=i * 15), 1, temp, 50.0)
+        )
+
+    # Refresh the continuous aggregate
+    cur.execute("""
+        CALL refresh_continuous_aggregate('sensor_hourly', '2024-01-15 10:00:00+00', '2024-01-15 11:00:00+00');
+    """)
+
+    # Verify
+    cur.execute("""
+        SELECT avg_temp FROM sensor_hourly
+        WHERE sensor_id = 1 AND bucket = '2024-01-15 10:00:00+00'
+    """)
+    result = cur.fetchone()
+    assert result is not None, "Continuous aggregate returned no rows"
+    assert result[0] == 23.0, f"Expected avg_temp=23.0, got {result[0]}"
+
+# FAILS - continuous aggregate not yet created in production code
+
+# Step 2: GREEN - Implement continuous aggregate creation
+def create_sensor_hourly_aggregate(conn):
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE MATERIALIZED VIEW IF NOT EXISTS sensor_hourly
+        WITH (timescaledb.continuous) AS
+        SELECT
+            time_bucket('1 hour', time) AS bucket,
+            sensor_id,
+            AVG(temperature) AS avg_temp,
+            AVG(humidity) AS avg_humidity
+        FROM sensor_data
+        GROUP BY bucket, sensor_id
+        WITH NO DATA;
+    """)
+
+# PASSES
+
+# Step 3: REFACTOR - Add refresh policy, compression on aggregate
+def create_sensor_hourly_aggregate(conn):
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE MATERIALIZED VIEW IF NOT EXISTS sensor_hourly
+        WITH (timescaledb.continuous) AS
+        SELECT
+            time_bucket('1 hour', time) AS bucket,
+            sensor_id,
+            AVG(temperature) AS avg_temp,
+            AVG(humidity) AS avg_humidity,
+            COUNT(*) AS sample_count
+        FROM sensor_data
+        GROUP BY bucket, sensor_id
+        WITH NO DATA;
+    """)
+    cur.execute("""
+        SELECT add_continuous_aggregate_policy('sensor_hourly',
+            start_offset => INTERVAL '3 hours',
+            end_offset => INTERVAL '1 hour',
+            schedule_interval => INTERVAL '1 hour');
+    """)
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. Bug Reported/Discovered
+   ↓
+2. Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. Verify the test fails for the right reason
+   ↓
+4. Fix the bug (make the test pass)
+   ↓
+5. Verify the test now PASSES
+   ↓
+6. Document the bug in test comments (include bug ID)
+   ↓
+7. Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix
+
+```python
+# Bug Report: BUG-4015 - Compressed chunks return incorrect results
+# when querying with a time range that spans a compression boundary.
+
+import pytest
+import psycopg2
+from datetime import datetime, timedelta, timezone
+
+def test_bug_4015_compressed_chunk_boundary_query(db_conn):
+    """Regression test: Queries spanning compressed/uncompressed chunks must return all rows."""
+    cur = db_conn.cursor()
+
+    # Enable compression on the hypertable
+    cur.execute("""
+        ALTER TABLE sensor_data SET (
+            timescaledb.compress,
+            timescaledb.compress_segmentby = 'sensor_id',
+            timescaledb.compress_orderby = 'time DESC'
+        );
+    """)
+
+    # Insert data across two chunks (assuming 7-day chunk interval)
+    base_time = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    for day in range(14):  # 14 days of data across 2 chunks
+        cur.execute(
+            "INSERT INTO sensor_data (time, sensor_id, temperature, humidity) VALUES (%s, %s, %s, %s)",
+            (base_time + timedelta(days=day), 1, 20.0 + day, 50.0)
+        )
+
+    # Compress only the first chunk (older data)
+    cur.execute("""
+        SELECT compress_chunk(c.chunk_name)
+        FROM timescaledb_information.chunks c
+        WHERE c.hypertable_name = 'sensor_data'
+        ORDER BY c.range_start
+        LIMIT 1;
+    """)
+
+    # Query spanning both compressed and uncompressed chunks
+    cur.execute("""
+        SELECT COUNT(*) FROM sensor_data
+        WHERE sensor_id = 1
+          AND time >= '2024-01-01'::timestamptz
+          AND time < '2024-01-15'::timestamptz
+    """)
+    result = cur.fetchone()
+    assert result[0] == 14, (
+        f"BUG-4015: Expected 14 rows spanning compressed/uncompressed chunks, got {result[0]}"
+    )
+
+# Fix: Ensured compression policy uses segment_by that aligns with query filters,
+# and verified decompress_chunk is not needed for standard SELECT queries.
+```
+
+### Prohibited Practices for Bug Fixes
+
+**NEVER:**
+- Fix a bug without adding a regression test first
+- Write implementation before writing tests (violates TDD)
+- Skip the Red-Green-Refactor cycle
+- Commit code with failing tests
+- Remove tests to make code pass
+- Modify production schema without migration tests
+
+---
+
 ## 3. Data Modeling for Time-Series
 
 ### Schema Design Principles

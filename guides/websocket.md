@@ -274,6 +274,236 @@ client.connect();
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. RED: Write a failing test first
+   ↓
+2. GREEN: Write minimal code to make it pass
+   ↓
+3. REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for WebSocket
+
+```javascript
+// Step 1: RED - Write failing test
+const WebSocket = require('ws');
+const { createServer } = require('http');
+
+describe('Chat Message Handler', () => {
+  let server, wss, client;
+
+  beforeEach((done) => {
+    server = createServer();
+    wss = new WebSocket.Server({ server });
+    setupMessageHandlers(wss); // function under test
+    server.listen(0, done);
+  });
+
+  afterEach((done) => {
+    if (client) client.close();
+    wss.close(() => server.close(done));
+  });
+
+  test('broadcasts chat message to all clients in the room', (done) => {
+    const port = server.address().port;
+
+    // Connect two clients
+    const client1 = new WebSocket(`ws://localhost:${port}?token=valid-token`);
+    const client2 = new WebSocket(`ws://localhost:${port}?token=valid-token`);
+
+    let connectedCount = 0;
+    const onOpen = () => {
+      connectedCount++;
+      if (connectedCount === 2) {
+        // Both clients join the same room
+        client1.send(JSON.stringify({
+          type: 'join_room',
+          id: 'msg-001',
+          payload: { roomId: 'room-1' }
+        }));
+        client2.send(JSON.stringify({
+          type: 'join_room',
+          id: 'msg-002',
+          payload: { roomId: 'room-1' }
+        }));
+
+        // Client 1 sends a chat message
+        setTimeout(() => {
+          client1.send(JSON.stringify({
+            type: 'chat_message',
+            id: 'msg-003',
+            payload: { roomId: 'room-1', content: 'Hello room!' }
+          }));
+        }, 100);
+      }
+    };
+
+    client1.on('open', onOpen);
+    client2.on('open', onOpen);
+
+    // Client 2 should receive the broadcast
+    client2.on('message', (data) => {
+      const message = JSON.parse(data);
+      if (message.type === 'chat_message') {
+        expect(message.payload.content).toBe('Hello room!');
+        client1.close();
+        client2.close();
+        done();
+      }
+    });
+  });
+});
+// FAILS - setupMessageHandlers not implemented yet
+
+// Step 2: GREEN - Implement the handler
+function setupMessageHandlers(wss) {
+  const rooms = new Map();
+
+  wss.on('connection', (ws) => {
+    ws.on('message', (data) => {
+      const message = JSON.parse(data);
+
+      if (message.type === 'join_room') {
+        const roomId = message.payload.roomId;
+        if (!rooms.has(roomId)) rooms.set(roomId, new Set());
+        rooms.get(roomId).add(ws);
+      }
+
+      if (message.type === 'chat_message') {
+        const { roomId, content } = message.payload;
+        const room = rooms.get(roomId);
+        if (room) {
+          const broadcast = JSON.stringify({
+            type: 'chat_message',
+            id: `${Date.now()}`,
+            payload: { roomId, content },
+            timestamp: new Date().toISOString()
+          });
+          room.forEach(client => {
+            if (client !== ws && client.readyState === WebSocket.OPEN) {
+              client.send(broadcast);
+            }
+          });
+        }
+      }
+    });
+  });
+}
+// PASSES
+
+// Step 3: REFACTOR - Extract room manager, add validation, handle edge cases
+// All tests still PASS
+```
+
+### WebSocket-Specific TDD Practices
+
+- Use `ws` (Node.js) or equivalent test WebSocket clients to simulate connections.
+- Test connection lifecycle: open, message, close, and error events.
+- Test reconnection logic with simulated disconnections.
+- Validate message routing: broadcast, room-scoped, and direct messages.
+- Test rate limiting and backpressure behavior under load.
+- Always clean up server and client connections in `afterEach` hooks.
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. Bug Reported/Discovered
+   ↓
+2. Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. Verify the test fails for the right reason
+   ↓
+4. Fix the bug (make the test pass)
+   ↓
+5. Verify the test now PASSES
+   ↓
+6. Document the bug in test comments (include bug ID)
+   ↓
+7. Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix
+
+```javascript
+// Bug Report: BUG-1755 - Messages are lost when client reconnects
+// because the message queue is not flushed after WebSocket 'open' event.
+
+describe('BUG-1755: Message queue flush on reconnect', () => {
+  test('queued messages are sent after reconnection', (done) => {
+    const client = new WebSocketClient('ws://localhost:8080?token=valid');
+    const sentMessages = [];
+
+    // Simulate: connection drops, messages are queued, connection restores
+    client.connect();
+
+    client.on('open', () => {
+      // Queue messages while "disconnected" by closing and reopening
+      client.ws.close();
+    });
+
+    client.on('close', () => {
+      // Queue messages while disconnected
+      client.send('chat_message', { roomId: 'room-1', content: 'queued-msg-1' });
+      client.send('chat_message', { roomId: 'room-1', content: 'queued-msg-2' });
+
+      expect(client.messageQueue.length).toBe(2);
+
+      // Simulate reconnection
+      client.connect();
+    });
+
+    // After reconnection, the queue should be flushed
+    let reconnected = false;
+    const originalOnOpen = client.ws?.onopen;
+    client.on('open', () => {
+      if (reconnected) return;
+      reconnected = true;
+
+      // BUG-1755: messageQueue was not being flushed
+      setTimeout(() => {
+        expect(client.messageQueue.length).toBe(0);
+        client.close();
+        done();
+      }, 100);
+    });
+  });
+});
+
+// Fix: Added flushMessageQueue() call inside the onopen handler
+// in WebSocketClient.setupEventHandlers():
+//   this.ws.onopen = () => {
+//     this.reconnectAttempts = 0;
+//     this.flushMessageQueue(); // BUG-1755: was missing
+//     this.emit('open');
+//   };
+```
+
+### Prohibited Practices for Bug Fixes
+
+**NEVER:**
+- Fix a bug without adding a regression test first
+- Write implementation before writing tests (violates TDD)
+- Skip the Red-Green-Refactor cycle
+- Commit code with failing tests
+- Remove tests to make code pass
+- Skip validation of WebSocket message schemas and connection state transitions
+
+---
+
 ## 3. Message Protocol (MANDATORY)
 
 ### A. Message Format

@@ -20,6 +20,197 @@ Mandatory standards for MongoDB database design, query optimization, and best pr
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. RED: Write a failing test first
+   ↓
+2. GREEN: Write minimal code to make it pass
+   ↓
+3. REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for MongoDB
+
+```javascript
+// Step 1: RED - Write failing test for an aggregation pipeline
+// Using Jest + mongodb-memory-server
+
+const { MongoMemoryServer } = require('mongodb-memory-server');
+const { MongoClient } = require('mongodb');
+
+let mongod, client, db;
+
+beforeAll(async () => {
+  mongod = await MongoMemoryServer.create();
+  client = await MongoClient.connect(mongod.getUri());
+  db = client.db('test');
+});
+
+afterAll(async () => {
+  await client.close();
+  await mongod.stop();
+});
+
+test('getTopSpendingUsers returns top N users by total order amount', async () => {
+  const orders = db.collection('orders');
+  await orders.insertMany([
+    { userId: 'user1', total: 50, status: 'delivered' },
+    { userId: 'user1', total: 75, status: 'delivered' },
+    { userId: 'user2', total: 200, status: 'delivered' },
+    { userId: 'user3', total: 30, status: 'cancelled' },
+  ]);
+
+  const result = await getTopSpendingUsers(db, 2);
+
+  expect(result).toHaveLength(2);
+  expect(result[0]).toEqual({ _id: 'user2', totalSpent: 200 });
+  expect(result[1]).toEqual({ _id: 'user1', totalSpent: 125 });
+});
+
+// Run: npx jest --testPathPattern=orders.test.js
+// FAILS - getTopSpendingUsers is not defined
+
+// Step 2: GREEN - Implement the aggregation pipeline
+async function getTopSpendingUsers(db, limit) {
+  return db.collection('orders').aggregate([
+    { $match: { status: { $ne: 'cancelled' } } },
+    { $group: { _id: '$userId', totalSpent: { $sum: '$total' } } },
+    { $sort: { totalSpent: -1 } },
+    { $limit: limit }
+  ]).toArray();
+}
+
+// Run: npx jest --testPathPattern=orders.test.js
+// PASSES
+
+// Step 3: REFACTOR - Add index to support the aggregation
+// db.orders.createIndex({ status: 1, userId: 1, total: 1 });
+// Tests still pass
+```
+
+### Example TDD for Schema Validation
+
+```javascript
+test('orders collection rejects documents without required fields', async () => {
+  await db.createCollection('validated_orders', {
+    validator: {
+      $jsonSchema: {
+        bsonType: 'object',
+        required: ['userId', 'total', 'status'],
+        properties: {
+          userId: { bsonType: 'string' },
+          total: { bsonType: 'number', minimum: 0 },
+          status: { enum: ['pending', 'confirmed', 'shipped', 'delivered', 'cancelled'] }
+        }
+      }
+    }
+  });
+
+  const col = db.collection('validated_orders');
+
+  // Valid document succeeds
+  await expect(col.insertOne({
+    userId: 'user1', total: 50, status: 'pending'
+  })).resolves.toBeDefined();
+
+  // Missing required field fails
+  await expect(col.insertOne({
+    total: 50, status: 'pending'
+  })).rejects.toThrow();
+
+  // Negative total fails
+  await expect(col.insertOne({
+    userId: 'user1', total: -10, status: 'pending'
+  })).rejects.toThrow();
+});
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. Bug Reported/Discovered
+   ↓
+2. Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. Verify the test fails for the right reason
+   ↓
+4. Fix the bug (make the test pass)
+   ↓
+5. Verify the test now PASSES
+   ↓
+6. Document the bug in test comments (include bug ID)
+   ↓
+7. Deploy with confidence (regression prevented)
+```
+
+### Example Bug Fix
+
+```javascript
+// Bug Report BUG-519: getTopSpendingUsers returns users with only
+// cancelled orders because $match stage doesn't filter them out
+// when all their orders are cancelled (they appear with totalSpent: 0).
+
+test('BUG-519: users with only cancelled orders are excluded', async () => {
+  const orders = db.collection('orders');
+  await orders.deleteMany({});
+  await orders.insertMany([
+    { userId: 'user1', total: 100, status: 'delivered' },
+    { userId: 'ghost', total: 50, status: 'cancelled' },
+    { userId: 'ghost', total: 30, status: 'cancelled' },
+  ]);
+
+  const result = await getTopSpendingUsers(db, 10);
+
+  // 'ghost' should NOT appear since all orders are cancelled
+  const userIds = result.map(r => r._id);
+  expect(userIds).not.toContain('ghost');
+  expect(result).toHaveLength(1);
+  expect(result[0]._id).toBe('user1');
+});
+
+// Run: npx jest --testPathPattern=orders.test.js
+// FAILS - ghost appears with totalSpent: 0
+
+// Fix: Add $match after $group to filter out zero-spend users
+async function getTopSpendingUsers(db, limit) {
+  return db.collection('orders').aggregate([
+    { $match: { status: { $ne: 'cancelled' } } },
+    { $group: { _id: '$userId', totalSpent: { $sum: '$total' } } },
+    { $match: { totalSpent: { $gt: 0 } } },
+    { $sort: { totalSpent: -1 } },
+    { $limit: limit }
+  ]).toArray();
+}
+
+// Run: npx jest --testPathPattern=orders.test.js
+// PASSES - bug fixed, regression prevented
+```
+
+### Prohibited Practices for Bug Fixes
+
+**NEVER:**
+- Fix a bug without adding a regression test first
+- Write implementation before writing tests (violates TDD)
+- Skip the Red-Green-Refactor cycle
+- Commit code with failing tests
+- Remove tests to make code pass
+- Modify production schema without migration tests
+
+---
+
 ## 2. Schema Design (MANDATORY)
 
 ### A. Document Structure
@@ -831,123 +1022,6 @@ try {
 
 ---
 
-## 15. Mongoose ODM
-
-### A. Schema Definition
-
-```javascript
-// models/user.js
-const mongoose = require('mongoose');
-
-const addressSchema = new mongoose.Schema({
-  type: { type: String, enum: ['home', 'work', 'other'], default: 'home' },
-  street: { type: String, required: true },
-  city: { type: String, required: true },
-  country: { type: String, required: true },
-  isDefault: { type: Boolean, default: false }
-}, { _id: false });
-
-const userSchema = new mongoose.Schema({
-  email: {
-    type: String,
-    required: [true, 'Email is required'],
-    unique: true,
-    lowercase: true,
-    trim: true,
-    match: [/^\S+@\S+\.\S+$/, 'Invalid email format']
-  },
-  password: {
-    type: String,
-    required: true,
-    select: false  // Don't include by default
-  },
-  profile: {
-    firstName: { type: String, maxlength: 100 },
-    lastName: { type: String, maxlength: 100 },
-    avatar: String
-  },
-  addresses: [addressSchema],
-  status: {
-    type: String,
-    enum: ['active', 'inactive', 'suspended'],
-    default: 'active'
-  },
-  deletedAt: Date
-}, {
-  timestamps: true,  // Auto createdAt, updatedAt
-  toJSON: { virtuals: true },
-  toObject: { virtuals: true }
-});
-
-// Virtual field
-userSchema.virtual('fullName').get(function() {
-  return `${this.profile.firstName} ${this.profile.lastName}`;
-});
-
-// Index
-userSchema.index({ email: 1 });
-userSchema.index({ status: 1, createdAt: -1 });
-
-// Pre-save hook
-userSchema.pre('save', async function(next) {
-  if (this.isModified('password')) {
-    this.password = await bcrypt.hash(this.password, 10);
-  }
-  next();
-});
-
-// Method
-userSchema.methods.comparePassword = async function(password) {
-  return bcrypt.compare(password, this.password);
-};
-
-// Static method
-userSchema.statics.findByEmail = function(email) {
-  return this.findOne({ email: email.toLowerCase() });
-};
-
-// Query helper
-userSchema.query.active = function() {
-  return this.where({ status: 'active', deletedAt: null });
-};
-
-module.exports = mongoose.model('User', userSchema);
-```
-
-### B. Usage
-
-```javascript
-const User = require('./models/user');
-
-// Create
-const user = await User.create({
-  email: 'test@example.com',
-  password: 'password123',
-  profile: { firstName: 'John', lastName: 'Doe' }
-});
-
-// Find with query helper
-const activeUsers = await User.find().active().sort({ createdAt: -1 });
-
-// Find with population
-const orders = await Order.find({ userId: user._id })
-  .populate('userId', 'email profile')
-  .sort({ createdAt: -1 })
-  .lean();  // Return plain objects (faster)
-
-// Update
-await User.findByIdAndUpdate(
-  user._id,
-  { $set: { status: 'inactive' } },
-  { new: true, runValidators: true }
-);
-
-// Lean queries for read performance
-const users = await User.find({ status: 'active' }).lean();
-```
-
----
-
 ## 10. Connection Pooling (MANDATORY)
 
 ### A. Configuration
@@ -1691,6 +1765,123 @@ mongod --bind_ip localhost,10.0.1.5
 - [ ] Audit logs reviewed regularly
 - [ ] Security patches applied promptly
 - [ ] Run with dedicated user (not root)
+
+---
+
+## 15. Mongoose ODM
+
+### A. Schema Definition
+
+```javascript
+// models/user.js
+const mongoose = require('mongoose');
+
+const addressSchema = new mongoose.Schema({
+  type: { type: String, enum: ['home', 'work', 'other'], default: 'home' },
+  street: { type: String, required: true },
+  city: { type: String, required: true },
+  country: { type: String, required: true },
+  isDefault: { type: Boolean, default: false }
+}, { _id: false });
+
+const userSchema = new mongoose.Schema({
+  email: {
+    type: String,
+    required: [true, 'Email is required'],
+    unique: true,
+    lowercase: true,
+    trim: true,
+    match: [/^\S+@\S+\.\S+$/, 'Invalid email format']
+  },
+  password: {
+    type: String,
+    required: true,
+    select: false  // Don't include by default
+  },
+  profile: {
+    firstName: { type: String, maxlength: 100 },
+    lastName: { type: String, maxlength: 100 },
+    avatar: String
+  },
+  addresses: [addressSchema],
+  status: {
+    type: String,
+    enum: ['active', 'inactive', 'suspended'],
+    default: 'active'
+  },
+  deletedAt: Date
+}, {
+  timestamps: true,  // Auto createdAt, updatedAt
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+});
+
+// Virtual field
+userSchema.virtual('fullName').get(function() {
+  return `${this.profile.firstName} ${this.profile.lastName}`;
+});
+
+// Index
+userSchema.index({ email: 1 });
+userSchema.index({ status: 1, createdAt: -1 });
+
+// Pre-save hook
+userSchema.pre('save', async function(next) {
+  if (this.isModified('password')) {
+    this.password = await bcrypt.hash(this.password, 10);
+  }
+  next();
+});
+
+// Method
+userSchema.methods.comparePassword = async function(password) {
+  return bcrypt.compare(password, this.password);
+};
+
+// Static method
+userSchema.statics.findByEmail = function(email) {
+  return this.findOne({ email: email.toLowerCase() });
+};
+
+// Query helper
+userSchema.query.active = function() {
+  return this.where({ status: 'active', deletedAt: null });
+};
+
+module.exports = mongoose.model('User', userSchema);
+```
+
+### B. Usage
+
+```javascript
+const User = require('./models/user');
+
+// Create
+const user = await User.create({
+  email: 'test@example.com',
+  password: 'password123',
+  profile: { firstName: 'John', lastName: 'Doe' }
+});
+
+// Find with query helper
+const activeUsers = await User.find().active().sort({ createdAt: -1 });
+
+// Find with population
+const orders = await Order.find({ userId: user._id })
+  .populate('userId', 'email profile')
+  .sort({ createdAt: -1 })
+  .lean();  // Return plain objects (faster)
+
+// Update
+await User.findByIdAndUpdate(
+  user._id,
+  { $set: { status: 'inactive' } },
+  { new: true, runValidators: true }
+);
+
+// Lean queries for read performance
+const users = await User.find({ status: 'active' }).lean();
+```
 
 ---
 
