@@ -213,7 +213,7 @@ def check_network_available() -> bool:
 
 async def _fetch_github_directory_listing_async() -> Optional[list[dict]]:
     """
-    Async version: Fetch the directory listing from GitHub API.
+    Async version: Fetch the directory listing from GitHub API with pagination support.
     
     Returns:
         List of file/directory information from GitHub API, or None if failed.
@@ -225,12 +225,43 @@ async def _fetch_github_directory_listing_async() -> Optional[list[dict]]:
         # GitHub API endpoint for repository contents
         # Format: https://api.github.com/repos/{owner}/{repo}/contents/{path}
         url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_PATH}"
-        params = {"ref": GITHUB_BRANCH}
+        params = {"ref": GITHUB_BRANCH, "per_page": 100}
+        
+        all_items = []
         
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(url, params=params, follow_redirects=True)
-            response.raise_for_status()
-            return response.json()
+            while url:
+                response = await client.get(url, params=params, follow_redirects=True)
+                response.raise_for_status()
+                
+                items = response.json()
+                if isinstance(items, list):
+                    all_items.extend(items)
+                else:
+                    # Single file, not a directory
+                    return items
+                
+                # Check for pagination in Link header
+                # Link header format: <url>; rel="next", <url>; rel="last"
+                link_header = response.headers.get("Link", "")
+                url = None  # Reset for next iteration
+                params = None  # Params are in the URL from Link header
+                
+                if link_header:
+                    # Parse Link header to find next page
+                    for link in link_header.split(","):
+                        if 'rel="next"' in link:
+                            # Extract URL from <url>
+                            url = link.split(";")[0].strip().strip("<>")
+                            break
+                
+                if not url:
+                    # No more pages
+                    break
+        
+        logger.info(f"Fetched {len(all_items)} items from GitHub (with pagination)")
+        return all_items
+        
     except Exception as e:
         logger.warning(f"Failed to fetch GitHub directory listing: {e}")
         return None
