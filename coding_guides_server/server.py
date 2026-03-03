@@ -3,6 +3,7 @@ from pathlib import Path
 from functools import lru_cache
 from typing import Optional
 from collections.abc import Iterator
+import asyncio
 import httpx
 import base64
 from cachetools import cached, TTLCache
@@ -180,10 +181,9 @@ def register_prompts_from_markdown() -> None:
 
     logger.info(f"Registered {registered} dynamic prompts from {PROMPTS_DIR}")
 
-@cached(cache=_network_cache)
-def check_network_available() -> bool:
+async def _check_network_available_async() -> bool:
     """
-    Check if network access is available by attempting to connect to GitHub API.
+    Async version: Check if network access is available by attempting to connect to GitHub API.
     
     Returns:
         True if network is available, False otherwise.
@@ -193,16 +193,27 @@ def check_network_available() -> bool:
     
     try:
         # Try to connect to GitHub API with a short timeout
-        with httpx.Client(timeout=3.0) as client:
-            response = client.get("https://api.github.com", follow_redirects=True)
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            response = await client.get("https://api.github.com", follow_redirects=True)
             return response.status_code == 200
     except Exception:
         return False
 
 
-def fetch_github_directory_listing() -> Optional[list[dict]]:
+@cached(cache=_network_cache)
+def check_network_available() -> bool:
     """
-    Fetch the directory listing from GitHub API.
+    Check if network access is available by attempting to connect to GitHub API.
+    
+    Returns:
+        True if network is available, False otherwise.
+    """
+    return asyncio.run(_check_network_available_async())
+
+
+async def _fetch_github_directory_listing_async() -> Optional[list[dict]]:
+    """
+    Async version: Fetch the directory listing from GitHub API.
     
     Returns:
         List of file/directory information from GitHub API, or None if failed.
@@ -216,18 +227,27 @@ def fetch_github_directory_listing() -> Optional[list[dict]]:
         url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_PATH}"
         params = {"ref": GITHUB_BRANCH}
         
-        with httpx.Client(timeout=10.0) as client:
-            response = client.get(url, params=params, follow_redirects=True)
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(url, params=params, follow_redirects=True)
             response.raise_for_status()
             return response.json()
     except Exception as e:
         logger.warning(f"Failed to fetch GitHub directory listing: {e}")
         return None
 
-@cached(cache=_github_file_cache)
-def fetch_github_file_content(file_path: str) -> Optional[str]:
+
+def fetch_github_directory_listing() -> Optional[list[dict]]:
     """
-    Fetch file content from GitHub API.
+    Fetch the directory listing from GitHub API.
+    
+    Returns:
+        List of file/directory information from GitHub API, or None if failed.
+    """
+    return asyncio.run(_fetch_github_directory_listing_async())
+
+async def _fetch_github_file_content_async(file_path: str) -> Optional[str]:
+    """
+    Async version: Fetch file content from GitHub API.
     
     Args:
         file_path: Path to the file in the GitHub repository.
@@ -242,8 +262,8 @@ def fetch_github_file_content(file_path: str) -> Optional[str]:
         url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
         params = {"ref": GITHUB_BRANCH}
         
-        with httpx.Client(timeout=10.0) as client:
-            response = client.get(url, params=params, follow_redirects=True)
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(url, params=params, follow_redirects=True)
             response.raise_for_status()
             data = response.json()
             
@@ -257,6 +277,20 @@ def fetch_github_file_content(file_path: str) -> Optional[str]:
     except Exception as e:
         logger.warning(f"Failed to fetch GitHub file {file_path}: {e}")
         return None
+
+
+@cached(cache=_github_file_cache)
+def fetch_github_file_content(file_path: str) -> Optional[str]:
+    """
+    Fetch file content from GitHub API.
+    
+    Args:
+        file_path: Path to the file in the GitHub repository.
+    
+    Returns:
+        File content as string, or None if failed.
+    """
+    return asyncio.run(_fetch_github_file_content_async(file_path))
 
 
 def cache_guide_locally(guide_name: str, content: str) -> Path:
