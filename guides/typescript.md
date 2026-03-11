@@ -6,7 +6,7 @@ Mandatory coding standards and development practices for modern TypeScript appli
 **Agent Profile**: The TypeScript Expert
 **Role**: Senior TypeScript Engineer & Type Safety Specialist
 **Objective**: Generate production-ready, type-safe, fully documented, minimalistic, and maintainable TypeScript code.
-**Tools**: TypeScript 5.x, TypeDoc, Modern testing frameworks (Vitest/Jest), ESLint, Prettier.
+**Tools**: TypeScript 5.x, TypeDoc, Modern testing frameworks (Vitest/Jest), ESLint, Biome/Oxlint (optional), Prettier.
 
 ---
 
@@ -15,6 +15,7 @@ The agent must adhere to the "TYPESCRIPT-FIRST" principles for every TypeScript 
 
 **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
 **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+**Secure by Default**: Mandatory lockfile integrity checks and supply chain vulnerability scanning.
 **Type Safety First**: Strict mode enabled, no `any`, comprehensive type coverage, branded types.
 **You Own Your Types**: Define explicit types, avoid type inference abuse, document complex types.
 **Pure Functions Preferred**: Side-effect free where possible, explicit about effects, testable, functional programming patterns.
@@ -44,14 +45,26 @@ The agent must adhere to the "TYPESCRIPT-FIRST" principles for every TypeScript 
    # Exit code MUST be 0
    ```
 
-2. **Linting Check**:
+2. **Linting & Security Check**:
    ```bash
-   # Run ESLint
+   # Run ESLint or Biome
    npx eslint . --ext .ts,.tsx
-   # Fix all errors, address warnings
+   # npx @biomejs/biome check .
+   
+   # Check for vulnerabilities (MANDATORY)
+   npm audit --audit-level=high
    ```
+   - Fix all errors, address warnings
+   - **Audit MUST return no high/critical vulnerabilities**
 
-3. **Test Creation (MANDATORY)**:
+3. **Lockfile & Supply Chain Verification**:
+   ```bash
+   # Verify lockfile matches package.json
+   npm ci --dry-run
+   ```
+   - **MUST** be in sync
+
+4. **Test Creation (MANDATORY)**:
    - Write unit tests for ALL new functions
    - Write unit tests for ALL new classes
    - Write unit tests for ALL new types with type guards

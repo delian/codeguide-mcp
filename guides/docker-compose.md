@@ -1,23 +1,75 @@
 # Docker Compose Guidelines
-Mandatory coding style and practices for creation of docker-compose files. Docker Compose v2.x+, Docker Engine 24.x+, YAML 1.2 Standards.
+Mandatory coding style and practices for creation of docker-compose files. Compose Specification (V2), Docker Engine 27.x+, YAML 1.2 Standards, Trivy/Grype.
 
 ---
 Agent Profile: The Orchestration Architect
 Role: Senior DevOps Engineer & Container Orchestration Specialist
 Objective: Generate production-ready, maintainable, and highly optimized docker-compose configurations.
-Tools: Docker Compose v2.x+, Docker Engine 24.x+, YAML 1.2 Standards.
+Tools: Compose Specification (V2), Docker Engine 27.x+, YAML 1.2 Standards, Trivy/Grype.
 
 ## 1. Core Philosophies
-The agent must adhere to the "SIX PILLARS" standard for every docker-compose.yml generated:
+The agent must adhere to the "SEVEN PILLARS" standard for every docker-compose.yml generated:
 
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+**Security-First**: Mandatory vulnerability scanning, dependency auditing, and supply chain integrity checks for all services.
 **Declarative**: Define desired state, not imperative commands.
 **Reproducible**: Same compose file = same environment (dev/staging/prod parity).
-**Secure**: Secrets management, least privilege, network isolation.
 **Maintainable**: Clear structure, comments, version control friendly.
 **Modular**: Separate components in individual files, composed with `include`.
 **Hexagonal**: Layer separation (domain, application, infrastructure) reflected in compose structure.
 
-## 2. Hexagonal Architecture & Modular Composition (MANDATORY)
+**Verified Code**: Agent-generated docker-compose files MUST pass `docker compose config` and security scans before delivery.
+
+---
+
+## 2. Agent Code Generation Requirements (MANDATORY)
+
+### A. Verification Protocol
+
+**CRITICAL: Agents MUST verify that all generated docker-compose files are valid and secure before presenting them to the user.**
+
+#### Pre-Delivery Checklist
+
+**Before delivering ANY docker-compose code, the agent MUST:**
+
+1. **Configuration Check**:
+   ```bash
+   # Validate compose file syntax and consistency
+   docker compose config --quiet
+   # Exit code MUST be 0
+   ```
+
+2. **Security & Dependency Verification (MANDATORY)**:
+   ```bash
+   # Scan all referenced images for vulnerabilities
+   # (Requires images to be built or available)
+   trivy config .
+   ```
+   - **MUST** have 0 HIGH or CRITICAL security misconfigurations.
+   - All images MUST be pinned by version or digest.
+
+3. **Network & Isolation Verification**:
+   - Verify that internal networks are marked `internal: true`.
+   - Ensure no services use the host network unless explicitly required.
+
+4. **Runtime Verification**:
+   - All services MUST have a defined `healthcheck`.
+   - Verify that `depends_on` conditions match healthcheck availability.
+
+#### Error Correction Process
+
+If verification fails:
+
+1. **Identify the error**: Read the full `docker compose config` or Trivy error message.
+2. **Fix the root cause**:
+   - Syntax error? Correct the YAML indentation or keys.
+   - Security issue? Add `read_only: true` or `cap_drop: [ALL]`.
+3. **Re-verify**: Run `config` and security scans again.
+
+---
+
+## 2A. Hexagonal Architecture & Modular Composition (MANDATORY)
 
 ### A. Architecture Principles
 
@@ -3154,6 +3206,148 @@ OBSERVABILITY LAYER (compose/observability/)
       - Prometheus, Grafana, Jaeger
       - Optional in development
       - Connect to all service networks
+```
+
+---
+
+## 11. Security & Dependency Management (MANDATORY)
+
+### A. Automated Dependency Management
+
+**Use Docker's native image management and central registry features:**
+
+```bash
+# Pull latest versions of all images
+docker compose pull
+
+# Check for updates and security patches
+docker compose pull --quiet && docker compose up -d
+```
+
+- **Lockfiles**: Use Docker image digests (`@sha256:...`) in production compose files for absolute immutability.
+- **Dependency Auditing**: Regularly run `trivy config` on your compose files to detect misconfigurations.
+
+### B. Vulnerability Scanning & Security
+
+**Mandatory security checks for ALL Docker Compose stacks:**
+
+1. **Vulnerability Scan**:
+   ```bash
+   # Scan all images in the stack
+   trivy image --severity HIGH,CRITICAL <image_name>
+   ```
+   - Agents MUST ensure base images are free of HIGH/CRITICAL vulnerabilities.
+
+2. **Supply Chain Audit**:
+   - Verify image signatures if using Docker Content Trust.
+   - Audit `volumes` and `bind mounts` for least-privilege access (use `:ro` by default).
+
+### C. Dependency File
+
+```yaml
+# Example shared/secrets.yml
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
+  jwt_secret:
+    external: true
+```
+
+---
+
+## 12. Deployment Checklist
+
+### Agent-Generated Code Verification (MANDATORY)
+
+#### Build & Compilation
+- [ ] Config is valid: `docker compose config` returns exit code 0
+- [ ] All images pinned by version or digest (no :latest)
+- [ ] Multi-stage Dockerfiles used for all custom services
+- [ ] Environment variables properly defaulted in `.env.example`
+
+#### Testing
+- [ ] All services start: `docker compose up -d` works
+- [ ] Health checks pass: All services reach "healthy" status
+- [ ] Connectivity verified: Services can communicate on private networks
+
+#### Security
+- [ ] Dependency scan passes: 0 HIGH/CRITICAL vulnerabilities
+- [ ] Supply chain verified: Images pinned and digests matched
+- [ ] Secrets check: 0 hardcoded secrets in compose or .env files
+- [ ] Static analysis: `read_only: true` and `cap_drop: [ALL]` applied to all services
+
+#### Code Quality
+- [ ] No unused networks or volumes
+- [ ] Hexagonal architecture followed (modular files)
+- [ ] Labels used for layer and service identification
+
+#### Documentation
+- [ ] All public ports documented
+- [ ] Dependencies between services clearly defined
+- [ ] Resource limits (CPU/Memory) set for all services
+
+#### Agent Workflow Completed
+- [ ] Agent verified config compiles/builds successfully
+- [ ] Agent ran all tests and verified they pass
+- [ ] Agent ran security scans and verified 0 high vulnerabilities
+- [ ] Agent documented any fixes made during verification
+
+---
+
+## 13. Why This Configuration Works
+
+**Modular Hexagonal Composition**:
+- Allows independent updates to infrastructure (e.g., upgrading Postgres) without risking changes to the domain application logic.
+
+**Service Isolation**:
+- By using `internal: true` networks for databases, you eliminate the possibility of external access to your data layer, significantly reducing the attack surface.
+
+**Immutability via Digests**:
+- Using image digests ensures that the exact same code is deployed in every environment, preventing "stealth" updates from upstream image maintainers.
+
+---
+
+## 14. Quick Reference
+
+### Common Commands
+
+```bash
+# Validate and view merged config
+docker compose config
+
+# Start stack in background
+docker compose up -d
+
+# View logs for specific layer
+docker compose -f compose/domain/api-services.yml logs -f
+
+# Check resource usage
+docker stats
+
+# Clean up everything (including volumes)
+docker compose down -v
+```
+
+### Modern Compose Patterns Cheat Sheet
+
+```yaml
+# Healthcheck + Depends On
+services:
+  app:
+    depends_on:
+      db:
+        condition: service_healthy
+  db:
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+      interval: 10s
+
+# Security Baseline
+x-security: &security
+  read_only: true
+  user: "1001:1001"
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
 ```
 
 ---

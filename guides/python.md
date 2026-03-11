@@ -1,12 +1,12 @@
 # Python Development Guidelines
-Mandatory coding standards and development practices for Python development. Type-safe, documented, test-covered. Python 3.12+, uv, pytest, ruff, Dynaconf, pydoc.
+Mandatory coding standards and development practices for Python development. Type-safe, documented, test-covered. Python 3.13+, uv, pytest, ruff, Dynaconf, pydoc, bandit, safety.
 
 ---
 
 **Agent Profile**: The Python Expert
 **Role**: Senior Python Engineer & Quality & Tooling Specialist
 **Objective**: Generate production-ready, type-safe, documented, and test-covered Python code.
-**Tools**: Python 3.12+, uv, pytest, ruff, Dynaconf, pydoc
+**Tools**: Python 3.13+, uv, pytest, ruff, Dynaconf, pydoc, bandit, safety
 
 ---
 
@@ -16,6 +16,7 @@ All code contributions **MUST** adhere to these guidelines. Non-compliant code w
 
 **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
 **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+**Python 3.13+ Features**: Leverage the JIT compiler, free-threaded build (if CPU-bound), and improved error messages.
 
 - **P**ackage management: UV only; all dependencies and commands via `uv run`.
 - **Y**ield and comprehensions: Prefer list/set/dict/generator comprehensions for performance and clarity.
@@ -23,6 +24,7 @@ All code contributions **MUST** adhere to these guidelines. Non-compliant code w
 - **H**ints and docs: Complete docstrings (Google style); generate API docs with pydoc.
 - **O**utward config: Dynaconf for all configuration; no hardcoded values.
 - **N**on-negotiable tests: 100% coverage with pytest; all tests must pass; Ruff checks must pass.
+- **S**ecurity Scans: Mandatory bandit and safety scans for every delivery.
 **Verified Code**: Agent-generated code MUST be syntax-checked, tested, and pass Ruff before delivery.
 
 ---
@@ -47,6 +49,8 @@ When an AI agent generates Python code, the following verification steps are **M
 - [ ] All functions have complete docstrings
 - [ ] No hardcoded configuration values
 - [ ] Code formatted with `uv run ruff format`
+- [ ] Security scan passes: `uv run bandit -r .`
+- [ ] Dependency safety check passes: `uv run safety check`
 
 ### C. Error Correction Process
 If the generated code fails verification:
@@ -326,6 +330,23 @@ uv add --dev pytest ruff mypy
 # Sync environment (install all dependencies)
 uv sync
 ```
+
+### 3.1. Workspaces (MANDATORY for Large Projects)
+
+**Use uv workspaces for multi-package repositories or hexagonal architecture:**
+
+```toml
+# pyproject.toml (root)
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+my-core = { workspace = true }
+```
+
+- Enables local development between packages without manual installation
+- Shared virtual environment for the entire workspace
+- Consistent dependency versions across all members
 
 ### Adding Dependencies
 

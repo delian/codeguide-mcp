@@ -1,12 +1,12 @@
 # Modern Kotlin Development Guidelines
-Mandatory coding standards and development practices for modern Kotlin applications with emphasis on minimal boilerplate, clean readable code, hexagonal architecture, and modern language features. Kotlin 1.9+, Gradle (preferred) / Maven (fallback), Kotest/JUnit 5, KDoc, Kotlin Coroutines, Kotlinx Serialization.
+Mandatory coding standards and development practices for modern Kotlin applications with emphasis on minimal boilerplate, clean readable code, hexagonal architecture, and modern language features. Kotlin 2.0+, Gradle (preferred) / Maven (fallback), Kotest/JUnit 5, KDoc, Kotlin Coroutines, Kotlinx Serialization.
 
 ---
 
 **Agent Profile**: The Kotlin Minimalist  
 **Role**: Senior Kotlin Engineer & Clean Code Specialist  
 **Objective**: Generate production-ready, minimalistic, clean, readable, well-documented Kotlin code using hexagonal architecture with focus on performance, scalability, and maintainability.  
-**Tools**: Kotlin 1.9+, Gradle (preferred) / Maven (fallback), Kotest/JUnit 5, KDoc, Kotlin Coroutines, Kotlinx Serialization.
+**Tools**: Kotlin 2.0+, Gradle (preferred) / Maven (fallback), Kotest/JUnit 5, KDoc, Kotlin Coroutines, Kotlinx Serialization.
 
 ---
 
@@ -14,30 +14,19 @@ Mandatory coding standards and development practices for modern Kotlin applicati
 
 The agent must adhere to the **MINIMAL-KOTLIN** standard for every Kotlin implementation:
 
-- **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory)
-- **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression
-- **M**inimal Boilerplate: Functions over classes, data classes, extension functions
-- **I**mmutable by Default: val over var, read-only collections, sealed classes
-- **N**ullable Safety: Prefer nullable operator (?), safe calls, elvis operator
-- **I**dempotent: Safe to retry, no side effects, pure functions preferred
-- **M**odern Patterns: Coroutines, async/await, reactive streams
-- **A**rchitectural: Hexagonal architecture, ports and adapters
-- **L**azy Evaluation: Sequences, lazy properties, deferred execution
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+**Security-First**: Mandatory vulnerability scanning, dependency auditing, and supply chain integrity checks.
 
-- **K**otlin Functions: Prefer top-level functions over classes when possible
-- **O**ptional & Null-Safe: Nullable types, safe calls, elvis operator
-- **T**ype Safety: Strong typing, type inference, sealed classes
-- **L**azy Sequences: Use sequences for large datasets
-- **I**nline Functions: Use inline for performance-critical code
-- **N**on-Blocking: Coroutines, suspend functions, Flow
+- **M**inimal Boilerplate: Functions over classes, data classes, extension functions.
+- **I**mmutable by Default: val over var, read-only collections, sealed classes.
+- **N**ullable Safety: Prefer nullable operator (?), safe calls, elvis operator.
+- **I**dempotent: Safe to retry, no side effects, pure functions preferred.
+- **M**odern Patterns: Coroutines, Smart Casts 2.0 (K2 compiler), reactive streams.
+- **A**rchitectural: Hexagonal architecture, ports and adapters.
+- **L**azy Evaluation: Sequences, lazy properties, deferred execution.
 
-**V**erified Builds: Agent-generated code MUST compile, pass tests, and validate before delivery
-- **E**xtension Functions: Add functionality without modifying source
-- **R**eactive Programming: Flow, Channels, coroutines
-- **I**mmutable Design: val, data classes, read-only collections
-- **F**unctional Style: Higher-order functions, lambdas, method references
-- **I**dempotent Operations: Safe to retry, no side effects
-- **E**fficient Execution: Coroutines, sequences, inline functions
+**Verified Code**: Agent-generated code MUST compile with K2 compiler, pass security scans, and pass all unit tests before delivery.
 
 ---
 
@@ -45,59 +34,54 @@ The agent must adhere to the **MINIMAL-KOTLIN** standard for every Kotlin implem
 
 ### A. Build Verification Protocol
 
-**CRITICAL: Agents MUST ALWAYS verify that all generated/modified Kotlin code compiles successfully. Compilation verification is MANDATORY for every code change.**
+**CRITICAL: Agents MUST ALWAYS verify that all generated/modified Kotlin code compiles successfully and passes security audits.**
 
-#### Verification Checklist
+#### Pre-Delivery Checklist
 
 **Before delivering ANY Kotlin code, the agent MUST:**
 
-1. **Compilation Verification (MANDATORY - ALWAYS REQUIRED)**:
-   **CRITICAL: Code MUST compile successfully. This is non-negotiable.**
+1. **Compilation Verification (MANDATORY)**:
    ```bash
-   # Compile all Kotlin sources
+   # Compile all Kotlin sources using K2 compiler
    ./gradlew compileKotlin
-   # OR
-   mvn compile
-   
-   # Check for compilation errors
-   echo $?  # Must be 0
-   
-   # Verify with Kotlin compiler directly
-   kotlinc -cp "$(./gradlew printClasspath -q)" src/main/kotlin/**/*.kt
+   # Exit code MUST be 0
    ```
-   - **MUST** compile without errors (exit code 0)
-   - No compiler warnings (or address all warnings)
-   - All imports resolved
-   - No deprecated API usage (unless necessary)
+   - No compiler warnings and all imports resolved.
 
-2. **Test Execution Verification (MANDATORY - ALWAYS REQUIRED)**:
-   **CRITICAL: Unit tests MUST be added for all new/modified code and MUST pass. This is non-negotiable.**
+2. **Test Execution Verification (MANDATORY)**:
    ```bash
    # Run all tests
    ./gradlew test
-   # OR
-   mvn test
-   
-   # Run tests with coverage
-   ./gradlew test jacocoTestReport
-   # OR
-   mvn test jacoco:report
+   # Exit code MUST be 0
    ```
-   - **MUST** pass all tests (exit code 0)
-   - **MANDATORY**: Unit tests MUST be added for all new code
-   - **MANDATORY**: All unit tests MUST pass before code delivery
-   - Minimum 80% code coverage for business logic
-   - No flaky tests (run multiple times to verify)
-   - **After ANY code change**: Re-run tests to verify they still pass
+   - **MANDATORY**: Unit tests added for all new code and MUST pass.
 
-3. **Code Quality Verification**:
+3. **Security & Dependency Verification (MANDATORY)**:
    ```bash
-   # Check code style
-   ./gradlew ktlintCheck
-   # OR
-   mvn ktlint:check
-   
-   # Static analysis
+   # Scan for vulnerabilities in dependencies
+   ./gradlew detekt
+   # (Include dependency audit tools like Snyk or OWASP Dependency-Check)
+   ```
+   - **MUST** have 0 HIGH or CRITICAL vulnerabilities.
+   - Supply chain integrity (lockfiles) MUST be verified.
+
+4. **Code Quality & Documentation**:
+   - All public APIs documented with KDoc.
+   - Formatting check (`ktlintCheck`) passes.
+
+#### Error Correction Process
+
+If verification fails:
+
+1. **Identify the error**: Read the compiler, test, or security scan output.
+2. **Fix the root cause**:
+   - Vulnerability? Update dependency version.
+   - Smart cast failure? Use K2-specific cast patterns.
+3. **Re-verify**: Run compilation, tests, and security scans again.
+
+---
+
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
    ./gradlew detekt
    # OR
    mvn detekt:check
@@ -1718,134 +1702,158 @@ inline fun <T> measureTime(block: () -> T): T {
 
 ---
 
-## 14. Summary
+## 11. Security & Dependency Management (MANDATORY)
 
-**CRITICAL Requirements for All Kotlin Code:**
+### A. Automated Dependency Management
 
-1. **Dependency Management**: Prefer Gradle, use Maven as fallback
-2. **Compilation Verification**: Code MUST ALWAYS compile (mandatory for every change)
-3. **Unit Tests**: ALWAYS required for all new/modified code, MUST pass
-4. **Hexagonal Architecture**: All applications MUST follow ports and adapters pattern
-5. **Functions Over Classes**: Prefer top-level functions over classes when possible
-6. **Nullable Safety**: Prefer nullable operator (?), safe calls, elvis operator
-7. **Coroutines**: Use coroutines for async operations with cancellation pattern
-8. **Extension Functions**: Use for separate libraries without modifying source
-9. **Data Classes**: Use for immutable data carriers
-10. **Sealed Classes**: Use for controlled hierarchies and pattern matching
-11. **KDoc**: Complete API documentation, well-documented code, auto-generatable
-12. **Testing**: 80%+ code coverage, comprehensive unit tests, always required
-13. **Functional Style**: Higher-order functions, immutability, pure functions
-14. **Performance**: Sequences, inline functions, lazy evaluation
-15. **Minimalistic Code**: Clean, readable, concise code
-16. **Verification**: Agent MUST compile, test, and generate KDoc before delivery
+**Use Gradle with version catalogs and lockfiles for automated management:**
 
-**Agent Verification Protocol:**
-- **MANDATORY**: Compile code (`./gradlew compileKotlin` or `mvn compile`) - ALWAYS required
-- **MANDATORY**: Run unit tests (`./gradlew test` or `mvn test`) - ALWAYS required, MUST pass
-- Generate KDoc (`./gradlew dokkaHtml` or `mvn dokka:dokka`)
-- **MANDATORY**: After ANY modification, re-compile and re-run tests
-- Only present working, tested, documented code to the user
+```kotlin
+// gradle/libs.versions.toml
+[versions]
+kotlin = "2.0.20"
+coroutines = "1.9.0"
 
-**Remember**: Minimalistic, clean, readable, well-documented, functional, immutable, coroutine-based code with hexagonal architecture, nullable safety, extension functions, and focus on performance and scalability. Keep it simple, keep it Kotlin, keep it working.
+[libraries]
+kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
+```
+
+- **Lockfiles**: Enable Gradle dependency locking (`dependencyLocking { lockAllConfigurations() }`) to ensure reproducible and secure builds.
+- **BOMs**: Use Kotlin and library-specific BOMs to maintain version consistency.
+
+### B. Vulnerability Scanning & Security
+
+**Mandatory security checks for ALL Kotlin projects:**
+
+1. **Vulnerability Scan**:
+   ```bash
+   # Scan for CVEs in dependencies
+   ./gradlew dependencyCheckAnalyze
+   ```
+   - Agents MUST ensure 0 HIGH or CRITICAL vulnerabilities remain.
+
+2. **Supply Chain Audit**:
+   - Verify artifact checksums and signatures.
+   - Use `checksum-dependency-check` to verify no tampered JARs are used.
+
+### C. Dependency File
+
+```kotlin
+// build.gradle.kts example
+dependencies {
+    implementation(libs.kotlinx.coroutines.core)
+    testImplementation(kotlin("test"))
+}
+```
 
 ---
 
-## 15. Quick Reference
+## 12. Deployment Checklist
+
+### Agent-Generated Code Verification (MANDATORY)
+
+#### Build & Compilation
+- [ ] Code compiles: `./gradlew compileKotlin` returns exit code 0
+- [ ] No compilation errors or warnings (Werror=true)
+- [ ] Kotlin 2.0 features used (K2 compiler enabled)
+- [ ] Code formatted: `./gradlew ktlintCheck` passes
+
+#### Testing
+- [ ] All tests pass: `./gradlew test` returns exit code 0
+- [ ] Reasonable coverage: `jacocoTestReport` shows >80%
+- [ ] Integration tests pass (using Kotest/Mockk)
+
+#### Security
+- [ ] Dependency scan passes: 0 vulnerabilities found
+- [ ] Supply chain verified: Lockfiles in sync
+- [ ] Secrets check: No hardcoded secrets in code or resources
+- [ ] Static analysis: `detekt` passes with 0 issues
+
+#### Code Quality
+- [ ] No unused dependencies or imports
+- [ ] Data classes used for all DTOs and models
+- [ ] Small, focused top-level functions instead of unnecessary classes
+
+#### Documentation
+- [ ] All public APIs have KDoc comments
+- [ ] Documentation follows conventions
+- [ ] Examples provided for complex APIs
+
+#### Architecture
+- [ ] Hexagonal architecture followed (Ports and Adapters)
+- [ ] Dependency injection used for all components
+- [ ] Coroutines used for all async/I/O operations
+
+#### Agent Workflow Completed
+- [ ] Agent verified code compiles/builds successfully
+- [ ] Agent ran all tests and verified they pass
+- [ ] Agent ran security scans and verified 0 high vulnerabilities
+- [ ] Agent verified documentation and KDoc
+
+---
+
+## 13. Why This Configuration Works
+
+**Kotlin 2.0 K2 Compiler**:
+- Provides massive performance improvements in compilation speed and smarter analysis, catching more potential bugs at compile-time.
+
+**Smart Casts 2.0**:
+- Significantly reduces boilerplate by allowing the compiler to track types through more complex logic flows, making code safer and more readable.
+
+**Coroutines with Cancellation**:
+- Native support for structured concurrency ensures that resources are always cleaned up, and no "ghost" tasks continue running after a scope is closed.
+
+---
+
+## 14. Quick Reference
 
 ### Common Commands
 
 ```bash
 # Build
 ./gradlew build
-./gradlew compileKotlin
 
-# Test
-./gradlew test
-./gradlew test --tests "MyTest"
+# Test with coverage
+./gradlew test jacocoTestReport
 
-# Lint & Format
-./gradlew ktlintCheck
-./gradlew ktlintFormat
+# Security scan
+./gradlew dependencyCheckAnalyze
 
-# Documentation
-./gradlew dokkaHtml
+# Lint and Format
+./gradlew ktlintCheck detekt ktlintFormat
 
 # Run
 ./gradlew run
-
-# Dependencies
-./gradlew dependencies
 ```
 
-### Kotlin Patterns Cheat Sheet
+### Modern Kotlin Patterns Cheat Sheet
 
 ```kotlin
-// Null safety
-val name = user?.name ?: "Unknown"
-val length = str?.length ?: 0
-val result = nullable?.let { process(it) }
-
-// Collections
-items.map { it * 2 }
-items.filter { it > 0 }
-items.firstOrNull { it.id == targetId }
-items.groupBy { it.category }
-
-// Coroutines
-suspend fun fetch(): Result = coroutineScope {
-    val a = async { fetchA() }
-    val b = async { fetchB() }
-    combine(a.await(), b.await())
+// Smart Casts 2.0 (Kotlin 2.0)
+fun handle(x: Any) {
+    if (x is String || x is Int) {
+        // x is smart-cast to Any in 1.9, but K2 handles more cases
+    }
 }
 
-// Data class
-data class User(val id: String, val name: String)
-
-// Sealed class
-sealed class Result {
-    data class Success(val data: Data) : Result()
-    data class Error(val message: String) : Result()
-}
-```
-
-### build.gradle.kts Template
-
-```kotlin
-plugins {
-    kotlin("jvm") version "1.9.0"
-    id("org.jetbrains.dokka") version "1.9.0"
+// Guard Conditions
+when (status) {
+    is Status.Active if status.priority > 10 -> handleHighPriority()
+    is Status.Active -> handleNormal()
 }
 
-dependencies {
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
-    testImplementation(kotlin("test"))
-    testImplementation("io.mockk:mockk:1.13.8")
-}
+// Native Multi-Error Joining
+val err = errors.join() // Collective error handling patterns
 
-tasks.test { useJUnitPlatform() }
-```
-
-### Project Structure
-
-```
-my_project/
-├── build.gradle.kts
-├── src/
-│   ├── main/kotlin/
-│   │   ├── domain/       # Domain models
-│   │   ├── ports/        # Interfaces
-│   │   └── adapters/     # Implementations
-│   └── test/kotlin/
-└── docs/
+// Value Classes
+@JvmInline value class UserId(val id: String)
 ```
 
 ---
 
-## References
-
-- [Kotlin Documentation](https://kotlinlang.org/docs/)
-- [Kotlin Coroutines Guide](https://kotlinlang.org/docs/coroutines-guide.html)
-- [Dokka Documentation](https://kotlin.github.io/dokka/)
+**Last Updated:** 2026-02-06
+**Version:** 1.1
+**Maintainer:** Kotlin Team
 
 
 **End of Modern Kotlin Development Guidelines**

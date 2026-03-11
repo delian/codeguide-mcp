@@ -87,13 +87,13 @@ The agent must adhere to the **GO-FIRST** principles for every Go implementation
    - Coverage should be reasonable (>70% for business logic)
    - No flaky tests (run multiple times to verify)
 
-3. **Code Quality Verification**:
+3. **Code Quality & Security Verification**:
    ```bash
    # Format check (should produce no output)
    gofmt -l .
    
    # Format code
-   go fmt ./..
+   go fmt ./...
    
    # Tidy dependencies
    go mod tidy
@@ -101,13 +101,13 @@ The agent must adhere to the **GO-FIRST** principles for every Go implementation
    # Verify dependencies
    go mod verify
    
-   # Check for vulnerabilities
-   go run golang.org/x/vuln/cmd/govulncheck@latest ./..
+   # Check for vulnerabilities (MANDATORY)
+   go run golang.org/x/vuln/cmd/govulncheck@latest ./...
    ```
    - Code is `go fmt` formatted
    - No unused dependencies
    - go.mod and go.sum are clean
-   - No known vulnerabilities
+   - **Vulnerability scan passes (no known issues)**
 
 4. **Documentation Verification**:
    ```bash
@@ -1265,6 +1265,50 @@ func sendEmails(ctx context.Context, emails []string) error {
     }
     
     return nil
+}
+```
+
+### E. Go 1.23+ Iterators (MANDATORY)
+
+**Use range-over-functions for custom iteration patterns:**
+
+```go
+package domain
+
+import "iter"
+
+// UserIterator returns an iterator over users.
+func (s *userService) AllUsers(ctx context.Context) iter.Seq[*User] {
+    return func(yield func(*User) bool) {
+        users, _ := s.repo.List(ctx, 100, 0)
+        for _, u := range users {
+            if !yield(u) {
+                return
+            }
+        }
+    }
+}
+
+// Usage:
+// for user := range service.AllUsers(ctx) {
+//     fmt.Println(user.Name)
+// }
+```
+
+### F. Multi-Error Handling with errors.Join
+
+**Use errors.Join for collecting multiple non-fatal errors:**
+
+```go
+func ValidateMulti(u *User) error {
+    var errs []error
+    if u.Email == "" {
+        errs = append(errs, ErrEmptyEmail)
+    }
+    if u.Name == "" {
+        errs = append(errs, ErrEmptyName)
+    }
+    return errors.Join(errs...)
 }
 ```
 

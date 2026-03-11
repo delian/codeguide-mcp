@@ -1,23 +1,24 @@
 # Modern C++ Development Guidelines
-Mandatory coding standards and development practices for modern C++ applications with CMake and Conan integration. C++20/23, CMake 3.15+, Conan 2.x, Doxygen, Modern STL, RAII patterns, Smart pointers.
+Mandatory coding standards and development practices for modern C++ applications with CMake and Conan integration. C++23/26, CMake 3.25+ (Presets), Conan 2.x, Doxygen, Modern STL, RAII patterns, Smart pointers.
 
 ---
 Agent Profile: The C++ Systems Architect
 Role: Senior C++ Engineer & Systems Programming Specialist
 Objective: Generate production-ready, memory-safe, fully documented, high-performance, and maintainable C++ applications.
-Tools: C++20/23, CMake 3.15+, Conan 2.x, Doxygen, Modern STL, RAII patterns, Smart pointers.
+Tools: C++23/26, CMake 3.25+ (Presets), Conan 2.x, Doxygen, Modern STL, RAII patterns, Smart pointers.
 
 ## 1. Core Philosophies
 The agent must adhere to the "MODERN-CPP" principles for every C++ project:
 
 **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
 **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
-**Memory Safe**: RAII, smart pointers, no raw pointers, no manual memory management.
-**Optimal Performance**: Zero-cost abstractions, move semantics, constexpr, std::optional.
+**Memory Safe**: RAII, smart pointers, no raw pointers, no manual memory management. Use `std::span` for safe buffer passing.
+**Optimal Performance**: Zero-cost abstractions, move semantics, constexpr, `std::expected` for monadic error handling.
+**Modern by Design**: Prefer C++23 features like `std::print`, `import std;`, and improved `std::ranges`.
 **Deterministic Behavior**: Value semantics, explicit lifetimes, no undefined behavior.
 **Exception Safe**: Strong exception guarantee, RAII for cleanup.
 **Readable Code**: Clear naming, const-correctness, auto where appropriate.
-**No Legacy**: Use C++20/23 features, avoid C-style code, deprecate old patterns.
+**No Legacy**: Use C++23 features, avoid C-style code, deprecate old patterns.
 **Compile-Time Safety**: Templates, concepts, constexpr, static_assert.
 **Package Management**: Conan-first dependency strategy, fallback to system packages only when necessary.
 **Portable**: Cross-platform code, standard library first, minimal platform-specific code.

@@ -1,12 +1,12 @@
 # Modern PHP Development Guidelines
-Mandatory coding standards and development practices for modern PHP applications with emphasis on async programming, hexagonal architecture, and test-driven development. PHP 8.3+, Composer, PHPUnit, PHPDoc, AMPHP, Psalm/PHPStan, PHP-CS-Fixer.
+Mandatory coding standards and development practices for modern PHP applications with emphasis on async programming, hexagonal architecture, and test-driven development. PHP 8.4+, Composer, PHPUnit, PHPDoc, AMPHP, Psalm/PHPStan, PHP-CS-Fixer.
 
 ---
 
 **Agent Profile**: The Modern PHP Architect  
 **Role**: Senior PHP Engineer & Async Programming Specialist  
 **Objective**: Generate production-ready, minimalistic, clean, well-documented PHP code using hexagonal architecture with async-first approach.  
-**Tools**: PHP 8.3+, Composer, PHPUnit, PHPDoc, AMPHP, Psalm/PHPStan, PHP-CS-Fixer.
+**Tools**: PHP 8.4+, Composer, PHPUnit, PHPDoc, AMPHP, Psalm/PHPStan, PHP-CS-Fixer.
 
 ## Core Philosophies
 
@@ -14,25 +14,15 @@ The agent must adhere to the "PHP-FIRST" principles for every PHP implementation
 
 **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
 **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+**Security-First**: Mandatory vulnerability scanning, dependency auditing, and supply chain integrity checks using `composer audit`.
 **Async-First**: Prefer AMPHP > ReactPHP > Swoole > Traditional PHP > Synchronous code.
 **Minimalistic Code**: Clean, concise, readable, simple PHP code with clear intent.
 **Type Safety**: Strict types, typed properties, return types, parameter types everywhere.
-**Immutability**: Prefer readonly properties, value objects, immutable data structures.
+**Immutability**: Prefer readonly properties, asymmetric visibility, immutable data structures.
 **Hexagonal Architecture**: Clear separation of domain, application, infrastructure, adapters.
 **Documentation as Code**: PHPDoc comments for all public APIs, auto-generated documentation.
 
-**Modern Features**: PHP 8.3+ features (Fibers, Attributes, Enums, Union Types, etc.).
-**Fibers**: Use Fibers for cooperative multitasking, non-blocking I/O.
-**Observable Code**: Clear naming, self-documenting code, meaningful comments.
-**Dependency Injection**: Constructor injection, interface-based dependencies.
-**Error Handling**: Exceptions for exceptional cases, Result types for expected failures.
-**Reproducible Builds**: Composer.lock committed, dependency pinning, deterministic.
-**Tested Code**: PHPUnit tests mandatory, 80%+ coverage, all tests must pass.
-
-**Verified Builds**: Agent-generated code MUST parse successfully and pass all tests before delivery.
-**Static Analysis**: Psalm/PHPStan level max, no errors allowed.
-**Code Style**: PSR-12 compliance, PHP-CS-Fixer automated formatting.
-**Performance**: Efficient algorithms, minimal allocations, async I/O for scalability.
+**Verified Code**: Agent-generated code MUST parse successfully, pass security audits, and pass all tests before delivery.
 
 ---
 
@@ -40,7 +30,7 @@ The agent must adhere to the "PHP-FIRST" principles for every PHP implementation
 
 ### A. Verification Protocol
 
-**CRITICAL: Agents MUST verify that all generated/modified PHP code parses successfully, passes static analysis, and passes all tests before presenting to the user.**
+**CRITICAL: Agents MUST verify that all generated/modified PHP code parses successfully, passes security audits, and passes all tests before presenting to the user.**
 
 #### Pre-Delivery Checklist
 
@@ -51,53 +41,47 @@ The agent must adhere to the "PHP-FIRST" principles for every PHP implementation
    # Verify PHP syntax
    php -l src/FileName.php
    # Exit code MUST be 0
-   
-   # Check all files
-   find src/ -name "*.php" -exec php -l {} \;
-   # All files MUST parse successfully
    ```
 
 2. **Static Analysis (MANDATORY)**:
    ```bash
-   # Run Psalm (preferred)
+   # Run Psalm (preferred) or PHPStan
    ./vendor/bin/psalm --no-cache
    # Exit code MUST be 0, level must be max
-   
-   # OR run PHPStan
-   ./vendor/bin/phpstan analyse src tests --level max
-   # Exit code MUST be 0
    ```
 
-3. **Code Style Check**:
+3. **Security & Dependency Verification (MANDATORY)**:
    ```bash
-   # Check PSR-12 compliance
-   ./vendor/bin/php-cs-fixer fix --dry-run --diff
-   # Should have no issues or auto-fix with:
-   ./vendor/bin/php-cs-fixer fix
+   # Scan for vulnerabilities in dependencies
+   composer audit
    ```
+   - **MUST** have 0 HIGH or CRITICAL vulnerabilities.
+   - Supply chain integrity (`composer.lock`) MUST be verified.
 
 4. **Test Execution (MANDATORY)**:
    ```bash
    # Run all tests
    ./vendor/bin/phpunit
-   # Exit code MUST be 0, all tests pass
-   
-   # Run with coverage
-   XDEBUG_MODE=coverage ./vendor/bin/phpunit --coverage-text --coverage-html=coverage
-   # Coverage MUST be > 80%
+   # Exit code MUST be 0
    ```
 
-5. **Dependency Check**:
-   ```bash
-   # Verify Composer dependencies
-   composer validate
-   composer check-platform-reqs
-   # Both MUST succeed
-   ```
+5. **Code Quality & Documentation**:
+   - PSR-12 compliance verified.
+   - All public APIs documented with PHPDoc.
 
-### B. Error Correction Process
+#### Error Correction Process
 
 If verification fails:
+
+1. **Identify the error**: Read the compiler, test, or security scan output.
+2. **Fix the root cause**:
+   - Vulnerability? Update dependency version in `composer.json`.
+   - Syntax issue? Correct the PHP 8.4 syntax usage.
+3. **Re-verify**: Run syntax check, static analysis, and tests again.
+
+---
+
+## 1A. Test-Driven Development (TDD) Protocol (MANDATORY)
 
 1. **Read error message** carefully (PHP errors are descriptive)
 2. **Identify root cause** (syntax, type, missing dependency, test failure)
@@ -3064,20 +3048,165 @@ parameters:
 
 ---
 
-## References
+## 11. Security & Dependency Management (MANDATORY)
 
-- [AMPHP Documentation](https://amphp.org/)
-- [PHP Manual - Fibers](https://www.php.net/manual/en/language.fibers.php)
-- [PHPUnit Documentation](https://phpunit.de/)
-- [Psalm Documentation](https://psalm.dev/)
-- [Hexagonal Architecture](https://alistair.cockburn.us/hexagonal-architecture/)
-- [PSR-12 Coding Style](https://www.php-fig.org/psr/psr-12/)
+### A. Automated Dependency Management
+
+**Use Composer with lockfiles and automation for consistent environments:**
+
+```json
+// composer.json
+{
+    "config": {
+        "allow-plugins": {
+            "php-http/discovery": true
+        },
+        "sort-packages": true
+    },
+    "require": {
+        "php": "^8.4"
+    }
+}
+```
+
+- **Lockfiles**: ALWAYS commit `composer.lock`. Use `composer install --no-dev` in production.
+- **Dependency Auditing**: Integrate `composer audit` into CI to catch vulnerabilities.
+
+### B. Vulnerability Scanning & Security
+
+**Mandatory security checks for ALL PHP projects:**
+
+1. **Vulnerability Scan**:
+   ```bash
+   # Scan for known vulnerabilities in dependencies
+   composer audit
+   ```
+   - Agents MUST fix all discoverable high/critical vulnerabilities before presentation.
+
+2. **Supply Chain Audit**:
+   - Verify package hashes in `composer.lock`.
+   - Use `composer validate --strict` to ensure config integrity.
+
+### C. Dependency File
+
+```json
+// Example composer.json
+{
+    "require": {
+        "amphp/amp": "^3.0",
+        "psr/log": "^3.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.5",
+        "vimeo/psalm": "^6.0"
+    }
+}
+```
 
 ---
 
-**Last Updated:** 2026-01-22
-**Version:** 1.1
-**Maintainer:** Development Team
+## 12. Deployment Checklist
+
+### Agent-Generated Code Verification (MANDATORY)
+
+#### Build & Compilation
+- [ ] Code parses: `php -l` returns 0 for all files
+- [ ] No syntax errors or deprecated features
+- [ ] PHP 8.4 features used (Property hooks, Asymmetric visibility)
+- [ ] Code formatted: `php-cs-fixer fix --dry-run` passes
+
+#### Testing
+- [ ] All tests pass: `phpunit` returns exit code 0
+- [ ] Reasonable coverage: `XDEBUG_MODE=coverage` shows >80%
+- [ ] Async operations verified (AMPHP/Fibers)
+
+#### Security
+- [ ] Dependency scan passes: `composer audit` shows 0 vulnerabilities
+- [ ] Supply chain verified: `composer.lock` is in sync
+- [ ] Secrets check: No hardcoded API keys or passwords in `.env`
+- [ ] Static analysis: `psalm` or `phpstan` passes at max level
+
+#### Code Quality
+- [ ] No unused imports or dead code
+- [ ] Readonly classes/properties used for immutable data
+- [ ] Project structure follows hexagonal layout
+
+#### Documentation
+- [ ] All public APIs have PHPDoc comments
+- [ ] Documentation follows PSR-5/PSR-19 conventions
+- [ ] Examples provided for complex APIs
+
+#### Architecture
+- [ ] Hexagonal architecture followed (Ports and Adapters)
+- [ ] Dependency injection used via constructor
+- [ ] Async-first design where I/O is involved
+
+#### Agent Workflow Completed
+- [ ] Agent verified code parses/builds successfully
+- [ ] Agent ran all tests and verified they pass
+- [ ] Agent ran security scans and verified 0 high vulnerabilities
+- [ ] Agent verified documentation and PHPDoc
+
+---
+
+## 13. Why This Configuration Works
+
+**PHP 8.4 Property Hooks**:
+- Dramatically reduces boilerplate by allowing validation and transformation logic directly inside property definitions, eliminating the need for many manual getters and setters.
+
+**AMPHP & Fibers**:
+- Enables high-performance, non-blocking I/O without the "callback hell" of traditional async patterns, allowing PHP to scale to thousands of concurrent connections.
+
+**Hexagonal Architecture**:
+- Decouples core business logic from infrastructure (like the DB or HTTP framework), making the application highly testable and resilient to technology changes.
+
+---
+
+## 14. Quick Reference
+
+### Common Commands
+
+```bash
+# Build/Install
+composer install
+
+# Test
+./vendor/bin/phpunit
+
+# Security Scan
+composer audit
+
+# Static Analysis
+./vendor/bin/psalm
+
+# Lint and Format
+./vendor/bin/php-cs-fixer fix
+```
+
+### Modern PHP 8.4 Patterns Cheat Sheet
+
+```php
+// Property Hooks (PHP 8.4)
+public string $name {
+    set => strlen($value) < 2 ? throw new Error() : $value;
+    get => strtoupper($value);
+}
+
+// Asymmetric Visibility (PHP 8.4)
+public private(set) string $id;
+
+// New without parentheses
+$name = new User()->name;
+
+// Array find functions
+$user = array_find($users, fn($u) => $u->id === $id);
+```
+
+---
+
+**Last Updated:** 2026-02-06
+**Version:** 1.2
+**Maintainer:** PHP Team
 
 
 **End of Modern PHP Development Guidelines**

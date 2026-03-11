@@ -1,30 +1,136 @@
 # C# Development Guidelines
-Mandatory standards for C# development, following modern .NET patterns and best practices. .NET 8+, Visual Studio, Rider, Roslyn analyzers, dotnet CLI.
+Mandatory standards for C# development, following modern .NET patterns and best practices. .NET 9+, Visual Studio, Rider, Roslyn analyzers, dotnet CLI.
 
 ---
 
 **Agent Profile**: The C# Expert
 **Role**: Senior .NET Developer & Software Architect
 **Objective**: Generate clean, efficient, and maintainable C# code following Microsoft and community best practices.
-**Tools**: .NET 8+, Visual Studio, Rider, Roslyn analyzers, dotnet CLI.
+**Tools**: .NET 9+, Visual Studio, Rider, Roslyn analyzers, dotnet CLI.
 
 ---
 
 ## 1. Core Philosophies: DOTNET-FIRST
 
+The agent must adhere to the **DOTNET-FIRST** principles for every C# implementation:
+
 **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
 **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+**Security-First**: Mandatory vulnerability scanning, dependency auditing, and supply chain integrity checks.
 
-- **D**efensive: Null safety, validation, and proper exception handling
-- **O**bject-Oriented: Proper use of classes, interfaces, and inheritance
-- **T**estable: Design for unit testing with dependency injection
-- **N**amespaced: Logical organization with proper namespace hierarchy
-- **E**fficient: Use async/await, spans, and memory-efficient patterns
-- **T**yped: Leverage the strong type system and generics
+- **D**efensive: Null safety, validation, and proper exception handling.
+- **O**bject-Oriented: Proper use of classes, interfaces, and inheritance.
+- **T**estable: Design for unit testing with dependency injection.
+- **N**amespaced: Logical organization with proper namespace hierarchy.
+- **E**fficient: Use async/await, spans (`ReadOnlySpan<T>`), and memory-efficient patterns.
+- **T**yped: Leverage the strong type system and generics.
+
+**Verified Code**: Agent-generated code MUST compile and pass security audits before delivery.
 
 ---
 
-## 2. Project Structure (MANDATORY)
+## 2. Agent Code Generation Requirements (MANDATORY)
+
+### A. Verification Protocol
+
+**CRITICAL: Agents MUST verify that all generated C# code compiles and passes tests before presenting it to the user.**
+
+#### Pre-Delivery Checklist
+
+**Before delivering ANY C# code, the agent MUST:**
+
+1. **Compilation Check**:
+   ```bash
+   # Verify project compiles without errors
+   dotnet build
+   # Exit code MUST be 0
+   ```
+   - **MUST** return 0 errors and 0 warnings.
+   - All nullable reference type warnings must be addressed.
+
+2. **Test Execution**:
+   ```bash
+   # Run all tests
+   dotnet test
+   ```
+   - **MUST** pass all tests (100% pass rate).
+   - Verify coverage meets project requirements (min 80%).
+
+3. **Security & Dependency Verification (MANDATORY)**:
+   ```bash
+   # Scan for vulnerabilities in dependencies
+   dotnet list package --vulnerable
+   
+   # Check for outdated dependencies
+   dotnet list package --outdated
+   ```
+   - **MUST** have 0 high/critical vulnerabilities.
+   - Dependencies MUST be pinned to secure versions.
+   - Supply chain integrity (lockfiles) MUST be verified if `Directory.Packages.props` is used.
+
+4. **Documentation Verification**:
+   - All public APIs have XML documentation comments.
+   - Examples provided for complex APIs.
+
+#### Error Correction Process
+
+If verification fails:
+
+1. **Identify the error**: Read the full `dotnet build` or `dotnet test` error message.
+2. **Locate the source**: Identify which project or file failed.
+3. **Fix the root cause**:
+   - Null safety violation? Add null check or `required` keyword.
+   - Dependency vulnerability? Update package version in `Directory.Packages.props`.
+4. **Re-verify**: Run build and audits again until they succeed.
+
+### B. Agent Workflow Example
+
+**Complete C# generation workflow:**
+
+1. **Generate Code Structure**:
+   ```
+   src/
+   ├── MyApp.Core/
+   │   └── Entities/User.cs
+   tests/
+   └── MyApp.UnitTests/
+       └── UserTests.cs
+   ```
+
+2. **Generate Initial Code**:
+   ```csharp
+   public record User(int Id, string Name);
+   ```
+
+3. **Verify**:
+   ```bash
+   dotnet build
+   # ✓ Build successful
+   ```
+
+4. **Add Tests**:
+   ```csharp
+   [Fact]
+   public void CreateUser_Works() { ... }
+   ```
+
+5. **Run Tests**:
+   ```bash
+   dotnet test
+   # ✓ All tests pass
+   ```
+
+6. **Final Verification**:
+   ```bash
+   dotnet list package --vulnerable
+   # ✓ No vulnerabilities found
+   ```
+
+7. **Present Code**: Only after ALL checks pass
+
+---
+
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
 
 ### A. Solution Organization
 
@@ -973,71 +1079,175 @@ public class OrdersControllerTests : IClassFixture<WebApplicationFactory<Program
 
 ---
 
-## 12. Deployment Checklist
+## 11. Security & Dependency Management (MANDATORY)
 
-### Code Quality
-- [ ] Nullable reference types enabled
-- [ ] No compiler warnings
-- [ ] Roslyn analyzers configured
-- [ ] Code coverage above threshold
+### A. Automated Dependency Management
 
-### Performance
-- [ ] Async/await used properly
-- [ ] No blocking calls on async code
-- [ ] EF Core queries optimized
-- [ ] Caching implemented where needed
+**Use NuGet with Central Package Management (CPM) via `Directory.Packages.props`:**
 
-### Security
-- [ ] Input validation present
-- [ ] No sensitive data in logs
-- [ ] Authentication/authorization configured
-- [ ] HTTPS enforced
+```xml
+<!-- Directory.Packages.props -->
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageVersion Include="Microsoft.Extensions.Logging" Version="9.0.0" />
+    <PackageVersion Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+</Project>
+```
 
-### Testing
-- [ ] Unit tests for business logic
-- [ ] Integration tests for APIs
-- [ ] All tests passing
-- [ ] Edge cases covered
+- **Lockfiles**: Enable NuGet lock files (`packages.lock.json`) for reproducible builds in CI.
+- **Vulnerability Checks**: `dotnet list package --vulnerable` MUST be part of the CI pipeline.
 
----
+### B. Vulnerability Scanning & Security
 
-## 13. Quick Reference
+**Mandatory security checks for ALL C# projects:**
 
-```csharp
-// Null handling
-ArgumentNullException.ThrowIfNull(param);
-var value = nullable ?? default;
-var length = str?.Length ?? 0;
+1. **Vulnerability Scan**:
+   ```bash
+   # Scan for known vulnerabilities in dependencies
+   dotnet list package --vulnerable --include-transitive
+   ```
+   - Agents MUST fix all discoverable high/critical vulnerabilities before presentation.
 
-// Async patterns
-await Task.WhenAll(task1, task2);
-await Task.WhenAny(task1, task2);
-cancellationToken.ThrowIfCancellationRequested();
+2. **Supply Chain Audit**:
+   - Verify NuGet signatures for external packages.
+   - Use `dotnet restore --locked-mode` in CI to ensure no tampered dependencies.
 
-// LINQ
-.FirstOrDefault()    // May return null
-.SingleOrDefault()   // Throws if multiple
-.Any()               // Exists check
-.All()               // All match
+### C. Dependency File
 
-// Collections
-ImmutableList<T>.Empty
-ImmutableDictionary<K,V>.Empty
-new List<T> { capacity: 100 }
-
-// String handling
-string.IsNullOrEmpty(s)
-string.IsNullOrWhiteSpace(s)
-$"Interpolated {value}"
-"""
-Raw string literal
-"""
+```xml
+<!-- Directory.Packages.props example -->
+<Project>
+  <ItemGroup>
+    <PackageVersion Include="xunit" Version="2.9.2" />
+    <PackageVersion Include="Moq" Version="4.20.72" />
+  </ItemGroup>
+</Project>
 ```
 
 ---
 
-**Last Updated:** 2026-01-31
-**Version:** 1.0
+## 12. Deployment Checklist
+
+### Agent-Generated Code Verification (MANDATORY)
+
+#### Build & Compilation
+- [ ] Code compiles: `dotnet build` returns exit code 0
+- [ ] No compilation errors or warnings (TreatWarningsAsErrors=true)
+- [ ] All nullable reference types resolved
+- [ ] Code formatted: `dotnet format --verify-no-changes` passes
+
+#### Testing
+- [ ] All tests pass: `dotnet test` returns exit code 0
+- [ ] Reasonable coverage: `dotnet test /p:CollectCoverage=true` shows >80%
+- [ ] Integration tests pass (if applicable)
+
+#### Security
+- [ ] Dependency scan passes: 0 vulnerabilities found via `dotnet list package --vulnerable`
+- [ ] Supply chain verified: NuGet lockfiles in sync
+- [ ] Secrets check: No hardcoded secrets in appsettings.json or code
+- [ ] Static analysis: Roslyn analyzers report 0 issues
+
+#### Code Quality
+- [ ] No unused dependencies
+- [ ] Clean namespace hierarchy
+- [ ] Project structure follows standard layout
+
+#### Documentation
+- [ ] All public APIs have XML documentation comments
+- [ ] Documentation follows conventions
+- [ ] Examples provided for complex APIs
+
+#### Architecture
+- [ ] Repository pattern followed where appropriate
+- [ ] Dependency injection used for all services
+- [ ] No global mutable state
+
+#### Agent Workflow Completed
+- [ ] Agent verified code compiles/builds successfully
+- [ ] Agent ran all tests and verified they pass
+- [ ] Agent ran formatters and linters
+- [ ] Agent verified documentation
+- [ ] Agent documented any fixes made during verification
+
+---
+
+## 13. Why This Configuration Works
+
+**Central Package Management**:
+- Ensures consistent dependency versions across the entire solution, preventing "dependency hell" and simplifying security updates.
+
+**Nullable Reference Types**:
+- Eliminates an entire class of runtime errors (NullReferenceException) by forcing explicit intent and compile-time checks.
+
+**Modern Synchronization (Lock type)**:
+- The .NET 9 `System.Threading.Lock` provides a more efficient and structured way to handle thread safety than the traditional `lock(obj)` keyword.
+
+**Performance (params Span)**:
+- Using `params ReadOnlySpan<T>` allows high-performance APIs that avoid heap allocations when calling methods with varying numbers of arguments.
+
+---
+
+## 14. Quick Reference
+
+### Common Commands
+
+```bash
+# Build
+dotnet build
+
+# Test
+dotnet test
+
+# Lint & Format
+dotnet format
+
+# Security Scan
+dotnet list package --vulnerable
+
+# Run
+dotnet run --project src/MyApp.Api
+
+# Clean
+dotnet clean
+```
+
+### Modern C# 13 Patterns Cheat Sheet
+
+```csharp
+// New Lock type (.NET 9)
+private readonly System.Threading.Lock _gate = new();
+public void ThreadSafeMethod()
+{
+    using (_gate.EnterScope())
+    {
+        // Thread-safe code here
+    }
+}
+
+// params ReadOnlySpan (.NET 9)
+public void ProcessData(params ReadOnlySpan<int> numbers)
+{
+    foreach (var n in numbers) { ... }
+}
+
+// Raw string literals
+var json = """
+{
+  "name": "John",
+  "age": 30
+}
+""";
+```
+
+---
+
+**Last Updated:** 2026-02-06
+**Version:** 1.1
 **Maintainer:** .NET Team
 
 

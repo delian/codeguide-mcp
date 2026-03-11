@@ -1,12 +1,12 @@
 # Modern Python Development with uv
-Mandatory standards and best practices for Python development using uv. Workspaces, hexagonal architecture, dependency management. uv, pyproject.toml, pytest, ruff, mypy, Python 3.12+.
+Mandatory standards and best practices for Python development using uv. Workspaces, hexagonal architecture, dependency management. uv, pyproject.toml, pytest, ruff, mypy, Python 3.13+.
 
 ---
 
 **Agent Profile**: The Python uv Expert  
 **Role**: Senior Python Engineer & Dependency Management Specialist  
 **Objective**: Generate production-ready Python projects using uv for dependency management, virtual environments, and workspace configuration.  
-**Tools**: uv, pyproject.toml, pytest, ruff, mypy, Python 3.12+.
+**Tools**: uv, pyproject.toml, pytest, ruff, mypy, Python 3.13+.
 
 ## Core Philosophies
 
@@ -14,6 +14,7 @@ The agent must adhere to the "UV-FIRST" principles for every Python project:
 
 **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor mandatory).
 **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+**Security-First**: Mandatory vulnerability scanning, dependency auditing, and supply chain integrity checks using `uv lock --check`.
 **uv for Everything**: Use uv for dependencies, virtual environments, scripts, tools, and task running.
 **Workspaces**: Use hierarchical pyproject.toml with workspaces for hexagonal architecture.
 **Lock Files**: Always commit uv.lock for reproducible builds across all environments.
@@ -27,9 +28,68 @@ The agent must adhere to the "UV-FIRST" principles for every Python project:
 **Script Management**: Define scripts in pyproject.toml, run with uv run.
 **Monorepo Ready**: Workspaces support for multi-package projects.
 
+**Verified Code**: Agent-generated code MUST pass `uv lock --check`, `ruff`, and `pytest` before delivery.
+
 ---
 
-## 1. Getting Started with uv
+## 1. Agent Code Generation Requirements (MANDATORY)
+
+### A. Verification Protocol
+
+**CRITICAL: Agents MUST verify that all generated Python code is functional, secure, and type-safe before presenting it to the user.**
+
+#### Pre-Delivery Checklist
+
+**Before delivering ANY Python code, the agent MUST:**
+
+1. **Compilation & Syntax Check**:
+   ```bash
+   # Verify project can be synced and lockfile is consistent
+   uv sync
+   uv lock --check
+   # Exit code MUST be 0
+   ```
+
+2. **Linting & Formatting**:
+   ```bash
+   # Run ruff for linting and formatting
+   uv run ruff check .
+   uv run ruff format --check .
+   ```
+
+3. **Security & Dependency Verification (MANDATORY)**:
+   ```bash
+   # Scan for known vulnerabilities in dependencies
+   # (Using bandit or safety via uv run)
+   uv run bandit -r src/
+   ```
+   - **MUST** have 0 HIGH or CRITICAL vulnerabilities.
+   - Supply chain integrity (`uv.lock`) MUST be verified.
+
+4. **Test Execution**:
+   ```bash
+   # Run all tests in the workspace
+   uv run pytest
+   # Exit code MUST be 0
+   ```
+
+5. **Documentation Verification**:
+   - All public APIs have docstrings (Google style).
+   - Verify docstrings are readable via `uv run python -m pydoc`.
+
+#### Error Correction Process
+
+If verification fails:
+
+1. **Identify the error**: Read the full `uv run` or `pytest` output.
+2. **Fix the root cause**:
+   - Dependency conflict? Adjust versions in `pyproject.toml` and run `uv lock`.
+   - Security issue? Use a safer alternative or update the package.
+3. **Re-verify**: Run sync, lock check, lint, and tests again.
+
+---
+
+## 2. Getting Started with uv
 
 ### A. Installation
 
@@ -1209,28 +1269,156 @@ CMD ["uv", "run", "--no-sync", "serve-prod"]
 - [ ] **Type checking**: In CI pipeline
 - [ ] **Matrix testing**: Multiple Python versions
 
-### Documentation
-- [ ] **README**: Project setup instructions with uv
-- [ ] **Architecture docs**: Hexagonal architecture explained
-- [ ] **API docs**: If applicable
-- [ ] **CONTRIBUTING**: Development workflow with uv
+---
+
+## 7. Security & Dependency Management (MANDATORY)
+
+### A. Automated Dependency Management
+
+**Use uv workspaces and lockfiles for consistent and fast management:**
+
+```toml
+# pyproject.toml
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+myapp-domain = { workspace = true }
+```
+
+- **Lockfiles**: ALWAYS commit `uv.lock`. It provides deterministic, reproducible builds.
+- **Frozen Builds**: Use `uv sync --frozen` in CI/CD to prevent unexpected lockfile updates.
+- **Sync Integrity**: `uv lock --check` verifies the lockfile is in sync with `pyproject.toml`.
+
+### B. Vulnerability Scanning & Security
+
+**Mandatory security checks for ALL Python projects using uv:**
+
+1. **Vulnerability Scan**:
+   ```bash
+   # Scan all dependencies for known vulnerabilities
+   uv run bandit -r src/
+   # (Or use safety if integrated)
+   ```
+   - Agents MUST ensure 0 HIGH or CRITICAL vulnerabilities are present.
+
+2. **Supply Chain Audit**:
+   - `uv lock --check` ensures the dependency graph is untampered.
+   - Use `uv sync --no-dev` for production environments to minimize attack surface.
+
+### C. Dependency File
+
+```toml
+# Example root pyproject.toml dependencies
+[project]
+dependencies = [
+    "fastapi>=0.115.0",
+    "pydantic>=2.9.0",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.6.0",
+    "mypy>=1.11.0",
+]
+```
 
 ---
 
-## 8. Why This Configuration Works
+## 8. Deployment Checklist
 
-1. **uv Speed**: 10-100x faster than pip, instant dependency resolution.
-2. **Workspaces**: Perfect for hexagonal architecture, manages inter-package dependencies.
-3. **Lock Files**: uv.lock ensures reproducible builds across all environments.
-4. **No pip Needed**: uv replaces pip, pip-tools, pipx, and virtualenv.
-5. **Python Management**: uv manages Python versions, no pyenv needed.
-6. **Scripts**: pyproject.toml scripts provide consistent task running.
-7. **Hexagonal Architecture**: Clear boundaries, testable code, changeable infrastructure.
-8. **TDD**: Tests first ensures quality and prevents regressions.
-9. **Type Safety**: Mypy strict mode catches bugs at compile time.
-10. **Fast CI**: uv's speed dramatically reduces CI/CD times.
-11. **Monorepo Ready**: Workspaces support complex project structures.
-12. **Zero Config**: Sensible defaults, works out of the box.
+### Agent-Generated Code Verification (MANDATORY)
+
+#### Build & Compilation
+- [ ] Code is syncable: `uv sync` returns 0
+- [ ] Lockfile is consistent: `uv lock --check` passes
+- [ ] Python 3.13 features used appropriately (JIT, free-threaded if applicable)
+- [ ] Code formatted: `uv run ruff format --check` passes
+
+#### Testing
+- [ ] All tests pass: `uv run pytest` returns exit code 0
+- [ ] Reasonable coverage: `uv run test-cov` shows >80%
+- [ ] Integration tests pass in isolated environments
+
+#### Security
+- [ ] Dependency scan passes: `bandit` shows 0 HIGH/CRITICAL vulnerabilities
+- [ ] Supply chain verified: `uv.lock` is committed and synced
+- [ ] Secrets check: No secrets found in code or `.env` files
+- [ ] Static analysis: `ruff` and `mypy` pass with 0 issues
+
+#### Code Quality
+- [ ] No unused dependencies or imports
+- [ ] Hexagonal architecture followed (domain isolation)
+- [ ] Type hints used everywhere (mypy strict mode)
+
+#### Documentation
+- [ ] All public APIs have Google-style docstrings
+- [ ] Architecture diagrams or ADRs updated
+- [ ] README contains clear setup instructions with `uv sync`
+
+#### Agent Workflow Completed
+- [ ] Agent verified code syncs/builds successfully
+- [ ] Agent ran all tests and verified they pass
+- [ ] Agent ran security scans and verified 0 high vulnerabilities
+- [ ] Agent verified documentation and type hints
+
+---
+
+## 9. Why This Configuration Works
+
+**uv Performance**:
+- Replaces pip, pip-tools, and virtualenv with a single tool that is 10-100x faster, enabling instant developer feedback loops.
+
+**Lockfile-First Development**:
+- `uv.lock` ensures that every developer and CI environment uses the exact same dependency versions, eliminating "it works on my machine" bugs.
+
+**Workspace Isolation**:
+- Supports multi-package repositories natively, making it the perfect choice for complex hexagonal architectures where domain, application, and infrastructure need clear boundaries.
+
+---
+
+## 10. Quick Reference
+
+### Common Commands
+
+```bash
+# Sync environment
+uv sync
+
+# Add dependency
+uv add requests
+
+# Run tests
+uv run pytest
+
+# Security scan
+uv run bandit -r src/
+
+# Type check
+uv run mypy packages
+
+# Lint and Format
+uv run ruff check . --fix && uv run ruff format .
+```
+
+### Modern uv Patterns Cheat Sheet
+
+```toml
+# Inline Script Dependencies (PEP 723)
+# /// script
+# dependencies = ["requests", "rich"]
+# ///
+import requests
+from rich import print
+
+# Workspace Source
+[tool.uv.sources]
+core = { path = "./packages/core" }
+
+# Grouped Updates
+[tool.renovate]
+groupName = "uv dependencies"
+```
 
 ---
 

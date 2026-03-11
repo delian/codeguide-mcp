@@ -1,13 +1,13 @@
 # Rust Development Guidelines
 
-Mandatory coding standards and development practices for Rust development. Rust 2021 Edition, Cargo, rustdoc, clippy, rustfmt, cargo-test, cargo-tarpaulin.
+Mandatory coding standards and development practices for Rust development. Rust 2024 Edition (if applicable) or latest stable, Cargo, rustdoc, clippy, rustfmt, cargo-test, cargo-tarpaulin, cargo-audit, cargo-deny.
 
 ---
 
 **Agent Profile**: The Rust Expert
 **Role**: Senior Rust Engineer & Systems Programming Specialist
 **Objective**: Generate production-ready, safe, performant, well-documented, and maintainable Rust code.
-**Tools**: Rust 2021 Edition, Cargo, rustdoc, clippy, rustfmt, cargo-test, cargo-tarpaulin
+**Tools**: Rust 2024 Edition (or latest stable), Cargo, rustdoc, clippy, rustfmt, cargo-test, cargo-tarpaulin, cargo-audit, cargo-deny
 
 ---
 
@@ -17,6 +17,7 @@ The agent must adhere to the **RUST-FIRST** principles for every Rust project:
 
 **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
 **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+**Supply Chain Integrity**: Mandatory auditing of dependencies for vulnerabilities and license compliance.
 
 **Result & Option**: Explicit error handling, no panics in production, exhaustive pattern matching.
 **RAII Everywhere**: Automatic resource management, Drop trait for cleanup, no manual memory management.
@@ -31,7 +32,7 @@ The agent must adhere to the **RUST-FIRST** principles for every Rust project:
 
 **Hexagonal Architecture**: Domain core, ports, adapters, clear boundaries, dependency inversion.
 **Enums for States**: Use enums for closed sets, exhaustive matching, type-safe state machines.
-**Async-First**: Use async/await for I/O, tokio runtime, async traits where applicable.
+**Async-First**: Use async/await for I/O, tokio runtime, native async traits where available.
 **Documented Code**: rustdoc comments for all public APIs, examples in docs, runnable doc tests.
 **Verified Code**: Agent-generated code MUST compile with `cargo build`, pass `cargo clippy -- -D warnings`, and pass `cargo test` before delivery.
 
@@ -88,7 +89,18 @@ The agent must adhere to the **RUST-FIRST** principles for every Rust project:
    cargo test --doc
    ```
 
-5. **Documentation Check**:
+5. **Security & Audit Check**:
+   ```bash
+   # Audit dependencies for known vulnerabilities
+   cargo audit
+   
+   # Check licenses and sources
+   cargo deny check
+   ```
+   - **Audit MUST pass with no unvetted vulnerabilities**
+   - All licenses must be compliant
+
+6. **Documentation Check**:
    ```bash
    # Verify documentation builds
    cargo doc --no-deps
@@ -98,7 +110,7 @@ The agent must adhere to the **RUST-FIRST** principles for every Rust project:
    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
    ```
 
-6. **Coverage Check** (optional but recommended):
+7. **Coverage Check** (optional but recommended):
    ```bash
    # Run test coverage
    cargo tarpaulin --out Html

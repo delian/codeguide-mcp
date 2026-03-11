@@ -24,6 +24,8 @@ The agent must adhere to the **PERFORMANCE-FIRST** standard for every CUDA imple
 - **R**obust Testing: Unit test every kernel, validate GPU vs CPU results, use reference code as gold standard when porting
 - **M**inimal Branching: Avoid divergent warps, minimize conditional logic
 - **A**synchronous Execution: Use CUDA streams for concurrency, CUDA Graphs for pipelines
+- **G**raph Optimized: Leverage CUDA Graphs for repeated kernel sequences to minimize launch overhead
+- **M**emory Pools: Use `cudaMemPool` for efficient allocation and reuse of device memory
 - **N**VIDIA Libraries: Prefer cuFFTdx > cuFFT, use cuBLAS, CUDA-X, NVPL for proven performance
 - **C**lean Code: Minimalistic, readable, avoid over-modularization when it hurts performance
 - **E**rror Checked: Every CUDA call wrapped with error checking, validated before delivery
@@ -1777,6 +1779,20 @@ for (int i = 0; i < iterations; i++) {
 // Cleanup
 cudaGraphExecDestroy(graph_exec);
 cudaGraphDestroy(graph);
+
+// ✅ MODERN - Update executable graph without re-instantiation (CUDA 12.0+)
+cudaGraphExecUpdateResult update_result;
+cudaGraphExecUpdate(graph_exec, new_graph, &update_result);
+
+// ✅ MODERN - Use Memory Pools for low-latency allocation (CUDA 11.2+)
+cudaMemPool_t mem_pool;
+cudaDeviceGetDefaultMemPool(&mem_pool, device);
+uint64_t threshold = 1024 * 1024 * 1024; // 1GB
+cudaMemPoolSetAttribute(mem_pool, cudaMemPoolAttrReleaseThreshold, &threshold);
+
+float* d_pool_ptr;
+cudaMallocFromPoolAsync(&d_pool_ptr, size, mem_pool, stream);
+cudaFreeAsync(d_pool_ptr, stream);
 
 // Performance benefit:
 // - Reduces kernel launch overhead from ~5-10 μs to <1 μs

@@ -1,12 +1,12 @@
 # Deno Development Guidelines
-Modern development practices for building secure, performant, and maintainable applications with Deno 2.0+.
+Modern development practices for building secure, performant, and maintainable applications with Deno 2.1+.
 
 ---
 
 **Agent Profile**: The Deno Security Architect
 **Role**: Senior Full-Stack Engineer & Deno Performance Specialist
 **Objective**: Generate production-ready, type-safe, secure-by-default, highly performant, and maintainable Deno applications.
-**Tools**: Deno 2.0+, TypeScript 5.x, JSR, Fresh, Oak, Standard Library, Built-in tooling.
+**Tools**: Deno 2.1+, TypeScript 5.x, JSR, Fresh, Oak, Standard Library, Built-in tooling.
 **Companion Guides**: typescript.md, nodejs.md, secure-coding.md, testing.md
 
 ---
@@ -17,59 +17,100 @@ The agent must adhere to the **DENO-SECURE** principles for every Deno project:
 
 **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation using Deno.test (Red-Green-Refactor cycle mandatory).
 **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+**Security-First**: Mandatory vulnerability scanning, dependency auditing, and supply chain integrity checks using `deno audit`.
 
 ### DENO-SECURE Principles
 
-- **D**efault Secure - Explicit permissions, no file/network access without flags
-- **E**SM Native - Native ES modules, no build step, direct TypeScript execution
-- **N**o Config - Zero configuration by default, works out of the box
-- **O**ptimized - Built on Rust + V8, optimized for modern JavaScript performance
+- **D**efault Secure - Explicit permissions, no file/network access without flags.
+- **E**SM Native - Native ES modules, no build step, direct TypeScript execution.
+- **N**o Config - Zero configuration by default, works out of the box.
+- **O**ptimized - Built on Rust + V8, optimized for modern JavaScript performance.
 
-- **S**tandard Library - Curated, audited standard library modules
-- **E**xplicit Permissions - Granular security with `--allow-*` flags
-- **C**omplete Tooling - Built-in formatter, linter, test runner, bundler, LSP
-- **U**RL Imports - Direct URL imports, no package.json or node_modules
-- **R**ust-Powered - Fast, memory-safe runtime built with Rust
-- **E**dge-Ready - Deploy to edge with Deno Deploy, global distribution
+- **S**tandard Library - Curated, audited standard library modules.
+- **E**xplicit Permissions - Granular security with `--allow-*` flags.
+- **C**omplete Tooling - Built-in formatter, linter, test runner, bundler, LSP.
+- **U**RL Imports - Direct URL imports, no package.json or node_modules.
+- **R**ust-Powered - Fast, memory-safe runtime built with Rust.
+- **E**dge-Ready - Deploy to edge with Deno Deploy, global distribution.
 
-**Additional Principles:**
-
-- **Web Standard APIs** - Native fetch, WebSocket, Web Crypto, etc.
-- **TypeScript First** - Native TypeScript support, no transpilation needed
-- **JSR Integration** - Modern package registry with TypeScript support
-- **npm Compatibility** - Use npm packages when needed via `npm:` specifier
-- **Zero Dependencies** - Minimize external dependencies, use std library
-- **Permission Model** - Principle of least privilege, explicit grants only
+**Verified Code**: Agent-generated code MUST pass `deno check` and `deno audit` before delivery.
 
 ---
 
-## 2. Mandatory Setup Requirements
+## 2. Agent Code Generation Requirements (MANDATORY)
+
+### A. Verification Protocol
+
+**CRITICAL: Agents MUST verify that all generated Deno code compiles, passes tests, and is secure before presenting it to the user.**
+
+#### Pre-Delivery Checklist
+
+**Before delivering ANY Deno code, the agent MUST:**
+
+1. **Syntax & Type Check**:
+   ```bash
+   # Verify TypeScript compiles without errors
+   deno check main.ts
+   # Exit code MUST be 0
+   ```
+
+2. **Linting Check**:
+   ```bash
+   # Run built-in linter
+   deno lint
+   # Fix all errors, address warnings
+   ```
+
+3. **Security & Dependency Verification (MANDATORY)**:
+   ```bash
+   # Scan for vulnerabilities in dependencies
+   deno audit
+   ```
+   - **MUST** have 0 high/critical vulnerabilities.
+   - Supply chain integrity (`deno.lock`) MUST be verified.
+
+4. **Test Execution**:
+   ```bash
+   # Run all tests with frozen lockfile
+   deno test --frozen --allow-read --allow-net
+   # Exit code MUST be 0
+   ```
+
+5. **Documentation Verification**:
+   - All public APIs have JSDoc comments.
+   - Examples in documentation are tested with `deno test --doc`.
+
+#### Error Correction Process
+
+If verification fails:
+
+1. **Identify the error**: Read the full Deno error message (often includes suggested fixes).
+2. **Locate the source**: Identify which module or permission failed.
+3. **Fix the root cause**:
+   - Permission error? Add specific `--allow-*` flag to task.
+   - Vulnerability? Update dependency in `deno.json`.
+4. **Re-verify**: Run check, lint, and tests again.
+
+---
+
+## 3. Mandatory Setup Requirements
 
 ### A. Deno Installation & Version
 
-**Version**: Use Deno 2.0+ (latest stable)
+**Version**: Use Deno 2.1+ (latest stable)
 
 ```bash
 # Install Deno (official installer)
 curl -fsSL https://deno.land/install.sh | sh
 
-# Or using Homebrew (macOS)
-brew install deno
-
-# Or using Chocolatey (Windows)
-choco install deno
-
 # Verify installation
 deno --version
-# deno 2.0.0 (release, x86_64-unknown-linux-gnu)
-# v8 12.1.285.6
-# typescript 5.4.0
+# deno 2.1.0 (release, x86_64-unknown-linux-gnu)
+# v8 12.9
+# typescript 5.6
 
 # Upgrade to latest
 deno upgrade
-
-# Upgrade to specific version
-deno upgrade --version 2.0.0
 ```
 
 ### B. Project Configuration (deno.json)
@@ -85,19 +126,29 @@ deno upgrade --version 2.0.0
   "tasks": {
     "dev": "deno run --watch --allow-net --allow-read --allow-env main.ts",
     "start": "deno run --allow-net --allow-read --allow-env main.ts",
-    "test": "deno test --allow-read --allow-net --coverage=coverage",
-    "test:watch": "deno test --watch",
-    "coverage": "deno coverage coverage --lcov --output=coverage.lcov",
-    "bench": "deno bench --allow-read --allow-net",
+    "test": "deno test --frozen --allow-read --allow-net --coverage=coverage",
+    "audit": "deno audit",
     "lint": "deno lint",
-    "fmt": "deno fmt",
-    "fmt:check": "deno fmt --check",
-    "check": "deno check **/*.ts",
-    "bundle": "deno bundle main.ts dist/bundle.js",
-    "compile": "deno compile --allow-net --allow-read --allow-env --output=dist/myapp main.ts"
+    "fmt": "deno fmt"
   },
 
   "imports": {
+    "@/": "./src/",
+    "@std/": "jsr:@std/",
+    "zod": "npm:zod@^3.23.0"
+  },
+
+  "compilerOptions": {
+    "strict": true
+  },
+
+  "lock": true
+}
+```
+
+---
+
+## 4. Test-Driven Development (TDD) Protocol (MANDATORY)
     "@/": "./src/",
     "@std/": "https://deno.land/std@0.224.0/",
     "zod": "npm:zod@^3.22.4"
@@ -2037,283 +2088,111 @@ const data = await parallelMap(
 
 ---
 
-## 11. Deployment
+## 11. Security & Dependency Management (MANDATORY)
 
-### A. Deno Deploy
+### A. Automated Dependency Management
 
-```typescript
-// Deploy to Deno Deploy (automatic deployment from GitHub)
-
-// main.ts
-import { serve } from '@std/http/server';
-
-serve((req) => {
-  return new Response('Hello from Deno Deploy!', {
-    headers: { 'content-type': 'text/plain' },
-  });
-});
-
-// Or use Deno.serve (native)
-Deno.serve((req) => {
-  const url = new URL(req.url);
-
-  if (url.pathname === '/') {
-    return new Response('Hello from Deno Deploy!');
-  }
-
-  return new Response('Not Found', { status: 404 });
-});
-```
-
-**Deploy Command:**
-```bash
-# Install deployctl
-deno install -Arf jsr:@deno/deployctl
-
-# Deploy to production
-deployctl deploy --project=myproject main.ts
-
-# Deploy with environment variables
-deployctl deploy \
-  --project=myproject \
-  --env=PRODUCTION \
-  --prod \
-  main.ts
-```
-
-### B. Docker Deployment
-
-```dockerfile
-# Dockerfile
-FROM denoland/deno:2.0.0
-
-WORKDIR /app
-
-# Cache dependencies
-COPY deno.json deno.lock ./
-RUN deno cache --lock=deno.lock **/*.ts
-
-# Copy source code
-COPY . .
-
-# Compile application
-RUN deno cache main.ts
-
-EXPOSE 8000
-
-# Run with minimal permissions
-CMD ["deno", "run", \
-  "--allow-net=:8000", \
-  "--allow-read=./public", \
-  "--allow-env=PORT,DATABASE_URL,JWT_SECRET", \
-  "main.ts"]
-```
-
-**Build and run:**
-```bash
-# Build image
-docker build -t myapp .
-
-# Run container
-docker run -p 8000:8000 \
-  -e PORT=8000 \
-  -e DATABASE_URL=postgres://... \
-  -e JWT_SECRET=... \
-  myapp
-```
-
-### C. Compile to Standalone Binary
-
-```bash
-# Compile to native executable
-deno compile \
-  --allow-net=:8000 \
-  --allow-read=./public \
-  --allow-env=PORT,DATABASE_URL \
-  --output=dist/myapp \
-  main.ts
-
-# Run the compiled binary
-./dist/myapp
-
-# Cross-compile for different platforms
-deno compile --target=x86_64-unknown-linux-gnu --output=dist/myapp-linux main.ts
-deno compile --target=x86_64-apple-darwin --output=dist/myapp-macos main.ts
-deno compile --target=x86_64-pc-windows-msvc --output=dist/myapp-windows.exe main.ts
-```
-
----
-
-## 12. Built-in Tooling
-
-### A. Formatting
-
-```bash
-# Format all TypeScript files
-deno fmt
-
-# Check formatting without changes
-deno fmt --check
-
-# Format specific files
-deno fmt src/**/*.ts
-
-# Custom configuration in deno.json
-{
-  "fmt": {
-    "useTabs": false,
-    "lineWidth": 100,
-    "indentWidth": 2,
-    "semiColons": true,
-    "singleQuote": true,
-    "proseWrap": "preserve"
-  }
-}
-```
-
-### B. Linting
-
-```bash
-# Lint all files
-deno lint
-
-# Lint specific files
-deno lint src/**/*.ts
-
-# Custom lint rules in deno.json
-{
-  "lint": {
-    "rules": {
-      "tags": ["recommended"],
-      "include": ["ban-untagged-todo", "no-throw-literal"],
-      "exclude": ["no-unused-vars"]
-    }
-  }
-}
-```
-
-### C. Testing
-
-```bash
-# Run all tests
-deno test
-
-# Run tests with coverage
-deno test --coverage=coverage
-
-# Generate coverage report
-deno coverage coverage --lcov --output=coverage.lcov
-
-# Run tests in watch mode
-deno test --watch
-
-# Run specific test file
-deno test tests/unit/user_test.ts
-
-# Run tests with permissions
-deno test --allow-read --allow-net
-
-# Parallel testing (default)
-deno test --parallel
-
-# Filter tests by name
-deno test --filter "UserService"
-```
-
-### D. Benchmarking
-
-```typescript
-// benchmarks/user_bench.ts
-Deno.bench('create user - memory', { group: 'create' }, () => {
-  const user = {
-    id: crypto.randomUUID(),
-    email: 'test@example.com',
-    name: 'Test User',
-  };
-});
-
-Deno.bench('create user - validation', { group: 'create' }, () => {
-  const schema = z.object({
-    email: z.string().email(),
-    name: z.string().min(1),
-  });
-
-  schema.parse({
-    email: 'test@example.com',
-    name: 'Test User',
-  });
-});
-
-Deno.bench({
-  name: 'fetch user from API',
-  group: 'api',
-  permissions: { net: true },
-  async fn() {
-    await fetch('https://jsonplaceholder.typicode.com/users/1');
-  },
-});
-
-// Run benchmarks
-// deno bench
-```
-
-### E. Documentation Generation
-
-```bash
-# Generate documentation
-deno doc mod.ts
-
-# Generate documentation for all exports
-deno doc --json mod.ts > docs.json
-
-# View documentation in browser
-deno doc --html --name="My Project" mod.ts
-
-# Check for missing documentation
-deno doc --lint mod.ts
-```
-
----
-
-## 13. Publishing to JSR
-
-### A. Prepare for Publishing
+**Use JSR and Deno's native workspace features for automated management:**
 
 ```json
 // deno.json
 {
-  "name": "@myorg/myproject",
-  "version": "1.0.0",
-  "exports": "./mod.ts",
-  "publish": {
-    "include": [
-      "mod.ts",
-      "src/",
-      "README.md",
-      "LICENSE"
-    ],
-    "exclude": [
-      "**/*_test.ts",
-      "tests/",
-      "benchmarks/",
-      "scripts/"
-    ]
+  "imports": {
+    "@std/": "jsr:@std/",
+    "hono": "jsr:@hono/hono@^4.0"
+  },
+  "lock": true
+}
+```
+
+- **Lockfiles**: Deno 2.0+ uses `deno.lock` by default. ALWAYS commit this file.
+- **Frozen Builds**: Use `--frozen` in CI to ensure no lockfile changes are allowed.
+- **Dependency Auditing**: Use `deno audit` to scan for known vulnerabilities.
+
+### B. Vulnerability Scanning & Security
+
+**Mandatory security checks for ALL Deno projects:**
+
+1. **Vulnerability Scan**:
+   ```bash
+   # Scan all dependencies for CVEs
+   deno audit
+   ```
+   - Agents MUST fix all discoverable high/critical vulnerabilities before presentation.
+
+2. **Supply Chain Audit**:
+   - Verify JSR and npm package signatures (automatic in Deno).
+   - Use `deno check` to verify type safety of all dependencies.
+
+### C. Dependency File
+
+```json
+// deno.json example
+{
+  "imports": {
+    "@std/assert": "jsr:@std/assert@1",
+    "@std/http": "jsr:@std/http@1"
   }
 }
 ```
 
-### B. Publish to JSR
+---
 
-```bash
-# Login to JSR
-deno publish --dry-run
+## 12. Deployment Checklist
 
-# Publish package
-deno publish
+### Agent-Generated Code Verification (MANDATORY)
 
-# Publish specific version
-deno publish --version 1.0.1
-```
+#### Build & Compilation
+- [ ] Code compiles: `deno check main.ts` returns exit code 0
+- [ ] No type errors or warnings
+- [ ] All imports/dependencies resolved
+- [ ] Code formatted: `deno fmt --check` produces no changes
+
+#### Testing
+- [ ] All tests pass: `deno test --frozen` returns exit code 0
+- [ ] Reasonable coverage: `deno test --coverage` shows >80%
+- [ ] Integration tests pass (if applicable)
+
+#### Security
+- [ ] Dependency scan passes: `deno audit` shows 0 vulnerabilities
+- [ ] Supply chain verified: `deno.lock` is in sync and verified
+- [ ] Secrets check: No hardcoded secrets or sensitive data in `.env`
+- [ ] Static analysis: `deno lint` passes with 0 warnings
+
+#### Code Quality
+- [ ] No unused dependencies or imports
+- [ ] Small, focused modules with clear exports
+- [ ] Project structure follows standard layout
+
+#### Documentation
+- [ ] All public APIs have JSDoc comments
+- [ ] Documentation follows conventions
+- [ ] Examples provided for complex APIs and tested with `deno test --doc`
+
+#### Architecture
+- [ ] Hexagonal architecture followed where appropriate
+- [ ] Permissions are explicit and granular
+- [ ] No global mutable state
+
+#### Agent Workflow Completed
+- [ ] Agent verified code compiles/builds successfully
+- [ ] Agent ran all tests and verified they pass
+- [ ] Agent ran formatters and linters
+- [ ] Agent verified documentation
+- [ ] Agent documented any fixes made during verification
+
+---
+
+## 13. Why This Configuration Works
+
+**Deno 2.1+ Native Tooling**:
+- Combines the best of Deno (security, ESM) with modern Node.js compatibility, allowing use of `npm:` packages without the security risks of `node_modules` by default.
+
+**JSR (JavaScript Registry)**:
+- Provides a high-performance, TypeScript-first package registry that auto-generates documentation and enforces best practices.
+
+**Frozen Lockfiles**:
+- Using `--frozen` in CI prevents "it works on my machine" issues and guards against supply chain attacks by ensuring the exact same bits are used in every environment.
 
 ---
 
@@ -2322,60 +2201,45 @@ deno publish --version 1.0.1
 ### Common Commands
 
 ```bash
-# Run application
-deno run main.ts
+# Run with explicit permissions
 deno run --allow-net --allow-read main.ts
 
-# Run with watch mode
-deno run --watch main.ts
+# Test with security checks
+deno test --frozen --allow-all
 
-# Execute TypeScript instantly
-deno run https://deno.land/std@0.224.0/examples/echo_server.ts
+# Security scan
+deno audit
 
-# REPL
-deno
+# Lint and Format
+deno lint && deno fmt
 
-# Install global script
-deno install --allow-net --allow-read https://deno.land/std@0.224.0/http/file_server.ts
+# Generate Documentation
+deno doc --html mod.ts
 
-# Upgrade Deno
-deno upgrade
-deno upgrade --version 2.0.0
-
-# Information
-deno info                  # Show Deno info
-deno info main.ts          # Show dependency tree
-deno --version             # Show version
-
-# Cache dependencies
-deno cache main.ts
-deno cache --reload main.ts  # Force re-download
+# Compile to standalone binary
+deno compile --allow-all main.ts
 ```
 
-### Permission Flags
+### Modern Deno Patterns Cheat Sheet
 
-| Flag | Description |
-|------|-------------|
-| `--allow-read[=path]` | Allow file system read access |
-| `--allow-write[=path]` | Allow file system write access |
-| `--allow-net[=host]` | Allow network access |
-| `--allow-env[=var]` | Allow environment variable access |
-| `--allow-run[=program]` | Allow subprocess execution |
-| `--allow-ffi[=path]` | Allow FFI (Foreign Function Interface) |
-| `--allow-hrtime` | Allow high-resolution time measurement |
-| `--allow-sys[=kind]` | Allow system information access |
-| `--allow-all` or `-A` | Allow all permissions (NOT recommended) |
+```typescript
+// Native .env handling (Deno 2.0+)
+// Run with: deno run --env-file=.env main.ts
+const apiKey = Deno.env.get("API_KEY");
+
+// Native SQLite (Deno 2.1+)
+import { DatabaseSync } from "node:sqlite";
+const db = new DatabaseSync("data.db");
+
+// Range-over-functions (Deno 2.1+)
+for (const user of service.allUsers()) { ... }
+```
 
 ---
 
-## Cross-References
-
-- **TypeScript Guidelines** - See [typescript.md](typescript.md) for TypeScript best practices
-- **Node.js Guidelines** - See [nodejs.md](nodejs.md) for Node.js comparison
-- **Testing Guidelines** - See [testing.md](testing.md) for comprehensive testing strategies
-- **Secure Coding** - See [secure-coding.md](secure-coding.md) for security best practices
-- **CI/CD Guidelines** - See [ci-cd.md](ci-cd.md) for deployment automation
-- **Docker Guidelines** - See [docker.md](docker.md) for containerization
+**Last Updated:** 2026-02-06
+**Version:** 2.1
+**Maintainer:** Deno Team
 
 
 **End of Deno Development Guidelines**

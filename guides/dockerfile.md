@@ -1,12 +1,12 @@
 # Dockerfile Guidelines
-Mandatory coding style and practices for creation of Dockerfiles and containers. Secure, minimal, cache-optimized. Docker Engine 24.x+, BuildKit, OCI Standards.
+Mandatory coding style and practices for creation of Dockerfiles and containers. Secure, minimal, cache-optimized. Docker Engine 27.x+, BuildKit, OCI 1.1 Standards, Trivy/Grype, SBOM (CycloneDX).
 
 ---
 
 **Agent Profile**: The Container Architect
 **Role**: Senior DevOps Engineer & Container Security Specialist
 **Objective**: Generate production-ready, secure, and highly optimized Dockerfiles.
-**Tools**: Docker Engine 24.x+, BuildKit, OCI Standards.
+**Tools**: Docker Engine 27.x+, BuildKit, OCI 1.1 Standards, Trivy/Grype, SBOM (CycloneDX).
 
 ---
 
@@ -16,88 +16,110 @@ The agent must adhere to the **DOCKERFILE-FIRST** principles for every Dockerfil
 
 **Test-Driven Development (TDD)**: ALWAYS verify builds and runtime behavior BEFORE delivery (build → test → fix cycle).
 **Regression Shield**: EVERY bug or security issue discovered MUST be fixed and re-verified before delivery.
+**Security-First**: Mandatory vulnerability scanning, SBOM generation, and supply chain integrity checks for all base images.
 
 - **S**mall: Minimize image size (MBs, not GBs).
 - **S**ecure: Least privilege (non-root), minimal attack surface (Distroless/Alpine).
 - **S**peedy: Maximize layer caching and build parallelism with optimal cache layer ordering.
 - **V**erified: Agent-generated Dockerfiles MUST build successfully before delivery.
 
+**Verified Code**: Agent-generated Dockerfiles MUST pass security scans and size checks before delivery.
+
+---
+
 ## 2. Agent Build Verification Requirements (MANDATORY)
 
-### A. Build Verification Protocol
+### A. Verification Protocol
 
 **CRITICAL: Agents MUST verify that all generated/modified Dockerfiles build successfully before presenting them to the user.**
 
-#### Verification Checklist
+#### Pre-Delivery Checklist
 
 **Before delivering ANY Dockerfile, the agent MUST:**
 
 1. **Build Verification**:
    ```bash
-   # Build the Docker image
-   docker build -t test-image:latest .
-   
-   # OR with BuildKit explicitly enabled
-   DOCKER_BUILDKIT=1 docker build -t test-image:latest .
+   # Build the Docker image with BuildKit
+   docker build --pull -t test-image:latest .
+   # Exit code MUST be 0
    ```
-   - **MUST** return exit code 0 (no errors)
-   - Address ALL build errors, not just warnings
-   - Verify all stages complete successfully in multi-stage builds
+   - **MUST** return exit code 0 (no errors).
+   - Address ALL build errors and warnings.
 
-2. **Layer Caching Validation**:
+2. **Security & Vulnerability Verification (MANDATORY)**:
    ```bash
-   # Build twice to verify caching works
-   docker build -t test-image:latest .
-   docker build -t test-image:latest .  # Should use cache
-   ```
-   - Second build should use cached layers
-   - Verify cache mounts are properly configured
-   - Ensure dependency layers are cached separately from source code layers
-
-3. **Image Inspection**:
-   ```bash
-   # Check image size
-   docker images test-image:latest
+   # Scan for vulnerabilities
+   trivy image --severity HIGH,CRITICAL test-image:latest
    
-   # Inspect image layers
-   docker history test-image:latest
+   # Check for hardcoded secrets
+   trivy fs . --scanners secret
+   ```
+   - **MUST** have 0 HIGH or CRITICAL vulnerabilities.
+   - 0 secrets must be detected in the image or build context.
+
+3. **Supply Chain & Metadata Verification**:
+   ```bash
+   # Generate SBOM
+   docker buildx build --output type=sbom,dest=sbom.json .
    
    # Verify non-root user
    docker inspect test-image:latest | grep -i user
    ```
-   - Image size should be reasonable (< 500MB for most apps)
-   - No excessive layers (combine RUN commands)
-   - USER directive is set (not running as root)
+   - SBOM MUST be generated successfully.
+   - USER directive MUST be set to a non-root UID.
 
 4. **Runtime Verification**:
-   ```bash
-   # Test container starts successfully
-   docker run --rm test-image:latest --help
-   
-   # OR for services
-   docker run -d -p 8080:8080 test-image:latest
-   docker ps  # Verify container is running
-   docker logs <container-id>  # Check for startup errors
-   docker stop <container-id>
-   ```
-   - Container must start without errors
-   - Application should respond appropriately
-   - No permission errors
-
-5. **Security Validation**:
-   ```bash
-   # Verify running as non-root
-   docker run --rm test-image:latest id
-   # Should NOT show uid=0(root)
-   ```
-   - Must run as non-root user
-   - No world-writable files in image
+   - Container MUST start successfully and pass health checks.
 
 #### Error Correction Process
 
 If verification fails:
 
-1. **Identify the error**: Read the full Docker build error message
+1. **Identify the error**: Read the full Docker build or Trivy scan error message.
+2. **Locate the source**: Identify which layer or dependency failed.
+3. **Fix the root cause**:
+   - Vulnerability? Update base image or dependency version.
+   - Secret found? Add to `.dockerignore` or remove from code.
+4. **Re-verify**: Run build and scans again.
+
+### B. Agent Workflow Example
+
+**Complete agent Dockerfile generation workflow:**
+
+1. **Generate Dockerfile**:
+   ```dockerfile
+   FROM node:20-alpine
+   USER node
+   WORKDIR /app
+   COPY --link package*.json ./
+   RUN npm ci
+   COPY --link . .
+   CMD ["node", "index.js"]
+   ```
+
+2. **Build and Verify**:
+   ```bash
+   docker build -t test-app:latest .
+   # ✓ Build successful
+   ```
+
+3. **Security Scan**:
+   ```bash
+   trivy image test-app:latest
+   # ✓ 0 vulnerabilities found
+   ```
+
+4. **Final Verification**:
+   ```bash
+   docker run --rm test-app:latest id
+   # ✓ uid=1000(node)
+   ```
+
+5. **Present Dockerfile**: Only after ALL checks pass
+
+---
+
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
 2. **Locate the source**: Identify which layer/command failed
 3. **Fix the root cause**:
    - Missing dependencies? Add to package install
@@ -1669,222 +1691,150 @@ ENTRYPOINT ["java", "-jar", "/app.jar"]
 | Java | 350MB (eclipse-temurin) | **200MB** | N/A |
 | .NET | 200MB (dotnet:alpine) | 100MB | **30-50MB** |
 
-### FROM scratch Checklist
+---
 
-- [ ] Binary is statically linked (CGO_ENABLED=0 for Go, musl for Rust)
-- [ ] CA certificates copied if HTTPS needed
-- [ ] Timezone data copied if time parsing needed
-- [ ] /etc/passwd copied for non-root user
-- [ ] No shell commands in ENTRYPOINT (exec form only)
-- [ ] Health check uses binary or HTTP probe (no shell)
+## 11. Security & Dependency Management (MANDATORY)
 
-## 5. Interaction Protocol
-User Input: "Create a Dockerfile for a React app using Vite."
+### A. Automated Dependency Management
 
-Agent Response Strategy:
+**Use multi-stage builds and BuildKit cache mounts to automatically manage and optimize dependencies:**
 
-* Analyze Context: React = Static assets. Needs build node, serve Nginx.
+```dockerfile
+# syntax=docker/dockerfile:1.6
+FROM node:20-alpine AS deps
+WORKDIR /app
 
-* Select Pattern: Multi-stage (Node Build -> Nginx Alpine Run).
+# Bind mount package files, cache npm registry
+RUN --mount=type=bind,source=package.json,target=package.json \
+    --mount=type=bind,source=package-lock.json,target=package-lock.json \
+    --mount=type=cache,target=/root/.npm \
+    npm ci --omit=dev
+```
 
-* Draft Code: Apply syntax=docker/dockerfile:1.6, .dockerignore, and Nginx security hardening.
+- **Lockfiles**: ALWAYS commit lockfiles (`package-lock.json`, `uv.lock`, `Cargo.lock`) and use `--frozen` or `ci` commands in builds.
+- **Dependency Auditing**: Integrate security scanners directly into the build process.
 
-* Optimize Caching: Order layers from least to most frequently changing (base image → dependencies → source code).
+### B. Vulnerability Scanning & Security
 
-* Verify Build: Run `docker build` to ensure it completes successfully.
+**Mandatory security checks for ALL Docker images:**
 
-* Test Caching: Rebuild to verify cache layers work correctly.
+1. **Vulnerability Scan (CVE)**:
+   ```bash
+   # Scan image for known vulnerabilities
+   trivy image --severity HIGH,CRITICAL my-app:latest
+   ```
+   - Agents MUST ensure 0 HIGH or CRITICAL vulnerabilities remain in the final runner stage.
 
-* Check Security: Verify non-root user with `docker run --rm <image> id`.
+2. **Supply Chain Audit (SBOM)**:
+   - Generate an SBOM for every production image.
+   - Use `docker buildx build --output type=sbom,dest=sbom.json .`
 
-* Review: Check against "Triple-S" (Small, Secure, Speedy) + Verified.
+### C. Dependency File
 
-* Output: Return code block + brief explanation of specific flags used.
+```dockerfile
+# Example .dockerignore
+.git
+node_modules
+dist
+coverage
+.env
+*.log
+```
 
-## 6. Deployment Checklist
+---
 
-### Agent-Generated Dockerfile Verification (MANDATORY)
-**If Dockerfile was generated/modified by an agent, verify BEFORE delivery:**
+## 12. Deployment Checklist
 
-#### Build Verification
-- [ ] Docker build succeeds: `docker build -t test:latest .` returns exit code 0
-- [ ] All multi-stage build stages complete successfully
-- [ ] Second build uses cached layers appropriately
-- [ ] Container starts successfully: `docker run --rm test:latest` works
+### Agent-Generated Code Verification (MANDATORY)
 
-#### Caching Verification
-- [ ] Cache layers optimized: Dependencies cached separately from source code
-- [ ] Cache mounts configured for all package managers (npm, pip, go, cargo)
-- [ ] COPY --link used for independent layer caching
-- [ ] Layer ordering: system packages → dependencies → source code
+#### Build & Compilation
+- [ ] Image builds successfully: `docker build -t test .` returns 0
+- [ ] Multi-stage build used to separate build and runtime environments
+- [ ] BuildKit features enabled: `# syntax=docker/dockerfile:1.6`
+- [ ] COPY --link used for all COPY instructions
 
-#### Size Verification
-- [ ] Image size is reasonable (< 500MB for most applications)
-- [ ] Layer count is minimal (combined RUN commands where appropriate)
-- [ ] Consider FROM scratch for Go/Rust (< 20MB target)
-- [ ] Consider Distroless for interpreted languages
+#### Testing
+- [ ] Container starts successfully: `docker run --rm test` works
+- [ ] Health checks pass: `HEALTHCHECK` directive present and verified
+- [ ] Application responds on expected ports
 
-#### Security Verification (MANDATORY)
-- [ ] Non-root user configured: `docker run --rm test:latest id` shows uid != 0
-- [ ] No SUID/SGID binaries: `docker run --rm test:latest find / -perm /6000 2>/dev/null`
-- [ ] No world-writable files
-- [ ] No secrets in ARG or ENV variables
-- [ ] No sensitive files in image: `docker history test:latest`
-- [ ] Secret mounts used for build-time credentials
-- [ ] ENTRYPOINT uses exec form (no shell injection)
-- [ ] No shell in final image (for scratch/distroless)
-- [ ] Prepared for read-only filesystem runtime
+#### Security
+- [ ] Dependency scan passes: `trivy` shows 0 HIGH/CRITICAL vulnerabilities
+- [ ] Supply chain verified: SBOM generated and lockfiles used
+- [ ] Secrets check: No secrets in ENV or ARG (use --mount=type=secret)
+- [ ] Non-root user: `USER` directive set to a non-root UID (e.g., 1001)
+- [ ] Filesystem security: `read_only: true` compatibility verified
+
+#### Code Quality
+- [ ] Layer ordering optimized: system packages → dependencies → source code
+- [ ] Minimal base image: `scratch` or `distroless` preferred
+- [ ] .dockerignore provided and excludes all unnecessary files
 
 #### Documentation
-- [ ] .dockerignore file provided and comprehensive
-- [ ] Base images use specific version tags (not :latest)
-- [ ] BuildKit syntax enabled: `# syntax=docker/dockerfile:1.6`
-- [ ] OCI-compliant labels added
-- [ ] Agent has documented any build fixes made during verification
+- [ ] OCI-compliant labels added (source, version, description)
+- [ ] Base images use specific semantic tags (not :latest)
 
-### Security Scan (MANDATORY before production)
-```bash
-# Scan with Trivy
-trivy image --severity HIGH,CRITICAL test:latest
-
-# Verify non-root
-docker run --rm test:latest id
-# Expected: uid=1001(appuser) or similar, NOT uid=0(root)
-
-# Test read-only filesystem compatibility
-docker run --rm --read-only --tmpfs /tmp test:latest
-```
-
-### General Best Practices
-- [ ] Multi-stage build used appropriately
-- [ ] Health checks configured for services
-- [ ] Signal handling works correctly (no shell wrapping)
-- [ ] Minimal base image selected (scratch > distroless > alpine > slim)
-
-## 7. Why This Configuration Works
-
-* **syntax=docker/dockerfile:1.6**: This directive tells the Docker builder to use the latest frontend, unlocking features like Heredocs and improved cache mounting even if the user has an older Docker daemon (as long as BuildKit is enabled).
-
-* **Agent Build Verification**: Ensures generated Dockerfiles actually build before delivery, preventing broken builds and reducing debugging time for users.
-
-* **Optimal Cache Layer Ordering**: By ordering layers from least to most frequently changing (system packages → dependencies → source code), builds leverage Docker's layer cache maximally. This can reduce rebuild times from minutes to seconds.
-
-* **BuildKit Cache Mounts**: This is the single biggest "modern" improvement. It prevents re-downloading dependencies if only the source code changed, but package files didn't. Cache mounts persist across builds, providing 5-10x speedup for dependency installation.
-
-* **Multi-Stage Builds**: Separates build-time dependencies from runtime, resulting in images that are 50-90% smaller. A Node.js app with build tools (1.2GB) becomes a production image with just the runtime (150MB).
-
-* **Security First**: By baking USER nonroot into the agent's instructions, you prevent the most common security vulnerability (running as root) by default. Non-root execution is a requirement for most enterprise Kubernetes environments.
-
-* **Verified Caching**: Testing cache behavior during verification ensures that small code changes don't trigger full dependency reinstalls, maintaining developer productivity.
+#### Agent Workflow Completed
+- [ ] Agent verified code compiles/builds successfully
+- [ ] Agent ran all tests and verified they pass
+- [ ] Agent ran security scans and verified 0 high vulnerabilities
+- [ ] Agent verified documentation and labels
 
 ---
 
-## 8. Quick Reference
+## 13. Why This Configuration Works
 
-### Build Commands
+**COPY --link**:
+- Decouples layers from the base image, allowing parallel builds and significantly faster re-builds when only source code changes.
+
+**Distroless & Scratch**:
+- Reduces the attack surface to near zero by removing shells, package managers, and unnecessary binaries.
+
+**BuildKit Cache Mounts**:
+- Persists dependency caches across builds without bloating the final image, making rebuilds 5-10x faster.
+
+---
+
+## 14. Quick Reference
+
+### Common Commands
+
 ```bash
-# Standard build with BuildKit
-DOCKER_BUILDKIT=1 docker build -t myapp:latest .
+# Build with BuildKit and SBOM
+DOCKER_BUILDKIT=1 docker buildx build --output type=sbom,dest=sbom.json -t app:latest .
 
-# Build with build arguments
-docker build --build-arg NODE_VERSION=20 -t myapp:latest .
+# Security scan
+trivy image --severity HIGH,CRITICAL app:latest
 
-# Build specific stage
-docker build --target builder -t myapp:builder .
-
-# Build with cache from registry
-docker build --cache-from myapp:latest -t myapp:latest .
-
-# Show build output
-docker build --progress=plain -t myapp:latest .
-```
-
-### Verification Commands
-```bash
-# Check image size
-docker images myapp:latest
+# Runtime security check
+docker run --rm --read-only --tmpfs /tmp app:latest id
 
 # Inspect layers
-docker history myapp:latest
-
-# Verify user
-docker run --rm myapp:latest id
-
-# Test application
-docker run --rm -p 8080:8080 myapp:latest
-
-# Check for vulnerabilities (if using Docker Scout)
-docker scout cve myapp:latest
+docker history app:latest
 ```
 
-### Cache Management
-```bash
-# Clear build cache
-docker builder prune
+### Modern Dockerfile Patterns Cheat Sheet
 
-# Clear specific cache mount
-docker builder prune --filter type=exec.cachemount
+```dockerfile
+# Multi-stage with --link and non-root
+FROM golang:1.23-alpine AS builder
+WORKDIR /app
+COPY --link go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY --link . .
+RUN go build -o /server
 
-# Show cache usage
-docker system df
+FROM scratch
+COPY --link --from=builder /server /server
+USER 1001:1001
+ENTRYPOINT ["/server"]
 ```
 
 ---
 
-## 9. Common Patterns
-
-### Node.js with pnpm
-```dockerfile
-FROM node:20-alpine AS base
-RUN npm install -g pnpm
-WORKDIR /app
-
-FROM base AS deps
-COPY package.json pnpm-lock.yaml ./
-RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
-    pnpm install --frozen-lockfile --prod
-
-FROM base AS runner
-USER node
-COPY --from=deps --chown=node:node /app/node_modules ./node_modules
-COPY --chown=node:node . .
-CMD ["node", "index.js"]
-```
-
-### Python with Poetry
-```dockerfile
-FROM python:3.11-slim AS builder
-RUN pip install poetry
-WORKDIR /app
-COPY pyproject.toml poetry.lock ./
-RUN --mount=type=cache,target=/root/.cache/pypoetry \
-    poetry install --no-dev --no-root
-
-FROM python:3.11-slim
-RUN useradd -m -u 1000 python
-USER 1000
-WORKDIR /app
-COPY --from=builder --chown=python:python /app/.venv /app/.venv
-ENV PATH="/app/.venv/bin:$PATH"
-COPY --chown=python:python . .
-CMD ["python", "main.py"]
-```
-
-### Rust
-```dockerfile
-FROM rust:1.75-alpine AS builder
-WORKDIR /app
-COPY Cargo.toml Cargo.lock ./
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target \
-    cargo build --release
-
-FROM alpine:3.19
-RUN adduser -D -u 1000 app
-USER 1000
-COPY --from=builder /app/target/release/myapp /app/myapp
-ENTRYPOINT ["/app/myapp"]
-```
+**Last Updated:** 2026-02-06
+**Version:** 2.0
+**Maintainer:** DevOps Team
 
 
 **End of Dockerfile Guidelines**

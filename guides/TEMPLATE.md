@@ -16,6 +16,7 @@ The agent must adhere to the **[ACRONYM]-FIRST** principles for every [TECHNOLOG
 
 **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
 **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+**Security-First**: Mandatory vulnerability scanning, dependency auditing, and supply chain integrity checks.
 
 - **[LETTER_1]**[rest_of_word]: [Description of principle]
 - **[LETTER_2]**[rest_of_word]: [Description of principle]
@@ -75,7 +76,19 @@ The agent must adhere to the **[ACRONYM]-FIRST** principles for every [TECHNOLOG
    - [requirement_1]
    - [requirement_2]
 
-4. **Documentation Verification**:
+4. **Security & Dependency Verification (MANDATORY)**:
+   ```bash
+   # Scan for vulnerabilities in dependencies
+   [security_scan_command]
+   
+   # Check for outdated dependencies
+   [dependency_update_check_command]
+   ```
+   - **MUST** have 0 high/critical vulnerabilities
+   - Dependencies MUST be up to date or pinned to secure versions
+   - Supply chain integrity (lockfiles) MUST be verified
+
+5. **Documentation Verification**:
    ```bash
    # Generate/check documentation
    [documentation_command]
@@ -460,24 +473,42 @@ project/
 
 ---
 
-## 11. Dependencies & Package Management (MANDATORY)
+## 11. Security & Dependency Management (MANDATORY)
 
-### A. Dependency Management
+### A. Automated Dependency Management
 
-**Use [PACKAGE_MANAGER] for dependencies:**
+**Use [PACKAGE_MANAGER] to automatically manage and lock dependencies:**
 
 ```bash
-# Add dependency
+# Initialize/Sync dependencies
+[sync_command]
+
+# Add a new dependency (automatically updates lockfile)
 [add_dependency_command]
 
-# Update dependencies
+# Update all dependencies to latest secure versions
 [update_command]
 
-# Clean/verify dependencies
-[clean_command]
+# Verify dependency integrity
+[verify_integrity_command]
 ```
 
-### B. Dependency File
+### B. Vulnerability Scanning & Security
+
+**Mandatory security checks for ALL dependencies:**
+
+1. **Vulnerability Scan**:
+   ```bash
+   # Scan for known vulnerabilities (CVEs)
+   [security_scan_command]
+   ```
+   - Agents MUST fix all discoverable high/critical vulnerabilities before presentation.
+
+2. **Supply Chain Audit**:
+   - Verify lockfile hashes match downloaded packages.
+   - Audit licenses for compliance.
+
+### C. Dependency File
 
 ```[config_format]
 [dependency_file_example]
@@ -501,6 +532,12 @@ project/
 - [ ] All tests pass: [test_command] returns exit code 0
 - [ ] Reasonable coverage: [coverage_command] shows >[PERCENTAGE]%
 - [ ] Integration tests pass (if applicable)
+
+#### Security
+- [ ] Dependency scan passes: 0 vulnerabilities found
+- [ ] Supply chain verified: Lockfile is in sync and verified
+- [ ] Secrets check: No hardcoded secrets or sensitive data
+- [ ] Static analysis: Security-focused linting passes
 
 #### Code Quality
 - [ ] Linter passes: [lint_command]

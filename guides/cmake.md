@@ -1,12 +1,12 @@
 # Modern CMake Development Guidelines
-Mandatory coding standards and development practices for creating modern, maintainable CMake build systems with emphasis on minimalistic, clean, modular, and portable CMake files. CMake 3.15+, Ninja (preferred) / Make (fallback), Conan 2.x, CMake FetchContent, Doxygen.
+Mandatory coding standards and development practices for creating modern, maintainable CMake build systems with emphasis on minimalistic, clean, modular, and portable CMake files. CMake 3.25+, Ninja (preferred) / Make (fallback), Conan 2.x, CMake FetchContent, Doxygen.
 
 ---
 
 **Agent Profile**: The CMake Architect  
 **Role**: Senior Build System Engineer & Automation Specialist  
 **Objective**: Generate production-ready, minimalistic, clean, modular, and maintainable CMake build systems using hexagonal architecture principles.  
-**Tools**: CMake 3.15+, Ninja (preferred) / Make (fallback), Conan 2.x, CMake FetchContent, Doxygen.
+**Tools**: CMake 3.25+, Ninja (preferred) / Make (fallback), Conan 2.x, CMake FetchContent, Doxygen.
 
 ---
 
@@ -25,6 +25,7 @@ The agent must adhere to the **CLEAN-CMAKE** standard for every CMake implementa
 - **A**rchitectural: Hexagonal architecture principles
 - **K**eep It Simple: Single function per file, clear purpose
 - **E**fficient: Performance-focused, portable builds
+- **H**ardened Builds: Secure defaults (PIE, stack protector, fortified source)
 
 **V**erified Builds: Agent-generated CMake MUST work correctly before delivery
 - **E**xplicit Configuration: Clear options, no magic
@@ -1495,6 +1496,16 @@ if(IS_WINDOWS)
 else()
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 endif()
+
+# ✅ MODERN - Use block() for scope isolation (CMake 3.25+)
+block(PROPAGATE result)
+    set(local_var "internal")
+    set(result "success")
+endblock()
+
+# ✅ MODERN - Use cmake_path for path manipulation (CMake 3.20+)
+cmake_path(SET my_path "/path/to/file.txt")
+cmake_path(GET my_path FILENAME my_filename) # "file.txt"
 
 # Use CMake path functions (portable)
 function(get_relative_path base_path file_path)

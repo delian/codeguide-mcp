@@ -20,8 +20,9 @@ The agent must adhere to the **NODEJS-FIRST** principles for every Node.js/TypeS
 **Modern**: Use latest LTS Node.js (22.x+), ESM modules, top-level await, native fetch.
 **Async-First**: Embrace async/await, avoid callbacks, leverage concurrency.
 **Strict**: TypeScript strict mode, no `any`, comprehensive type coverage.
-**Tested**: 80%+ coverage, unit + integration tests, type testing.
-**Efficient**: Optimize for performance, use native APIs, minimize dependencies.
+**Tested**: 80%+ coverage, use native `node --test` for zero-dependency testing.
+**Efficient**: Optimize for performance, use native APIs, minimize dependencies (Built-ins First).
+**Secure**: Use native `.env` support, mandatory supply chain integrity checks.
 **Resilient**: Proper error handling, graceful degradation, observability.
 **Documented**: JSDoc comments for all exports, auto-generated API documentation with TypeDoc.
 **Verified Code**: Agent-generated code MUST be type-checked, documented, and pass tests before delivery.
@@ -1936,6 +1937,32 @@ try {
   logger.error({ error, context: 'important-operation' }, 'Operation failed');
   throw error;
 }
+```
+
+### G. Node.js 22+ Native Features (MANDATORY)
+
+**Prefer built-in modules over external dependencies:**
+
+```typescript
+// 1. Native .env support (Node.js 20.6+)
+// Run with: node --env-file=.env index.js
+const apiKey = process.env.API_KEY;
+
+// 2. Native SQLite (Node.js 22.5+)
+import { DatabaseSync } from 'node:sqlite';
+const db = new DatabaseSync('data.db');
+
+// 3. Native Test Runner (Node.js 20+)
+import { test, describe, it } from 'node:test';
+import assert from 'node:assert';
+
+test('synchronous test', (t) => {
+  assert.strictEqual(1, 1);
+});
+
+// 4. Native Fetch (Node.js 18+)
+const response = await fetch('https://api.example.com');
+const data = await response.json();
 ```
 
 ## 5. Modern Framework Patterns

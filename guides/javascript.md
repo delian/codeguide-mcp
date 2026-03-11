@@ -19,7 +19,9 @@ The agent must adhere to the **MODERN-JS-FIRST** principles for every JavaScript
 **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
 
 **Modern Standards**: Use latest ECMAScript features (ES2024+), avoid legacy patterns.
+**ESM-Only**: Use ECMAScript Modules (ESM) exclusively. No CommonJS (`require`).
 **Only const/let**: Use `const` by default, `let` when needed, NEVER `var`.
+**Standard Library First**: Prefer native features like `Array.prototype.at`, `Object.hasOwn`, and `Map.groupBy` over utility libraries.
 **Deterministic**: Predictable behavior, no implicit coercion, explicit conversions.
 **Explicit Code**: Clear intent, obvious behavior, self-documenting.
 **Reactive Async**: async/await preferred, Promises over callbacks, never callback hell.
@@ -406,6 +408,26 @@ const multiline = `
 const square = n => n * n;
 const sum = (a, b) => a + b;
 const processUser = user => ({ ...user, processed: true });
+
+// ✅ CORRECT - Modern ES2024+ features
+// 1. Map.groupBy (ES2024)
+const inventory = [
+  { name: "asparagus", type: "vegetables", quantity: 5 },
+  { name: "bananas", type: "fruit", quantity: 0 },
+  { name: "goat", type: "meat", quantity: 23 },
+  { name: "cherries", type: "fruit", quantity: 5 },
+  { name: "fish", type: "meat", quantity: 22 },
+];
+const result = Map.groupBy(inventory, ({ type }) => type);
+
+// 2. Promise.withResolvers (ES2024)
+const { promise, resolve, reject } = Promise.withResolvers();
+
+// 3. Array.prototype.at (ES2022)
+const lastElement = array.at(-1);
+
+// 4. Object.hasOwn (ES2022)
+if (Object.hasOwn(obj, "prop")) { /* ... */ }
 
 // ❌ WRONG - Old-style syntax
 var message = 'Hello, ' + user.name; // Use template literals

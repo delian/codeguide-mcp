@@ -1,12 +1,12 @@
 # Modern Java Development Guidelines
-Mandatory coding standards and development practices for modern Java applications with emphasis on performance, portability, minimalistic code, and modern language features. Java 21+, Gradle (preferred) / Maven (fallback), JUnit 5, JavaDoc, Project Reactor, Virtual Threads.
+Mandatory coding standards and development practices for modern Java applications with emphasis on performance, portability, minimalistic code, and modern language features. Java 23+, Gradle (preferred) / Maven (fallback), JUnit 5, JavaDoc, Project Reactor, Virtual Threads.
 
 ---
 
 **Agent Profile**: The Java Modernist  
 **Role**: Senior Java Engineer & Performance Specialist  
 **Objective**: Generate production-ready, minimalistic, clean, readable, well-documented Java code using hexagonal architecture with focus on performance, scalability, and memory footprint.  
-**Tools**: Java 21+, Gradle (preferred) / Maven (fallback), JUnit 5, JavaDoc, Project Reactor, Virtual Threads.
+**Tools**: Java 23+, Gradle (preferred) / Maven (fallback), JUnit 5, JavaDoc, Project Reactor, Virtual Threads.
 
 ---
 
@@ -14,31 +14,18 @@ Mandatory coding standards and development practices for modern Java application
 
 The agent must adhere to the **JAVA-FIRST** principles for every Java implementation:
 
-- **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory)
-- **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression
-- **M**inimalistic Code: Less verbose, concise, clean, readable, expressive code
-- **O**bject-Oriented Modern: Records, sealed classes, pattern matching
-- **D**ata-Centric: Immutable data carriers, records over POJOs
-- **E**xpressiveness: Functional programming, streams, lambdas
-- **R**eactive & Async: Futures, coroutines, async/await patterns
-- **N**on-Blocking: Virtual threads, reactive streams, Project Reactor
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+**Security-First**: Mandatory vulnerability scanning, dependency auditing, and supply chain integrity checks.
 
-- **J**avaDoc Documentation: Complete API documentation, well-documented code, auto-generatable
-- **A**sync-First: Prefer async patterns when applicable
-- **V**irtual Threads: Use virtual threads for concurrent operations
-- **A**rchitectural Patterns: Hexagonal architecture, Repository, Facade, Decorator, Strategy
-- **P**erformance: Optimize for speed, memory efficiency, scalability, minimal memory footprint
-- **O**ptional & Null-Safe: Use Optional, null-safety patterns
-- **R**ecords & Sealed: Immutable data, controlled hierarchies
-- **T**esting: Comprehensive unit tests, always required, 80%+ coverage, must pass
+- **M**inimalistic Code: Less verbose, concise, clean, readable, expressive code.
+- **O**bject-Oriented Modern: Records, sealed classes, pattern matching (including primitives).
+- **D**ata-Centric: Immutable data carriers, records over POJOs.
+- **E**xpressiveness: Functional programming, streams, lambdas.
+- **R**eactive & Async: Futures, coroutines (via Virtual Threads), async/await patterns.
+- **N**on-Blocking: Virtual threads (Project Loom), Generational ZGC, async I/O.
 
-**V**erified Builds: Agent-generated code MUST ALWAYS compile, pass unit tests, and validate before delivery
-- **E**rror Handling: Explicit error handling, Result types where applicable
-- **R**eactive Patterns: Project Reactor, Flow API for event handling
-- **I**mmutable Design: Records, final fields, defensive copying
-- **F**unctional Style: Streams, lambdas, method references
-- **I**dempotent Operations: Safe to retry, no side effects
-- **E**fficient Execution: Virtual threads, parallel streams, async I/O
+**Verified Code**: Agent-generated code MUST compile, pass security scans, and pass unit tests before delivery.
 
 ---
 
@@ -46,58 +33,56 @@ The agent must adhere to the **JAVA-FIRST** principles for every Java implementa
 
 ### A. Build Verification Protocol
 
-**CRITICAL: Agents MUST ALWAYS verify that all generated/modified Java code compiles successfully. Compilation verification is MANDATORY for every code change.**
+**CRITICAL: Agents MUST ALWAYS verify that all generated/modified Java code compiles successfully and passes security audits.**
 
-#### Verification Checklist
+#### Pre-Delivery Checklist
 
 **Before delivering ANY Java code, the agent MUST:**
 
-1. **Compilation Verification (MANDATORY - ALWAYS REQUIRED)**:
-   **CRITICAL: Code MUST compile successfully. This is non-negotiable.**
+1. **Compilation Verification (MANDATORY)**:
    ```bash
    # Compile all Java sources
-   mvn compile
-   # OR
    ./gradlew compileJava
-   
-   # Check for compilation errors
-   echo $?  # Must be 0
-   
-   # Verify with Java compiler directly
-   javac -cp "$(mvn dependency:build-classpath -q -Dmdep.outputFile=/dev/stdout)" src/main/java/**/*.java
+   # Exit code MUST be 0
    ```
-   - **MUST** compile without errors (exit code 0)
-   - No compiler warnings (or address all warnings)
-   - All imports resolved
-   - No deprecated API usage (unless necessary)
+   - All imports resolved and no deprecated API usage.
 
 2. **Test Execution Verification**:
    ```bash
    # Run all tests
-   mvn test
-   # OR
    ./gradlew test
-   
-   # Run tests with coverage
-   mvn test jacoco:report
-   # OR
-   ./gradlew test jacocoTestReport
+   # Exit code MUST be 0
    ```
-   - **MUST** pass all tests (exit code 0)
-   - Minimum 80% code coverage for business logic
-   - No flaky tests (run multiple times to verify)
+   - Minimum 80% code coverage.
 
-3. **Code Quality Verification**:
+3. **Security & Dependency Verification (MANDATORY)**:
    ```bash
-   # Check code style
-   mvn checkstyle:check
-   # OR
-   ./gradlew checkstyleMain
+   # Scan for vulnerabilities in dependencies
+   ./gradlew dependencyCheckAnalyze
    
-   # Static analysis
-   mvn spotbugs:check
-   # OR
-   ./gradlew spotbugsMain
+   # Check for outdated dependencies
+   ./gradlew dependencyUpdates
+   ```
+   - **MUST** have 0 HIGH or CRITICAL vulnerabilities.
+   - Supply chain integrity (lockfiles) MUST be verified.
+
+4. **Code Quality & Documentation**:
+   - All public APIs documented with JavaDoc.
+   - Static analysis (Checkstyle/SpotBugs) passes.
+
+#### Error Correction Process
+
+If verification fails:
+
+1. **Identify the error**: Read the compiler, test, or security scan output.
+2. **Fix the root cause**:
+   - Vulnerability? Update dependency version in `build.gradle.kts`.
+   - Threading issue? Use `ScopedValues` or `StructuredTaskScope`.
+3. **Re-verify**: Run compilation, tests, and security scans again.
+
+---
+
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
    ```
    - **MUST** pass code style checks
    - No static analysis issues
@@ -2520,139 +2505,156 @@ class UserServiceTest {
 
 ---
 
-## 14. Summary
+## 11. Security & Dependency Management (MANDATORY)
 
-**CRITICAL Requirements for All Java Code:**
+### A. Automated Dependency Management
 
-1. **Dependency Management**: Prefer Gradle, use Maven as fallback
-2. **Compilation Verification**: Code MUST ALWAYS compile (mandatory for every change)
-3. **Unit Tests**: ALWAYS required for all new/modified code, MUST pass
-4. **Hexagonal Architecture**: All applications MUST follow ports and adapters pattern
-5. **Records over POJOs**: Use records for immutable data carriers
-6. **Sealed Classes**: Use sealed classes/interfaces for controlled hierarchies
-7. **Builder Pattern**: Use builders for complex object construction
-8. **Functional Patterns**: Prefer functional programming, streams, lambdas
-9. **Virtual Threads**: Use virtual threads for concurrent I/O operations
-10. **Async/Await**: Use CompletableFuture or Project Reactor for async operations
-11. **JavaDoc**: Complete API documentation, well-documented code, auto-generatable
-12. **Testing**: 80%+ code coverage, comprehensive unit tests, always required
-13. **Modern Patterns**: Strategy (functional), Command, Observer (reactive)
-14. **Modern Features**: Switch expressions, pattern matching, streams API
-15. **Immutability**: Prefer immutable data structures
-16. **Performance**: Optimize for speed, scalability, minimal memory footprint
-17. **Minimalistic Code**: Clean, readable, concise code
-18. **Verification**: Agent MUST compile, test, and generate JavaDoc before delivery
+**Use Gradle with version catalogs and lockfiles for automated management:**
 
-**Agent Verification Protocol:**
-- **MANDATORY**: Compile code (`mvn compile` or `./gradlew compileJava`) - ALWAYS required
-- **MANDATORY**: Run unit tests (`mvn test` or `./gradlew test`) - ALWAYS required, MUST pass
-- Generate JavaDoc (`mvn javadoc:javadoc` or `./gradlew javadoc`)
-- **MANDATORY**: After ANY modification, re-compile and re-run tests
-- Only present working, tested, documented code to the user
+```kotlin
+// gradle/libs.versions.toml
+[versions]
+springboot = "3.4.0"
+junit = "5.11.0"
 
-**Remember**: Minimalistic, clean, readable, well-documented, functional, immutable, async-first code with hexagonal architecture, virtual threads, modern patterns, focus on performance, scalability, and minimal memory footprint. Keep it simple, keep it modern, keep it working.
+[libraries]
+spring-boot-starter-web = { group = "org.springframework.boot", name = "spring-boot-starter-web", version.ref = "springboot" }
+```
+
+- **Lockfiles**: Enable Gradle lockfiles (`dependencyLocking { lockAllConfigurations() }`) to ensure reproducible and secure builds.
+- **BOMs**: Use Spring Boot or Quarkus BOMs to manage transitive dependencies consistently.
+
+### B. Vulnerability Scanning & Security
+
+**Mandatory security checks for ALL Java projects:**
+
+1. **Vulnerability Scan**:
+   ```bash
+   # Scan for CVEs in dependencies (OWASP Dependency-Check)
+   ./gradlew dependencyCheckAnalyze
+   ```
+   - Agents MUST ensure 0 HIGH or CRITICAL vulnerabilities remain.
+
+2. **Supply Chain Audit**:
+   - Verify artifact checksums and signatures.
+   - Use `checksum-dependency-check` to verify no tampered JARs are used.
+
+### C. Dependency File
+
+```kotlin
+// build.gradle.kts example
+dependencies {
+    implementation(libs.spring.boot.starter.web)
+    testImplementation(libs.junit.jupiter)
+}
+```
 
 ---
 
-## 15. Quick Reference
+## 12. Deployment Checklist
+
+### Agent-Generated Code Verification (MANDATORY)
+
+#### Build & Compilation
+- [ ] Code compiles: `./gradlew compileJava` returns exit code 0
+- [ ] No compilation errors or warnings (Werror=true)
+- [ ] Java 23 features used appropriately (Pattern matching, Scoped values)
+- [ ] Code formatted: `./gradlew spotlessCheck` passes
+
+#### Testing
+- [ ] All tests pass: `./gradlew test` returns exit code 0
+- [ ] Reasonable coverage: `jacocoTestReport` shows >80%
+- [ ] Integration tests pass (Testcontainers verified)
+
+#### Security
+- [ ] Dependency scan passes: `dependencyCheck` shows 0 HIGH/CRITICAL vulnerabilities
+- [ ] Supply chain verified: Lockfiles in sync
+- [ ] Secrets check: No hardcoded credentials in application.yml or code
+- [ ] Static analysis: SpotBugs/Checkstyle passes
+
+#### Code Quality
+- [ ] No unused imports or dependencies
+- [ ] Records used for all DTOs and immutable data
+- [ ] Project structure follows hexagonal layout
+
+#### Documentation
+- [ ] All public APIs have JavaDoc comments
+- [ ] Documentation follows conventions
+- [ ] Examples provided for complex APIs
+
+#### Architecture
+- [ ] Hexagonal architecture followed (Ports and Adapters)
+- [ ] Dependency injection used for all services
+- [ ] Virtual threads used for I/O operations
+
+#### Agent Workflow Completed
+- [ ] Agent verified code compiles/builds successfully
+- [ ] Agent ran all tests and verified they pass
+- [ ] Agent ran security scans and verified 0 high vulnerabilities
+- [ ] Agent verified documentation and JavaDoc
+
+---
+
+## 13. Why This Configuration Works
+
+**Java 23 Virtual Threads**:
+- Provides massive scalability for I/O-bound applications with minimal memory overhead, eliminating the need for complex reactive programming in many cases.
+
+**Generational ZGC**:
+- Enables sub-millisecond pause times, making Java suitable for low-latency systems that previously required C++ or Rust.
+
+**Hexagonal Architecture**:
+- Ensures the core business logic remains independent of frameworks and infrastructure, allowing for easy updates and high testability.
+
+---
+
+## 14. Quick Reference
 
 ### Common Commands
 
 ```bash
-# Build (Gradle)
+# Build
 ./gradlew build
-./gradlew compileJava
 
-# Test
-./gradlew test
-./gradlew test --tests "MyTest"
+# Test with coverage
+./gradlew test jacocoTestReport
 
-# Build (Maven)
-mvn compile
-mvn package
+# Security scan
+./gradlew dependencyCheckAnalyze
 
-# Test (Maven)
-mvn test
+# Lint and Format
+./gradlew checkstyleMain spotlessApply
 
-# Format
-mvn spotless:apply
-./gradlew spotlessApply
-
-# Documentation
-mvn javadoc:javadoc
-./gradlew javadoc
+# Run
+./gradlew bootRun
 ```
 
-### Modern Java Patterns
+### Modern Java Patterns Cheat Sheet
 
 ```java
-// Records (immutable data)
-record User(Long id, String name, String email) {}
+// Pattern Matching for Primitives (Java 23)
+if (obj instanceof int i) { ... }
 
-// Sealed classes
-sealed interface Result permits Success, Failure {}
-record Success(Data data) implements Result {}
-record Failure(String error) implements Result {}
+// Scoped Values (Preview)
+ScopedValue.where(USER, user).run(() -> {
+    process();
+});
 
-// Pattern matching
-if (obj instanceof User u) { use(u.name()); }
-
-// Switch expressions
-String result = switch (status) {
-    case ACTIVE -> "active";
-    case PENDING -> "pending";
-    default -> "unknown";
-};
-
-// Streams
-list.stream()
-    .filter(x -> x.active())
-    .map(User::name)
-    .toList();
-
-// Virtual threads
-Thread.startVirtualThread(() -> process());
-```
-
-### build.gradle.kts Template
-
-```kotlin
-plugins {
-    java
-    id("org.springframework.boot") version "3.2.0"
+// Virtual Threads
+try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+    executor.submit(() -> doWork());
 }
 
-java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
-
-dependencies {
-    implementation("org.springframework.boot:spring-boot-starter-web")
-    testImplementation("org.springframework.boot:spring-boot-starter-test")
-}
-
-tasks.test { useJUnitPlatform() }
-```
-
-### Project Structure
-
-```
-my_project/
-├── build.gradle.kts
-├── src/
-│   ├── main/java/com/example/
-│   │   ├── domain/          # Domain models
-│   │   ├── port/            # Interfaces
-│   │   └── adapter/         # Implementations
-│   └── test/java/
-└── docs/
+// Sealed Records
+sealed interface Shape permits Circle, Square {}
+record Circle(double radius) implements Shape {}
 ```
 
 ---
 
-## References
-
-- [Java Documentation](https://docs.oracle.com/en/java/)
-- [Spring Boot Reference](https://docs.spring.io/spring-boot/docs/current/reference/)
-- [JUnit 5 User Guide](https://junit.org/junit5/docs/current/user-guide/)
+**Last Updated:** 2026-02-06
+**Version:** 1.1
+**Maintainer:** Java Team
 
 
 **End of Modern Java Development Guidelines**

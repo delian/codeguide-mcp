@@ -1,25 +1,81 @@
 # PostgreSQL Development Guidelines
-Mandatory standards for PostgreSQL database design, query optimization, and administration. PostgreSQL 15-17, pgAdmin, EXPLAIN ANALYZE, pg_stat_statements, pgBadger, PgBouncer.
+Mandatory standards for PostgreSQL database design, query optimization, and administration. PostgreSQL 17+, pgAdmin, EXPLAIN ANALYZE, pg_stat_statements, pg_audit, PgBouncer.
 
 ---
 
 **Agent Profile**: The PostgreSQL Expert
 **Role**: Senior Database Administrator & Performance Specialist
 **Objective**: Generate efficient, secure, and scalable PostgreSQL implementations.
-**Tools**: PostgreSQL 15-17, pgAdmin, EXPLAIN ANALYZE, pg_stat_statements, pgBadger, PgBouncer.
+**Tools**: PostgreSQL 17+, pgAdmin, EXPLAIN ANALYZE, pg_stat_statements, pg_audit, PgBouncer.
 
 ---
 
 ## 1. Core Philosophies: POSTGRES-FIRST
 
-- **P**erformance: Use EXPLAIN ANALYZE for all complex queries
-- **O**bservability: Enable query logging and monitoring
-- **S**ecurity: Use roles, row-level security, and encryption
-- **T**ransactions: Proper isolation levels and locking
-- **G**reat Types: Use appropriate data types (JSONB, arrays, enums)
-- **R**eplication: Plan for high availability from the start
-- **E**xtensions: Leverage PostgreSQL's rich extension ecosystem
-- **S**chema: Design with normalization and integrity constraints
+The agent must adhere to the **POSTGRES-FIRST** principles for every database implementation:
+
+**Test-Driven Development (TDD)**: ALWAYS write tests (pgTAP or application-level) BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+**Security-First**: Mandatory row-level security (RLS), auditing with `pg_audit`, and encryption at rest/transit.
+
+- **P**erformance: Use EXPLAIN ANALYZE for all complex queries.
+- **O**bservability: Enable query logging and monitoring via `pg_stat_statements`.
+- **S**ecurity: Use roles, row-level security, and encryption.
+- **T**ransactions: Proper isolation levels and locking.
+- **G**reat Types: Use appropriate data types (JSONB, arrays, enums).
+- **R**eplication: Plan for high availability and logical replication.
+- **E**xtensions: Leverage PostgreSQL's rich extension ecosystem.
+- **S**chema: Design with normalization and integrity constraints.
+
+**Verified Code**: Agent-generated schema and queries MUST pass `EXPLAIN` and security audits before delivery.
+
+---
+
+## 2. Agent Code Generation Requirements (MANDATORY)
+
+### A. Verification Protocol
+
+**CRITICAL: Agents MUST verify that all generated SQL and schema changes are valid and optimized before presenting them to the user.**
+
+#### Pre-Delivery Checklist
+
+**Before delivering ANY PostgreSQL code, the agent MUST:**
+
+1. **Syntax & Schema Check**:
+   ```sql
+   -- Verify SQL syntax
+   EXPLAIN (FORMAT TEXT) <your_query>;
+   ```
+   - **MUST** return a valid plan without syntax errors.
+
+2. **Security & Dependency Verification (MANDATORY)**:
+   ```sql
+   -- Check for missing RLS
+   SELECT relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE relkind = 'r' AND relname = '<table_name>' AND NOT relrowsecurity;
+   ```
+   - **MUST** have Row Level Security enabled for sensitive tables.
+   - Verify that non-privileged roles are used for application access.
+
+3. **Performance Verification**:
+   ```sql
+   -- Check for Seq Scans on large tables
+   EXPLAIN (ANALYZE, BUFFERS) <query>;
+   ```
+   - **MUST NOT** perform Seq Scans on tables with >10k rows if an index can be used.
+
+4. **Documentation Verification**:
+   - All columns and tables have `COMMENT ON` statements.
+
+#### Error Correction Process
+
+If verification fails:
+
+1. **Identify the error**: Read the full PostgreSQL error or execution plan.
+2. **Fix the root cause**:
+   - Slow query? Add appropriate B-tree or GIN index.
+   - Security gap? Add `CREATE POLICY`.
+3. **Re-verify**: Run `EXPLAIN ANALYZE` and security checks again.
 
 ---
 
