@@ -7,7 +7,7 @@ Mandatory coding standards and development practices for React and TypeScript de
 **Agent Profile**: The React Architect
 **Role**: Senior Frontend Engineer & React Performance Specialist
 **Objective**: Generate production-ready, type-safe, fully documented, highly performant, and maintainable React SPAs.
-**Tools**: React 19.x, TypeScript 5.x, Vite 5.x, TypeDoc, Modern Hooks, TanStack ecosystem
+**Tools**: React 19.x, TypeScript 5.x, Vite 6.x, React Compiler, TypeDoc, Modern Hooks, TanStack ecosystem
 
 ---
 
@@ -17,18 +17,74 @@ The agent must adhere to the **REACT-FIRST** principles for every React applicat
 
 **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
 **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
-**React-Native Patterns**: Use built-in React features first, minimal external dependencies.
+**Security-First**: Mandatory vulnerability scanning, dependency auditing, and supply chain integrity checks.
+**React-Native Patterns**: Use built-in React features first (Actions, useActionState, useFormStatus), minimal external dependencies.
 **End-to-End Type Safety**: TypeScript strict mode, no `any`, comprehensive type coverage.
 **Accessibility First**: WCAG 2.1 AA compliance, semantic HTML, keyboard navigation.
 **Composable Components**: Small, reusable, single-responsibility components.
 **Testable Architecture**: Component testing, integration tests, 80%+ coverage, mandatory tests for all components.
-**Performance Optimized**: Code splitting, lazy loading, optimized re-renders.
+**Performance Optimized**: React Compiler for automated memoization, code splitting, lazy loading.
 **Reactive State Management**: Modern hooks, server state separation, minimal global state.
 **Observable Patterns**: Proper dependency arrays, effect cleanup, no memory leaks.
 **Documented Code**: JSDoc comments for all exports, auto-generated API documentation with TypeDoc.
 **Verified Code**: Agent-generated code MUST compile (TypeScript check), have documentation, and pass all tests before delivery.
 
-## 2. Mandatory Setup Requirements
+## 2. Agent Code Generation Requirements (MANDATORY)
+
+### A. Verification Protocol
+
+**CRITICAL: Agents MUST verify that all generated React code compiles, passes tests, and is secure before presenting it to the user.**
+
+#### Pre-Delivery Checklist
+
+**Before delivering ANY React code, the agent MUST:**
+
+1. **TypeScript & Build Check**:
+   ```bash
+   # Run TypeScript compiler
+   npx tsc --noEmit
+   
+   # Verify production build
+   npm run build
+   # Exit code MUST be 0
+   ```
+
+2. **Security & Dependency Verification (MANDATORY)**:
+   ```bash
+   # Scan for vulnerabilities in dependencies
+   npm audit --audit-level=high
+   
+   # Check for hardcoded secrets
+   # (Using a tool like gitleaks or simple grep patterns)
+   ```
+   - **MUST** have 0 high/critical vulnerabilities.
+   - Supply chain integrity (lockfiles) MUST be verified.
+
+3. **Test Execution**:
+   ```bash
+   # Run all tests with coverage
+   npm run test:coverage
+   ```
+   - **MUST** pass all tests (100% pass rate).
+   - Minimum 80% code coverage.
+
+4. **Documentation Verification**:
+   - All components and hooks have JSDoc comments.
+   - Run `npm run docs:check` to ensure completeness.
+
+#### Error Correction Process
+
+If verification fails:
+
+1. **Identify the error**: Read the full compiler, test, or audit error message.
+2. **Fix the root cause**:
+   - Accessibility issue? Add ARIA labels or semantic tags.
+   - Performance issue? Check for excessive re-renders (though React Compiler should handle most).
+3. **Re-verify**: Run build, tests, and audits again.
+
+---
+
+## 3. Mandatory Setup Requirements
 
 ### A. Project Initialization
 * **Build Tool**: ALWAYS use Vite 5.x+ (NOT Create React App - deprecated).
@@ -3760,6 +3816,157 @@ vi.mock('./api', () => ({
 
 // Spy on method
 vi.spyOn(console, 'error').mockImplementation(() => {});
+```
+
+---
+
+## 11. Security & Dependency Management (MANDATORY)
+
+### A. Automated Dependency Management
+
+**Use npm with lockfiles and automated scanning for consistent and secure environments:**
+
+```json
+// package.json
+{
+  "scripts": {
+    "audit": "npm audit --audit-level=high",
+    "update": "npm update"
+  }
+}
+```
+
+- **Lockfiles**: ALWAYS commit `package-lock.json`. Use `npm ci` in CI/CD to ensure exact dependency matching.
+- **Dependency Auditing**: Integrate `npm audit` into your pre-commit hooks or CI pipeline.
+- **Selective Pinning**: Pin versions of high-risk dependencies (e.g., encryption or auth libraries) to specific versions.
+
+### B. Vulnerability Scanning & Security
+
+**Mandatory security checks for ALL React projects:**
+
+1. **Vulnerability Scan**:
+   ```bash
+   # Scan all dependencies for known vulnerabilities
+   npm audit --audit-level=high
+   ```
+   - Agents MUST ensure 0 HIGH or CRITICAL vulnerabilities are present in the dependency tree.
+
+2. **Supply Chain Audit**:
+   - Verify package integrity using `npm verify`.
+   - Use tools like `Snyk` or `Socket` to detect malicious packages or telemetry in dependencies.
+
+### C. Dependency File
+
+```json
+// Example package.json dependencies
+{
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "vitest": "^2.0.0",
+    "@biomejs/biome": "^1.9.0"
+  }
+}
+```
+
+---
+
+## 12. Deployment Checklist
+
+### Agent-Generated Code Verification (MANDATORY)
+
+#### Build & Compilation
+- [ ] Code compiles: `npm run typecheck` returns 0
+- [ ] Production build succeeds: `npm run build` completes successfully
+- [ ] React 19 features used correctly (Actions, `use` hook)
+- [ ] Code formatted: `npx @biomejs/biome check --apply .` passes
+
+#### Testing
+- [ ] All tests pass: `npm test` returns exit code 0
+- [ ] Reasonable coverage: `npm test -- --coverage` shows >80%
+- [ ] Components tested with `user-event` for realistic behavior
+
+#### Security
+- [ ] Dependency scan passes: `npm audit` shows 0 HIGH/CRITICAL vulnerabilities
+- [ ] Supply chain verified: `package-lock.json` is committed and synced
+- [ ] Secrets check: 0 hardcoded secrets in code or `.env.local`
+- [ ] Static analysis: `biome` passes with 0 security warnings
+
+#### Code Quality
+- [ ] No unused dependencies or imports
+- [ ] Small, focused components with clear props interfaces
+- [ ] Project structure follows the standard layout
+
+#### Documentation
+- [ ] All public APIs (components/hooks) have JSDoc comments
+- [ ] Documentation check passes: `npm run docs:check` returns 0
+- [ ] Examples provided for complex components and hooks
+
+#### Architecture
+- [ ] Separation of concerns: business logic in hooks, UI in components
+- [ ] Accessibility: WCAG 2.1 AA compliance verified
+- [ ] No global mutable state (use stores or context)
+
+#### Agent Workflow Completed
+- [ ] Agent verified code builds successfully
+- [ ] Agent ran all tests and verified they pass
+- [ ] Agent ran security scans and verified 0 vulnerabilities
+- [ ] Agent verified documentation and accessibility
+
+---
+
+## 13. Why This Configuration Works
+
+**React 19 Actions**:
+- Simplifies data mutations by automatically managing pending states and error handling, reducing the need for manual `isLoading` state management.
+
+**React Compiler**:
+- Eliminates manual performance optimization (memoization) by automatically generating the most efficient code, reducing developer cognitive load.
+
+**Vite 6+**:
+- Provides near-instant development starts and lightning-fast HMR using native ESM, ensuring a high-velocity developer feedback loop.
+
+---
+
+## 14. Quick Reference
+
+### Common Commands
+
+```bash
+# Build
+npm run build
+
+# Test with coverage
+npm test -- --coverage
+
+# Security scan
+npm audit --audit-level=high
+
+# Lint and Format
+npx @biomejs/biome check --apply .
+
+# Run dev server
+npm run dev
+```
+
+### Modern React 19 Patterns Cheat Sheet
+
+```tsx
+// useActionState (Mutations)
+const [state, formAction, isPending] = useActionState(updateUser, null);
+
+// useFormStatus (Sub-component UI)
+const { pending } = useFormStatus();
+
+// use (Promises in Render)
+const data = use(fetchDataPromise);
+
+// Native Metadata (SEO)
+<title>My App</title>
+<meta name="description" content="React 19" />
 ```
 
 ---

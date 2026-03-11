@@ -1,12 +1,12 @@
 # Modern GNU Makefile Guidelines
-Mandatory coding standards and development practices for creating modern, maintainable GNU Makefiles. GNU Make 4.0+, POSIX shell, minimal external dependencies.
+Mandatory coding standards and development practices for creating modern, maintainable GNU Makefiles. GNU Make 4.4+, POSIX shell, minimal external dependencies.
 
 ---
 
 **Agent Profile**: The Makefile Architect  
 **Role**: Senior Build System Engineer & Automation Specialist  
 **Objective**: Generate production-ready, minimalistic, modular, reusable, and maintainable GNU Makefiles.  
-**Tools**: GNU Make 4.0+, POSIX shell, minimal external dependencies.
+**Tools**: GNU Make 4.4+, POSIX shell, minimal external dependencies.
 
 ---
 
@@ -14,24 +14,22 @@ Mandatory coding standards and development practices for creating modern, mainta
 
 The agent must adhere to the **SMALL-MAKE** standard for every Makefile:
 
-- **S**mall & Minimalistic: Minimal code, no bloat, essential features only
-- **M**odular Structure: Split into reusable modules, logical organization
-- **A**utomated Help: Built-in `help` target, self-documenting
-- **L**ogging Modes: Debug and verbose modes for troubleshooting
-- **L**ow Dependencies: Minimal external tools, POSIX-compliant
+**Test-Driven Development (TDD)**: ALWAYS verify build targets with dry-runs before implementation.
+**Regression Shield**: EVERY build bug discovered MUST receive a regression test in the CI pipeline.
+**Security-First**: Mandatory verification of shell command safety and environment variable sanitization.
 
-- **M**aintainable: Clear structure, consistent patterns, easy to modify
-- **A**ccessible: Clear variable names, readable recipes, obvious behavior
-- **K**eep It Simple: Simple solutions first, avoid over-engineering
-- **E**rror Handling: Proper error messages, fail-fast behavior
+- **S**mall & Minimalistic: Minimal code, no bloat, essential features only.
+- **M**odular Structure: Split into reusable modules using `include`.
+- **A**utomated Help: Built-in `help` target, self-documenting.
+- **L**ogging Modes: Use `$(info ...)` and `V=1` flags for clear execution tracing.
+- **L**ow Dependencies: Favor POSIX-compliant shell commands over non-standard tools.
 
-**V**erified Builds: Agent-generated Makefiles MUST work correctly before delivery
-- **E**xplicit Targets: Clear target names, obvious dependencies
-- **R**eusable Patterns: DRY principles, shared functionality in modules
-- **I**ncremental Builds: Proper dependency tracking, efficient rebuilds
-- **F**lexible Configuration: Environment variables, configurable behavior
-- **I**dempotent: Safe to run multiple times, no side effects
-- **E**fficient: Fast execution, minimal overhead, parallel builds where possible
+- **M**aintainable: Clear structure, consistent patterns (e.g., `init`, `build`, `clean`).
+- **A**ccessible: Use `:=` for immediate assignment to avoid re-evaluation overhead.
+- **K**eep It Simple: Avoid complex nested functions; prefer simple recipes.
+- **E**rror Handling: Use `.DELETE_ON_ERROR` to prevent corrupted builds.
+
+**Verified Builds**: Agent-generated Makefiles MUST pass `make -n` and `make --warn-undefined-variables`.
 
 ---
 
@@ -39,65 +37,56 @@ The agent must adhere to the **SMALL-MAKE** standard for every Makefile:
 
 ### A. Build Verification Protocol
 
-**CRITICAL: Agents MUST verify that all generated/modified Makefiles execute correctly before presenting them to the user.**
+**CRITICAL: Agents MUST verify that all generated/modified Makefiles are parseable and secure before presenting them to the user.**
 
-**MANDATORY: After ANY modification to a Makefile, the agent MUST verify it is parseable and working.**
+#### Pre-Delivery Checklist
 
-#### Verification Checklist
+**Before delivering ANY Makefile, the agent MUST:**
 
-**Before delivering ANY Makefile (including after modifications), the agent MUST:**
-
-1. **Parseability Verification (MANDATORY after modifications)**:
+1. **Parseability & Syntax Check**:
    ```bash
-   # Check Makefile is parseable
-   make -n -f Makefile 2>&1
-   # Exit code MUST be 0, MUST show no parse errors
-   
-   # Verify no syntax errors
-   make --dry-run --always-make 2>&1
-   # Exit code MUST be 0, no syntax errors
-   
-   # Test parseability with different make versions (if available)
-   make -n 2>&1 | grep -i "error\|warning" | grep -v "Nothing to be done"
-   # Should produce no output (no errors/warnings)
-   ```
-
-2. **Post-Modification Verification (MANDATORY)**:
-   ```bash
-   # After modifying Makefile, ALWAYS run:
-   # 1. Parse check
-   make -n 2>&1
+   # Check for syntax errors and undefined variables
+   make -n --warn-undefined-variables
    # Exit code MUST be 0
-   
-   # 2. Test affected targets
-   make help 2>&1
-   # MUST work without errors
-   
-   # 3. Test default target (if applicable)
-   make 2>&1
-   # MUST execute or show clear error (not parse error)
    ```
 
-2. **Target Execution Test**:
+2. **Security & Shell Verification (MANDATORY)**:
    ```bash
-   # Test help target
-   make help
-   # MUST display help text without errors
+   # Verify SHELL is explicitly set to a POSIX-compliant shell
+   grep "^SHELL :=" Makefile
    
-   # Test default target
-   make
-   # MUST execute successfully or show clear error
-   
-   # Test verbose mode
-   make V=1
-   # MUST show verbose output
-   
-   # Test debug mode
-   make DEBUG=1
-   # MUST show debug information
+   # Verify .DELETE_ON_ERROR is present
+   grep "^\.DELETE_ON_ERROR:" Makefile
    ```
+   - **MUST** ensure all shell commands are escaped correctly to prevent injection.
 
-3. **Module Inclusion Test**:
+3. **Target Execution (Dry-Run)**:
+   ```bash
+   # Verify help target works
+   make help
+   
+   # Verify build logic (dry-run)
+   make -n build
+   ```
+   - **MUST** return 0 pass rate for basic targets.
+
+4. **Documentation Verification**:
+   - All public targets are documented with `##` comments for the `help` target.
+   - Run `make help` to ensure the output is readable.
+
+#### Error Correction Process
+
+If verification fails:
+
+1. **Identify the error**: Read the full `make` error message (e.g., "missing separator").
+2. **Fix the root cause**:
+   - Tab issue? Ensure all recipes use literal TAB characters.
+   - Variable issue? Check if `$(VAR)` is defined or if `$VAR` (shell) was intended.
+3. **Re-verify**: Run `make -n` again.
+
+---
+
+## 3. Core Structure (MANDATORY)
    ```bash
    # If using includes, verify they work
    make -n
@@ -2648,122 +2637,172 @@ endif
 
 ---
 
-## 16. Common Pitfalls to Avoid
-
-### ❌ WRONG - Common Mistakes
-
-```makefile
-# ❌ Using bash-specific features
-SHELL := /bin/bash
-build:
-	@array=(a b c); echo $${array[@]}
-
-# ❌ Not using .PHONY for phony targets
-clean:
-	@rm -rf build
-
-# ❌ Hardcoding paths
-build:
-	@/usr/bin/gcc -o output input.c
-
-# ❌ No error handling
-build:
-	@cp src/*.c build/
-
-# ❌ Monolithic Makefile (everything in one file)
-# 500+ lines in single Makefile
-
-# ❌ No help system
-# Missing help target
-
-# ❌ No verbose/debug modes
-# Can't troubleshoot issues
-```
-
-### ✅ CORRECT - Best Practices
-
-```makefile
-# ✅ POSIX-compliant
-SHELL := /bin/sh
-build:
-	@for file in src/*.c; do \
-		echo "Processing $$file"; \
-	done
-
-# ✅ Phony targets declared
-.PHONY: clean
-clean:
-	@rm -rf $(BUILD_DIR)
-
-# ✅ Configurable tools
-CC ?= gcc
-build:
-	@$(CC) -o output input.c
-
-# ✅ Error handling
-build:
-	@test -d src || (echo "Error: src not found" && exit 1)
-	@cp src/*.c build/
-
-# ✅ Modular structure
-include make/config.mk
-include make/build.mk
-
-# ✅ Help system
-help: ## Show help
-	@echo "Available targets:"
-
-# ✅ Verbose and debug modes
-V ?= 0
-DEBUG ?= 0
-```
-
----
-
-## 17. Resources
-
-### GNU Make Documentation
-- [GNU Make Manual](https://www.gnu.org/software/make/manual/)
-- [Makefile Tutorial](https://makefiletutorial.com/)
-
-### POSIX Standards
-- [POSIX Shell Command Language](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html)
-
-### Best Practices
-- [Managing Projects with GNU Make](https://www.oreilly.com/library/view/managing-projects-with/0596006101/)
-
----
-
-## 18. Summary
+## 10. Summary
 
 **CRITICAL Requirements for All Makefiles:**
 
-1. **Modular Structure**: Split into logical modules in `make/` directory, keep main Makefile small and readable
-2. **Reproducible Builds**: Deterministic outputs, SOURCE_DATE_EPOCH, version pinning, reproducible flags
-3. **Incremental Builds**: Proper dependency tracking, caching to prevent duplicate work
-4. **Progress Indicators**: Progress logs or progress bars by default (unless verbose mode)
-5. **Clean Comments**: Simple, clean, helpful comments throughout
-6. **Verbose Mode**: Support `V=1` for command visibility
-7. **Debug Mode**: Support `DEBUG=1` for troubleshooting
-8. **Help System**: Built-in `help` target documenting all targets
-9. **Minimal Dependencies**: Use only POSIX tools, avoid external dependencies
-10. **Reusability**: Use functions and templates for common patterns
-11. **Error Handling**: Validate prerequisites, clear error messages
-12. **Verification**: Agent MUST test Makefile before delivery
-13. **Post-Modification Check**: Agent MUST verify parseability after ANY modification
+1. **Modular Structure**: Split into logical modules in `make/` directory, keep main Makefile small and readable.
+2. **Reproducible Builds**: Deterministic outputs, `SOURCE_DATE_EPOCH`, version pinning, reproducible flags.
+3. **Incremental Builds**: Proper dependency tracking, caching to prevent duplicate work.
+4. **Progress Indicators**: Progress logs or progress bars by default (unless verbose mode).
+5. **Clean Comments**: Simple, clean, helpful comments throughout.
+6. **Verbose Mode**: Support `V=1` for command visibility.
+7. **Debug Mode**: Support `DEBUG=1` for troubleshooting.
+8. **Help System**: Built-in `help` target documenting all targets.
+9. **Minimal Dependencies**: Use only POSIX tools, avoid external dependencies.
+10. **Reusability**: Use functions and templates for common patterns.
+11. **Error Handling**: Validate prerequisites, clear error messages.
+12. **Verification**: Agent MUST test Makefile before delivery.
+13. **Post-Modification Check**: Agent MUST verify parseability after ANY modification.
 
-**Agent Verification Protocol:**
-- Run `make -n` to check syntax and parseability
-- **MANDATORY**: After ANY modification, verify parseability with `make -n`
-- Test `make help` displays correctly
-- Verify `make V=1` shows verbose output
-- Verify `make DEBUG=1` shows debug information
-- Test default target executes successfully
-- Verify caching works (run target twice, second should skip)
-- Verify progress indicators show by default
-- Only present working Makefiles to the user
+---
 
-**Remember**: Small, minimalistic, modular (in separate `make/` directory), reusable, reproducible, with built-in help, debugging support, incremental caching, progress indicators, and clean comments. Always verify parseability after modifications. Keep it simple, keep it POSIX, keep it working.
+## 11. Security & Dependency Management (MANDATORY)
+
+### A. Automated Dependency Management
+
+**Use compiler-generated dependency files (`.d`) to ensure accurate incremental builds:**
+
+```makefile
+# Generate dependency files during compilation
+DEP_FLAGS := -MMD -MP
+$(OBJ_DIR)/%.o: %.c
+	@$(CC) $(CFLAGS) $(DEP_FLAGS) -c $< -o $@
+
+# Include generated dependencies
+-include $(DEPS)
+```
+
+- **Lockfiles**: If your Makefile manages external tools (e.g., `wget` for binaries), ALWAYS verify checksums or use a lockfile equivalent.
+- **Environment Isolation**: Use `unexport` for variables that should not leak into sub-make processes unless explicitly required.
+
+### B. Vulnerability Scanning & Security
+
+**Mandatory security checks for ALL Makefile implementations:**
+
+1. **Shell Injection Prevention**:
+   - ALWAYS quote variables used in shell commands: `rm -rf "$(TARGET_DIR)"`.
+   - Use `$(abspath ...)` to prevent path traversal when dealing with user-supplied paths.
+
+2. **Environment Sanitization**:
+   - Explicitly set `SHELL := /bin/sh` to avoid using a compromised user shell.
+   - Use `.DELETE_ON_ERROR:` to ensure that a failed command doesn't leave a corrupted target file that `make` thinks is up-to-date.
+
+### C. Dependency File
+
+```makefile
+# Example make/deps.mk
+# Track external tools version
+REQUIRED_TOOLS := gcc make awk
+$(foreach tool,$(REQUIRED_TOOLS),\
+    $(if $(shell command -v $(tool) 2> /dev/null),,$(error "Error: $(tool) is not installed")))
+```
+
+---
+
+## 12. Deployment Checklist
+
+### Agent-Generated Code Verification (MANDATORY)
+
+#### Build & Compilation
+- [ ] Code is parseable: `make -n` returns exit code 0
+- [ ] GNU Make 4.4 features: Use of `$(let ...)` or `$(intcmp ...)` where appropriate
+- [ ] Tab integrity: All recipes start with a literal TAB character
+- [ ] No undefined variables: `make --warn-undefined-variables` passes
+
+#### Testing
+- [ ] `make help` works: Displays all documented targets correctly
+- [ ] Incremental build: Running `make` twice results in "Nothing to be done"
+- [ ] Parallel build: `make -j` verified to work without race conditions
+
+#### Security
+- [ ] Shell safety: All variables in recipes are double-quoted
+- [ ] `SHELL` explicitly set: `SHELL := /bin/sh` or similar POSIX shell
+- [ ] `.DELETE_ON_ERROR` present: Prevents stale/corrupted targets
+- [ ] Path safety: `abspath` used for sensitive path operations
+
+#### Code Quality
+- [ ] Modularity: Logic split into `make/*.mk` files if > 100 lines
+- [ ] DRY principle: Common patterns abstracted into variables or functions
+- [ ] Idempotency: `make clean` followed by `make` always works
+
+#### Documentation
+- [ ] Self-documenting: All targets have `##` comments for the help target
+- [ ] Variables documented: Important configuration variables explained
+
+#### Architecture
+- [ ] POSIX compliance: Recipes use standard shell features, not bashisms
+- [ ] Dependency tracking: `.d` files used for C/C++ or similar languages
+
+#### Agent Workflow Completed
+- [ ] Agent verified Makefile is parseable with `make -n`
+- [ ] Agent verified `make help` output
+- [ ] Agent verified parallel build safety
+- [ ] Agent verified shell command quoting
+
+---
+
+## 13. Why This Configuration Works
+
+**Immediate Assignment (`:=`)**:
+- Prevents expensive recursive expansion of variables every time they are referenced, significantly speeding up large Makefiles.
+
+**Order-Only Prerequisites (`|`)**:
+- Allows ensuring a directory exists (e.g., `bin/`) without triggering a rebuild of the target every time the directory's timestamp changes.
+
+**`.DELETE_ON_ERROR`**:
+- A critical safety feature that ensures if a recipe fails, the target file is deleted, forcing a re-run next time instead of leaving a broken file.
+
+---
+
+## 14. Quick Reference
+
+### Common Commands
+
+```bash
+# Dry-run (Check what would happen)
+make -n
+
+# Parallel build (Use all cores)
+make -j$(nproc)
+
+# Trace variables (Debug)
+make -p | grep MY_VAR
+
+# Check for undefined variables
+make --warn-undefined-variables
+
+# Self-documented help
+make help
+```
+
+### Modern GNU Make 4.4+ Patterns Cheat Sheet
+
+```makefile
+# Immediate assignment for performance
+VERSION := $(shell git describe --tags)
+
+# Order-only prerequisite for directories
+$(OBJ_DIR)/%.o: %.c | $(OBJ_DIR)
+	@$(CC) -c $< -o $@
+
+$(OBJ_DIR):
+	@mkdir -p $@
+
+# Built-in help pattern
+help: ## Show this help
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+# Delete on error (Global safety)
+.DELETE_ON_ERROR:
+```
+
+---
+
+## Resources
+
+- [GNU Make Manual (v4.4)](https://www.gnu.org/software/make/manual/make.html)
+- [POSIX Shell Standard](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html)
 
 
 **End of Modern GNU Makefile Guidelines**

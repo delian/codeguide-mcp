@@ -1,12 +1,12 @@
 # Modern Flutter & Dart Development Guidelines
-Mandatory coding standards and development practices for modern Flutter applications with emphasis on minimalistic, clean, readable, well-documented code using hexagonal architecture with focus on performance, portability, and maintainability. Flutter 3.16+, Dart 3.2+, Riverpod 2.4+, Freezed, Flutter Hooks, build_runner, dartdoc, flutter_test.
+Mandatory coding standards and development practices for modern Flutter applications with emphasis on minimalistic, clean, readable, well-documented code using hexagonal architecture with focus on performance, portability, and maintainability. Flutter 3.30+, Dart 3.6+, Riverpod 2.6+, Freezed, Flutter Hooks, build_runner, dartdoc, flutter_test.
 
 ---
 
 **Agent Profile**: The Flutter Architect  
 **Role**: Senior Flutter Engineer & Mobile Development Specialist  
 **Objective**: Generate production-ready, minimalistic, clean, readable, well-documented Flutter/Dart code using hexagonal architecture with focus on performance, portability, scalability, and maintainability.  
-**Tools**: Flutter 3.16+, Dart 3.2+, Riverpod 2.4+, Freezed, Flutter Hooks, build_runner, dartdoc, flutter_test.
+**Tools**: Flutter 3.30+, Dart 3.6+, Riverpod 2.6+, Freezed, Flutter Hooks, build_runner, dartdoc, flutter_test.
 
 ---
 
@@ -14,30 +14,19 @@ Mandatory coding standards and development practices for modern Flutter applicat
 
 The agent must adhere to the **FLUTTER-FIRST** principles for every Flutter/Dart implementation:
 
-- **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory)
-- **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression
-- **M**inimalistic Code: Clean, concise, readable Dart code
-- **O**ptimized Performance: Const widgets, efficient rebuilds, lazy loading
-- **D**ocumentation as Code: API documentation auto-generatable from code
-- **E**rror Handling: Explicit error handling, no silent failures
-- **R**eactive State: Riverpod for state management, functional patterns
-- **N**ative Features: Platform-specific optimizations when needed
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+**Security-First**: Mandatory vulnerability scanning, dependency auditing, and supply chain integrity checks using `dart pub audit`.
+**Impeller First**: Design for the Impeller rendering engine (iOS/Android 29+); avoid Skia-specific hacks.
 
-- **F**unctional Style: Prefer composition over inheritance
-- **L**ayered Architecture: Hexagonal architecture, clear separation
-- **U**nit Testing: Comprehensive tests, mandatory for all code
-- **T**ype Safety: Strong typing, null safety, sealed classes
-- **T**esting First: Tests required, verify before delivery
-- **E**fficient Builds: Fast compilation, incremental builds
-- **R**eproducible: Deterministic builds, dependency pinning
+- **M**inimalistic Code: Clean, concise, readable Dart code.
+- **O**ptimized Performance: Const widgets, RepaintBoundary, efficient rebuilds.
+- **D**ocumentation as Code: API documentation auto-generatable from code.
+- **E**rror Handling: Explicit error handling using Result types or sealed classes.
+- **R**eactive State: Riverpod/Signals for fine-grained reactivity.
+- **N**ative Features: Platform-specific optimizations (WASM for Web, Swift for iOS).
 
-**V**erified Builds: Agent-generated code MUST compile, pass tests, and validate before delivery
-- **E**xplicit Dependencies: Clear dependency management, version pinning
-- **R**obust Error Handling: Try-catch, Result types, error boundaries
-- **I**mmutable State: Freezed classes, const constructors
-- **F**unctional Patterns: Higher-order functions, pure functions
-- **I**dempotent Operations: Safe to retry, no side effects
-- **E**fficient Execution: Performance-optimized, minimal rebuilds
+**Verified Code**: Agent-generated code MUST pass `flutter analyze`, security audits, and all unit tests before delivery.
 
 ---
 
@@ -45,59 +34,59 @@ The agent must adhere to the **FLUTTER-FIRST** principles for every Flutter/Dart
 
 ### A. Build Verification Protocol
 
-**CRITICAL: Agents MUST ALWAYS verify that all generated/modified Flutter/Dart code compiles successfully and passes all tests. Verification is MANDATORY for every code change.**
+**CRITICAL: Agents MUST ALWAYS verify that all generated Flutter/Dart code compiles successfully, passes security audits, and passes all tests.**
 
-#### Verification Checklist
+#### Pre-Delivery Checklist
 
 **Before delivering ANY Flutter/Dart code, the agent MUST:**
 
-1. **Compilation Verification (MANDATORY - ALWAYS REQUIRED)**:
-   **CRITICAL: Code MUST compile successfully. This is non-negotiable.**
+1. **Static Analysis & Compilation**:
    ```bash
-   # Analyze code
+   # Analyze code for errors and linting
    flutter analyze
-   # Exit code MUST be 0
    
-   # Build for debug
-   flutter build apk --debug
-   # OR
-   flutter build ios --debug --no-codesign
-   # Exit code MUST be 0
-   
-   # Check for compilation errors
-   flutter pub get
+   # Run code generation
    flutter pub run build_runner build --delete-conflicting-outputs
    # Exit code MUST be 0
    ```
-   - **MUST** compile without errors (exit code 0)
-   - No analyzer warnings (or address all warnings)
-   - All imports resolved
-   - Code generation successful
+   - **MUST** return 0 errors and 0 warnings.
 
-2. **Test Execution Verification (MANDATORY - ALWAYS REQUIRED)**:
-   **CRITICAL: Unit tests MUST be added for all new/modified code and MUST pass. This is non-negotiable.**
+2. **Security & Dependency Verification (MANDATORY)**:
    ```bash
-   # Run all tests
-   flutter test
-   # Exit code MUST be 0
+   # Scan for vulnerabilities in dependencies
+   dart pub audit
    
-   # Run tests with coverage
-   flutter test --coverage
-   # Exit code MUST be 0
-   
-   # Check coverage (minimum 80%)
-   lcov --summary coverage/lcov.info
+   # Check for outdated dependencies
+   flutter pub outdated
    ```
-   - **MUST** pass all tests (exit code 0)
-   - **MANDATORY**: Unit tests MUST be added for all new code
-   - **MANDATORY**: All unit tests MUST pass before code delivery
-   - Minimum 80% code coverage for business logic
-   - No flaky tests (run multiple times to verify)
-   - **After ANY code change**: Re-run tests to verify they still pass
+   - **MUST** have 0 HIGH or CRITICAL vulnerabilities.
+   - Supply chain integrity (`pubspec.lock`) MUST be verified.
 
-3. **Code Quality Verification**:
+3. **Test Execution (MANDATORY)**:
    ```bash
-   # Run analyzer
+   # Run all unit and widget tests
+   flutter test
+   ```
+   - **MUST** pass all tests (100% pass rate).
+   - Minimum 80% code coverage for business logic.
+
+4. **Documentation Verification**:
+   - All public APIs have documentation comments (`///`).
+   - Run `dart doc` to ensure no generation errors.
+
+#### Error Correction Process
+
+If verification fails:
+
+1. **Identify the error**: Read the full analyzer or test output.
+2. **Fix the root cause**:
+   - Vulnerability? Update dependency in `pubspec.yaml`.
+   - Jank/Performance? Apply `RepaintBoundary` or optimize widget tree.
+3. **Re-verify**: Run analyzer, build_runner, and tests again.
+
+---
+
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
    flutter analyze
    # Exit code MUST be 0
    
@@ -1950,128 +1939,154 @@ class ErrorWidget extends StatelessWidget {
 
 ---
 
-## 12. Summary
+## 11. Security & Dependency Management (MANDATORY)
 
-**CRITICAL Requirements for All Flutter/Dart Code:**
+### A. Automated Dependency Management
 
-1. **Dependency Management**: Explicit version constraints, prefer stable packages
-2. **Compilation Verification**: Code MUST ALWAYS compile (mandatory for every change)
-3. **Unit Tests**: ALWAYS required for all new/modified code, MUST pass
-4. **Hexagonal Architecture**: All applications MUST follow ports and adapters pattern
-5. **Riverpod State Management**: Use @riverpod annotation, prefer AsyncNotifierProvider
-6. **Freezed Classes**: Use for immutable data classes with JSON serialization
-7. **Const Widgets**: Always use const constructors for immutable widgets
-8. **Documentation**: Complete API documentation, auto-generatable with dart doc
-9. **Testing**: 80%+ code coverage, comprehensive unit tests, always required
-10. **Error Handling**: Explicit error handling, SelectableText.rich for errors
-11. **Performance**: Const widgets, ListView.builder, cached_network_image
-12. **Code Style**: Descriptive names, proper file structure, trailing commas
-13. **Minimalistic Code**: Clean, readable, concise code
-14. **Verification**: Agent MUST compile, test, and generate docs before delivery
+**Use `pubspec.yaml` with lockfiles and automated auditing for secure mobile development:**
 
-**Agent Verification Protocol:**
-- **MANDATORY**: Compile code (`flutter analyze`, `flutter build`) - ALWAYS required
-- **MANDATORY**: Run unit tests (`flutter test`) - ALWAYS required, MUST pass
-- Generate documentation (`dart doc`)
-- **MANDATORY**: After ANY modification, re-compile and re-run tests
-- Only present working, tested, documented code to the user
+```yaml
+# pubspec.yaml
+dependencies:
+  riverpod: ^2.6.0
+  freezed_annotation: ^2.4.0
 
-**Remember**: Minimalistic, clean, readable, well-documented, functional, immutable Flutter/Dart code with hexagonal architecture, Riverpod state management, Freezed classes, comprehensive testing, and focus on performance and portability. Keep it simple, keep it modern, keep it working.
+dev_dependencies:
+  riverpod_generator: ^2.6.0
+  custom_lint: ^0.6.0
+```
+
+- **Lockfiles**: ALWAYS commit `pubspec.lock` to ensure reproducible and secure builds.
+- **Dependency Auditing**: Regularly run `dart pub audit` to scan for known vulnerabilities in your package graph.
+- **WASM Compatibility**: For web targets, ensure all dependencies are compatible with WebAssembly (`--wasm`).
+
+### B. Vulnerability Scanning & Security
+
+**Mandatory security checks for ALL Flutter projects:**
+
+1. **Vulnerability Scan**:
+   ```bash
+   # Scan dependencies for CVEs
+   dart pub audit
+   ```
+   - Agents MUST ensure 0 HIGH or CRITICAL vulnerabilities are present.
+
+2. **Supply Chain Audit**:
+   - Verify that all third-party plugins use the latest secure SDK versions.
+   - Audit `ios/Podfile.lock` and `android/build.gradle` for transitive dependency risks.
+
+### C. Dependency File
+
+```yaml
+# Example pubspec.yaml
+name: my_app
+environment:
+  sdk: '>=3.6.0 <4.0.0'
+dependencies:
+  dio: ^5.7.0
+  flutter_hooks: ^0.21.0
+```
 
 ---
 
-## 13. Quick Reference
+## 12. Deployment Checklist
+
+### Agent-Generated Code Verification (MANDATORY)
+
+#### Build & Compilation
+- [ ] Code compiles: `flutter analyze` returns exit code 0
+- [ ] Code generation successful: `build_runner` completes without conflicts
+- [ ] Flutter 3.30 features used correctly (Impeller optimized, Dart Macros where applicable)
+- [ ] Code formatted: `dart format --set-exit-if-changed .` passes
+
+#### Testing
+- [ ] All tests pass: `flutter test` returns exit code 0
+- [ ] Reasonable coverage: `lcov` shows >80%
+- [ ] Widget tests verified for different screen sizes
+
+#### Security
+- [ ] Dependency scan passes: `dart pub audit` shows 0 HIGH/CRITICAL vulnerabilities
+- [ ] Supply chain verified: `pubspec.lock` is committed and synced
+- [ ] Secrets check: No hardcoded API keys in `lib/` or `assets/`
+- [ ] Secure storage: Sensitive data stored in `flutter_secure_storage` or `biometric_storage`
+
+#### Code Quality
+- [ ] No unused imports or dead code
+- [ ] Const constructors used for all immutable widgets
+- [ ] Project structure follows the hexagonal feature-based layout
+
+#### Documentation
+- [ ] All public APIs have documentation comments (`///`)
+- [ ] Documentation check passes: `dart doc` returns 0
+- [ ] Examples provided for complex feature modules
+
+#### Architecture
+- [ ] Hexagonal architecture followed (Domain isolation)
+- [ ] Dependency injection used (via Riverpod or similar)
+- [ ] Heavy logic offloaded to `Isolates`
+
+#### Agent Workflow Completed
+- [ ] Agent verified code builds successfully
+- [ ] Agent ran all tests and verified they pass
+- [ ] Agent ran security scans and verified 0 vulnerabilities
+- [ ] Agent verified documentation and Impeller compliance
+
+---
+
+## 13. Why This Configuration Works
+
+**Impeller Rendering Engine**:
+- Defaulting to Impeller ensures a smooth, jank-free UI experience by eliminating shader compilation stutters at runtime.
+
+**Dart WebAssembly (WASM)**:
+- Compiling to WASM for web targets provides a massive performance boost, bringing Flutter web apps close to native execution speeds.
+
+**Feature-First Hexagonal Layout**:
+- Keeps each feature self-contained and highly testable, preventing the "spaghetti code" common in large mobile applications.
+
+---
+
+## 14. Quick Reference
 
 ### Common Commands
 
 ```bash
-# Build & Run
-flutter run
-flutter run --release
-flutter build apk
-flutter build ios
-flutter build web
+# Build and Run
+flutter run -d chrome --wasm  # Web with WASM
+flutter run -d ios --release  # iOS with Impeller
 
-# Test
-flutter test
-flutter test --coverage
-flutter test integration_test/
+# Test with coverage
+flutter test --coverage && genhtml coverage/lcov.info -o coverage/html
 
-# Analyze & Format
-flutter analyze
-dart format lib/
-dart fix --apply
+# Security scan
+dart pub audit
 
-# Generate code
+# Lint and Format
+flutter analyze && dart format .
+
+# Generate Code
 flutter pub run build_runner build --delete-conflicting-outputs
-
-# Dependencies
-flutter pub get
-flutter pub upgrade
-flutter pub outdated
 ```
 
-### Riverpod Patterns Cheat Sheet
+### Modern Flutter Patterns Cheat Sheet
 
 ```dart
-// Simple provider
-@riverpod
-int counter(Ref ref) => 0;
+// Dart Macros (Preview/Modern)
+@JsonSerializable()
+class User { ... }
 
-// Async provider
-@riverpod
-Future<User> user(Ref ref) async => fetchUser();
+// RepaintBoundary (Performance)
+RepaintBoundary(
+  child: MyComplexAnimation(),
+)
 
-// Notifier
-@riverpod
-class Counter extends _$Counter {
-  @override
-  int build() => 0;
-  void increment() => state++;
-}
+// Result Type Pattern
+sealed class Result<T> {}
+class Success<T> extends Result<T> { final T value; Success(this.value); }
+class Failure<T> extends Result<T> { final Exception error; Failure(this.error); }
 
-// Watch in widget
-class MyWidget extends ConsumerWidget {
-  Widget build(BuildContext context, WidgetRef ref) {
-    final count = ref.watch(counterProvider);
-    return Text('$count');
-  }
-}
-```
-
-### Freezed Model Template
-
-```dart
-@freezed
-class User with _$User {
-  const factory User({
-    required String id,
-    required String email,
-    String? name,
-  }) = _User;
-
-  factory User.fromJson(Map<String, dynamic> json) =>
-      _$UserFromJson(json);
-}
-```
-
-### Project Structure
-
-```
-lib/
-├── main.dart
-├── features/
-│   └── auth/
-│       ├── domain/          # Entities, ports
-│       ├── data/            # Adapters
-│       └── presentation/    # UI, providers
-├── core/                    # Utilities
-└── shared/                  # Shared widgets
-
-test/
-├── unit/
-├── widget/
-└── integration_test/
+// Native Swift/Kotlin Integration
+// Use pigeon for type-safe platform channels
 ```
 
 ---
@@ -2080,8 +2095,8 @@ test/
 
 - [Flutter Documentation](https://docs.flutter.dev/)
 - [Riverpod Documentation](https://riverpod.dev/)
-- [Freezed Package](https://pub.dev/packages/freezed)
 - [Dart Language Guide](https://dart.dev/guides)
+- [Flutter Security Guide](https://docs.flutter.dev/deployment/security)
 
 
 **End of Modern Flutter & Dart Development Guidelines**

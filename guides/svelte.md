@@ -16,6 +16,7 @@ The agent must adhere to the **SVELTE-FIRST** principles for every Svelte applic
 
 **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
 **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+**Security-First**: Mandatory vulnerability scanning, dependency auditing, and supply chain integrity checks using `npm audit`.
 **Runes/Signals First**: ALWAYS use Svelte 5 runes (`$state`, `$derived`, `$effect`) — never legacy `$:` syntax for new code.
 **Async-First**: Prefer `async`/`await` over `.then()` chains; use `{#await}` blocks for reactive promises.
 **Reactive by Default**: Let Svelte's compiler handle reactivity; avoid manual subscriptions.
@@ -25,7 +26,8 @@ The agent must adhere to the **SVELTE-FIRST** principles for every Svelte applic
 **Tested Code**: Unit tests for all logic, component tests for UI.
 **Documented APIs**: JSDoc/TypeDoc for all public APIs.
 **Hexagonal Architecture**: Clear separation of domain, application, and infrastructure.
-**Verified Code**: Agent-generated code MUST compile (`svelte-check`/`npm run build`), pass lint and tests, and pass verification before delivery.
+
+**Verified Code**: Agent-generated code MUST compile (`svelte-check`/`npm run build`), pass security audits, pass lint and tests, and pass verification before delivery.
 
 ---
 
@@ -33,71 +35,62 @@ The agent must adhere to the **SVELTE-FIRST** principles for every Svelte applic
 
 ### A. Verification Protocol
 
-**CRITICAL: Agents MUST verify that all generated Svelte code compiles and passes tests before presenting it to the user.**
+**CRITICAL: Agents MUST verify that all generated Svelte code compiles, is secure, and passes tests before presenting it to the user.**
 
 #### Pre-Delivery Checklist
 
 **Before delivering ANY Svelte code, the agent MUST:**
 
-1. **TypeScript Compilation Check**:
+1. **TypeScript & Type Check**:
    ```bash
-   # Verify code compiles without errors
+   # Verify code compiles and types are correct
    npm run check
-   # OR
-   svelte-check --tsconfig ./tsconfig.json
    # Exit code MUST be 0
    ```
 
-2. **Build Verification**:
+2. **Security & Dependency Verification (MANDATORY)**:
    ```bash
-   # Verify project builds successfully
-   npm run build
-   # Exit code MUST be 0
+   # Scan for vulnerabilities in dependencies
+   npm audit --audit-level=high
    
-   # Verify no build warnings
-   npm run build 2>&1 | grep -i "warning" && exit 1 || exit 0
+   # Check for hardcoded secrets
+   # (Using a tool like gitleaks or simple grep patterns)
    ```
+   - **MUST** have 0 high/critical vulnerabilities.
+   - Supply chain integrity (`package-lock.json`) MUST be verified.
 
-3. **Linting Check**:
+3. **Build Verification**:
    ```bash
-   # Verify code passes linting
-   npm run lint
+   # Verify project builds successfully for production
+   npm run build
    # Exit code MUST be 0
    ```
 
 4. **Test Execution**:
    ```bash
-   # Run all unit tests
-   npm run test
-   # Exit code MUST be 0, all tests pass
-   
-   # Run with coverage
+   # Run all unit and component tests with coverage
    npm run test:coverage
-   # Coverage should be > 80%
    ```
+   - **MUST** pass all tests (100% pass rate).
+   - Minimum 80% code coverage.
 
-5. **Component Tests** (for UI components):
-   ```bash
-   # Run component tests
-   npm run test:component
-   # Exit code MUST be 0
-   ```
+5. **Documentation Verification**:
+   - All public components, props, and snippets have JSDoc/TypeDoc comments.
+   - Documentation generation (`npm run docs`) succeeds.
 
-6. **Documentation Generation**:
-   ```bash
-   # Generate TypeDoc documentation
-   npm run docs
-   # Verify docs/api/ directory is created
-   ```
-
-### B. Error Correction Process
+#### Error Correction Process
 
 If verification fails:
 
-1. **Read the error message** (Svelte/TypeScript errors are descriptive)
-2. **Identify the root cause** (type error, reactivity issue, build config, etc.)
-3. **Fix the issue** following Svelte best practices
-4. **Re-run verification** until all checks pass
+1. **Identify the error**: Read the full Svelte compiler, test runner, or audit output.
+2. **Fix the root cause**:
+   - Hydration mismatch? Ensure DOM structure matches between server and client.
+   - Reactivity issue? Verify rune usage and state isolation.
+3. **Re-verify**: Run check, build, and tests again.
+
+---
+
+## 3. Mental Model
 5. **Document any non-obvious fixes**
 
 ### C. Prohibited Practices
@@ -3383,6 +3376,161 @@ export const POST: RequestHandler = async ({ request }) => {
   const user = await createUser(data);
   return json(user, { status: 201 });
 };
+```
+
+---
+
+## 11. Security & Dependency Management (MANDATORY)
+
+### A. Automated Dependency Management
+
+**Use npm with lockfiles and automated scanning for consistent and secure environments:**
+
+```json
+// package.json
+{
+  "scripts": {
+    "audit": "npm audit --audit-level=high",
+    "update": "npm update"
+  }
+}
+```
+
+- **Lockfiles**: ALWAYS commit `package-lock.json`. Use `npm ci` in CI/CD to ensure exact dependency matching.
+- **Dependency Auditing**: Integrate `npm audit` into your CI pipeline to block builds with HIGH or CRITICAL vulnerabilities.
+- **CSRF Protection**: Use SvelteKit's built-in CSRF protection for form actions.
+
+### B. Vulnerability Scanning & Security
+
+**Mandatory security checks for ALL Svelte projects:**
+
+1. **Vulnerability Scan**:
+   ```bash
+   # Scan all dependencies for known vulnerabilities
+   npm audit --audit-level=high
+   ```
+   - Agents MUST ensure 0 HIGH or CRITICAL vulnerabilities are present.
+
+2. **Supply Chain Audit**:
+   - Verify package integrity using `npm verify`.
+   - Audit external snippets and libraries for malicious telemetry or hidden dependencies.
+
+### C. Dependency File
+
+```json
+// Example package.json dependencies
+{
+  "dependencies": {
+    "svelte": "^5.0.0",
+    "@sveltejs/kit": "^2.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "vitest": "^2.0.0",
+    "playwright": "^1.45.0"
+  }
+}
+```
+
+---
+
+## 12. Deployment Checklist
+
+### Agent-Generated Code Verification (MANDATORY)
+
+#### Build & Compilation
+- [ ] Code compiles: `npm run check` returns exit code 0
+- [ ] Production build succeeds: `npm run build` completes successfully
+- [ ] Svelte 5 features used correctly (Runes, Snippets)
+- [ ] Code formatted: `prettier --check .` passes
+
+#### Testing
+- [ ] All tests pass: `npm run test` returns exit code 0
+- [ ] Reasonable coverage: `npm run test:coverage` shows >80%
+- [ ] Hydration verified: No hydration mismatches in production build
+
+#### Security
+- [ ] Dependency scan passes: `npm audit` shows 0 HIGH/CRITICAL vulnerabilities
+- [ ] Supply chain verified: `package-lock.json` is committed and synced
+- [ ] Secrets check: No hardcoded secrets in `.env` or `$env/static/private`
+- [ ] Static analysis: `eslint` passes with 0 security warnings
+
+#### Code Quality
+- [ ] No unused exports or stores
+- [ ] Small, focused components with clear props interfaces
+- [ ] Project structure follows the standard layout
+
+#### Documentation
+- [ ] All public APIs (components/stores) have JSDoc comments
+- [ ] Documentation check passes: `npm run docs:check` returns 0
+- [ ] Examples provided for complex UI interactions
+
+#### Architecture
+- [ ] Separation of concerns: business logic in stores/lib, UI in components
+- [ ] Server-side logic kept in `.server.ts` files
+- [ ] Accessibility: WCAG 2.1 AA compliance verified
+
+#### Agent Workflow Completed
+- [ ] Agent verified code builds successfully
+- [ ] Agent ran all tests and verified they pass
+- [ ] Agent ran security scans and verified 0 high vulnerabilities
+- [ ] Agent verified documentation and accessibility
+
+---
+
+## 13. Why This Configuration Works
+
+**Svelte 5 Runes**:
+- Provides fine-grained reactivity that is more predictable and easier to debug than the legacy `$:` syntax, leading to fewer reactivity-related bugs.
+
+**SvelteKit 2 Server Actions**:
+- Simplifies data mutations by providing a type-safe, built-in way to handle form submissions and server-side logic without extra boilerplate.
+
+**Vite 6**:
+- Ensures lightning-fast development feedback and optimized production bundles using native ESM and modern bundling techniques.
+
+---
+
+## 14. Quick Reference
+
+### Common Commands
+
+```bash
+# Build
+npm run build
+
+# Test with coverage
+npm run test:coverage
+
+# Security scan
+npm audit --audit-level=high
+
+# Lint and Format
+npm run lint && npm run format
+
+# Run dev server
+npm run dev
+```
+
+### Modern Svelte 5 Patterns Cheat Sheet
+
+```svelte
+// $state (Reactivity)
+let count = $state(0);
+
+// $derived (Computed)
+let doubled = $derived(count * 2);
+
+// $effect (Side Effects)
+$effect(() => {
+  console.log('Count is', count);
+});
+
+// Snippets (Reusable HTML)
+{#snippet card(title)}
+  <div class="card">{title}</div>
+{/snippet}
+{@render card('My Title')}
 ```
 
 ---

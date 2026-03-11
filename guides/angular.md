@@ -1,36 +1,89 @@
-# Angular & TypeScript Single Page Application Guidelines
-Mandatory coding standards and development practices for modern Angular single page applications with TypeScript. Angular 17+, TypeScript 5.x, Signals, Standalone Components, RxJS 7.x, NgRx Signal Store, TypeDoc.
+# Angular & TypeScript Development Guidelines
+Mandatory coding standards and development practices for modern Angular applications. Angular 19+, TypeScript 5.6+, Signals, Linked Signals, Resources, Standalone Components, NgRx Signal Store, TypeDoc.
 
 ---
-Agent Profile: The Angular Architect
-Role: Senior Frontend Engineer & Angular Performance Specialist
-Objective: Generate production-ready, type-safe, fully documented, highly performant, and maintainable Angular SPAs.
-Tools: Angular 17+, TypeScript 5.x, Signals, Standalone Components, RxJS 7.x, NgRx Signal Store, TypeDoc.
+**Agent Profile**: The Angular Architect
+**Role**: Senior Frontend Engineer & Angular Performance Specialist
+**Objective**: Generate production-ready, type-safe, fully documented, highly performant, and maintainable Angular SPAs.
+**Tools**: Angular 19+, TypeScript 5.6+, Signals, Standalone Components, RxJS 8.x, NgRx Signal Store, TypeDoc.
 
 ## 1. Core Philosophies
 The agent must adhere to the "ANGULAR-FIRST" principles for every Angular application:
 
 **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
 **Regression Shield**: EVERY bug discovered MUST receive a test before fixing to prevent regression.
-**Standalone Components**: No NgModules, use standalone components exclusively.
-**Immutable State**: Use signals for reactive state management.
-**Generic & Reusable**: Composition over inheritance, smart/dumb component pattern.
-**Natively Reactive**: Signals + RxJS interop, avoid zone.js pollution.
-**Async Operations**: Prefer async/await for asynchronous code, use RxJS for reactive streams.
-**Lazy Loading**: Route-level and component-level code splitting.
-**Fast Performance**: OnPush everywhere (default with signals), minimal change detection.
-**Interceptors Modern**: Use functional interceptors over class-based.
-**Route Guards Functional**: Use functional guards over class guards.
-**Strict TypeScript**: Full strict mode, no `any`, comprehensive typing.
-**Type Safety**: End-to-end type safety from API to template.
-**Angular Material**: Use Angular Material components as default UI library unless specified otherwise.
-**Minimalistic Code**: Write clear, concise code with single responsibility, avoid over-engineering.
-**Modular Architecture**: Small, focused modules/components with clear boundaries and dependencies.
-**Tested Code**: Mandatory unit tests with Jasmine/Karma, 80%+ coverage, all tests must pass.
-**Verified Builds**: Agent-generated code MUST compile (ng build) and pass all tests before delivery.
-**Documented Code**: JSDoc comments for all exports, auto-generated API documentation with TypeDoc.
+**Security-First**: Mandatory vulnerability scanning, dependency auditing, and supply chain integrity checks using `npm audit`.
+**Signal-Based Components**: Use Signal inputs (`input()`), outputs (`output()`), and models (`model()`).
+**Zoneless Development**: Prefer zoneless Angular; avoid reliance on `zone.js` where possible.
+**Standalone Everything**: Standalone components, directives, and pipes are mandatory.
+**Immutable State**: Use Signals for local state and NgRx Signal Store for global/feature state.
+**Functional Pattern**: Use `inject()` for dependency injection; use functional guards and interceptors.
+**Natively Reactive**: Leverage `resource()` and `rxResource()` for data fetching and async state.
+**Performance Optimized**: Enable hydration and event replay for SSR applications.
 
-## 2. Mandatory Setup Requirements
+**Verified Code**: Agent-generated code MUST compile (`ng build`), pass security audits, and pass all unit tests before delivery.
+
+---
+
+## 2. Agent Code Generation Requirements (MANDATORY)
+
+### A. Verification Protocol
+
+**CRITICAL: Agents MUST verify that all generated Angular code compiles, is secure, and passes tests before presenting it to the user.**
+
+#### Pre-Delivery Checklist
+
+**Before delivering ANY Angular code, the agent MUST:**
+
+1. **Build & Type Check**:
+   ```bash
+   # Verify code compiles and template types are correct
+   ng build
+   # Exit code MUST be 0
+   ```
+
+2. **Security & Dependency Verification (MANDATORY)**:
+   ```bash
+   # Scan for vulnerabilities in dependencies
+   npm audit --audit-level=high
+   
+   # Check for hardcoded secrets in templates or services
+   ```
+   - **MUST** have 0 high/critical vulnerabilities.
+   - Supply chain integrity (`package-lock.json`) MUST be verified.
+
+3. **Test Execution**:
+   ```bash
+   # Run all unit tests with coverage
+   ng test --no-watch --code-coverage --browsers=ChromeHeadless
+   ```
+   - **MUST** pass all tests (100% pass rate).
+   - Minimum 80% code coverage.
+
+4. **Linting Check**:
+   ```bash
+   # Verify code passes ESLint checks
+   ng lint
+   ```
+   - All critical warnings addressed.
+
+5. **Documentation Verification**:
+   - All public components, signals, and methods have JSDoc comments.
+   - Run `npm run docs` to ensure generation succeeds.
+
+#### Error Correction Process
+
+If verification fails:
+
+1. **Identify the error**: Read the full Angular compiler, test runner, or audit output.
+2. **Fix the root cause**:
+   - Signal error? Ensure `linkedSignal` dependencies are correctly tracked.
+   - Hydration error? Check for direct DOM manipulation in components.
+3. **Re-verify**: Run build, tests, and audits again.
+
+---
+
+## 3. Mandatory Setup Requirements
 
 ### A. Project Initialization
 * **Angular Version**: Use Angular 17+ with latest features.
@@ -4905,16 +4958,163 @@ src/
 
 ---
 
+## 16. Security & Dependency Management (MANDATORY)
+
+### A. Automated Dependency Management
+
+**Use npm with lockfiles and automated scanning for consistent and secure environments:**
+
+```json
+// package.json
+{
+  "scripts": {
+    "audit": "npm audit --audit-level=high",
+    "update": "ng update"
+  }
+}
+```
+
+- **Lockfiles**: ALWAYS commit `package-lock.json`. Use `npm ci` in CI/CD to ensure exact dependency matching.
+- **Dependency Auditing**: Integrate `npm audit` into your CI pipeline to block builds with HIGH or CRITICAL vulnerabilities.
+- **Angular Update**: Use `ng update` to manage framework migrations and peer dependency synchronization.
+
+### B. Vulnerability Scanning & Security
+
+**Mandatory security checks for ALL Angular projects:**
+
+1. **Vulnerability Scan**:
+   ```bash
+   # Scan all dependencies for known vulnerabilities
+   npm audit --audit-level=high
+   ```
+   - Agents MUST ensure 0 HIGH or CRITICAL vulnerabilities are present.
+
+2. **Supply Chain Audit**:
+   - Verify package integrity using `npm verify`.
+   - Use `DomSanitizer` for any dynamic HTML; avoid `dangerouslySetInnerHTML` patterns unless sanitized via `trusted-types`.
+
+### C. Dependency File
+
+```json
+// Example package.json dependencies
+{
+  "dependencies": {
+    "@angular/core": "^19.0.0",
+    "@angular/common": "^19.0.0",
+    "zod": "^3.23.0"
+  }
+}
+```
+
+---
+
+## 17. Deployment Checklist
+
+### Agent-Generated Code Verification (MANDATORY)
+
+#### Build & Compilation
+- [ ] Code compiles: `ng build` returns exit code 0
+- [ ] Template type checking passes (strict mode)
+- [ ] Angular 19 features used correctly (Signals, `linkedSignal`, `resource`)
+- [ ] Code formatted: `npm run lint` passes
+
+#### Testing
+- [ ] All unit tests pass: `ng test` returns exit code 0
+- [ ] Reasonable coverage: `ng test --code-coverage` shows >80%
+- [ ] Zoneless verified (if applicable): No reliance on `NgZone`
+
+#### Security
+- [ ] Dependency scan passes: `npm audit` shows 0 HIGH/CRITICAL vulnerabilities
+- [ ] Supply chain verified: `package-lock.json` is committed and synced
+- [ ] Secrets check: 0 hardcoded secrets in code or `environment.ts`
+- [ ] XSS prevention: No raw user input in `[innerHTML]` without `DomSanitizer`
+
+#### Code Quality
+- [ ] No unused imports or dead code
+- [ ] Standalone components used throughout (no `NgModules`)
+- [ ] Project structure follows the standard layout
+
+#### Documentation
+- [ ] All public APIs (components/services) have JSDoc comments
+- [ ] Documentation check passes: `npm run docs:check` returns 0
+- [ ] Examples provided for complex Signal patterns
+
+#### Architecture
+- [ ] Separation of concerns: logic in services/stores, UI in components
+- [ ] Accessibility: WCAG 2.1 AA compliance verified
+- [ ] SSR & Hydration: Verified compatibility (no direct DOM access)
+
+#### Agent Workflow Completed
+- [ ] Agent verified code builds successfully
+- [ ] Agent ran all tests and verified 100% pass rate
+- [ ] Agent ran security audits and verified 0 high vulnerabilities
+- [ ] Agent verified documentation and accessibility
+
+---
+
+## 18. Why This Configuration Works
+
+**Angular 19 Signals**:
+- Provides fine-grained reactivity that eliminates the overhead of `zone.js` monkey-patching, leading to significantly faster initial loads and more predictable UI updates.
+
+**Linked Signals & Resources**:
+- Simplifies state synchronization and data fetching, replacing complex RxJS chains with native, declarative primitives that are easier to test.
+
+**Standalone Architecture**:
+- Reduces boilerplate and improves build performance by allowing the Angular compiler to better tree-shake unused code at the component level.
+
+---
+
+## 19. Quick Reference
+
+### Common Commands
+
+```bash
+# Build
+ng build --configuration production
+
+# Test with coverage
+ng test --no-watch --code-coverage
+
+# Security scan
+npm audit --audit-level=high
+
+# Lint
+ng lint
+
+# Run dev server
+ng serve
+```
+
+### Modern Angular 19 Patterns Cheat Sheet
+
+```typescript
+// linkedSignal (Sync state)
+const value = signal(10);
+const derived = linkedSignal(() => value() * 2);
+
+// resource (Async data)
+const userResource = resource({
+  loader: () => fetchUser(id())
+});
+
+// rxResource (RxJS data)
+const users = rxResource({
+  loader: () => this.http.get<User[]>('/api/users')
+});
+
+// model() (Two-way binding)
+checked = model(false);
+```
+
+---
+
 ## References
 
 - [Angular Documentation](https://angular.dev/)
 - [Angular Signals Guide](https://angular.dev/guide/signals)
-- [Standalone Components](https://angular.dev/guide/components/importing)
-- [Angular Router](https://angular.dev/guide/routing)
 - [RxJS Documentation](https://rxjs.dev/)
-- [NgRx Signals](https://ngrx.io/guide/signals)
-- [TypeScript Handbook](https://www.typescriptlang.org/docs/)
-- [Web Content Accessibility Guidelines](https://www.w3.org/WAI/WCAG21/quickref/)
+- [Angular Security Guide](https://angular.dev/guide/security)
 
 
-**End of Angular & TypeScript Single Page Application Guidelines**
+**End of Angular & TypeScript Development Guidelines**

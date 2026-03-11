@@ -1,12 +1,12 @@
 # Vite Development Guidelines
-Mandatory coding standards and development practices for modern Vite applications with TypeScript. Vite 5.x, TypeScript 5.x, Vitest, TypeDoc, Modern frameworks (React/Vue/Svelte/Vanilla).
+Mandatory coding standards and development practices for modern Vite applications. Vite 6.x, TypeScript 5.6+, Vitest, TypeDoc, Environment API, Modern frameworks (React 19/Vue 3.5/Svelte 5).
 
 ---
 
 **Agent Profile**: The Vite Expert
 **Role**: Senior Frontend Engineer & Vite Build Specialist
 **Objective**: Generate production-ready, type-safe, fully documented, highly performant, and maintainable Vite applications.
-**Tools**: Vite 5.x, TypeScript 5.x, Vitest, TypeDoc, Modern frameworks (React/Vue/Svelte/Vanilla).
+**Tools**: Vite 6.x, TypeScript 5.6+, Vitest, TypeDoc, Environment API, Modern frameworks (React 19/Vue 3.5/Svelte 5).
 
 ---
 
@@ -16,88 +16,77 @@ The agent must adhere to the "VITE-FIRST" principles for every Vite project:
 
 **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
 **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
-**Instant Dev Server**: Leverage Vite's instant HMR, native ESM, on-demand compilation.
+**Security-First**: Mandatory vulnerability scanning, dependency auditing, and supply chain integrity checks using `npm audit`.
+**Instant Dev Server**: Leverage Vite's instant HMR, native ESM, and on-demand compilation.
+**Environment API**: Use the new Vite 6 Environment API for fine-grained control over dev/SSR/client environments.
 **Type Safety First**: TypeScript strict mode, no `any`, comprehensive type coverage.
-**Efficient Builds**: Optimized production builds with Rollup, tree-shaking, code splitting.
-**Fast Feedback**: Hot module replacement (HMR) for instant updates, fast test execution.
-**Isolated Dependencies**: Use Vite's dependency pre-bundling for optimal performance.
-**Reactive Patterns**: Signals/reactive primitives preferred, async/await for all async operations.
-**Systematic Testing**: Unit tests with Vitest, 80%+ coverage, tests must pass.
-**Tested Code**: Comprehensive unit tests for all logic, component tests for UI.
-**Documented APIs**: TypeDoc comments for all exports, auto-generated documentation.
-**Verified Builds**: Agent-generated code MUST compile and pass all tests before delivery.
+**Efficient Builds**: Optimized production builds with Rollup, tree-shaking, and code splitting.
+**Reactive Patterns**: Signals/reactive primitives preferred (React 19, Svelte 5 runes).
+
+**Verified Code**: Agent-generated code MUST compile (`npm run build`), pass security audits, and pass all tests before delivery.
 
 ---
 
-## 1. Agent Code Generation Requirements (MANDATORY)
+## 2. Agent Code Generation Requirements (MANDATORY)
 
 ### A. Verification Protocol
 
-**CRITICAL: Agents MUST verify that all generated Vite code compiles and passes tests before presenting it to the user.**
+**CRITICAL: Agents MUST verify that all generated Vite code compiles, is secure, and passes tests before presenting it to the user.**
 
 #### Pre-Delivery Checklist
 
 **Before delivering ANY Vite code, the agent MUST:**
 
-1. **TypeScript Compilation Check**:
+1. **TypeScript & Type Check**:
    ```bash
    # Verify TypeScript compiles without errors
-   npm run type-check
-   # OR
    npx tsc --noEmit
    # Exit code MUST be 0
    ```
 
-2. **Build Verification**:
+2. **Security & Dependency Verification (MANDATORY)**:
    ```bash
-   # Verify project builds successfully
+   # Scan for vulnerabilities in dependencies
+   npm audit --audit-level=high
+   
+   # Check for hardcoded secrets
+   # (Using a tool like gitleaks or simple grep patterns)
+   ```
+   - **MUST** have 0 high/critical vulnerabilities.
+   - Supply chain integrity (`package-lock.json`) MUST be verified.
+
+3. **Build Verification**:
+   ```bash
+   # Verify project builds successfully for production
    npm run build
    # Exit code MUST be 0
-   
-   # Check build output
-   ls dist/
-   # Verify assets are generated
-   ```
-
-3. **Development Server Check**:
-   ```bash
-   # Verify dev server starts without errors
-   npm run dev &
-   sleep 3
-   curl http://localhost:5173 | grep -q "html" && echo "OK" || echo "FAIL"
-   kill %1
    ```
 
 4. **Test Execution**:
    ```bash
-   # Run all unit tests
-   npm run test
-   # Exit code MUST be 0, all tests pass
-   
-   # Run with coverage
+   # Run all unit tests with coverage
    npm run test:coverage
-   # Coverage should be > 80%
    ```
+   - **MUST** pass all tests (100% pass rate).
+   - Minimum 80% code coverage.
 
-5. **Linting Check**:
-   ```bash
-   # Verify code passes linting
-   npm run lint
-   # Exit code MUST be 0
-   ```
+5. **Documentation Verification**:
+   - All public APIs and configuration modules have TypeDoc comments.
+   - Run `npm run docs` to ensure no generation errors.
 
-6. **Documentation Generation**:
-   ```bash
-   # Generate TypeDoc documentation
-   npm run docs
-   # Verify docs/ directory is created
-   ```
-
-### B. Error Correction Process
+#### Error Correction Process
 
 If verification fails:
 
-1. **Read the error message** (Vite/TypeScript errors are descriptive)
+1. **Identify the error**: Read the full Vite compiler, test runner, or audit output.
+2. **Fix the root cause**:
+   - Module resolution error? Check `tsconfig.json` paths and Vite aliases.
+   - HMR issue? Ensure proper disposal logic in `import.meta.hot.dispose`.
+3. **Re-verify**: Run build, tests, and audits again.
+
+---
+
+## 3. Mandatory Setup Requirements
 2. **Identify the root cause** (type error, build config, missing dependency, etc.)
 3. **Fix the issue** following Vite best practices
 4. **Re-run verification** until all checks pass
@@ -2714,6 +2703,167 @@ export const config = {
   isProd: import.meta.env.PROD,
   mode: import.meta.env.MODE,
 } as const;
+```
+
+---
+
+## 8. Security & Dependency Management (MANDATORY)
+
+### A. Automated Dependency Management
+
+**Use npm with lockfiles and automated scanning for consistent and secure environments:**
+
+```json
+// package.json
+{
+  "scripts": {
+    "audit": "npm audit --audit-level=high",
+    "update": "npm update"
+  }
+}
+```
+
+- **Lockfiles**: ALWAYS commit `package-lock.json`. Use `npm ci` in CI/CD to ensure exact dependency matching.
+- **Dependency Auditing**: Integrate `npm audit` into your CI pipeline to block builds with HIGH or CRITICAL vulnerabilities.
+- **Selective Pinning**: Pin versions of security-critical dependencies (e.g., auth, encryption) to specific versions.
+
+### B. Vulnerability Scanning & Security
+
+**Mandatory security checks for ALL Vite projects:**
+
+1. **Vulnerability Scan**:
+   ```bash
+   # Scan all dependencies for known vulnerabilities
+   npm audit --audit-level=high
+   ```
+   - Agents MUST ensure 0 HIGH or CRITICAL vulnerabilities are present.
+
+2. **Supply Chain Audit**:
+   - Verify package integrity using `npm verify`.
+   - Audit Vite plugins for excessive permissions or suspicious telemetry.
+
+### C. Dependency File
+
+```json
+// Example package.json dependencies
+{
+  "dependencies": {
+    "vite": "^6.0.0",
+    "@preact/signals-core": "^1.8.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.0",
+    "typedoc": "^0.26.0"
+  }
+}
+```
+
+---
+
+## 9. Deployment Checklist
+
+### Agent-Generated Code Verification (MANDATORY)
+
+#### Build & Compilation
+- [ ] Code compiles: `npx tsc --noEmit` returns exit code 0
+- [ ] Production build succeeds: `npm run build` completes successfully
+- [ ] Vite 6 features used correctly (Environment API, if applicable)
+- [ ] Code formatted: `npm run lint` or `prettier --check` passes
+
+#### Testing
+- [ ] All tests pass: `npm run test` returns exit code 0
+- [ ] Reasonable coverage: `npm run test:coverage` shows >80%
+- [ ] HMR verified: Changes reflect instantly in dev mode
+
+#### Security
+- [ ] Dependency scan passes: `npm audit` shows 0 HIGH/CRITICAL vulnerabilities
+- [ ] Supply chain verified: `package-lock.json` is committed and synced
+- [ ] Secrets check: 0 hardcoded secrets in code or `.env` files
+- [ ] CSP: Proper Content Security Policy headers configured for production
+
+#### Code Quality
+- [ ] No unused imports or dead code
+- [ ] Small, focused modules with clear interfaces
+- [ ] Project structure follows the standard layout
+
+#### Documentation
+- [ ] All public APIs have TypeDoc comments
+- [ ] Documentation check passes: `npm run docs` succeeds without warnings
+- [ ] Examples provided for complex utilities or stores
+
+#### Architecture
+- [ ] Separation of concerns: business logic in features/utils, UI in components
+- [ ] Environment API used for SSR/Client isolation
+- [ ] Signals used for efficient reactive state management
+
+#### Agent Workflow Completed
+- [ ] Agent verified code builds successfully
+- [ ] Agent ran all tests and verified 100% pass rate
+- [ ] Agent ran security audits and verified 0 high vulnerabilities
+- [ ] Agent verified documentation and HMR stability
+
+---
+
+## 10. Why This Configuration Works
+
+**Vite 6 Environment API**:
+- Provides native support for managing multiple environments (Client, SSR, Worklets) within a single dev server, eliminating the need for separate build processes.
+
+**Rollup 4 Bundling**:
+- Leverages the latest Rollup improvements for even faster builds and more efficient tree-shaking, resulting in smaller production bundles.
+
+**Native ESM Performance**:
+- Using native ESM during development ensures that only the modified modules are re-compiled and sent to the browser, maintaining instant HMR even in massive codebases.
+
+---
+
+## 11. Quick Reference
+
+### Common Commands
+
+```bash
+# Build
+npm run build
+
+# Test with coverage
+npm run test:coverage
+
+# Security scan
+npm audit --audit-level=high
+
+# Lint
+npm run lint
+
+# Run dev server
+npm run dev
+```
+
+### Modern Vite 6 Patterns Cheat Sheet
+
+```typescript
+// Environment API (Vite 6)
+export default defineConfig({
+  environments: {
+    client: {
+      build: { outDir: 'dist/client' }
+    },
+    ssr: {
+      build: { outDir: 'dist/ssr' }
+    }
+  }
+});
+
+// Signals (Reactivity)
+const count = signal(0);
+effect(() => console.log(count.value));
+
+// HMR Disposal
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    // Cleanup logic
+  });
+}
 ```
 
 ---

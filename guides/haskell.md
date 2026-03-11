@@ -1,54 +1,94 @@
 # Haskell Development Guidelines
-Mandatory coding standards and development practices for Haskell development. GHC 9.4+, Cabal 3.10+, HLS, Haddock, HSpec, QuickCheck, HLint.
+Mandatory coding standards and development practices for Haskell development. GHC 9.10+, Cabal 3.12+, HLS, Haddock, HSpec, QuickCheck, HLint.
 
 ---
 
 **Agent Profile**: The Haskell Expert
 **Role**: Senior Functional Programming Engineer & Type-System Specialist
 **Objective**: Generate production-ready, correct and maintainable functional code.
-**Tools**: GHC 9.4+, Cabal 3.10+, HLS, Haddock, HSpec, QuickCheck, HLint
+**Tools**: GHC 9.10+, Cabal 3.12+, HLS, Haddock, HSpec, QuickCheck, HLint
 
 ---
 
 ## 1. Core Philosophies: HASKELL-FIRST
 
-### HASKELL-FIRST
-1. **Type-Driven Development**: Let the type system guide your design; "make invalid states unrepresentable"
-2. **Purity by Default**: Pure functions are the norm; effects are explicit and isolated
-3. **Composability**: Build complex systems from simple, composable functions
-4. **Immutability**: All data structures are immutable by default
-5. **Laziness as a Feature**: Leverage lazy evaluation for elegant, efficient code
-6. **Documentation as Code**: Use Haddock comments for all public APIs
-7. **Test-Driven Development (TDD)**: Write tests first, then implementation
-8. **Regression Shield**: Every bug fix must include a regression test
+The agent must adhere to the **HASKELL-FIRST** principles for every Haskell project:
 
-### MODERN-HASKELL
-1. **GHC 9.4+**: Use modern GHC with latest language extensions
-2. **Cabal 3.10+**: Modern dependency management with cabal-install
-3. **HLS Integration**: Haskell Language Server for IDE support
-4. **Property-Based Testing**: QuickCheck for comprehensive test coverage
-5. **Strict by Default**: Use `-XStrictData` to avoid space leaks
-6. **Modern Extensions**: Leverage `DerivingStrategies`, `RecordWildCards`, `OverloadedStrings`
-7. **Type Safety**: Use newtypes, smart constructors, and GADTs for type-level guarantees
-8. **Effect Systems**: Consider `mtl`, `polysemy`, or `effectful` for managing effects
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+**Security-First**: Mandatory vulnerability scanning, dependency auditing, and supply chain integrity checks.
 
-### HEXAGONAL-ARCHITECTURE
-1. **Domain Core**: Pure business logic with algebraic data types
-2. **Ports (Type Classes)**: Abstract interfaces for external dependencies
-3. **Adapters**: Concrete implementations of ports (IO, databases, APIs)
-4. **Dependency Inversion**: Domain depends on abstractions, not implementations
+- **Type-Driven Development**: Let the type system guide your design; "make invalid states unrepresentable".
+- **Purity by Default**: Pure functions are the norm; effects are explicit and isolated (use `effectful` or `cleff`).
+- **Composability**: Build complex systems from simple, composable functions.
+- **Immutability**: All data structures are immutable by default.
+- **Laziness with Care**: Leverage lazy evaluation but use strictness (`-XStrictData`) where performance/leaks are concerns.
+- **Documentation as Code**: Use Haddock comments for all public APIs.
 
-### AGENT-VERIFICATION
-When generating Haskell code, agents MUST verify:
-1. **Compilation**: `cabal build` succeeds without errors
-2. **Tests Pass**: `cabal test` runs all tests successfully
-3. **Linting**: `hlint` reports no warnings (or approved exceptions)
-4. **Documentation**: `cabal haddock` generates complete documentation
-5. **Type Checking**: All type signatures are explicit and correct
+**Verified Code**: Agent-generated code MUST compile (`cabal build`), pass security audits, and pass all tests before delivery.
 
 ---
 
-## 2. Test-Driven Development (TDD)
+## 2. Agent Code Generation Requirements (MANDATORY)
+
+### A. Verification Protocol
+
+**CRITICAL: Agents MUST verify that all generated Haskell code compiles, is secure, and passes tests before presenting it to the user.**
+
+#### Pre-Delivery Checklist
+
+**Before delivering ANY Haskell code, the agent MUST:**
+
+1. **Compilation & Type Check**:
+   ```bash
+   # Verify code compiles without errors
+   cabal build
+   # Exit code MUST be 0
+   ```
+
+2. **Security & Dependency Verification (MANDATORY)**:
+   ```bash
+   # Scan for vulnerabilities in dependencies (if tools like cabal-audit are available)
+   # Or manually check known advisories for core dependencies
+   
+   # Verify supply chain integrity
+   # Check cabal.project.freeze if it exists
+   ```
+   - **MUST** have 0 high/critical vulnerabilities.
+   - Supply chain integrity MUST be verified.
+
+3. **Test Execution (MANDATORY)**:
+   ```bash
+   # Run all unit and property-based tests
+   cabal test
+   ```
+   - **MUST** pass all tests (100% pass rate).
+   - Use `QuickCheck` for property verification where applicable.
+
+4. **Linting & Quality**:
+   ```bash
+   # Run HLint for stylistic and safety checks
+   hlint .
+   ```
+   - Address all warnings related to safety or potential bugs.
+
+5. **Documentation Verification**:
+   - All public functions and types have Haddock comments (`-- |`).
+   - Run `cabal haddock` to ensure documentation can be generated.
+
+#### Error Correction Process
+
+If verification fails:
+
+1. **Identify the error**: Read the full GHC compiler or test runner output.
+2. **Fix the root cause**:
+   - Type error? Align type signatures with implementation.
+   - Space leak? Add strictness annotations or use `foldl'`.
+3. **Re-verify**: Run build and tests again.
+
+---
+
+## 3. Test-Driven Development (TDD)
 
 ### A. TDD Protocol
 
@@ -3648,6 +3688,149 @@ spec = do
     it "handles null" pending
   describe "error cases" $ do
     it "rejects invalid" pending
+```
+
+---
+
+## 11. Security & Dependency Management (MANDATORY)
+
+### A. Automated Dependency Management
+
+**Use Cabal with freeze files and automated auditing for consistent and secure environments:**
+
+```bash
+# Freeze dependencies for reproducible builds
+cabal freeze
+
+# Check for outdated dependencies
+cabal outdated
+```
+
+- **Lockfiles**: ALWAYS commit `cabal.project.freeze`. Use `cabal build --offline` in CI/CD (after fetching) to ensure no unexpected downloads.
+- **Dependency Auditing**: Regularly check `Hackage` security advisories for used packages.
+- **PVP Compliance**: Follow the Package Versioning Policy (PVP) for all internal and external dependencies.
+
+### B. Vulnerability Scanning & Security
+
+**Mandatory security checks for ALL Haskell implementations:**
+
+1. **Vulnerability Scan**:
+   ```bash
+   # Use cabal-audit if available, otherwise check advisories
+   cabal-audit
+   ```
+   - Agents MUST ensure 0 HIGH or CRITICAL vulnerabilities are present in the dependency tree.
+
+2. **Supply Chain Audit**:
+   - Verify package integrity using `cabal build --dry-run`.
+   - Audit `Custom` setup scripts in `.cabal` files for malicious behavior.
+
+### C. Dependency File
+
+```cabal
+-- Example .cabal dependencies
+build-depends:
+    , base           >=4.20 && <5
+    , text           >=2.1
+    , effectful-core >=2.3
+```
+
+---
+
+## 12. Deployment Checklist
+
+### Agent-Generated Code Verification (MANDATORY)
+
+#### Build & Compilation
+- [ ] Code compiles: `cabal build` returns exit code 0
+- [ ] GHC 9.10 features used correctly (e.g., Extended Overloaded Labels, improved specialization)
+- [ ] Strictness: `-XStrictData` verified for data-heavy modules to prevent space leaks
+- [ ] Formatting: `fourmolu` or `ormolu` passes
+
+#### Testing
+- [ ] All tests pass: `cabal test` returns exit code 0
+- [ ] Property-based: `QuickCheck` used for complex domain logic
+- [ ] Golden tests: Verified for API/JSON stability
+
+#### Security
+- [ ] Dependency scan passes: 0 HIGH/CRITICAL vulnerabilities
+- [ ] Supply chain verified: `cabal.project.freeze` is committed and synced
+- [ ] Secrets check: 0 hardcoded secrets in code or configuration files
+- [ ] Static analysis: `hlint` passes with 0 security-related warnings
+
+#### Code Quality
+- [ ] No unused imports or dead code
+- [ ] Explicit type signatures for all top-level exports
+- [ ] Smart constructors used for domain validation
+
+#### Documentation
+- [ ] All public APIs have Haddock comments (`-- |`)
+- [ ] Documentation builds: `cabal haddock` succeeds
+- [ ] Examples provided for complex type-level logic
+
+#### Architecture
+- [ ] Hexagonal architecture: Pure domain, effectful adapters
+- [ ] Effect management: `effectful` or `cleff` preferred over raw `mtl`
+- [ ] Type safety: `newtype` wrappers used for primitive types
+
+#### Agent Workflow Completed
+- [ ] Agent verified code builds successfully
+- [ ] Agent ran all tests and verified 100% pass rate
+- [ ] Agent ran security audits and verified 0 vulnerabilities
+- [ ] Agent verified documentation and type correctness
+
+---
+
+## 13. Why This Configuration Works
+
+**Type-Driven Development**:
+- Leveraging Haskell's advanced type system (GADTs, Type Families) ensures that many business logic errors are caught at compile-time rather than runtime.
+
+**Effect Systems (Effectful)**:
+- Provides a high-performance, type-safe way to manage side effects, making the application easier to test and reason about compared to traditional monad transformers.
+
+**GHC 9.10+ Optimizations**:
+- Benefit from improved compile times and more efficient machine code generation, particularly for generic and overloaded code.
+
+---
+
+## 14. Quick Reference
+
+### Common Commands
+
+```bash
+# Build
+cabal build
+
+# Test with coverage
+cabal test --enable-coverage
+
+# Security/Outdated check
+cabal outdated
+
+# Lint
+hlint .
+
+# Generate docs
+cabal haddock
+```
+
+### Modern Haskell 9.10+ Patterns Cheat Sheet
+
+```haskell
+-- Effectful (Modern Effects)
+runMyEffect :: Eff [MyEffect, IOE] a -> IO a
+runMyEffect = runEff . runMyEffectIO
+
+-- Overloaded Record Dot (GHC 9.2+)
+userEmail = user.profile.email
+
+-- Strict Data by Default
+data User = User { id :: !Int, name :: !Text }
+
+-- Deriving Via (Modern Deriving)
+newtype AppId = AppId Int
+  deriving (Show, Eq) via Int
 ```
 
 ---

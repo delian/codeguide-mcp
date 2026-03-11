@@ -2134,142 +2134,142 @@ See section 2B for detailed GENERATED ALWAYS AS IDENTITY patterns.
 
 ---
 
-## 15. Deployment Checklist
+## 11. Security & Dependency Management (MANDATORY)
 
-### Schema Design
-- [ ] Appropriate data types used (TEXT, NUMERIC, TIMESTAMPTZ, etc.)
-- [ ] Primary keys are BIGINT GENERATED ALWAYS AS IDENTITY or UUID
-- [ ] No SERIAL/BIGSERIAL in new tables (use Identity columns)
-- [ ] Foreign keys defined with appropriate ON DELETE action
-- [ ] Check constraints for business rule validation
-- [ ] All timestamps use TIMESTAMPTZ, never TIMESTAMP
-- [ ] JSONB used only for truly dynamic/semi-structured data
-- [ ] Tables over 100M rows evaluated for partitioning
+### A. Automated Dependency Management
 
-### Indexing
-- [ ] Indexes on all foreign key columns
-- [ ] Indexes for common WHERE, JOIN, and ORDER BY patterns
-- [ ] Partial indexes for frequently filtered subsets
-- [ ] GIN indexes for JSONB, arrays, and full-text search columns
-- [ ] BRIN indexes considered for large append-only tables
-- [ ] No unused indexes (checked via pg_stat_user_indexes)
-- [ ] Covering indexes (INCLUDE) for high-frequency index-only scans
+**Use SQL migration tools (Flyway, Liquibase, or native framework migrations) to manage schema versions:**
 
-### Performance
-- [ ] EXPLAIN ANALYZE run on all complex queries
-- [ ] pg_stat_statements enabled and monitored
-- [ ] Connection pooling configured (PgBouncer in transaction mode)
-- [ ] Autovacuum tuned for high-churn tables
-- [ ] Materialized views with CONCURRENTLY refresh for expensive aggregations
-- [ ] Keyset pagination used instead of OFFSET for deep pagination
-- [ ] Functions marked PARALLEL SAFE where applicable
+```bash
+# Verify migration integrity
+atlas migrate hash
 
-### Security
-- [ ] Application connects with least-privilege role (never superuser)
-- [ ] Role hierarchy established (readonly, readwrite, admin)
-- [ ] Row-level security enabled for multi-tenant tables
-- [ ] Column-level privileges restrict sensitive columns
-- [ ] SSL/TLS required for all remote connections
-- [ ] Credentials stored in secrets manager, never hardcoded
-- [ ] RLS context set with SET LOCAL (not SET) in pooled connections
-- [ ] Password authentication uses scram-sha-256
+# Dry-run migration
+atlas migrate apply --dry-run
+```
 
-### Extensions
-- [ ] pg_stat_statements loaded in shared_preload_libraries
-- [ ] pg_trgm installed for fuzzy search requirements
-- [ ] pgvector installed for embedding similarity search
-- [ ] pg_cron configured for scheduled maintenance jobs
+- **Lockfiles**: If using tools like `Prisma` or `TypeORM`, ALWAYS commit their schema lockfiles.
+- **Dependency Auditing**: Audit database extensions for vulnerabilities. Use official or trusted community versions only.
 
-### Backup and Recovery
-- [ ] WAL archiving enabled (wal_level = replica)
-- [ ] Regular pg_dump backups scheduled and tested
-- [ ] Point-in-time recovery (PITR) tested
-- [ ] Backup restoration procedure documented and tested
-- [ ] Replication lag monitored for logical replication
+### B. Vulnerability Scanning & Security
 
----
+**Mandatory security checks for ALL PostgreSQL implementations:**
 
-## 16. Quick Reference
+1. **Vulnerability Scan**:
+   ```sql
+   -- Check for world-writable tables or missing RLS
+   SELECT tablename FROM pg_tables WHERE schemaname = 'public' 
+   AND NOT EXISTS (SELECT 1 FROM pg_policy WHERE tablename = pg_tables.tablename);
+   ```
+   - Agents MUST ensure Row Level Security (RLS) is active on all tables containing PII.
+
+2. **Access Control Audit**:
+   - Verify that application roles do not have `SUPERUSER` or `CREATEDB` permissions.
+   - Audit `pg_hba.conf` to ensure `scram-sha-256` is enforced.
+
+### C. Dependency File
 
 ```sql
--- Common psql commands
-\l                      -- List databases
-\dt                     -- List tables
-\di                     -- List indexes
-\d+ table_name         -- Describe table with storage info
-\df                     -- List functions
-\dv                     -- List views
-\dm                     -- List materialized views
-\dp table_name         -- Show table privileges
-\timing on              -- Show query timing
-\x auto                 -- Toggle expanded display
-
--- Maintenance
-VACUUM ANALYZE table_name;          -- Reclaim space + update statistics
-VACUUM (VERBOSE) table_name;        -- Verbose vacuum output
-REINDEX INDEX CONCURRENTLY ix_name; -- Rebuild index without locking
-ANALYZE table_name;                 -- Update planner statistics only
-CLUSTER table_name USING ix_name;   -- Physically reorder table by index
-
--- Kill long-running queries
-SELECT pid, now() - query_start AS duration, state, query
-FROM pg_stat_activity
-WHERE state = 'active'
-AND query_start < NOW() - INTERVAL '5 minutes'
-ORDER BY duration DESC;
-
--- Cancel a query (graceful)
-SELECT pg_cancel_backend(pid);
-
--- Terminate a connection (forceful)
-SELECT pg_terminate_backend(pid);
-
--- Check locks and blocking queries
-SELECT
-    blocked.pid AS blocked_pid,
-    blocked.query AS blocked_query,
-    blocking.pid AS blocking_pid,
-    blocking.query AS blocking_query
-FROM pg_stat_activity blocked
-JOIN pg_locks bl ON bl.pid = blocked.pid
-JOIN pg_locks kl ON kl.locktype = bl.locktype
-    AND kl.database IS NOT DISTINCT FROM bl.database
-    AND kl.relation IS NOT DISTINCT FROM bl.relation
-    AND kl.page IS NOT DISTINCT FROM bl.page
-    AND kl.tuple IS NOT DISTINCT FROM bl.tuple
-    AND kl.transactionid IS NOT DISTINCT FROM bl.transactionid
-    AND kl.pid != bl.pid
-    AND kl.granted
-JOIN pg_stat_activity blocking ON blocking.pid = kl.pid
-WHERE NOT bl.granted;
-
--- Database-level statistics
-SELECT
-    datname,
-    numbackends AS connections,
-    xact_commit AS commits,
-    xact_rollback AS rollbacks,
-    blks_read AS disk_reads,
-    blks_hit AS cache_hits,
-    round(100.0 * blks_hit / NULLIF(blks_hit + blks_read, 0), 2) AS cache_hit_pct
-FROM pg_stat_database
-WHERE datname = current_database();
-
--- Current database size
-SELECT pg_size_pretty(pg_database_size(current_database()));
-
--- List all active connections
-SELECT pid, usename, application_name, client_addr, state, query
-FROM pg_stat_activity
-WHERE datname = current_database()
-ORDER BY state, query_start;
+-- Example migrations/001_initial.sql
+CREATE TABLE users (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    email TEXT UNIQUE NOT NULL
+);
 ```
 
 ---
 
-**Last Updated:** 2026-02-27
-**Version:** 2.0
-**Maintainer:** Database Team
+## 12. Deployment Checklist
+
+### Agent-Generated Code Verification (MANDATORY)
+
+#### Schema & SQL
+- [ ] Schema compiles: `EXPLAIN` returns a valid plan for all queries
+- [ ] No Seq Scans on large tables verified via `EXPLAIN ANALYZE`
+- [ ] Identity columns (`GENERATED ALWAYS AS IDENTITY`) used instead of SERIAL
+- [ ] SQL follows project casing and naming conventions
+
+#### Security
+- [ ] Row Level Security (RLS) enabled and policies verified
+- [ ] Application connects via non-privileged role
+- [ ] `scram-sha-256` used for password authentication
+- [ ] Secrets check: No hardcoded credentials in migration scripts
+
+#### Code Quality
+- [ ] No unused indexes
+- [ ] JSONB used appropriately with GIN indexing
+- [ ] Proper foreign key constraints with `ON DELETE` actions
+
+#### Documentation
+- [ ] All tables and columns have `COMMENT ON` descriptions
+- [ ] Complex queries have comments explaining the execution strategy
+
+#### Architecture
+- [ ] Normalization rules followed (3NF minimum for core data)
+- [ ] Partitioning applied for tables > 100M rows
+
+#### Agent Workflow Completed
+- [ ] Agent verified SQL executes successfully
+- [ ] Agent ran `EXPLAIN ANALYZE` on performance-critical queries
+- [ ] Agent verified RLS policies
+- [ ] Agent documented any schema fixes made during verification
+
+---
+
+## 13. Why This Configuration Works
+
+**PostgreSQL 17 JSONB Improvements**:
+- Modern SQL/JSON standard functions provide significantly faster and more standard-compliant ways to query semi-structured data.
+
+**Row Level Security (RLS)**:
+- Provides a mandatory security layer at the database level, ensuring data isolation even if the application layer is compromised.
+
+**Identity Columns**:
+- Replacing legacy `SERIAL` types with SQL-standard `IDENTITY` columns prevents accidental manual ID injection and improves portability.
+
+---
+
+## 14. Quick Reference
+
+### Common Commands
+
+```bash
+# Analyze query performance
+psql -c "EXPLAIN (ANALYZE, BUFFERS) SELECT * FROM my_table"
+
+# Check active connections
+psql -c "SELECT * FROM pg_stat_activity"
+
+# Check table sizes
+psql -c "\dt+"
+
+# Kill a long-running PID
+psql -c "SELECT pg_terminate_backend(<pid>)"
+```
+
+### Modern Postgres Patterns Cheat Sheet
+
+```sql
+-- JSON_TABLE (PG 17)
+SELECT * FROM JSON_TABLE(
+    '{"items": [{"id": 1}, {"id": 2}]}',
+    '$.items[*]' COLUMNS (id INT PATH '$.id')
+);
+
+-- MERGE (PG 15+)
+MERGE INTO target t USING source s ON t.id = s.id
+WHEN MATCHED THEN UPDATE SET val = s.val
+WHEN NOT MATCHED THEN INSERT (id, val) VALUES (s.id, s.val);
+
+-- SKIP LOCKED (Queues)
+SELECT * FROM jobs FOR UPDATE SKIP LOCKED LIMIT 1;
+```
+
+---
+
+**Last Updated:** 2026-02-06
+**Version:** 2.1
+**Maintainer:** DB Team
 
 
 **End of PostgreSQL Development Guidelines**

@@ -1,27 +1,89 @@
 # React Native Development Guidelines
-Mandatory standards for building cross-platform mobile applications with React Native. React Native 0.73+, Expo, TypeScript, React Navigation, Reanimated.
+Mandatory standards for building cross-platform mobile applications with React Native. React Native 0.76+, Bridgeless Architecture, Expo, TypeScript, React Navigation, Reanimated.
 
 ---
 
 **Agent Profile**: The React Native Expert
 **Role**: Senior Mobile Developer & Cross-Platform Architect
 **Objective**: Generate performant, maintainable React Native applications that provide native-quality experiences on iOS and Android.
-**Tools**: React Native 0.73+, Expo, TypeScript, React Navigation, Reanimated.
+**Tools**: React Native 0.76+, Expo, TypeScript, React Navigation, Reanimated.
 
 ---
 
 ## 1. Core Philosophies: NATIVE-FIRST
 
-- **N**ative feel: Apps should feel native on each platform
-- **A**synchronous: Non-blocking operations for smooth UI
-- **T**yped: TypeScript for reliability
-- **I**solated: Component-based architecture
-- **V**erified: Tested on real devices
-- **E**fficient: Optimized for mobile constraints
+The agent must adhere to the **NATIVE-FIRST** principles for every React Native implementation:
+
+**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
+**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+**Security-First**: Mandatory vulnerability scanning, dependency auditing, and supply chain integrity checks.
+**Bridgeless Architecture**: Default to the New Architecture (TurboModules, Fabric) and avoid the legacy bridge.
+
+- **N**ative feel: Apps should feel native on each platform (iOS/Android specific UX).
+- **A**synchronous: Non-blocking operations for smooth 60/120 FPS UI.
+- **T**yped: TypeScript strict mode for reliability.
+- **I**solated: Component-based architecture with clear boundaries.
+- **V**erified: Tested on real devices and emulators.
+- **E**fficient: Optimized for mobile memory and battery constraints.
+
+**Verified Code**: Agent-generated code MUST pass `tsc`, security audits, and component tests before delivery.
 
 ---
 
-## 2. Project Structure (MANDATORY)
+## 2. Agent Code Generation Requirements (MANDATORY)
+
+### A. Verification Protocol
+
+**CRITICAL: Agents MUST verify that all generated React Native code compiles, passes tests, and follows security best practices before presenting it to the user.**
+
+#### Pre-Delivery Checklist
+
+**Before delivering ANY React Native code, the agent MUST:**
+
+1. **TypeScript & Build Check**:
+   ```bash
+   # Run TypeScript compiler
+   npx tsc --noEmit
+   
+   # Verify Expo config (if applicable)
+   npx expo config
+   ```
+   - **MUST** return exit code 0.
+   - All nullable prop warnings must be resolved.
+
+2. **Security & Dependency Verification (MANDATORY)**:
+   ```bash
+   # Scan for vulnerabilities in dependencies
+   npm audit --audit-level=high
+   ```
+   - **MUST** have 0 high/critical vulnerabilities.
+   - Supply chain integrity (`package-lock.json`) MUST be verified.
+
+3. **Test Execution**:
+   ```bash
+   # Run all unit and component tests
+   npm test
+   ```
+   - **MUST** pass all tests (100% pass rate).
+   - Minimum 80% code coverage.
+
+4. **Documentation Verification**:
+   - All public APIs, components, and custom hooks have JSDoc comments.
+   - Navigation routes are explicitly typed.
+
+#### Error Correction Process
+
+If verification fails:
+
+1. **Identify the error**: Read the full compiler or test runner output.
+2. **Fix the root cause**:
+   - Navigation error? Check the `StackParamList` definitions.
+   - Native module error? Ensure TurboModule compatibility.
+3. **Re-verify**: Run build, tests, and audits again.
+
+---
+
+## 3. Project Structure (MANDATORY)
 
 ### A. Directory Layout
 
@@ -890,63 +952,163 @@ describe('LoginScreen', () => {
 
 ---
 
-## 10. Deployment Checklist
+## 10. Security & Dependency Management (MANDATORY)
 
-### Code Quality
-- [ ] TypeScript strict mode
-- [ ] No console.log in production
-- [ ] All images optimized
-- [ ] Unused dependencies removed
+### A. Automated Dependency Management
 
-### Performance
-- [ ] FlatList optimizations applied
-- [ ] Memoization where needed
-- [ ] No unnecessary re-renders
-- [ ] Images lazy loaded
+**Use npm/yarn with lockfiles and automated auditing for secure mobile development:**
 
-### Platform
-- [ ] Tested on iOS and Android
-- [ ] Safe area handling
-- [ ] Keyboard avoiding behavior
-- [ ] Deep linking configured
+```json
+// package.json
+{
+  "scripts": {
+    "audit": "npm audit --audit-level=high",
+    "doctor": "npx expo doctor"
+  }
+}
+```
 
-### Release
-- [ ] Version bumped
-- [ ] Release notes written
-- [ ] App store assets ready
-- [ ] Beta tested
+- **Lockfiles**: ALWAYS commit `package-lock.json` or `yarn.lock`. Use `npm ci` in CI/CD.
+- **Expo SDK Updates**: Use `npx expo install --fix` to ensure all dependencies are compatible with your SDK version.
+- **Native Security**: Audit native dependencies (pods, gradle) using `npx expo-doctor`.
 
----
+### B. Vulnerability Scanning & Security
 
-## 11. Quick Reference
+**Mandatory security checks for ALL React Native projects:**
 
-```tsx
-// Platform detection
-Platform.OS === 'ios'
-Platform.select({ ios: value, android: value })
+1. **Vulnerability Scan**:
+   ```bash
+   # Scan JS dependencies
+   npm audit --audit-level=high
+   
+   # Scan for hardcoded secrets in the codebase
+   # (Using a tool like gitleaks or simple grep for API_KEY)
+   ```
+   - Agents MUST ensure 0 HIGH or CRITICAL vulnerabilities are present in the JS bundle.
 
-// Safe area
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-const insets = useSafeAreaInsets();
+2. **Secure Storage**:
+   - Sensitive data (tokens, PII) MUST be stored in `react-native-keychain` or `expo-secure-store`, NEVER in `AsyncStorage`.
 
-// Keyboard
-import { KeyboardAvoidingView, Platform } from 'react-native';
-<KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+### C. Dependency File
 
-// Dimensions
-import { useWindowDimensions } from 'react-native';
-const { width, height } = useWindowDimensions();
-
-// Navigation
-useNavigation<NavigationType>()
-useRoute<RouteType>()
-navigation.navigate('Screen', { params })
+```json
+// Example package.json dependencies
+{
+  "dependencies": {
+    "react-native": "0.76.0",
+    "expo": "~52.0.0",
+    "react-native-reanimated": "~3.16.0"
+  }
+}
 ```
 
 ---
 
-**Last Updated:** 2026-01-31
-**Version:** 1.0
+## 11. Deployment Checklist
+
+### Agent-Generated Code Verification (MANDATORY)
+
+#### Build & Compilation
+- [ ] Code compiles: `npx tsc --noEmit` returns exit code 0
+- [ ] New Architecture compatibility: No legacy bridge dependencies
+- [ ] Android 15 support: `react-native-safe-area-context` used for edge-to-edge
+- [ ] Code formatted: `npx @biomejs/biome check --apply .` passes
+
+#### Testing
+- [ ] All tests pass: `npm test` returns exit code 0
+- [ ] Reasonable coverage: `npm test -- --coverage` shows >80%
+- [ ] Components tested with `@testing-library/react-native`
+
+#### Security
+- [ ] Dependency scan passes: `npm audit` shows 0 HIGH/CRITICAL vulnerabilities
+- [ ] Secrets check: 0 hardcoded secrets in code or `.env` files
+- [ ] Secure storage: Sensitive data stored in Keychain/SecureStore
+- [ ] ProGuard/R8: Configured for Android release builds
+
+#### Code Quality
+- [ ] No unused dependencies or dead code
+- [ ] Images optimized and using `FastImage` where applicable
+- [ ] Project structure follows standard layout
+
+#### Documentation
+- [ ] All public APIs (components/hooks) have JSDoc comments
+- [ ] Navigation `ParamList` is explicitly typed and documented
+- [ ] Examples provided for complex UI interactions
+
+#### Architecture
+- [ ] Bridgeless mode enabled by default
+- [ ] TurboModules used for new native integrations
+- [ ] Separation of UI and business logic (custom hooks)
+
+#### Agent Workflow Completed
+- [ ] Agent verified code builds successfully
+- [ ] Agent ran all tests and verified they pass
+- [ ] Agent ran security scans and verified 0 high vulnerabilities
+- [ ] Agent verified documentation and native compliance
+
+---
+
+## 12. Why This Configuration Works
+
+**Bridgeless Architecture**:
+- Eliminates the asynchronous overhead of the legacy bridge, allowing for direct, synchronous communication between JavaScript and Native code (C++/Swift/Kotlin).
+
+**TurboModules**:
+- Provides lazy-loading of native modules, significantly improving app startup time and reducing memory footprint.
+
+**Expo SDK 52+**:
+- Simplifies dependency management and provides a unified API for high-quality native features, ensuring better stability across iOS and Android.
+
+---
+
+## 13. Quick Reference
+
+### Common Commands
+
+```bash
+# Start development server
+npx expo start
+
+# Run on iOS/Android
+npx expo run:ios
+npx expo run:android
+
+# Security and compatibility check
+npx expo doctor
+
+# Run tests
+npm test
+
+# Build for production
+npx expo export
+```
+
+### Modern React Native Patterns Cheat Sheet
+
+```tsx
+// Bridgeless native module (TurboModule)
+import { NativeModules } from 'react-native';
+const { MyTurboModule } = NativeModules;
+
+// Safe Area (Android 15 Edge-to-Edge)
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+const insets = useSafeAreaInsets();
+
+// Reanimated 3 (Worklets)
+const animatedStyle = useAnimatedStyle(() => {
+  'worklet';
+  return { opacity: withSpring(sv.value) };
+});
+
+// Expo Router (Typed Routes)
+import { Link } from 'expo-router';
+<Link href={{ pathname: "/user/[id]", params: { id: '123' } }}>View Profile</Link>
+```
+
+---
+
+**Last Updated:** 2026-02-06
+**Version:** 1.1
 **Maintainer:** Mobile Team
 
 

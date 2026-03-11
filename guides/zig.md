@@ -1,12 +1,12 @@
 # Zig Development Guidelines
-Mandatory coding standards and development practices for modern Zig applications. Zig 0.12+, zig build, zig test, zig fmt, comptime, std library.
+Mandatory coding standards and development practices for modern Zig applications. Zig 0.13+, zig build, zig test, zig fmt, comptime, std library.
 
 ---
 
 **Agent Profile**: The Zig Expert
 **Role**: Senior Zig Engineer & Systems Programming Specialist
 **Objective**: Generate production-ready, safe, performant, well-documented, and maintainable Zig code.
-**Tools**: Zig 0.12+, zig build, zig test, zig fmt, comptime, std library.
+**Tools**: Zig 0.13+, zig build, zig test, zig fmt, comptime, std library.
 
 ---
 
@@ -16,6 +16,7 @@ The agent must adhere to the "ZIG-FIRST" principles for every Zig project:
 
 **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
 **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+**Security-First**: Mandatory vulnerability scanning, dependency auditing, and supply chain integrity checks.
 
 **Zero Hidden Control Flow**: No hidden allocations, explicit everything, visible side effects.
 **Intentional Memory Management**: Allocators passed explicitly, defer for cleanup, arena allocators.
@@ -29,74 +30,64 @@ The agent must adhere to the "ZIG-FIRST" principles for every Zig project:
 
 **Hexagonal Architecture**: Domain core, ports, adapters, clear boundaries.
 **Explicit Allocators**: Pass allocators, no global state, defer cleanup immediately.
-**CQRS Pattern**: Separate commands and queries, clear data flow.
-**Uniform Design**: Consistent init/deinit patterns, method syntax, struct composition.
-**Reusable Modules**: Clean module boundaries, public interfaces, encapsulation.
 
-**Comptime Everything**: Leverage comptime for polymorphism, generics, code generation.
-**Defer for Safety**: Pair allocations with defer, resource cleanup guaranteed.
-**Data-Oriented**: Struct of arrays, cache-friendly, ECS when appropriate.
+**Verified Always**: All code must compile with `zig build`, pass security audits, and pass all tests.
 
-**Verified Always**: All code must compile with `zig build`, pass tests with `zig test`.
-**Async-Aware**: Use async/await when applicable, event loop patterns.
-**Documented Code**: Doc comments for all public APIs, generated documentation.
+---
 
 ## 2. Agent Code Generation Requirements (MANDATORY)
 
 ### A. Verification Protocol
 
-**CRITICAL: Agents MUST verify that all generated Zig code compiles and passes tests before presenting it to the user.**
+**CRITICAL: Agents MUST verify that all generated Zig code compiles, is secure, and passes tests before presenting it to the user.**
 
 #### Pre-Delivery Checklist
 
 **Before delivering ANY Zig code, the agent MUST:**
 
-1. **Compilation Check**:
+1. **Compilation & Build Check**:
    ```bash
-   # Verify code compiles without errors
+   # Verify code compiles and build scripts work
    zig build
    # Exit code MUST be 0
-   
-   # Check specific module
-   zig build-lib src/module.zig
-   
-   # Compile with optimizations
-   zig build -Doptimize=ReleaseFast
    ```
 
-2. **Formatting Check**:
+2. **Security & Dependency Verification (MANDATORY)**:
    ```bash
-   # Verify code is formatted
-   zig fmt --check src/
-   # Exit code MUST be 0
+   # Verify dependency integrity
+   zig build --fetch
    
-   # Auto-format code
-   zig fmt src/
+   # Check for hardcoded secrets
+   # (Using a tool like gitleaks or simple grep patterns)
    ```
+   - **MUST** have 0 high/critical vulnerabilities.
+   - Supply chain integrity (`build.zig.zon`) MUST be verified.
 
-3. **Test Execution**:
+3. **Test Execution (MANDATORY)**:
    ```bash
-   # Run all tests
-   zig test src/main.zig
-   # Exit code MUST be 0, all tests pass
-   
-   # Run tests with coverage
+   # Run all unit and integration tests
    zig build test
-   
-   # Run specific test
-   zig test src/domain/user.zig
    ```
+   - **MUST** pass all tests (100% pass rate).
+   - Use `std.testing.allocator` to detect memory leaks.
 
-4. **Build System Check**:
-   ```bash
-   # Verify build.zig works
-   zig build
-   
-   # Run with different modes
-   zig build -Doptimize=Debug
-   zig build -Doptimize=ReleaseSafe
-   zig build -Doptimize=ReleaseFast
-   ```
+4. **Documentation Verification**:
+   - All public APIs, structs, and functions have documentation comments (`///`).
+   - Run `zig build-lib -femit-docs` to ensure documentation can be generated.
+
+#### Error Correction Process
+
+If verification fails:
+
+1. **Identify the error**: Read the full Zig compiler or test runner output.
+2. **Fix the root cause**:
+   - Memory leak? Ensure `defer allocator.free(slice)` is correctly placed.
+   - Compilation error? Check for `comptime` logic or breaking changes in 0.13+.
+3. **Re-verify**: Run build and tests again.
+
+---
+
+## 3. Mental Model
 
 5. **Documentation Check**:
    ```bash
@@ -2231,114 +2222,154 @@ test "Memory leak detection" {
 
 ---
 
-## 15. Why This Configuration Works
+## 11. Security & Dependency Management (MANDATORY)
 
-1. **Explicit Memory Management**: No hidden allocations, predictable performance, easier debugging.
+### A. Automated Dependency Management
 
-2. **Comptime Programming**: Zero-cost abstractions, type-safe generics, compile-time validation.
+**Use `build.zig.zon` and the Zig package manager for secure, reproducible builds:**
 
-3. **Data-Oriented Design**: Cache-friendly layouts, SIMD-friendly code, 10-100x performance improvements.
+```zig
+// build.zig.zon
+.{
+    .name = "my_project",
+    .version = "0.1.0",
+    .dependencies = .{
+        .zap = .{
+            .url = "https://github.com/zigzap/zap/archive/v0.8.0.tar.gz",
+            .hash = "1220...",
+        },
+    },
+    .paths = .{ "" },
+}
+```
 
-4. **Hexagonal Architecture**: Testable in isolation, clear boundaries, flexible adapters.
+- **Lockfiles**: ALWAYS commit `build.zig.zon`. It acts as the source of truth for dependency hashes.
+- **Dependency Fetching**: Use `zig build --fetch` to ensure all dependencies are available and their hashes match.
+- **Supply Chain**: Only use dependencies from trusted sources or those providing cryptographic hashes.
 
-5. **CQRS**: Optimized read/write paths, scalable architecture, clear data flow.
+### B. Vulnerability Scanning & Security
 
-6. **Error Union Types**: Explicit error handling, compile-time error checking, no exceptions.
+**Mandatory security checks for ALL Zig implementations:**
 
-7. **Defer Pattern**: Guaranteed cleanup, no resource leaks, simple error handling.
+1. **Vulnerability Scan**:
+   ```bash
+   # Verify dependency integrity and hashes
+   zig build --fetch
+   ```
+   - Agents MUST ensure 0 hash mismatches or connection errors during fetching.
 
-8. **Pure Zig**: Portable across platforms, no FFI complexity, easier deployment.
+2. **Memory Safety Audit**:
+   - ALWAYS use `std.testing.allocator` in tests to detect leaks.
+   - Use `ReleaseSafe` or `Debug` modes during development to catch undefined behavior via runtime checks.
 
-9. **Built-in Testing**: Tests alongside code, no external framework, fast execution.
+### C. Dependency File
 
-10. **Agent Verification**: Ensures all code compiles and tests pass, eliminates broken code.
+```zig
+// Example build.zig dependency usage
+const zap = b.dependency("zap", .{
+    .target = target,
+    .optimize = optimize,
+});
+exe.root_module.addImport("zap", zap.module("zap"));
+```
 
 ---
 
-## 16. Quick Reference
+## 12. Deployment Checklist
+
+### Agent-Generated Code Verification (MANDATORY)
+
+#### Build & Compilation
+- [ ] Code compiles: `zig build` returns exit code 0
+- [ ] Multi-platform build: `zig build -Dtarget=x86_64-linux` verified
+- [ ] Optimization: `zig build -Doptimize=ReleaseSafe` succeeds
+- [ ] Code formatted: `zig fmt --check .` passes
+
+#### Testing
+- [ ] All tests pass: `zig build test` returns exit code 0
+- [ ] Memory leaks: `std.testing.allocator` shows 0 leaks in tests
+- [ ] Edge cases: Integer overflows and null pointer checks verified in `ReleaseSafe`
+
+#### Security
+- [ ] Supply chain verified: `build.zig.zon` hashes match remote sources
+- [ ] Secrets check: 0 hardcoded secrets in `src/` or `build.zig`
+- [ ] Bounds checking: Verified active in development/staging builds
+
+#### Code Quality
+- [ ] No unused imports or variables
+- [ ] Small, focused structs and functions
+- [ ] Memory ownership is clear (who allocates, who frees)
+
+#### Documentation
+- [ ] All public APIs (`pub`) have doc comments (`///`)
+- [ ] Documentation builds: `zig build-lib -femit-docs` succeeds
+- [ ] Examples provided for complex `comptime` logic
+
+#### Architecture
+- [ ] Separation of concerns: logic in modules, I/O in main
+- [ ] Allocators passed explicitly (no global allocators)
+- [ ] Hexagonal architecture followed where applicable
+
+#### Agent Workflow Completed
+- [ ] Agent verified code builds successfully
+- [ ] Agent ran all tests and verified 0 leaks
+- [ ] Agent verified dependency hashes in `build.zig.zon`
+- [ ] Agent verified documentation and formatting
+
+---
+
+## 13. Why This Configuration Works
+
+**Explicit Allocators**:
+- Eliminates hidden memory allocations, making the code's resource usage predictable and preventing memory leaks in long-running systems.
+
+**Comptime Validation**:
+- Allows for complex logic and generics to be resolved at compile-time with zero runtime overhead, while maintaining full type safety.
+
+**Zig Package Manager (0.13+)**:
+- Provides a built-in, hash-verified way to manage dependencies, ensuring supply chain integrity without external tools.
+
+---
+
+## 14. Quick Reference
 
 ### Common Commands
 
 ```bash
 # Build
-zig build
 zig build -Doptimize=ReleaseSafe
 
-# Run
-zig run src/main.zig
-
-# Test
+# Run tests
 zig build test
-zig test src/test.zig
 
-# Format
-zig fmt src/
+# Update dependencies
+zig build --fetch
 
-# Generate docs
-zig build docs
+# Formatting
+zig fmt .
+
+# Documentation
+zig build-lib src/main.zig -femit-docs
 ```
 
-### Zig Patterns Cheat Sheet
+### Modern Zig 0.13+ Patterns Cheat Sheet
 
 ```zig
-// Error handling
-const result = function() catch |err| return err;
-const value = optional orelse default;
-try function();  // Propagate error
+// New b.path() syntax (0.12+)
+const exe = b.addExecutable(.{
+    .root_source_file = b.path("src/main.zig"),
+});
 
-// Defer for cleanup
-var file = try std.fs.open();
-defer file.close();
-
-// Allocators
-var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-defer _ = gpa.deinit();
-const allocator = gpa.allocator();
-
-// Slices
-const items: []const u8 = "hello";
-for (items) |item| {}
-
-// Comptime
-fn GenericType(comptime T: type) type {
-    return struct { value: T };
+// Comptime Type Check
+fn assertType(comptime T: type) void {
+    if (@typeInfo(T) != .Struct) @compileError("Must be a struct");
 }
-```
 
-### build.zig Template
-
-```zig
-const std = @import("std");
-
-pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
-
-    const exe = b.addExecutable(.{
-        .name = "myapp",
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    b.installArtifact(exe);
-
-    const tests = b.addTest(.{
-        .root_source_file = b.path("src/main.zig"),
-    });
-    const test_step = b.step("test", "Run tests");
-    test_step.dependOn(&tests.step);
+// Result Type with Payload
+const MyError = error{NotFound};
+fn getData() MyError![]u8 {
+    return MyError.NotFound;
 }
-```
-
-### Project Structure
-
-```
-my_project/
-├── build.zig
-├── src/
-│   ├── main.zig
-│   └── lib/
-└── tests/
 ```
 
 ---
@@ -2346,16 +2377,8 @@ my_project/
 ## References
 
 - [Zig Language Reference](https://ziglang.org/documentation/master/)
-- [Zig Standard Library](https://ziglang.org/documentation/master/std/)
-- [Zig Build System](https://ziglang.org/learn/build-system/)
-- [Zig By Example](https://zigbyexample.github.io/)
-- [Data-Oriented Design](https://www.dataorienteddesign.com/dodbook/)
-
----
-
-**Last Updated:** 2026-01-17
-**Version:** 1.0
-**Maintainer:** Development Team
+- [Zig Standard Library Docs](https://ziglang.org/documentation/master/std/)
+- [Zig Build System Guide](https://ziglang.org/learn/build-system/)
 
 
 **End of Zig Development Guidelines**
