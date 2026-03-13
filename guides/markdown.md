@@ -1,12 +1,12 @@
 # Markdown Documentation Guidelines
-Modern practices for creating professional, maintainable, and accessible documentation using Markdown, Mermaid diagrams, and automation tools.
+Modern practices for creating professional, maintainable, and accessible documentation using Markdown with Mermaid-first diagramming, structured content, and automation tools.
 
 ---
 
 **Agent Profile**: The Documentation Excellence Expert
 **Role**: Technical Writer & Documentation Architect
-**Objective**: Generate clear, accessible, and maintainable documentation using modern Markdown practices
-**Tools**: Markdown, Mermaid, MDX, markdownlint, Vale, Prettier, documentation generators
+**Objective**: Generate clear, accessible, diagram-rich, and maintainable documentation using modern Markdown practices
+**Tools**: Markdown, Mermaid 11+, MDX, markdownlint, Vale, Prettier, documentation generators
 **Companion Guides**: git.md, ci-cd.md, pre-commit.md, accessibility.md
 
 ---
@@ -28,12 +28,15 @@ The agent must adhere to **CLEAR-DOC** principles:
 │  Agents MUST:                                                        │
 │  1. Validate all internal and external links work                   │
 │  2. Test all code examples compile/run without errors               │
-│  3. Verify diagrams render correctly                                │
-│  4. Check accessibility (alt text, heading hierarchy)               │
-│  5. Lint markdown for consistency (markdownlint)                    │
-│  6. NEVER present untested documentation to users                   │
+│  3. Include diagrams for architecture, flows, and relationships     │
+│  4. Use Mermaid for ALL diagrams unless user specifies otherwise    │
+│  5. Verify diagrams render correctly                                │
+│  6. Check accessibility (alt text, heading hierarchy)               │
+│  7. Lint markdown for consistency (markdownlint)                    │
+│  8. NEVER present untested documentation to users                   │
 │                                                                      │
 │  Documentation without validation is REJECTED.                      │
+│  Documentation without diagrams where applicable is INCOMPLETE.     │
 │                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -46,17 +49,18 @@ The agent must adhere to **CLEAR-DOC** principles:
 - **A**ccessible - Screen reader friendly, proper heading hierarchy, alt text
 - **R**eproducible - Code examples must be tested and runnable
 
-- **D**iagrams Rich - Use Mermaid for architecture, flows, and relationships
+- **D**iagrams First - Use Mermaid for ALL diagrams (architecture, flows, relationships, ERDs, state machines). Mermaid is the default and only format unless explicitly overridden.
 - **O**rganized - Logical structure with table of contents and navigation
-- **C**orrect - Automated validation for links, spelling, and grammar
+- **C**orrect - Automated validation for links, spelling, grammar, and diagram syntax
 
 **Additional Principles:**
 
 - **Single Source of Truth** - DRY principle for documentation
-- **Version Controlled** - Documentation lives alongside code
-- **Automated Testing** - CI/CD validates every documentation change
+- **Version Controlled** - Documentation lives alongside code (diagrams as code, not images)
+- **Automated Testing** - CI/CD validates every documentation change including diagram syntax
 - **Progressive Disclosure** - Simple overview → detailed reference
 - **Search Optimized** - Descriptive headings, keywords, metadata
+- **Diagrams as Code** - All diagrams MUST be Mermaid code blocks, never static images (unless photographing physical artifacts or screenshots)
 
 ---
 
@@ -144,11 +148,6 @@ Variables like `$HOME` or commands like `npm install`.
    2. Another substep
 3. Third step
 
-<!-- Task lists (GitHub Flavored Markdown) -->
-- [ ] Incomplete task
-- [x] Completed task
-- [ ] Another incomplete task
-
 <!-- Definition lists (not universally supported) -->
 Term
 : Definition of the term
@@ -165,7 +164,49 @@ Another term
 - ❌ Never mix `*`, `-`, `+` markers in same document
 - ❌ Never use tabs for indentation
 
+### C2. Task Lists (GitHub Flavored Markdown)
+
+Task lists render interactive checkboxes in GitHub Issues, PRs, and Markdown files.
+
+```markdown
+<!-- Basic task list -->
+- [ ] Incomplete task
+- [x] Completed task
+- [ ] Another incomplete task
+
+<!-- Task list with issue references -->
+- [x] #739
+- [ ] https://github.com/octo-org/octo-repo/issues/740
+- [ ] Add delight to the experience when all tasks are complete :tada:
+
+<!-- Nested task lists -->
+- [ ] Main task
+  - [ ] Subtask 1
+  - [x] Subtask 2
+  - [ ] Subtask 3
+- [x] Another completed task
+```
+
+**GitHub Issue-Specific Features:**
+- When task lists appear in the **first comment** of an issue, a progress indicator is shown in issue lists
+- Referenced issues (`#123`) are automatically checked off when those issues close
+- Hovering a task item reveals an icon to convert it into a standalone issue
+- Tracked issues display a "Tracked by" breadcrumb linking back to the parent
+
+**Rules:**
+- ✅ Use `- [ ]` (with space) for incomplete, `- [x]` for complete
+- ✅ Reference issues by number (`#123`) or full URL in task items
+- ✅ Place task lists in the **first comment** of an issue for progress tracking
+- ✅ Use task lists for tracking work items, PR checklists, and review criteria
+- ❌ Do not create task items in closed issues or issues with linked PRs
+- ❌ Do not rely on reordering across different comments (only within same comment)
+
+> [!NOTE]
+> GitHub's `tasklist` fenced code block syntax was retired in February 2025. Use standard Markdown task lists (`- [ ]`) or sub-issues instead.
+
 ### D. Code Blocks
+
+GitHub renders fenced code blocks with syntax highlighting using [Linguist](https://github.com/github-linguist/linguist) for language detection. Always specify a language identifier for proper highlighting.
 
 ```markdown
 <!-- Fenced code blocks with syntax highlighting -->
@@ -211,13 +252,67 @@ Useful for output examples or logs.
 ```
 ```
 
-**Language Identifiers:**
-- `javascript`, `typescript`, `jsx`, `tsx`
-- `python`, `java`, `go`, `rust`, `c`, `cpp`, `csharp`
-- `bash`, `sh`, `shell`, `powershell`
-- `yaml`, `json`, `toml`, `xml`, `html`, `css`
-- `sql`, `graphql`, `dockerfile`
-- `markdown`, `text`, `diff`
+#### Displaying Triple Backticks Inside Code Blocks
+
+Wrap with quadruple backticks when your code contains triple backticks:
+
+````markdown
+````
+```ruby
+puts "Hello"
+```
+````
+````
+
+#### Code Blocks in Lists
+
+To preserve formatting within lists, indent non-fenced code blocks by **eight spaces**:
+
+```markdown
+1. First step:
+
+        non-fenced code in a list
+        needs 8 spaces of indentation
+
+2. Second step with fenced block:
+
+   ```bash
+   # Fenced blocks in lists need 3-space indent
+   echo "hello"
+   ```
+```
+
+#### Special Code Block Types (GitHub)
+
+GitHub supports these special fenced code block types beyond syntax highlighting:
+
+| Language ID | Renders As |
+|------------|------------|
+| `mermaid` | Interactive diagram (see Section 3) |
+| `geojson` | Interactive map |
+| `topojson` | Interactive map |
+| `stl` | Interactive 3D model viewer |
+| `math` | LaTeX mathematical expression (see Section 8D) |
+
+**Language Identifiers (Common):**
+- **Web:** `javascript`, `typescript`, `jsx`, `tsx`, `html`, `css`, `scss`, `graphql`
+- **Systems:** `c`, `cpp`, `rust`, `go`, `java`, `csharp`, `swift`, `kotlin`
+- **Scripting:** `python`, `ruby`, `php`, `perl`, `lua`, `elixir`
+- **Shell:** `bash`, `sh`, `shell`, `zsh`, `powershell`, `fish`
+- **Data/Config:** `yaml`, `json`, `toml`, `xml`, `ini`, `env`
+- **Database:** `sql`, `plsql`, `graphql`
+- **Infrastructure:** `dockerfile`, `hcl`, `nginx`
+- **Documentation:** `markdown`, `text`, `diff`, `mermaid`, `math`
+- **Other:** `r`, `scala`, `dart`, `zig`, `nix`, `vim`, `latex`
+
+**Rules:**
+- ✅ ALWAYS specify language identifier — never use bare ` ``` ` fences
+- ✅ Use `text` for plain output or logs with no syntax
+- ✅ Use `diff` for showing code changes with `+`/`-` markers
+- ✅ Use lowercase language identifiers (required for GitHub Pages)
+- ✅ Use quadruple backticks to nest code blocks containing triple backticks
+- ❌ Never use indented code blocks (4 spaces) — always use fenced blocks for clarity
+- ❌ Never use `~~~` (tilde) fences — use backtick fences for consistency
 
 ### E. Tables
 
@@ -336,45 +431,259 @@ x<sup>2</sup> + y<sup>2</sup>
 
 ---
 
-## 3. Mermaid Diagrams (MANDATORY)
+## 3. Diagrams (MANDATORY — Mermaid-First)
+
+### GitHub-Supported Diagram Types
+
+GitHub natively renders these diagram types in Issues, Discussions, PRs, wikis, and Markdown files:
+
+| Type | Code Fence | Use Case |
+|------|-----------|----------|
+| **Mermaid** | ` ```mermaid ` | Flowcharts, sequence diagrams, ER diagrams, state machines, gantt charts, class diagrams, and more |
+| **GeoJSON** | ` ```geojson ` | Interactive geographic maps with features and geometries |
+| **TopoJSON** | ` ```topojson ` | Optimized geographic maps with shared topology arcs |
+| **ASCII STL** | ` ```stl ` | Interactive 3D model rendering (wireframe, surface, solid views) |
+
+**CRITICAL: ALL logical diagrams (architecture, flows, data models, sequences, state machines) MUST use Mermaid unless the user explicitly requests another format.** Mermaid diagrams are code — they are versionable, diffable, reviewable, and render natively on GitHub, GitLab, Notion, Docusaurus, MkDocs, and most modern documentation platforms.
+
+> [!TIP]
+> Check which Mermaid version GitHub uses by rendering a ` ```mermaid ` block containing just `info`.
+
+**When to include diagrams (MANDATORY):**
+- Architecture and system design → Mermaid flowchart or C4
+- API/service interactions → Mermaid sequence diagram
+- Data models and schemas → Mermaid ER diagram
+- Object relationships → Mermaid class diagram
+- Workflows and processes → Mermaid flowchart or state diagram
+- State machines and lifecycles → Mermaid state diagram
+- Project timelines → Mermaid gantt chart
+- Git branching strategies → Mermaid git graph
+- Decision trees → Mermaid flowchart
+- Concept overviews → Mermaid mindmap
+- Geographic data → GeoJSON or TopoJSON
+- 3D models / physical objects → STL
+
+**When NOT to use Mermaid:**
+- Screenshots of actual UIs (use images)
+- Photos of physical artifacts (use images)
+- Geographic/map data (use GeoJSON/TopoJSON)
+- 3D model rendering (use STL)
+- Highly complex diagrams exceeding ~30 nodes (split into multiple diagrams)
+- When the user explicitly requests PlantUML, D2, Graphviz, or another format
+
+> [!WARNING]
+> Third-party Mermaid plugins may cause rendering errors on GitHub. Stick to GitHub's built-in Mermaid support for maximum compatibility.
+
+### 3A. Mermaid Rules & Best Practices (MANDATORY)
+
+**CRITICAL: Follow these rules for ALL Mermaid diagrams.**
+
+#### Naming & Readability
+
+```markdown
+<!-- ✅ CORRECT: Descriptive node IDs and labels -->
+```mermaid
+flowchart LR
+    userRequest[User Request] --> apiGateway[API Gateway]
+    apiGateway --> authService[Auth Service]
+    authService --> userDB[(User Database)]
+```
+
+<!-- ❌ WRONG: Cryptic single-letter IDs without labels -->
+```mermaid
+flowchart LR
+    A --> B
+    B --> C
+    C --> D
+```
+```
+
+**Rules:**
+- Node IDs MUST be camelCase descriptive identifiers: `authService`, `userDB`, `paymentGateway`
+- Node labels MUST be human-readable: `[Auth Service]`, `[(User Database)]`
+- Single-letter IDs (`A`, `B`, `C`) are ONLY acceptable in trivial examples with 3 or fewer nodes
+- Edge labels MUST describe the interaction: `-->|authenticates|`, `-->|queries|`
+- Use aliases (`participant API as API Gateway`) for long names in sequence diagrams
+
+#### Complexity Limits
+
+```markdown
+<!-- ✅ CORRECT: Split complex systems into focused diagrams -->
+
+## System Overview
+```mermaid
+flowchart TB
+    Client --> Gateway
+    Gateway --> Services
+    Services --> DataLayer
+```
+
+## Authentication Flow (Detail)
+```mermaid
+sequenceDiagram
+    Client->>Gateway: POST /login
+    Gateway->>AuthService: Validate
+    AuthService->>DB: Check credentials
+```
+
+<!-- ❌ WRONG: One massive diagram with 40+ nodes -->
+```
+
+**Rules:**
+- Maximum **20 nodes** per flowchart/graph diagram
+- Maximum **8 participants** per sequence diagram
+- Maximum **15 entities** per ER diagram
+- Maximum **12 states** per state diagram
+- If a diagram exceeds limits, **split it** into overview + detail diagrams
+- Use `subgraph` to group related nodes and reduce visual complexity
+- Every diagram MUST have a preceding Markdown heading or introductory sentence explaining what it shows
+
+#### Direction & Layout
+
+**Rules:**
+- Use `LR` (left-to-right) for processes, pipelines, and data flows
+- Use `TD`/`TB` (top-down) for hierarchies, architectures, and org charts
+- Use `BT` (bottom-up) sparingly — only for dependency trees showing what depends on what
+- Use `RL` (right-to-left) only for RTL-language documentation
+- Be consistent within a document — don't mix `LR` and `TD` for similar diagram types
+
+#### Styling & Theming
+
+```markdown
+<!-- ✅ CORRECT: Use classDef for semantic styling -->
+```mermaid
+flowchart TD
+    classDef primary fill:#4f46e5,stroke:#3730a3,color:#fff
+    classDef success fill:#16a34a,stroke:#15803d,color:#fff
+    classDef danger fill:#dc2626,stroke:#b91c1c,color:#fff
+    classDef storage fill:#f59e0b,stroke:#d97706,color:#000
+
+    request[Incoming Request]:::primary --> validate{Valid?}
+    validate -->|Yes| process[Process]:::success
+    validate -->|No| reject[Reject]:::danger
+    process --> store[(Database)]:::storage
+```
+
+<!-- ❌ WRONG: Inline style attributes scattered everywhere -->
+```mermaid
+flowchart TD
+    A[Request] --> B{Valid?}
+    style A fill:#f00
+    style B fill:#0f0
+```
+```
+
+**Rules:**
+- Use `classDef` for reusable styles — never scattered `style` directives
+- Define semantic class names: `primary`, `success`, `danger`, `storage`, `external`
+- Use accessible color combinations with sufficient contrast (WCAG AA)
+- Keep styling minimal — diagrams should be clear without color. Color adds emphasis, not meaning
+- Always set both `fill` and `color` (text) together for contrast
+- Test diagrams in both light and dark themes when possible
+
+#### Subgraphs
+
+```markdown
+```mermaid
+flowchart TB
+    subgraph frontend["Frontend Layer"]
+        webapp[Web App]
+        mobile[Mobile App]
+    end
+
+    subgraph backend["Backend Layer"]
+        api[API Server]
+        worker[Background Worker]
+    end
+
+    subgraph data["Data Layer"]
+        db[(PostgreSQL)]
+        cache[(Redis)]
+        queue[(RabbitMQ)]
+    end
+
+    webapp & mobile --> api
+    api --> db & cache
+    api --> queue
+    worker --> queue
+    worker --> db
+```
+```
+
+**Rules:**
+- Always quote subgraph titles: `subgraph name["Display Title"]`
+- Use subgraphs to represent architectural boundaries (layers, services, environments)
+- Limit nesting to **2 levels** of subgraphs maximum
+- Each subgraph should contain 2-8 nodes
+
+#### Edge Labels & Interactions
+
+```markdown
+<!-- ✅ CORRECT: Meaningful edge labels -->
+```mermaid
+sequenceDiagram
+    Client->>+API: POST /orders {items, payment}
+    API->>+PaymentService: charge(amount, method)
+    PaymentService-->>-API: PaymentResult{status, txId}
+    API->>+InventoryService: reserve(items)
+    InventoryService-->>-API: ReservationResult
+    API-->>-Client: 201 Created {orderId}
+```
+
+<!-- ❌ WRONG: No labels or generic labels -->
+```mermaid
+sequenceDiagram
+    A->>B: request
+    B->>C: request
+    C-->>B: response
+    B-->>A: response
+```
+```
+
+**Rules:**
+- Edge labels on flowcharts should describe the action or condition: `-->|on success|`, `-->|retries 3x|`
+- Sequence diagram messages should include HTTP methods, payloads, or function signatures
+- Use `Note over` or `Note right of` for context that doesn't fit in message labels
+- Use `alt/else/end` for conditional flows, `loop` for repetition, `par` for parallel execution
+
+### 3B. Diagram Types Reference
 
 ### A. Flowcharts
 
 ```markdown
 ```mermaid
 flowchart TD
-    A[Start] --> B{Is it working?}
-    B -->|Yes| C[Great!]
-    B -->|No| D[Debug]
-    D --> E[Fix issue]
-    E --> B
-    C --> F[End]
+    start[Start] --> validate{Is it working?}
+    validate -->|Yes| success[Great!]
+    validate -->|No| debug[Debug]
+    debug --> fix[Fix issue]
+    fix --> validate
+    success --> done[End]
 ```
 ```
 
 **Flowchart Directions:**
-- `TD` or `TB` - Top to bottom (default)
+- `TD` or `TB` - Top to bottom (default, use for hierarchies)
 - `BT` - Bottom to top
-- `LR` - Left to right
+- `LR` - Left to right (use for processes and pipelines)
 - `RL` - Right to left
 
 **Node Shapes:**
 ```markdown
 ```mermaid
 flowchart LR
-    A[Rectangle]
-    B(Rounded)
-    C([Stadium])
-    D[[Subroutine]]
-    E[(Database)]
-    F((Circle))
-    G>Asymmetric]
-    H{Diamond}
-    I{{Hexagon}}
-    J[/Parallelogram/]
-    K[\Parallelogram alt\]
-    L[/Trapezoid\]
-    M[\Trapezoid alt/]
+    rect[Rectangle - Process]
+    rounded(Rounded - Alternative)
+    stadium([Stadium - Terminal])
+    subroutine[[Subroutine - Predefined]]
+    database[(Database - Storage)]
+    circle((Circle - Connector))
+    asymmetric>Asymmetric - Input]
+    diamond{Diamond - Decision}
+    hexagon{{Hexagon - Preparation}}
+    parallelogram[/Parallelogram - IO/]
+    trapezoid[/Trapezoid - Manual Op\]
+    doubleCircle(((Double Circle - Critical)))
 ```
 ```
 
@@ -382,13 +691,13 @@ flowchart LR
 ```markdown
 ```mermaid
 flowchart TD
-    A --> B
-    A --- C
-    A -.-> D
-    A ==> E
-    A -- Label --> F
-    A -. Dotted label .-> G
-    A == Thick label ==> H
+    A -->|Solid arrow| B
+    A ---|Solid line| C
+    A -.->|Dotted arrow| D
+    A ==>|Thick arrow| E
+    A --o|Circle end| F
+    A --x|Cross end| G
+    H <-->|Bidirectional| I
 ```
 ```
 
@@ -440,8 +749,21 @@ sequenceDiagram
     end
 
     Note right of User: User is now<br/>authenticated
+
+    par Background Tasks
+        API->>Auth: Log login event
+    and
+        API->>DB: Update last_login
+    end
 ```
 ```
+
+**Sequence Diagram Interaction Types:**
+- `->>` Solid arrow (synchronous request)
+- `-->>` Dashed arrow (response / async)
+- `-x` Solid with cross (lost message)
+- `--x` Dashed with cross (lost response)
+- `-)` Solid with open arrow (async fire-and-forget)
 
 ### C. Class Diagrams
 
@@ -453,9 +775,9 @@ classDiagram
         +String email
         +String name
         -String passwordHash
-        +login()
-        +logout()
-        +updateProfile()
+        +login() bool
+        +logout() void
+        +updateProfile(data) User
     }
 
     class Post {
@@ -463,16 +785,16 @@ classDiagram
         +String title
         +String content
         +DateTime createdAt
-        +publish()
-        +delete()
+        +publish() void
+        +delete() void
     }
 
     class Comment {
         +String id
         +String content
         +DateTime createdAt
-        +edit()
-        +delete()
+        +edit(content) Comment
+        +delete() void
     }
 
     User "1" --> "*" Post : writes
@@ -485,7 +807,7 @@ classDiagram
 - `+` Public
 - `-` Private
 - `#` Protected
-- `~` Package
+- `~` Package/Internal
 
 **Relationship Types:**
 ```markdown
@@ -546,10 +868,11 @@ erDiagram
 ```
 
 **Cardinality:**
-- `||--||` One to one
+- `||--||` Exactly one to exactly one
 - `||--o{` One to zero or many
 - `||--|{` One to one or many
 - `}o--o{` Zero or many to zero or many
+- `|o--o|` Zero or one to zero or one
 
 ### E. State Diagrams
 
@@ -575,6 +898,12 @@ stateDiagram-v2
 ```
 ```
 
+**Rules for state diagrams:**
+- Always use `stateDiagram-v2` (not the legacy `stateDiagram`)
+- Use `[*]` for start and end states
+- Composite states should have meaningful names
+- Transition labels should be method/action names: `submit()`, `approve()`
+
 ### F. Gantt Charts
 
 ```markdown
@@ -599,6 +928,8 @@ gantt
 ```
 ```
 
+**Task markers:** `done` (completed), `active` (in progress), `crit` (critical path)
+
 ### G. Git Graphs
 
 ```markdown
@@ -610,12 +941,12 @@ gitgraph
     checkout develop
     commit id: "Add feature A"
     commit id: "Add feature B"
-    branch feature-x
-    checkout feature-x
-    commit id: "Start feature X"
-    commit id: "Complete feature X"
+    branch feature/auth
+    checkout feature/auth
+    commit id: "Start auth feature"
+    commit id: "Complete auth feature"
     checkout develop
-    merge feature-x
+    merge feature/auth
     checkout main
     merge develop tag: "v1.0.0"
     checkout develop
@@ -630,32 +961,32 @@ gitgraph
 ```markdown
 ```mermaid
 graph TB
-    subgraph "External Systems"
-        ExtAPI[External API]
-        ExtDB[(External Database)]
+    subgraph external["External Systems"]
+        extAPI[External API]
+        extDB[(External Database)]
     end
 
-    subgraph "Application Layer"
-        Web[Web Application]
-        API[REST API]
-        Worker[Background Workers]
+    subgraph app["Application Layer"]
+        web[Web Application]
+        api[REST API]
+        worker[Background Workers]
     end
 
-    subgraph "Data Layer"
-        Cache[(Redis Cache)]
-        DB[(PostgreSQL)]
-        Queue[(Message Queue)]
+    subgraph data["Data Layer"]
+        cache[(Redis Cache)]
+        db[(PostgreSQL)]
+        queue[(Message Queue)]
     end
 
-    User((User)) --> Web
-    Web --> API
-    API --> Cache
-    API --> DB
-    API --> ExtAPI
-    Worker --> Queue
-    Worker --> DB
-    Worker --> ExtDB
-    API --> Queue
+    user((User)) --> web
+    web --> api
+    api --> cache
+    api --> db
+    api --> extAPI
+    worker --> queue
+    worker --> db
+    worker --> extDB
+    api --> queue
 ```
 ```
 
@@ -680,7 +1011,6 @@ mindmap
         Extended syntax
       Diagrams
         Mermaid
-        PlantUML
       Code blocks
         Syntax highlighting
         Line numbers
@@ -717,6 +1047,277 @@ timeline
            : User onboarding
 ```
 ```
+
+### K. Quadrant Charts
+
+Use for prioritization matrices (effort vs. impact, urgency vs. importance):
+
+```markdown
+```mermaid
+quadrantChart
+    title Feature Prioritization
+    x-axis Low Effort --> High Effort
+    y-axis Low Impact --> High Impact
+    quadrant-1 Do First
+    quadrant-2 Plan Carefully
+    quadrant-3 Delegate
+    quadrant-4 Eliminate
+    Auth Revamp: [0.8, 0.9]
+    Dark Mode: [0.2, 0.3]
+    API v2: [0.7, 0.7]
+    Logo Update: [0.1, 0.1]
+    Search: [0.4, 0.8]
+    Onboarding: [0.3, 0.7]
+```
+```
+
+### L. Sankey Diagrams
+
+Use for showing flow quantities (traffic, data, resources):
+
+```markdown
+```mermaid
+sankey-beta
+    Traffic,Organic Search,5000
+    Traffic,Direct,3000
+    Traffic,Social Media,2000
+    Traffic,Referral,1000
+    Organic Search,Landing Page,3500
+    Organic Search,Blog,1500
+    Direct,Landing Page,2000
+    Direct,Dashboard,1000
+    Social Media,Landing Page,1200
+    Social Media,Blog,800
+```
+```
+
+### M. Block Diagrams
+
+Use for system component layouts and block architectures:
+
+```markdown
+```mermaid
+block-beta
+    columns 3
+    frontend["Frontend"]:3
+    space
+    api["API Gateway"]
+    space
+    auth["Auth Service"] app["App Service"] data["Data Service"]
+    space
+    db[("Database")]
+    space
+```
+```
+
+### N. Packet Diagrams
+
+Use for network protocol and data structure documentation:
+
+```markdown
+```mermaid
+packet-beta
+    0-15: "Source Port"
+    16-31: "Destination Port"
+    32-63: "Sequence Number"
+    64-95: "Acknowledgment Number"
+    96-99: "Data Offset"
+    100-105: "Reserved"
+    106: "URG"
+    107: "ACK"
+    108: "PSH"
+    109: "RST"
+    110: "SYN"
+    111: "FIN"
+    112-127: "Window Size"
+    128-143: "Checksum"
+    144-159: "Urgent Pointer"
+```
+```
+
+### O. XY Charts
+
+Use for simple data visualizations within documentation:
+
+```markdown
+```mermaid
+xychart-beta
+    title "Monthly Revenue (2024)"
+    x-axis [Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec]
+    y-axis "Revenue ($K)" 0 --> 120
+    bar [45, 52, 61, 58, 72, 80, 75, 88, 95, 92, 105, 110]
+    line [45, 52, 61, 58, 72, 80, 75, 88, 95, 92, 105, 110]
+```
+```
+
+### 3C. Mermaid Anti-Patterns (NEVER DO)
+
+```markdown
+<!-- ❌ NEVER: Use static images when Mermaid can express it -->
+![Architecture diagram](./images/architecture.png)
+<!-- ✅ INSTEAD: Use Mermaid -->
+```mermaid
+flowchart TD
+    ...
+```
+
+<!-- ❌ NEVER: Create unreadable mega-diagrams -->
+```mermaid
+flowchart TD
+    A --> B --> C --> D --> E --> F --> G --> H --> I --> J
+    A --> K --> L --> M --> N --> O --> P --> Q --> R --> S
+    %% 40+ nodes in one diagram
+```
+<!-- ✅ INSTEAD: Split into overview + detail diagrams -->
+
+<!-- ❌ NEVER: Use diagrams without context -->
+```mermaid
+flowchart LR
+    A[X] --> B[Y]
+```
+<!-- ✅ INSTEAD: Always precede with explanatory text -->
+The authentication flow validates credentials before issuing tokens:
+```mermaid
+flowchart LR
+    request[Login Request] --> validate[Validate Credentials]
+```
+
+<!-- ❌ NEVER: Omit diagram titles in gantt/timeline/xy charts -->
+```mermaid
+gantt
+    section Phase 1
+    Task 1: 2024-01-01, 30d
+```
+<!-- ✅ INSTEAD: Always include a title -->
+```mermaid
+gantt
+    title Sprint 1 Timeline
+    section Phase 1
+    Task 1: 2024-01-01, 30d
+```
+
+<!-- ❌ NEVER: Use color as the only differentiator -->
+<!-- ✅ INSTEAD: Use shape, label, and position in addition to color -->
+```
+
+### 3D. GeoJSON Maps (GitHub-Supported)
+
+Use GeoJSON fenced code blocks to render interactive maps directly in GitHub Markdown, Issues, PRs, and Discussions.
+
+```markdown
+```geojson
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "id": 1,
+      "properties": {
+        "name": "Service Region A"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [[-90, 35], [-90, 30], [-85, 30], [-85, 35], [-90, 35]]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Data Center"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-87.5, 32.5]
+      }
+    }
+  ]
+}
+```
+```
+
+**Supported geometry types:** `Point`, `LineString`, `Polygon`, `MultiPoint`, `MultiLineString`, `MultiPolygon`, `GeometryCollection`
+
+**Rules:**
+- ✅ Use for geographic/location data (service regions, data center maps, coverage areas)
+- ✅ Include `properties` with descriptive names for each feature
+- ✅ Use valid GeoJSON (validate with [geojson.io](https://geojson.io) or `geojsonlint`)
+- ❌ Do not use for logical diagrams — use Mermaid instead
+- ❌ Do not embed excessively large GeoJSON (keep under 10MB for GitHub rendering)
+
+### 3E. TopoJSON Maps (GitHub-Supported)
+
+TopoJSON is an optimized extension of GeoJSON that encodes topology. Use it when you need shared boundaries or reduced file sizes.
+
+```markdown
+```topojson
+{
+  "type": "Topology",
+  "transform": {
+    "scale": [0.036003600360036005, 0.017361589674592462],
+    "translate": [-180, -89.99892578124998]
+  },
+  "objects": {
+    "regions": {
+      "type": "GeometryCollection",
+      "geometries": [
+        {
+          "type": "Point",
+          "coordinates": [4000, 5000],
+          "properties": {"name": "Server A"}
+        },
+        {
+          "type": "Polygon",
+          "arcs": [[0]],
+          "properties": {"name": "Region 1"}
+        }
+      ]
+    }
+  },
+  "arcs": [
+    [[4000, 0], [1999, 9999], [2000, -9999], [-3999, 0]]
+  ]
+}
+```
+```
+
+**Rules:**
+- ✅ Use TopoJSON over GeoJSON when maps share boundaries (reduces size significantly)
+- ✅ Keep topology arcs simple and well-documented with properties
+- ❌ Do not hand-write TopoJSON — generate it from GeoJSON using tools like `topojson-server`
+
+### 3F. ASCII STL 3D Models (GitHub-Supported)
+
+Use STL fenced code blocks to render interactive 3D model viewers on GitHub. The viewer supports wireframe, surface angle, and solid rendering modes.
+
+```markdown
+```stl
+solid cube
+  facet normal 0.0 0.0 -1.0
+    outer loop
+      vertex 0.0 0.0 0.0
+      vertex 1.0 1.0 0.0
+      vertex 1.0 0.0 0.0
+    endloop
+  endfacet
+  facet normal 0.0 0.0 -1.0
+    outer loop
+      vertex 0.0 0.0 0.0
+      vertex 0.0 1.0 0.0
+      vertex 1.0 1.0 0.0
+    endloop
+  endfacet
+endsolid cube
+```
+```
+
+**Rules:**
+- ✅ Use for hardware documentation, 3D-printed parts, mechanical components
+- ✅ Use ASCII STL format (not binary) — only ASCII renders on GitHub
+- ✅ Keep models under 1MB for reasonable rendering performance
+- ❌ Do not use for logical diagrams or architecture — use Mermaid
+- ❌ Do not embed high-polygon models (keep triangle count reasonable)
 
 ---
 
@@ -2794,27 +3395,80 @@ This is danger
 :::
 ```
 
-### D. Math Equations (LaTeX)
+### D. Mathematical Expressions (GitHub MathJax)
+
+GitHub renders math using **MathJax**, an open-source JavaScript display engine supporting LaTeX syntax. Math works in Markdown files, Issues, Discussions, PRs, and wikis.
+
+#### Inline Math
+
+Two delimiter options for inline expressions:
 
 ```markdown
-<!-- Inline math -->
+<!-- Standard dollar sign delimiters -->
 The equation $E = mc^2$ represents mass-energy equivalence.
 
-<!-- Block math -->
+The Cauchy-Schwarz inequality: $\left( \sum_{k=1}^n a_k b_k \right)^2$
+
+<!-- Backtick-dollar delimiters (use when expression contains Markdown-conflicting characters) -->
+The expression $`\sqrt{3x-1}+(1+x)^2`$ uses backtick-dollar syntax.
+
+<!-- Use backtick-dollar when the expression contains underscores, asterisks, or pipes -->
+$`a_1, a_2, \ldots, a_n`$
+```
+
+**When to use which:**
+- `$...$` — Default for simple expressions without Markdown conflicts
+- `` $`...`$ `` — When expression contains `_`, `*`, `|`, or other Markdown syntax characters
+
+#### Block / Display Math
+
+Two methods for display equations:
+
+```markdown
+<!-- Method 1: Double dollar signs (on own line) -->
 $$
-\frac{-b \pm \sqrt{b^2 - 4ac}}{2a}
+\left( \sum_{k=1}^n a_k b_k \right)^2 \leq \left( \sum_{k=1}^n a_k^2 \right) \left( \sum_{k=1}^n b_k^2 \right)
 $$
 
-<!-- Complex equations -->
-$$
+<!-- Method 2: Fenced code block with math identifier (PREFERRED for GitHub) -->
+```math
+\left( \sum_{k=1}^n a_k b_k \right)^2 \leq \left( \sum_{k=1}^n a_k^2 \right) \left( \sum_{k=1}^n b_k^2 \right)
+```
+```
+
+**Prefer ` ```math ` blocks** — they avoid ambiguity with dollar signs in surrounding text and render reliably across all GitHub contexts.
+
+#### Complex Equations
+
+```markdown
+```math
 \begin{aligned}
 \nabla \times \vec{\mathbf{B}} -\, \frac1c\, \frac{\partial\vec{\mathbf{E}}}{\partial t} &= \frac{4\pi}{c}\vec{\mathbf{j}} \\
 \nabla \cdot \vec{\mathbf{E}} &= 4 \pi \rho \\
 \nabla \times \vec{\mathbf{E}}\, +\, \frac1c\, \frac{\partial\vec{\mathbf{B}}}{\partial t} &= \vec{\mathbf{0}} \\
 \nabla \cdot \vec{\mathbf{B}} &= 0
 \end{aligned}
-$$
 ```
+```
+
+#### Dollar Sign Escaping
+
+```markdown
+<!-- Within math expressions: use backslash -->
+$`\sqrt{\$4}`$
+
+<!-- Outside math on same line as math: wrap literal $ in <span> -->
+To split <span>$</span>100 in half, we calculate $100/2$
+```
+
+**Rules:**
+- ✅ Use ` ```math ` fenced blocks for display equations (most reliable on GitHub)
+- ✅ Use `$...$` for simple inline math
+- ✅ Use `` $`...`$ `` when expressions contain `_`, `*`, `|`, or other Markdown characters
+- ✅ End lines with `\\` for line breaks within aligned environments
+- ✅ In `.md` files, end lines with backslash `\` before line breaks for proper rendering
+- ❌ Never use `$$` on the same line as other text — it must be on its own line
+- ❌ Never mix `$` delimiters with adjacent dollar amounts without escaping
 
 ### E. Footnotes
 
@@ -2990,10 +3644,15 @@ Jump to:
   - [ ] No broken anchors
   - [ ] Relative links use correct paths
 
-- [ ] **Images and Diagrams**
-  - [ ] All images have descriptive alt text
-  - [ ] Images load correctly
-  - [ ] Mermaid diagrams render properly
+- [ ] **Diagrams (Mermaid-First)**
+  - [ ] All architecture/flow/data diagrams use Mermaid (not static images)
+  - [ ] Mermaid diagrams render correctly (validated with mmdc or live editor)
+  - [ ] Diagrams follow complexity limits (max 20 nodes/flowchart, 8 participants/sequence)
+  - [ ] Node IDs are descriptive camelCase with human-readable labels
+  - [ ] Edge labels describe actions/conditions
+  - [ ] Each diagram has preceding explanatory text or heading
+  - [ ] classDef used for styling (not scattered `style` directives)
+  - [ ] All images (non-diagram) have descriptive alt text
   - [ ] Images optimized for web (< 500KB)
 
 - [ ] **Code Blocks**
@@ -3024,6 +3683,22 @@ Jump to:
 ---
 
 ## 11. Common Anti-Patterns to Avoid
+
+### ❌ Don't: Use Static Images for Diagrams
+
+```markdown
+<!-- BAD - Static image that can't be versioned, diffed, or updated -->
+![Architecture diagram](./images/architecture.png)
+
+<!-- GOOD - Mermaid diagram as code -->
+The system follows a three-tier architecture:
+
+```mermaid
+flowchart TB
+    client[Client Layer] --> api[API Layer]
+    api --> data[Data Layer]
+```
+```
 
 ### ❌ Don't: Use Bare URLs
 
@@ -3154,52 +3829,114 @@ Horizontal rule
 ### Mermaid Quick Reference
 
 ```markdown
+<!-- Flowchart (architecture, processes) -->
 ```mermaid
 flowchart LR
-    A[Start] --> B{Decision}
-    B -->|Yes| C[End]
-    B -->|No| D[End]
+    start[Start] --> decision{Decision}
+    decision -->|Yes| success[End]
+    decision -->|No| retry[Retry]
 ```
 
+<!-- Sequence (API calls, interactions) -->
 ```mermaid
 sequenceDiagram
-    Alice->>Bob: Hello
-    Bob-->>Alice: Hi
+    Client->>+Server: POST /api/data
+    Server-->>-Client: 200 OK {result}
 ```
 
+<!-- Class (object relationships) -->
 ```mermaid
 classDiagram
     class Animal {
-        +name
-        +makeSound()
+        +String name
+        +makeSound() void
     }
+    Animal <|-- Dog
+    Animal <|-- Cat
 ```
 
+<!-- ER (data models) -->
 ```mermaid
 erDiagram
     USER ||--o{ ORDER : places
+    ORDER ||--|{ LINE_ITEM : contains
 ```
 
+<!-- State (lifecycles) -->
 ```mermaid
 stateDiagram-v2
     [*] --> Active
-    Active --> [*]
+    Active --> Inactive : deactivate()
+    Inactive --> [*]
 ```
 
+<!-- Gantt (timelines) -->
 ```mermaid
 gantt
-    title Timeline
+    title Sprint Timeline
     section Phase 1
     Task 1: 2024-01-01, 30d
 ```
 
+<!-- Git (branching strategy) -->
 ```mermaid
 gitgraph
     commit
     branch develop
     commit
+    checkout main
+    merge develop tag: "v1.0"
+```
+
+<!-- Quadrant (prioritization) -->
+```mermaid
+quadrantChart
+    title Priority Matrix
+    x-axis Low Effort --> High Effort
+    y-axis Low Impact --> High Impact
+    Feature A: [0.2, 0.8]
+    Feature B: [0.8, 0.3]
+```
+
+<!-- Mindmap (concepts) -->
+```mermaid
+mindmap
+    root((Topic))
+        Branch A
+            Leaf 1
+            Leaf 2
+        Branch B
+```
+
+<!-- XY Chart (data) -->
+```mermaid
+xychart-beta
+    title "Metrics"
+    x-axis [Q1, Q2, Q3, Q4]
+    y-axis "Value" 0 --> 100
+    bar [25, 50, 75, 90]
 ```
 ```
+
+### Choosing the Right Diagram Type
+
+| Scenario | Diagram Type | Direction |
+|----------|-------------|-----------|
+| System architecture | `flowchart` | `TB` |
+| Data pipeline | `flowchart` | `LR` |
+| API interaction | `sequenceDiagram` | — |
+| Database schema | `erDiagram` | — |
+| Object model | `classDiagram` | — |
+| Workflow lifecycle | `stateDiagram-v2` | — |
+| Project schedule | `gantt` | — |
+| Branching strategy | `gitgraph` | — |
+| Prioritization | `quadrantChart` | — |
+| Concept overview | `mindmap` | — |
+| Flow quantities | `sankey-beta` | — |
+| Metrics/trends | `xychart-beta` | — |
+| Component layout | `block-beta` | — |
+| Protocol/packet | `packet-beta` | — |
+| History/milestones | `timeline` | — |
 
 ---
 
@@ -3208,9 +3945,12 @@ gitgraph
 - **Git Guidelines** - See [git.md](git.md) for version control best practices
 - **CI/CD Guidelines** - See [ci-cd.md](ci-cd.md) for automation pipelines
 - **Pre-commit Guidelines** - See [pre-commit.md](pre-commit.md) for commit hooks
+- **Accessibility Guidelines** - See [accessibility.md](accessibility.md) for WCAG compliance
 - **Python Guidelines** - See [python.md](python.md) for docstring standards
 - **JavaScript Guidelines** - See [javascript.md](javascript.md) for JSDoc standards
 - **TypeScript Guidelines** - See [typescript.md](typescript.md) for TSDoc standards
+- **Architecture Guidelines** - See [architectures.md](architectures.md) for architecture diagram patterns
+- **OpenAPI Guidelines** - See [openapi.md](openapi.md) for API documentation standards
 
 
 **End of Markdown Documentation Guidelines**
