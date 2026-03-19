@@ -625,6 +625,8 @@ TEST(StringUtils, HandlesEmptyString_Bug1524) {
 
 ## 3. Dependency Management Strategy (MANDATORY)
 
+**CMake is the single tool orchestrating ALL dependency management** (as defined in cmake.md and conan.md). Conan is bootstrapped and invoked automatically from within CMake — the user never runs `conan install` or maintains external dependency files (`conanfile.txt`, `conanfile.py`). Each module manages its own Conan dependencies independently via `conan_cmake_configure()` + `conan_cmake_install()` in its own `CMakeLists.txt`. Running `conan install` manually outside of CMake is **PROHIBITED**.
+
 ### A. Dependency Resolution Priority (STRICT ORDER)
 
 When adding a dependency to a project, **ALWAYS follow this priority order**:
@@ -633,17 +635,36 @@ When adding a dependency to a project, **ALWAYS follow this priority order**:
 - **ALWAYS check Conan first**: Search https://conan.io/center/
 - Use official Conan packages from conan-center
 - Specify exact version numbers
+- **Conan MUST be used from within CMake** — each module calls `conan_cmake_configure()` + `conan_cmake_install()` directly in its own `CMakeLists.txt` (see conan.md for full pattern)
 - Example: `fmt/10.2.0`, `spdlog/1.12.0`, `gtest/1.15.0`
 
 ```cmake
-# ✅ CORRECT - Using Conan package
+# ✅ CORRECT - Per-module Conan dependencies (PRIMARY pattern from conan.md)
+# Each module's CMakeLists.txt declares its own dependencies independently
+
+# Set module-local paths for Conan-generated files
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_BINARY_DIR})
+list(APPEND CMAKE_PREFIX_PATH ${CMAKE_CURRENT_BINARY_DIR})
+
+# Declare and install this module's Conan dependencies
 conan_cmake_configure(
-    REQUIRES
-        fmt/10.2.0
-        spdlog/1.12.0
+    REQUIRES fmt/10.2.0 spdlog/1.12.0
     GENERATORS CMakeDeps CMakeToolchain
 )
+conan_cmake_install(
+    PATH_OR_REFERENCE .
+    BUILD missing
+    REMOTE conancenter
+    SETTINGS ${CONAN_SETTINGS}
+)
+
+# Then use standard CMake find_package (Conan generates config files)
+find_package(fmt REQUIRED)
+find_package(spdlog REQUIRED)
+target_link_libraries(${PROJECT_NAME} PRIVATE fmt::fmt spdlog::spdlog)
 ```
+
+> **Alternative**: The `add_conan_dependencies()` wrapper from `cmake/ConanIntegration.cmake` is also acceptable — it wraps the above `conan_cmake_configure()` + `conan_cmake_install()` calls into a convenience function. See Section 5C.
 
 #### 2. **SECONDARY: System Package Manager** (Only if not in Conan)
 - **Use ONLY if package is NOT available in Conan**
@@ -684,8 +705,8 @@ FetchContent_MakeAvailable(mylib)
 Need dependency "X"?
 │
 ├─> Search Conan (conan.io/center)
-│   ├─> Found? ✅ USE CONAN
-│   │   └─> Add to conan_cmake_configure(REQUIRES X/version)
+│   ├─> Found? ✅ USE CONAN (per-module conan_cmake_configure/install)
+│   │   └─> Add to conan_cmake_configure(REQUIRES X/version ...) in the module's CMakeLists.txt
 │   │
 │   └─> Not Found? ⤵️
 │       │
@@ -701,13 +722,14 @@ Need dependency "X"?
 
 ### C. Why This Order?
 
-1. **Conan (Primary)**: 
+1. **Conan from within CMake (Primary)**:
    - Cross-platform compatibility
    - Version control and reproducibility
    - Automatic dependency resolution
    - No system pollution
    - Easy to upgrade/downgrade
    - Works in CI/CD environments
+   - CMake as single orchestrator — one tool drives the entire build and dependency workflow
 
 2. **System Packages (Secondary)**:
    - Some packages are system-specific (e.g., OpenSSL system trust stores)
@@ -756,14 +778,16 @@ sudo dnf install openssl-devel readline-devel
 ### E. Prohibited Practices
 
 ❌ **NEVER do these**:
+- Running `conan install` outside of CMake as a separate manual step — CMake is the single orchestrator
+- Maintaining a centralized `conanfile.txt` or `conanfile.py` — dependencies live in each module's `CMakeLists.txt`
 - Copy-pasting library source code into your project
 - Committing compiled binaries (`.a`, `.so`, `.dll`) to version control
 - Using random GitHub repositories without version tags
-- Mixing multiple versions of the same library
 - Hardcoding library paths (e.g., `/usr/local/lib/libfoo.a`)
 
 ✅ **ALWAYS do these**:
-- Use Conan for C++ dependencies whenever possible
+- Use per-module `conan_cmake_configure()` + `conan_cmake_install()` in each module's `CMakeLists.txt` (or the `add_conan_dependencies()` wrapper)
+- Bootstrap Conan via `add_subdirectory(cmake/conan)` in the root `CMakeLists.txt` (see conan.md)
 - Pin exact version numbers
 - Document which dependencies come from where
 - Test on a clean system (Docker) to verify dependencies
@@ -1681,9 +1705,9 @@ private:
 project-root/
 ├── CMakeLists.txt           # Root CMake configuration
 ├── conanfile.txt            # Optional global Conan dependencies
-├── conan/                   # Conan integration
-│   └── CMakeLists.txt      # Conan setup (downloaded automatically)
 ├── cmake/                   # CMake modules and scripts
+│   ├── DependencyManagement.cmake  # Dependency resolution (priority order)
+│   ├── ConanIntegration.cmake      # Conan setup (auto-downloads conan.cmake)
 │   ├── CompilerWarnings.cmake
 │   ├── Sanitizers.cmake
 │   └── StaticAnalyzers.cmake
@@ -1766,13 +1790,14 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 # Include CMake modules
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
 
-# Conan integration
-add_subdirectory(conan)
+# Bootstrap Conan (downloads conan.cmake, autodetects settings)
+# Makes conan_cmake_configure/conan_cmake_install available to all modules
+add_subdirectory(cmake/conan)
 
 # Compiler warnings and static analysis
-include(cmake/CompilerWarnings.cmake)
-include(cmake/Sanitizers.cmake)
-include(cmake/StaticAnalyzers.cmake)
+include(CompilerWarnings)
+include(Sanitizers)
+include(StaticAnalyzers)
 
 # Options
 option(BUILD_TESTS "Build test suite (MANDATORY for production)" ON)
@@ -1813,59 +1838,99 @@ if(BUILD_BENCHMARKS)
 endif()
 ```
 
-### C. Conan Integration (conan/CMakeLists.txt)
+### C. Conan Bootstrap (cmake/conan/CMakeLists.txt)
+
+**PRIMARY pattern (from conan.md). Conan is bootstrapped once via `add_subdirectory(cmake/conan)` in the root CMakeLists.txt. Each module then calls `conan_cmake_configure()` / `conan_cmake_install()` independently.**
+
 ```cmake
-# ✅ CORRECT - Conan automatic setup
+# cmake/conan/CMakeLists.txt - Conan Bootstrap
+# Purpose: Download conan.cmake and autodetect settings ONCE.
+#          All modules then use conan_cmake_configure() / conan_cmake_install()
+#          independently in their own CMakeLists.txt.
+
 cmake_minimum_required(VERSION 3.15)
 
-# Default Conan profile
-set(CONAN_HOST_PROFILE default CACHE STRING "Conan host profile")
-
-# Download conan.cmake if not present
+# Download conan.cmake if not already cached
 if(NOT EXISTS "${CMAKE_BINARY_DIR}/conan.cmake")
     message(STATUS "Downloading conan.cmake from https://github.com/conan-io/cmake-conan")
-    file(DOWNLOAD 
+    file(DOWNLOAD
         "https://raw.githubusercontent.com/conan-io/cmake-conan/0.18.1/conan.cmake"
-        "${CMAKE_CURRENT_BINARY_DIR}/conan.cmake"
+        "${CMAKE_BINARY_DIR}/conan.cmake"
         TLS_VERIFY ON
-        STATUS download_status
     )
-    list(GET download_status 0 status_code)
-    if(NOT status_code EQUAL 0)
-        message(FATAL_ERROR "Failed to download conan.cmake")
-    endif()
 endif()
 
-# Include conan.cmake
-include(${CMAKE_CURRENT_BINARY_DIR}/conan.cmake)
+include(${CMAKE_BINARY_DIR}/conan.cmake)
 
-# Auto-detect settings
+# Autodetect compiler, OS, architecture, build type
 conan_cmake_autodetect(settings)
 
-# Make settings available to parent scope
-set(CONAN_SETTINGS ${settings} PARENT_SCOPE)
+# Make settings available to all subdirectories
+set(CONAN_SETTINGS ${settings} CACHE INTERNAL "Conan autodetected settings")
+```
+
+### C2. Alternative: Function-Based Wrapper (cmake/ConanIntegration.cmake)
+
+**Optional convenience wrapper around the raw per-module pattern. Use `include(ConanIntegration)` + `setup_conan()` in root, then `add_conan_dependencies()` in modules.**
+
+```cmake
+# cmake/ConanIntegration.cmake - Conan package management (wrapper)
+# Purpose: Convenience functions wrapping conan_cmake_configure/install
+
+function(setup_conan)
+    find_program(CONAN_CMD conan)
+    if(NOT CONAN_CMD)
+        message(WARNING "Conan not found, skipping Conan integration")
+        return()
+    endif()
+
+    if(NOT EXISTS "${CMAKE_BINARY_DIR}/conan.cmake")
+        file(DOWNLOAD
+            "https://raw.githubusercontent.com/conan-io/cmake-conan/0.18.1/conan.cmake"
+            "${CMAKE_BINARY_DIR}/conan.cmake"
+            TLS_VERIFY ON
+        )
+    endif()
+
+    include(${CMAKE_BINARY_DIR}/conan.cmake)
+    conan_cmake_autodetect(settings)
+    set(CONAN_SETTINGS ${settings} PARENT_SCOPE)
+    set(CONAN_AVAILABLE TRUE PARENT_SCOPE)
+endfunction()
+
+function(add_conan_dependencies)
+    cmake_parse_arguments(CONAN "" "" "REQUIRES" ${ARGN})
+
+    conan_cmake_configure(
+        REQUIRES ${CONAN_REQUIRES}
+        GENERATORS CMakeDeps CMakeToolchain
+    )
+
+    conan_cmake_install(
+        PATH_OR_REFERENCE .
+        BUILD missing
+        REMOTE conancenter
+        SETTINGS ${CONAN_SETTINGS}
+    )
+endfunction()
 ```
 
 ### D. Module CMakeLists.txt Pattern
 ```cmake
-# ✅ CORRECT - Module with Conan dependencies
+# ✅ CORRECT - Module with per-module Conan dependencies (PRIMARY pattern from conan.md)
 # src/parser/CMakeLists.txt
 cmake_minimum_required(VERSION 3.15)
 project(parser CXX)
 
-# Ensure module path is set
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_BINARY_DIR})
-list(APPEND CMAKE_PREFIX_PATH ${CMAKE_BINARY_DIR})
+# Set module-local paths for Conan-generated config files
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_BINARY_DIR})
+list(APPEND CMAKE_PREFIX_PATH ${CMAKE_CURRENT_BINARY_DIR})
 
-# Configure Conan dependencies for this module
+# Declare and install THIS MODULE's Conan dependencies
 conan_cmake_configure(
-    REQUIRES
-        fmt/10.2.0
-        spdlog/1.12.0
+    REQUIRES fmt/10.2.0 spdlog/1.12.0
     GENERATORS CMakeDeps CMakeToolchain
 )
-
-# Install dependencies
 conan_cmake_install(
     PATH_OR_REFERENCE .
     BUILD missing
@@ -1873,7 +1938,7 @@ conan_cmake_install(
     SETTINGS ${CONAN_SETTINGS}
 )
 
-# Find packages
+# Find packages (Conan generates CMake config files)
 find_package(fmt REQUIRED)
 find_package(spdlog REQUIRED)
 
@@ -2476,23 +2541,15 @@ project(network CXX)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_BINARY_DIR})
 list(APPEND CMAKE_PREFIX_PATH ${CMAKE_BINARY_DIR})
 
-# Conan dependencies
-conan_cmake_configure(
+# Conan dependencies (via cmake/ConanIntegration.cmake)
+add_conan_dependencies(
     REQUIRES
         asio/1.28.0
         openssl/3.1.4
         fmt/10.2.0
-    GENERATORS CMakeDeps CMakeToolchain
 )
 
-conan_cmake_install(
-    PATH_OR_REFERENCE .
-    BUILD missing
-    REMOTE conancenter
-    SETTINGS ${CONAN_SETTINGS}
-)
-
-# Find packages
+# Find packages (Conan generates CMake config files)
 find_package(asio REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(fmt REQUIRED)
@@ -2547,19 +2604,11 @@ project(myapp CXX)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_BINARY_DIR})
 list(APPEND CMAKE_PREFIX_PATH ${CMAKE_BINARY_DIR})
 
-# Conan dependencies (CLI-specific)
-conan_cmake_configure(
+# Conan dependencies (CLI-specific, via cmake/ConanIntegration.cmake)
+add_conan_dependencies(
     REQUIRES
         cli11/2.3.2
         spdlog/1.12.0
-    GENERATORS CMakeDeps CMakeToolchain
-)
-
-conan_cmake_install(
-    PATH_OR_REFERENCE .
-    BUILD missing
-    REMOTE conancenter
-    SETTINGS ${CONAN_SETTINGS}
 )
 
 find_package(CLI11 REQUIRED)
@@ -2602,18 +2651,10 @@ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 
 set(target core_tests)
 
-# Conan test dependencies
-conan_cmake_configure(
+# Conan test dependencies (via cmake/ConanIntegration.cmake)
+add_conan_dependencies(
     REQUIRES
         gtest/1.15.0
-    GENERATORS CMakeDeps CMakeToolchain
-)
-
-conan_cmake_install(
-    PATH_OR_REFERENCE .
-    BUILD missing
-    REMOTE conancenter
-    SETTINGS ${CONAN_SETTINGS}
 )
 
 find_package(GTest REQUIRED)
@@ -3002,18 +3043,10 @@ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 
 set(target parser_tests)
 
-# Conan dependencies for testing
-conan_cmake_configure(
+# Conan dependencies for testing (via cmake/ConanIntegration.cmake)
+add_conan_dependencies(
     REQUIRES
         gtest/1.15.0
-    GENERATORS CMakeDeps CMakeToolchain
-)
-
-conan_cmake_install(
-    PATH_OR_REFERENCE .
-    BUILD missing
-    REMOTE conancenter
-    SETTINGS ${CONAN_SETTINGS}
 )
 
 # Find GTest package
@@ -3553,7 +3586,7 @@ echo "✅ All validation checks passed!"
 
 3. **Doxygen + API Documentation**: Auto-generated documentation from code, always in sync, reduces onboarding time by 40%+, better IDE IntelliSense, enables API discoverability. Documentation as code ensures it never becomes outdated.
 
-4. **Conan in CMake**: Single command build, reproducible builds, dependency isolation per module, no manual dependency management.
+4. **Decentralized per-module Conan** (via `cmake/conan/CMakeLists.txt` bootstrap + per-module `conan_cmake_configure()`/`conan_cmake_install()`): Single command build (`cmake -B build && cmake --build build`), reproducible builds, dependency isolation per module, no centralized dependency files. CMake is the single orchestrator — no standalone `conan install` steps. See conan.md for the full pattern.
 
 5. **Modular Structure**: Small files, clear responsibilities, easy testing, parallel builds.
 
@@ -3575,7 +3608,7 @@ echo "✅ All validation checks passed!"
 
 14. **Mandatory Testing with GTest**: Industry-standard framework, excellent IDE integration, parameterized tests, mock support. CTest integration enables running tests as part of the build process and CI/CD pipelines. Tests catch regressions before they reach production.
 
-15. **Per-Module Testing**: Each module manages its own test dependencies through Conan, enabling independent testing and parallel test execution.
+15. **Per-Module Dependencies**: Each module manages its own Conan dependencies via `conan_cmake_configure()` + `conan_cmake_install()` directly in its `CMakeLists.txt` (or the `add_conan_dependencies()` wrapper), enabling independent testing and parallel test execution. No centralized dependency file — dependencies live where they are used.
 
 ---
 
@@ -3600,9 +3633,10 @@ clang-tidy src/**/*.cpp --fix
 doxygen Doxyfile
 cmake --build build --target docs
 
-# Conan dependencies
-conan install . --build=missing
-conan lock create .
+# Conan dependencies (handled automatically by CMake via cmake/conan/ bootstrap)
+# No manual conan install needed — CMake drives everything
+# No conanfile.txt or conanfile.py — each module declares its own deps
+conan audit scan .  # Security scan for CVEs in dependencies
 ```
 
 ### CMakeLists.txt Template
@@ -3652,13 +3686,19 @@ auto [key, value] = std::pair{1, "one"};
 
 ```
 my_project/
-├── CMakeLists.txt
-├── conanfile.txt
-├── include/
-│   └── myproject/
-│       └── *.hpp
+├── CMakeLists.txt              # Root: bootstraps Conan, adds subdirectories
+├── cmake/
+│   └── conan/
+│       └── CMakeLists.txt      # Conan bootstrap (downloads conan.cmake)
 ├── src/
-│   └── *.cpp
+│   ├── core/
+│   │   ├── CMakeLists.txt      # Core lib + its own Conan deps
+│   │   ├── include/core/
+│   │   └── src/
+│   └── parser/
+│       ├── CMakeLists.txt      # Parser lib + its own Conan deps
+│       ├── include/parser/
+│       └── src/
 ├── tests/
 │   └── test_*.cpp
 └── docs/

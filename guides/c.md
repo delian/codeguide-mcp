@@ -515,12 +515,16 @@ project/
 ├── docs/                         # Documentation
 │   └── Doxyfile
 ├── cmake/                        # CMake modules
+│   ├── DependencyManagement.cmake  # Dependency resolution (priority order)
+│   ├── ConanIntegration.cmake      # Conan setup (auto-downloads conan.cmake)
 │   ├── CompilerWarnings.cmake
 │   └── Sanitizers.cmake
 ├── CMakeLists.txt                # Primary build system
 ├── CMakePresets.json              # CMake presets (dev, release, sanitize)
 ├── Makefile                      # Convenience wrapper / alternative build
-├── conanfile.txt                 # Conan dependencies (if using Conan)
+├── cmake/
+│   └── conan/
+│       └── CMakeLists.txt        # Conan bootstrap (downloads conan.cmake)
 ├── .clang-format                 # Code formatting rules
 ├── .clang-tidy                   # Static analysis rules
 └── README.md
@@ -1422,21 +1426,106 @@ if (count > SIZE_MAX / sizeof(*arr)) {
 arr = malloc(count * sizeof(*arr));
 ```
 
-### C. Dependency Management Strategy
+### C. Dependency Management Strategy (STRICT ORDER)
 
-**Dependency priority order:**
+**CMake is the single tool orchestrating ALL dependency management** (as defined in cmake.md and conan.md). Conan is bootstrapped and invoked automatically from within CMake — the user never runs `conan install` or maintains external dependency files (`conanfile.txt`, `conanfile.py`). Each module manages its own Conan dependencies independently via `conan_cmake_configure()` + `conan_cmake_install()` in its own `CMakeLists.txt`.
 
-1. **C Standard Library** — always prefer `<stdlib.h>`, `<string.h>`, `<stdio.h>`, etc.
-2. **Conan 2.x** — for well-known C libraries (OpenSSL, zlib, sqlite3, cJSON, etc.)
-3. **System packages** — `pkg-config` based dependencies
-4. **CMake FetchContent** — for header-only or small libraries from Git
-5. **Vendored source** — copy into `vendor/` as last resort (pin version, track upstream)
+**Dependency Resolution Priority (MANDATORY):**
 
-```bash
-# Conan: install dependencies
-conan install . --output-folder=build --build=missing
+#### 1. **C Standard Library** — ALWAYS prefer first
+- `<stdlib.h>`, `<string.h>`, `<stdio.h>`, `<stdint.h>`, etc.
+- No external dependency needed for standard functionality.
 
-# CMake FetchContent example (CMakeLists.txt)
+#### 2. **PRIMARY: Conan Packages (conan-center)** ⭐ PREFERRED
+- **ALWAYS check Conan first**: Search https://conan.io/center/
+- Use official Conan packages from conan-center
+- Specify exact version numbers
+- **Conan MUST be used from within CMake** — each module calls `conan_cmake_configure()` + `conan_cmake_install()` directly in its own `CMakeLists.txt` (see conan.md for full pattern)
+- Example: `openssl/3.2.0`, `zlib/1.3.1`, `sqlite3/3.45.0`, `cjson/1.7.17`
+
+```cmake
+# ✅ CORRECT - Per-module Conan dependencies (PRIMARY pattern from conan.md)
+# Each module's CMakeLists.txt declares its own dependencies independently
+
+# Set module-local paths for Conan-generated files
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_BINARY_DIR})
+list(APPEND CMAKE_PREFIX_PATH ${CMAKE_CURRENT_BINARY_DIR})
+
+# Declare and install this module's Conan dependencies
+conan_cmake_configure(
+    REQUIRES openssl/3.2.0 zlib/1.3.1 cjson/1.7.17
+    GENERATORS CMakeDeps CMakeToolchain
+)
+conan_cmake_install(
+    PATH_OR_REFERENCE .
+    BUILD missing
+    REMOTE conancenter
+    SETTINGS ${CONAN_SETTINGS}
+)
+
+# Then use standard CMake find_package (Conan generates config files)
+find_package(OpenSSL REQUIRED)
+find_package(ZLIB REQUIRED)
+find_package(cJSON REQUIRED)
+target_link_libraries(${PROJECT_NAME} PRIVATE OpenSSL::SSL ZLIB::ZLIB cjson::cjson)
+```
+
+> **Alternative**: The `add_conan_dependencies()` wrapper from `cmake/ConanIntegration.cmake` is also acceptable — it wraps the above calls into a convenience function. See conan.md for both patterns.
+
+#### Conan Bootstrap (cmake/conan/CMakeLists.txt)
+
+**PRIMARY pattern (from conan.md). Bootstraps Conan once via `add_subdirectory(cmake/conan)` in the root CMakeLists.txt.**
+
+```cmake
+# cmake/conan/CMakeLists.txt - Conan Bootstrap
+# Purpose: Download conan.cmake and autodetect settings ONCE.
+#          All modules then use conan_cmake_configure() / conan_cmake_install()
+#          independently in their own CMakeLists.txt.
+
+cmake_minimum_required(VERSION 3.15)
+
+# Download conan.cmake if not already cached
+if(NOT EXISTS "${CMAKE_BINARY_DIR}/conan.cmake")
+    message(STATUS "Downloading conan.cmake from https://github.com/conan-io/cmake-conan")
+    file(DOWNLOAD
+        "https://raw.githubusercontent.com/conan-io/cmake-conan/0.18.1/conan.cmake"
+        "${CMAKE_BINARY_DIR}/conan.cmake"
+        TLS_VERIFY ON
+    )
+endif()
+
+include(${CMAKE_BINARY_DIR}/conan.cmake)
+
+# Autodetect compiler, OS, architecture, build type
+conan_cmake_autodetect(settings)
+
+# Make settings available to all subdirectories
+set(CONAN_SETTINGS ${settings} CACHE INTERNAL "Conan autodetected settings")
+```
+
+#### 3. **SECONDARY: System Packages** (Only if not in Conan)
+- **Use ONLY if package is NOT available in Conan**
+- `pkg-config` or `find_package()` based dependencies
+- Platform-specific package managers:
+  - **Ubuntu/Debian**: `apt` (e.g., `libssl-dev`)
+  - **Fedora/RHEL**: `dnf`/`yum`
+  - **macOS**: `brew`
+
+```cmake
+# ✅ CORRECT - System package (only if not in Conan)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(SYSTEMD REQUIRED libsystemd)
+target_link_libraries(${PROJECT_NAME} PRIVATE ${SYSTEMD_LIBRARIES})
+```
+
+#### 4. **TERTIARY: Other Methods** (Last Resort Only)
+- **Use ONLY if package is in neither Conan nor system packages**
+- Options (in preference order):
+  1. CMake FetchContent (for small libraries from Git)
+  2. Vendored source — copy into `vendor/` (pin version, track upstream)
+
+```cmake
+# ⚠️ LAST RESORT - FetchContent (only if unavailable elsewhere)
 include(FetchContent)
 FetchContent_Declare(
     cjson
@@ -1445,6 +1534,46 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(cjson)
 ```
+
+### Dependency Decision Tree
+
+```
+Need dependency "X"?
+│
+├─> In C Standard Library? ✅ USE STDLIB (no dependency needed)
+│
+├─> Search Conan (conan.io/center)
+│   ├─> Found? ✅ USE CONAN (per-module conan_cmake_configure/install)
+│   │   └─> Add to conan_cmake_configure(REQUIRES X/version ...) in the module's CMakeLists.txt
+│   │
+│   └─> Not Found? ⤵️
+│       │
+│       └─> Search system packages (apt/dnf/brew/pkg-config)
+│           ├─> Found? ⚠️ USE SYSTEM PACKAGE
+│           │   └─> Add find_package(X REQUIRED) or pkg_check_modules()
+│           │   └─> Document in README that users need to install system package
+│           │
+│           └─> Not Found? ⛔ LAST RESORT
+│               └─> Use FetchContent or vendor the source
+│               └─> Document why Conan/system wasn't used
+```
+
+### Prohibited Practices
+
+❌ **NEVER do these**:
+- Running `conan install` outside of CMake as a separate manual step — CMake is the single orchestrator
+- Maintaining a centralized `conanfile.txt` or `conanfile.py` — dependencies live in each module's `CMakeLists.txt`
+- Copy-pasting library source code into your project without vendoring properly
+- Committing compiled binaries (`.a`, `.so`, `.dll`) to version control
+- Using random GitHub repositories without version tags
+- Hardcoding library paths (e.g., `/usr/local/lib/libfoo.a`)
+
+✅ **ALWAYS do these**:
+- Use per-module `conan_cmake_configure()` + `conan_cmake_install()` in each module's `CMakeLists.txt` (or the `add_conan_dependencies()` wrapper)
+- Bootstrap Conan via `add_subdirectory(cmake/conan)` in the root `CMakeLists.txt` (see conan.md)
+- Pin exact version numbers
+- Document which dependencies come from where
+- Test on a clean system (Docker) to verify dependencies
 
 ### D. Vulnerability Scanning
 
@@ -1591,6 +1720,13 @@ project(myproject VERSION 1.0.0 LANGUAGES C)
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
+
+# ── CMake Modules (following cmake.md pattern) ────────────────────────
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
+
+# Bootstrap Conan (downloads conan.cmake, autodetects settings)
+# Makes conan_cmake_configure/conan_cmake_install available to all modules
+add_subdirectory(cmake/conan)
 
 # ── Compiler Warnings ──────────────────────────────────────────────────
 add_compile_options(
@@ -1808,7 +1944,7 @@ release:
 - Strict compiler flags (`-Wall -Wextra -Werror -Wpedantic -Wshadow -Wconversion`) combined with `static_assert`, `clang-tidy`, and `cppcheck` catch entire categories of bugs at compile time rather than runtime.
 
 **Reproducible Builds**:
-- CMake Presets, Conan lockfiles, and pinned dependency versions ensure every developer and CI system produces identical builds. No "works on my machine" failures.
+- CMake Presets, Conan lockfiles, and pinned dependency versions ensure every developer and CI system produces identical builds. CMake is the single orchestrator via `cmake/conan/CMakeLists.txt` bootstrap + per-module `conan_cmake_configure()`/`conan_cmake_install()` — no standalone `conan install` steps, no centralized dependency files. No "works on my machine" failures. See conan.md for the full pattern.
 
 ---
 
