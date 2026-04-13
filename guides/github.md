@@ -2876,7 +2876,111 @@ Thank you for contributing! 🎉
 
 ---
 
-## 7. Deployment Checklist
+## 7. Security & Dependency Management (MANDATORY)
+
+### A. Infrastructure Security Scanning
+
+```yaml
+# Dependabot configuration - .github/dependabot.yml
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    reviewers:
+      - "security-team"
+    labels:
+      - "dependencies"
+    open-pull-requests-limit: 10
+    groups:
+      dev-dependencies:
+        dependency-type: "development"
+      production-dependencies:
+        dependency-type: "production"
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+```
+
+```yaml
+# GitHub Advanced Security - CodeQL analysis workflow
+# .github/workflows/codeql.yml
+name: CodeQL Analysis
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * 1'  # Weekly Monday 6am
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    strategy:
+      matrix:
+        language: ['javascript', 'python']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: +security-and-quality
+      - uses: github/codeql-action/analyze@v3
+```
+
+### B. Vulnerability Scanning
+
+```bash
+# Query security alerts via gh CLI
+gh api repos/{owner}/{repo}/dependabot/alerts --jq '.[] | select(.state=="open") | {package: .dependency.package.name, severity: .security_advisory.severity}'
+gh api repos/{owner}/{repo}/code-scanning/alerts --jq '.[] | select(.state=="open") | {rule: .rule.id, severity: .rule.security_severity_level}'
+
+# Secret scanning alerts
+gh api repos/{owner}/{repo}/secret-scanning/alerts --jq '.[] | select(.state=="open") | {type: .secret_type, created: .created_at}'
+
+# List all security advisories
+gh api repos/{owner}/{repo}/security-advisories
+```
+
+### C. Policy & Compliance
+
+```yaml
+# Branch protection - enforce via gh CLI or API
+# Require PR reviews, status checks, and signed commits
+gh api repos/{owner}/{repo}/branches/main/protection -X PUT -f '{
+  "required_status_checks": {"strict": true, "contexts": ["ci/test", "ci/lint", "CodeQL"]},
+  "required_pull_request_reviews": {"required_approving_review_count": 2, "dismiss_stale_reviews": true},
+  "enforce_admins": true,
+  "required_signatures": true,
+  "restrictions": null
+}'
+
+# Rulesets (modern replacement for branch protection)
+gh api repos/{owner}/{repo}/rulesets -X POST --input ruleset.json
+
+# Security policy - SECURITY.md in repository root
+# Define vulnerability reporting process and supported versions
+```
+
+```bash
+# Enable security features for the repository
+gh api repos/{owner}/{repo} -X PATCH -f security_and_analysis='{"secret_scanning":{"status":"enabled"},"secret_scanning_push_protection":{"status":"enabled"}}'
+```
+
+---
+
+## 8. Deployment Checklist
 
 ### Repository Setup
 - [ ] **README.md**: Comprehensive with badges
@@ -2952,7 +3056,7 @@ Thank you for contributing! 🎉
 
 ---
 
-## 8. Why This Configuration Works
+## 9. Why This Configuration Works
 
 1. **TDD Enforcement**: Automated workflows verify tests exist and pass, preventing bugs.
 2. **Regression Shield**: Bug fixes require tests, building safety net over time.

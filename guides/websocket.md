@@ -1345,6 +1345,20 @@ ws.close(1000, 'reason');
 
 ---
 
+## 10. Why This Configuration Works
+
+1. **Token-Based Authentication on Upgrade**: Authenticating during the HTTP upgrade handshake rather than after connection establishment prevents unauthorized clients from consuming server resources. Rejecting invalid tokens before the WebSocket is opened eliminates an entire class of abuse vectors.
+
+2. **Heartbeat with Ping/Pong Frames**: Regular ping/pong exchanges detect dead connections that the TCP stack has not yet noticed (half-open connections). This prevents resource leaks from zombie connections and allows clients to implement automatic reconnection.
+
+3. **Structured Message Protocol with Type Fields**: Using a consistent message envelope with `type`, `payload`, and `id` fields enables multiplexing multiple logical channels over a single WebSocket, correlating requests with responses, and implementing reliable delivery through message acknowledgment.
+
+4. **Exponential Backoff for Reconnection**: Reconnecting with exponential backoff and jitter prevents thundering herd problems where all clients reconnect simultaneously after a server restart, which would create a load spike that crashes the server again.
+
+5. **Redis Pub/Sub for Multi-Node Scaling**: Publishing messages through Redis rather than maintaining in-process subscriber lists allows horizontal scaling across multiple server nodes. Any node can accept a connection and deliver messages published by any other node.
+
+---
+
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** Platform Team

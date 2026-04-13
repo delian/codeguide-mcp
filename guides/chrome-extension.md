@@ -1818,5 +1818,66 @@ it("should handle storage", async () => {
 
 **Remember**: Minimalistic, clean, readable, well-documented, secure Chrome extension code with hexagonal architecture, Manifest V3, TypeScript strict mode, comprehensive testing, TDD, and focus on performance and portability. Test first, fix bugs with regression tests, keep it simple, keep it secure, keep it working.
 
+---
+
+## 14. Deployment Checklist
+
+### Code Quality
+- [ ] TypeScript strict mode enabled, no `any` types
+- [ ] All ESLint rules pass with zero warnings
+- [ ] Code formatted with Prettier
+- [ ] Build succeeds without errors (`npm run build`)
+- [ ] All unit tests pass (`npm test`) with 80%+ coverage
+
+### Manifest V3 Compliance
+- [ ] `manifest_version` set to `3`
+- [ ] Permissions follow least privilege (no `<all_urls>` unless essential)
+- [ ] Host permissions separated from API permissions
+- [ ] Content Security Policy defined and restrictive
+- [ ] Service worker registered (no persistent background pages)
+
+### Chrome Web Store Preparation
+- [ ] Extension icons provided (16x16, 48x48, 128x128)
+- [ ] Store listing screenshots prepared (1280x800 or 640x400)
+- [ ] Privacy policy URL included
+- [ ] Description and category selected
+- [ ] Version number incremented following semver
+
+### Security
+- [ ] No inline scripts or `eval()` usage
+- [ ] External API calls use HTTPS only
+- [ ] User data stored via `chrome.storage` (not localStorage)
+- [ ] Sensitive data never logged to console
+- [ ] Content scripts scoped to minimum required domains
+
+### Performance
+- [ ] Bundle size minimized (tree-shaking, code splitting)
+- [ ] Service worker activates and deactivates efficiently
+- [ ] No unnecessary background alarms or persistent connections
+- [ ] Content scripts use `run_at: "document_idle"` by default
+
+---
+
+## 15. Why This Configuration Works
+
+1. **Manifest V3 Architecture**: The service worker model replaces persistent background pages, reducing memory usage by 50-80% when the extension is idle.
+
+2. **TypeScript Strict Mode**: Catching null/undefined errors, implicit any types, and unused variables at compile time eliminates entire categories of runtime bugs.
+
+3. **Hexagonal Architecture for Extensions**: Separating Chrome API adapters from core logic enables unit testing business rules without mocking browser APIs.
+
+4. **Least Privilege Permissions**: Requesting only `activeTab` instead of broad host permissions builds user trust and passes Chrome Web Store review faster.
+
+5. **Content Security Policy**: Disallowing inline scripts and `eval()` prevents XSS attacks even if an attacker injects content into the extension context.
+
+6. **chrome.storage over localStorage**: The storage API syncs across devices, survives extension updates, and is accessible from service workers where localStorage is unavailable.
+
+7. **Service Worker Lifecycle**: Designing for ephemeral activation (start, handle event, terminate) forces stateless patterns that are inherently more robust.
+
+8. **TDD for Extension Logic**: Writing tests before implementation catches messaging protocol errors and state management bugs before loading the extension in the browser.
+
+9. **Automated Build Pipeline**: Webpack/Vite bundling with TypeScript compilation produces optimized, minified output that reduces load time and review time.
+
+10. **Message Passing Pattern**: Using `chrome.runtime.sendMessage` between contexts (popup, content script, service worker) provides clean separation with typed contracts.
 
 **End of Modern Chrome Extension Development Guidelines**

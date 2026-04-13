@@ -97,6 +97,155 @@ int main() {
 - Sub-microsecond operations possible
 - Single-process data integrity
 
+## 2A. TDD Protocol (Red-Green-Refactor)
+
+EVERY new feature or module MUST follow the Red-Green-Refactor cycle. No production code without a failing test first.
+
+### Workflow
+
+1. **RED** -- Write a failing test that defines the expected behavior.
+2. **GREEN** -- Write the minimum production code to make the test pass.
+3. **REFACTOR** -- Clean up while keeping tests green.
+
+### Concrete Example -- Testing Key-Value Put/Get with Column Families
+
+**Step 1 -- RED (Python with `python-rocksdb`):**
+
+```python
+# test_rocksdb_kv.py
+import rocksdb
+import tempfile, os, pytest
+
+@pytest.fixture
+def db_with_cf(tmp_path):
+    """Open a RocksDB instance with a custom column family."""
+    opts = rocksdb.Options()
+    opts.create_if_missing = True
+    db_path = str(tmp_path / "testdb")
+    # Create the DB and a column family
+    db = rocksdb.DB(db_path, opts)
+    db.close()
+    db = rocksdb.DB(db_path, opts, column_families={
+        b"default": rocksdb.ColumnFamilyOptions(),
+        b"metrics": rocksdb.ColumnFamilyOptions(),
+    })
+    yield db
+    db.close()
+
+def test_put_get_default_cf(db_with_cf):
+    """Key written to default CF is retrievable."""
+    db = db_with_cf
+    db.put(b"sensor:001", b"temperature=22.5")
+    assert db.get(b"sensor:001") == b"temperature=22.5"
+
+def test_put_get_named_cf(db_with_cf):
+    """Key written to 'metrics' CF is isolated from default CF."""
+    db = db_with_cf
+    cf = db.get_column_family(b"metrics")
+    db.put((cf, b"latency:p99"), b"12ms")
+    # Readable from the metrics CF
+    assert db.get((cf, b"latency:p99")) == b"12ms"
+    # NOT visible in default CF
+    assert db.get(b"latency:p99") is None
+```
+
+**Step 2 -- GREEN (C++ implementation sketch):**
+
+```cpp
+// Minimal production wrapper ensuring CF isolation
+#include <rocksdb/db.h>
+#include <rocksdb/options.h>
+
+rocksdb::Status OpenWithColumnFamilies(
+    const std::string& path,
+    rocksdb::DB** db,
+    std::vector<rocksdb::ColumnFamilyHandle*>& handles) {
+  rocksdb::Options options;
+  options.create_if_missing = true;
+  // First open to create CF if needed
+  std::vector<rocksdb::ColumnFamilyDescriptor> cfs = {
+    {rocksdb::kDefaultColumnFamilyName, rocksdb::ColumnFamilyOptions()},
+    {"metrics", rocksdb::ColumnFamilyOptions()},
+  };
+  return rocksdb::DB::Open(rocksdb::DBOptions(options), path, cfs, &handles, db);
+}
+```
+
+**Step 3 -- REFACTOR:**
+
+- Extract fixture into a shared `conftest.py`.
+- Parameterize across column family names.
+- Add teardown that verifies DB closes cleanly.
+
+### TDD Rules for RocksDB
+
+- Test at the **embedded library level** -- no network mocks needed.
+- Use `tmp_path` (pytest) or `std::filesystem::temp_directory_path` for isolated DB directories.
+- Always close the DB in teardown to avoid lock-file leaks.
+- Test compaction behavior by writing enough keys to trigger flushes.
+- Cover both C++ (`rocksdb::Status`) and Python (`python-rocksdb`) APIs when the project uses both.
+
+---
+
+## 2B. Bug Fix Protocol (Regression Testing)
+
+EVERY bug fix MUST include a regression test that fails before the fix and passes after.
+
+### Workflow
+
+1. **Reproduce** -- Write a test that triggers the exact bug.
+2. **Verify RED** -- Confirm the test fails on the current code.
+3. **Fix** -- Apply the minimal code change.
+4. **Verify GREEN** -- Confirm the test (and all others) pass.
+5. **Document** -- Reference the bug/ticket in the test docstring.
+
+### Concrete Example -- Stale Read After Compaction
+
+**Bug report:** After manual compaction, deleted keys occasionally return stale values because the application reads from a snapshot taken before compaction.
+
+**Step 1 -- Regression test:**
+
+```python
+# test_bug_stale_read_after_compaction.py
+import rocksdb
+import pytest
+
+@pytest.fixture
+def db(tmp_path):
+    opts = rocksdb.Options()
+    opts.create_if_missing = True
+    db = rocksdb.DB(str(tmp_path / "bugdb"), opts)
+    yield db
+    db.close()
+
+def test_deleted_key_absent_after_compaction(db):
+    """Regression: BUG-4821 -- deleted key must not reappear after compaction."""
+    # Setup: write and then delete
+    db.put(b"temp:key", b"old_value")
+    db.delete(b"temp:key")
+
+    # Force compaction
+    db.compact_range()
+
+    # The key MUST be gone -- no stale reads
+    assert db.get(b"temp:key") is None
+```
+
+**Step 2 -- Verify the test fails** (reproduces the bug on the broken branch).
+
+**Step 3 -- Fix** (ensure snapshot is refreshed after compaction in application code).
+
+**Step 4 -- Verify GREEN** -- all tests pass including the new regression test.
+
+### Regression Test Rules for RocksDB
+
+- Name test files `test_bug_<description>.py` or `test_regression_<ticket>.py`.
+- Include the ticket/issue number in the docstring.
+- Regression tests are NEVER deleted -- they guard against re-introduction.
+- Cover edge cases: empty DB, single-key DB, max-size values, concurrent writers.
+
+---
+
 ## 3. Installation and Setup
 
 ### C++ Installation
@@ -2486,6 +2635,97 @@ g++ -std=c++17 -O3 example.cpp -lrocksdb -lpthread -ldl -lz -lsnappy -llz4 -lzst
 ```
 
 This guide covers the essential aspects of RocksDB with emphasis on modern C++ practices, security, and performance optimization for production deployments.
+
+---
+
+## 22. Deployment Checklist
+
+### Build and Compilation
+- [ ] RocksDB version pinned in build configuration
+- [ ] Compiled with optimizations enabled (`-O2` or `-O3`)
+- [ ] Compression libraries linked (snappy, zlib, lz4, zstd)
+- [ ] Static analysis and sanitizers run (ASan, TSan, UBSan)
+- [ ] Platform-specific optimizations enabled (SSE4.2, AVX2 if available)
+- [ ] `make check` or equivalent test suite passes
+
+### Testing
+- [ ] `db_bench` benchmarks run with production-like workload
+- [ ] Write amplification measured and within acceptable range
+- [ ] Compaction throughput tested under sustained write load
+- [ ] Read latency profiled at p50, p95, p99
+- [ ] Crash recovery tested (kill -9 and restart)
+- [ ] Backup and restore tested with `BackupEngine` or `Checkpoint`
+
+### Security
+- [ ] File permissions restrict database directory access
+- [ ] Encryption at rest configured if required (`EncryptedEnv`)
+- [ ] No sensitive data in RocksDB LOG files
+- [ ] WAL directory on same secure storage as SST files
+- [ ] Backup files encrypted and access-controlled
+
+### Agent Workflow
+- [ ] Column family configuration documented and version-controlled
+- [ ] Compaction tuning parameters documented with rationale
+- [ ] Monitoring integrated for compaction stats, stall conditions, and cache hit rates
+- [ ] Automated backup schedule configured
+- [ ] Runbooks for compaction stalls, space amplification, and recovery procedures
+
+---
+
+## 23. Why This Configuration Works
+
+**LSM-Tree Write Optimization**:
+- The log-structured merge-tree design converts random writes into sequential I/O through memtable buffering and background compaction, delivering consistently high write throughput even on SSDs.
+
+**Tunable Compaction Strategies**:
+- Choosing between leveled, universal, and FIFO compaction allows precise control over the trade-off between write amplification, space amplification, and read amplification for each workload.
+
+**Column Family Isolation**:
+- Separate column families enable different tuning parameters (compression, compaction, cache allocation) for different data types within the same database, optimizing resource usage.
+
+**Block Cache and Bloom Filters**:
+- LRU block cache reduces disk reads for hot data, while bloom filters eliminate unnecessary SST file reads for point lookups, reducing read amplification significantly.
+
+**Prefix and Whole-Key Bloom Filters**:
+- Configurable bloom filters at both the prefix and whole-key level enable efficient range scans and point lookups respectively, adapting to diverse access patterns within the same deployment.
+
+---
+
+## 24. Quick Reference
+
+### Common Commands
+
+```bash
+# Build RocksDB from source
+mkdir -p build && cd build && cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)
+
+# Run benchmarks
+./db_bench --benchmarks="fillrandom,readrandom,readseq" --num=1000000 --db=/tmp/rocksdb_bench
+
+# Inspect SST files
+sst_dump --file=/path/to/sst_file --command=scan --output_hex
+
+# Use ldb to inspect database
+ldb --db=/path/to/db scan --max_keys=10
+ldb --db=/path/to/db get key1
+ldb --db=/path/to/db approx_size
+
+# List column families
+ldb --db=/path/to/db list_column_families
+
+# Dump WAL files
+ldb --db=/path/to/db dump_wal --walfile=/path/to/wal
+
+# Check database consistency
+ldb --db=/path/to/db checkconsistency
+
+# Compact database manually
+ldb --db=/path/to/db compact
+
+# Get database properties
+ldb --db=/path/to/db getproperty rocksdb.stats
+ldb --db=/path/to/db getproperty rocksdb.estimate-num-keys
+```
 
 ---
 

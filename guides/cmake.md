@@ -1747,7 +1747,102 @@ target_compile_features(core PUBLIC cxx_std_20)
 
 ---
 
-## 18. Quick Reference
+## 18. Security & Dependency Management (MANDATORY)
+
+### A. Infrastructure Security Scanning
+
+```cmake
+# Static analysis integration in CMake
+# cppcheck - general static analysis
+find_program(CPPCHECK cppcheck)
+if(CPPCHECK)
+    set(CMAKE_CXX_CPPCHECK
+        "${CPPCHECK}"
+        "--enable=warning,performance,portability"
+        "--suppress=missingIncludeSystem"
+        "--inline-suppr"
+        "--inconclusive"
+        "--error-exitcode=1"
+    )
+endif()
+
+# clang-tidy - LLVM static analyzer
+find_program(CLANG_TIDY clang-tidy)
+if(CLANG_TIDY)
+    set(CMAKE_CXX_CLANG_TIDY
+        "${CLANG_TIDY}"
+        "-checks=-*,bugprone-*,cert-*,clang-analyzer-*,concurrency-*,cppcoreguidelines-*,modernize-*,performance-*,readability-*"
+        "--warnings-as-errors=*"
+    )
+endif()
+```
+
+```bash
+# Run static analysis tools manually
+cppcheck --enable=all --error-exitcode=1 --suppress=missingIncludeSystem src/
+clang-tidy src/*.cpp -- -Iinclude/
+
+# flawfinder - security-focused C/C++ scanner
+flawfinder --minlevel=2 --error-level=4 src/
+flawfinder --columns --context --sarif src/ > flawfinder-report.sarif
+```
+
+### B. Vulnerability Scanning
+
+```bash
+# If using Conan package manager - audit dependencies
+conan audit scan .
+conan audit scan . --format json > audit-report.json
+
+# For vcpkg projects - check for known vulnerabilities manually
+# vcpkg does not have built-in audit; use OSV-Scanner instead
+osv-scanner --lockfile=vcpkg.json
+
+# Scan build artifacts and binaries
+trivy fs --scanners vuln .
+```
+
+### C. Policy & Compliance
+
+```cmake
+# AddressSanitizer - runtime memory error detection
+option(ENABLE_ASAN "Enable AddressSanitizer" OFF)
+if(ENABLE_ASAN)
+    add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address)
+endif()
+
+# UndefinedBehaviorSanitizer - runtime UB detection
+option(ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
+if(ENABLE_UBSAN)
+    add_compile_options(-fsanitize=undefined -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=undefined)
+endif()
+
+# ThreadSanitizer - data race detection
+option(ENABLE_TSAN "Enable ThreadSanitizer" OFF)
+if(ENABLE_TSAN)
+    add_compile_options(-fsanitize=thread)
+    add_link_options(-fsanitize=thread)
+endif()
+
+# Hardening flags for production builds
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    add_compile_options(
+        -D_FORTIFY_SOURCE=2      # Buffer overflow detection
+        -fstack-protector-strong  # Stack smashing protection
+        -fPIE                     # Position-independent executable
+    )
+    add_link_options(
+        -pie                      # Position-independent executable
+        -Wl,-z,relro,-z,now       # Full RELRO
+    )
+endif()
+```
+
+---
+
+## 19. Quick Reference
 
 ### Common Commands
 
@@ -2149,7 +2244,7 @@ gtest_discover_tests(test_core)
 
 ---
 
-## 19. Summary
+## 20. Summary
 
 **CRITICAL Requirements for All CMake Files:**
 
@@ -2179,5 +2274,64 @@ gtest_discover_tests(test_core)
 
 **Remember**: Minimalistic, modular, clean, portable CMake files with hexagonal architecture, everything driven from CMake, support for Ninja and Make, verbose/debug modes, and proper dependency management. Keep it simple, keep it clean, keep it working.
 
+---
+
+## 21. Deployment Checklist
+
+### Build Configuration
+- [ ] Minimum CMake version specified (`cmake_minimum_required`)
+- [ ] Project version defined in `project()` command
+- [ ] Release and Debug build types configured correctly
+- [ ] Compiler warnings enabled (`-Wall -Wextra -Wpedantic` or MSVC equivalents)
+- [ ] Position-independent code enabled for shared libraries
+
+### Dependencies
+- [ ] Conan (per-module) used as primary package manager
+- [ ] System packages used as fallback with `find_package()`
+- [ ] FetchContent used only as last resort
+- [ ] All dependency versions pinned and reproducible
+
+### Testing
+- [ ] CTest integration enabled with `enable_testing()`
+- [ ] Unit tests discoverable via `gtest_discover_tests()` or equivalent
+- [ ] Test targets build without errors
+- [ ] All tests pass (`ctest --output-on-failure`)
+- [ ] Code coverage target configured for CI
+
+### Installation
+- [ ] `install()` targets defined for all public components
+- [ ] CMake package config files generated for downstream consumers
+- [ ] `CMAKE_INSTALL_PREFIX` documented and tested
+- [ ] Component-based install separates Runtime/Development/Documentation
+
+### Cross-Platform
+- [ ] Builds succeed with both Ninja and Make generators
+- [ ] Windows (MSVC), Linux (GCC/Clang), macOS (AppleClang) tested
+- [ ] No platform-specific assumptions without generator expressions
+- [ ] CI pipeline validates all target platforms
+
+---
+
+## 22. Why This Configuration Works
+
+1. **Modern CMake Targets**: Using `target_*` commands instead of global variables (`include_directories`, `link_libraries`) scopes settings precisely and prevents unintended leakage between targets.
+
+2. **Ninja as Preferred Generator**: Ninja builds are 10-20% faster than Make due to parallel dependency resolution and minimal stat calls on incremental rebuilds.
+
+3. **Conan-First Dependency Management**: Conan provides hermetic, versioned C/C++ packages with prebuilt binaries, eliminating the "works on my machine" problem for native dependencies.
+
+4. **One CMakeLists.txt per Component**: Each library and executable has its own `CMakeLists.txt`, making the build graph modular and enabling independent development.
+
+5. **CTest Integration**: Native CTest support enables uniform test execution across all platforms, with JUnit XML output for CI pipeline integration.
+
+6. **Generator Expressions**: Using `$<CONFIG:Release>` and `$<PLATFORM_ID:Linux>` instead of `if()` blocks keeps configuration declarative and correct for multi-config generators.
+
+7. **Install and Export Support**: Generating `FooConfig.cmake` files allows downstream projects to consume libraries with a simple `find_package(Foo)`.
+
+8. **Verbose and Debug Modes**: `CMAKE_VERBOSE_MAKEFILE` and `--trace-expand` provide full build transparency for diagnosing configuration issues.
+
+9. **Incremental Prefix Numbering**: `001-network.cmake`, `002-compute.cmake` ordering prevents ambiguity in file processing order and simplifies code review.
+
+10. **Hexagonal Architecture Alignment**: Separating core logic, adapters, and ports into distinct CMake targets enforces architectural boundaries at the build system level.
 
 **End of Modern CMake Development Guidelines**

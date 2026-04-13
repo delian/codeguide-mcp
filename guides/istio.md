@@ -2521,4 +2521,65 @@ ISTIO VERIFICATION CHECKLIST:
 > "Use the managed Istio add-on on AKS. It's supported, automatically upgraded, and reduces operational burden."
 
 
+---
+
+## 13. Deployment Checklist
+
+### Mesh Installation
+- [ ] Istio version is current and supported (N-1 policy)
+- [ ] Control plane high availability configured (2+ istiod replicas)
+- [ ] Istio CNI plugin installed (eliminates init container privileges)
+- [ ] Resource limits set on istiod and sidecar proxies
+
+### Security
+- [ ] PeerAuthentication set to STRICT mTLS cluster-wide
+- [ ] Default-deny AuthorizationPolicy applied to all namespaces
+- [ ] Explicit allow policies for each service-to-service path
+- [ ] RequestAuthentication configured for external JWT validation
+- [ ] Egress traffic controlled via ServiceEntry (no open egress)
+
+### Traffic Management
+- [ ] Gateway configured with TLS certificates (auto-renewed)
+- [ ] Static IP assigned to ingress gateway
+- [ ] VirtualService routing rules defined for all services
+- [ ] DestinationRule circuit breakers configured
+- [ ] Retry policies with exponential backoff set
+- [ ] Timeout values defined for all routes
+
+### Observability
+- [ ] Distributed tracing enabled (Jaeger/Zipkin backend)
+- [ ] Prometheus scraping Istio metrics
+- [ ] Grafana dashboards for mesh traffic, latency, and errors
+- [ ] Access logging enabled on ingress gateway
+- [ ] Kiali installed for service mesh visualization
+
+### Platform-Specific
+- [ ] AKS: Managed Istio add-on enabled (or manual install documented)
+- [ ] EKS: NLB with Elastic IP configured for ingress
+- [ ] On-prem: MetalLB or equivalent load balancer configured
+
+---
+
+## 14. Why This Configuration Works
+
+1. **STRICT mTLS Everywhere**: Encrypting and authenticating all service-to-service traffic eliminates eavesdropping and spoofing without application code changes.
+
+2. **Deny-by-Default Authorization**: Starting with an empty AuthorizationPolicy that denies all traffic forces explicit allow rules, ensuring no unintended service access.
+
+3. **Static IP for Ingress**: Assigning a fixed IP to the ingress gateway enables stable DNS records, predictable firewall rules, and reliable external integrations.
+
+4. **Circuit Breakers with Outlier Detection**: Automatically ejecting unhealthy endpoints prevents cascading failures from propagating through the service mesh.
+
+5. **Sidecar Proxy Pattern**: Handling security, observability, and traffic management in the Envoy sidecar keeps application code free of cross-cutting infrastructure concerns.
+
+6. **Managed Istio on AKS**: Using the platform-managed add-on reduces operational burden with automatic upgrades, integrated monitoring, and Microsoft support.
+
+7. **Egress Control via ServiceEntry**: Restricting outbound traffic to declared external services prevents data exfiltration and catches unintended external dependencies.
+
+8. **Retry Policies with Budget**: Configuring retries with `perTryTimeout` and backoff improves reliability while retry budgets prevent retry storms from amplifying failures.
+
+9. **Canary Deployments via Traffic Splitting**: VirtualService weighted routing enables gradual rollouts with instant rollback by adjusting traffic percentages.
+
+10. **Observability without Code Changes**: Automatic metrics, traces, and access logs from Envoy proxies provide full visibility into mesh traffic with zero application instrumentation.
+
 **End of Istio Service Mesh Guidelines**

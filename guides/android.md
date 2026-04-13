@@ -71,6 +71,115 @@ app/
 
 ---
 
+## 2A. TDD Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### Red-Green-Refactor Cycle with JUnit 5 and Espresso
+
+```kotlin
+// ═══════════════════════════════════════════════════════════════
+// STEP 1: RED - Write failing test first
+// ═══════════════════════════════════════════════════════════════
+
+// test/ui/screens/home/HomeViewModelTest.kt
+@OptIn(ExperimentalCoroutinesApi::class)
+class HomeViewModelTest {
+
+    @get:Rule
+    val mainDispatcherRule = MainDispatcherRule()
+
+    private lateinit var viewModel: HomeViewModel
+    private val mockGetItems: GetItemsUseCase = mockk()
+    private val mockRefreshItems: RefreshItemsUseCase = mockk()
+
+    @Test
+    fun `loadItems sets loading state then shows items`() = runTest {
+        // Given
+        val items = listOf(Item(id = "1", title = "Test Item"))
+        every { mockGetItems() } returns flowOf(items)
+
+        // When
+        viewModel = HomeViewModel(mockGetItems, mockRefreshItems, SavedStateHandle())
+
+        // Then
+        viewModel.uiState.test {
+            val state = awaitItem()
+            assertThat(state.items).hasSize(1)
+            assertThat(state.items.first().title).isEqualTo("Test Item")
+            assertThat(state.isLoading).isFalse()
+        }
+    }
+}
+
+// Run: ./gradlew test
+// ❌ FAILS - ViewModel or UseCase doesn't exist yet
+
+// ═══════════════════════════════════════════════════════════════
+// STEP 2: GREEN - Write minimal implementation
+// ═══════════════════════════════════════════════════════════════
+
+// Implement GetItemsUseCase and HomeViewModel to make the test pass
+
+// Run: ./gradlew test
+// ✅ PASSES - all tests pass
+
+// ═══════════════════════════════════════════════════════════════
+// STEP 3: REFACTOR - Add error handling, improve while tests stay green
+// ═══════════════════════════════════════════════════════════════
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow Example
+
+```kotlin
+// ═══════════════════════════════════════════════════════════════
+// Bug Report #456: HomeScreen crashes when refresh returns empty
+// list after previously showing items (NPE in ItemList composable)
+// ═══════════════════════════════════════════════════════════════
+
+// STEP 1: Write test that reproduces the bug
+// test/ui/screens/home/HomeViewModelTest.kt
+
+@Test
+fun `refresh with empty result shows empty state not crash - Bug #456`() = runTest {
+    // Bug: Refreshing when items existed caused NPE in ItemList
+    // Discovered: 2026-03-20
+    // Root cause: State not updated to empty list after refresh
+
+    val itemsFlow = MutableStateFlow(listOf(Item(id = "1", title = "Old")))
+    every { mockGetItems() } returns itemsFlow
+    coEvery { mockRefreshItems() } coAnswers {
+        itemsFlow.value = emptyList()
+        Result.success(Unit)
+    }
+
+    viewModel = HomeViewModel(mockGetItems, mockRefreshItems, SavedStateHandle())
+    viewModel.refresh()
+
+    viewModel.uiState.test {
+        val state = awaitItem()
+        assertThat(state.items).isEmpty()
+        assertThat(state.isRefreshing).isFalse()
+    }
+}
+
+// Run: ./gradlew test
+// ❌ FAILS - NPE when transitioning to empty list
+
+// STEP 2: Fix the bug - Handle empty list state in ViewModel
+
+// Run: ./gradlew test
+// ✅ PASSES - bug fixed, regression prevented forever
+```
+
+---
+
 ## 3. Jetpack Compose (MANDATORY)
 
 ### A. Composable Functions
@@ -875,7 +984,115 @@ fun ItemImage(
 
 ---
 
-## 10. Deployment Checklist
+## 10. Security & Dependency Management (MANDATORY)
+
+### A. Dependency Vulnerability Scanning
+
+**OWASP Dependency-Check Gradle Plugin:**
+```kotlin
+// build.gradle.kts (project-level)
+plugins {
+    id("org.owasp.dependencycheck") version "9.0.9" apply false
+}
+
+// build.gradle.kts (app-level)
+plugins {
+    id("org.owasp.dependencycheck")
+}
+
+dependencyCheck {
+    failBuildOnCVSS = 7.0f  // Fail on HIGH+ severity
+    formats = listOf("HTML", "JSON")
+    suppressionFile = "config/owasp-suppressions.xml"
+}
+```
+
+**Run vulnerability scan:**
+```bash
+./gradlew dependencyCheckAnalyze
+```
+
+- Review the generated report in `build/reports/dependency-check-report.html`
+- Run scans in CI on every PR and at least weekly on the main branch
+- Configure **Dependabot** for Gradle dependencies in `.github/dependabot.yml`:
+
+```yaml
+# .github/dependabot.yml
+version: 2
+updates:
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+```
+
+### B. App Signing and Code Protection
+
+- **Google Play App Signing**: ALWAYS enroll in Play App Signing; let Google manage your app signing key. Upload key should be separate and rotatable.
+- **ProGuard/R8**: Enable for all release builds. Verify rules in `proguard-rules.pro` to prevent stripping critical classes.
+
+```kotlin
+// build.gradle.kts (app-level)
+android {
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
+}
+```
+
+### C. Secret Management
+
+- NEVER hardcode API keys, tokens, or secrets in source code or `strings.xml`
+- Use `local.properties` (excluded from VCS) or encrypted environment variables in CI
+- For runtime secrets, use the Android Keystore system:
+
+```kotlin
+// Store secrets in Android Keystore
+val keyStore = KeyStore.getInstance("AndroidKeyStore")
+keyStore.load(null)
+val secretKeyEntry = keyStore.getEntry("my_secret_alias", null) as KeyStore.SecretKeyEntry
+```
+
+### D. Network Security
+
+- Enforce HTTPS for all network connections via Network Security Config:
+
+```xml
+<!-- res/xml/network_security_config.xml -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
+```
+
+- Enable certificate pinning for critical API endpoints
+- Use `BuildConfig` fields for base URLs; never commit production URLs to source
+
+### E. Security Checklist
+
+- [ ] OWASP dependency-check plugin configured and passing
+- [ ] Dependabot enabled for Gradle dependencies
+- [ ] ProGuard/R8 enabled for release builds
+- [ ] Google Play App Signing enrolled
+- [ ] No secrets in source code or version control
+- [ ] Network Security Config enforces HTTPS
+- [ ] Android Keystore used for on-device secrets
+- [ ] CI pipeline runs vulnerability scans on every build
+
+---
+
+## 11. Deployment Checklist
 
 ### Code Quality
 - [ ] ProGuard/R8 rules configured
@@ -897,7 +1114,7 @@ fun ItemImage(
 
 ---
 
-## 11. Quick Reference
+## 12. Quick Reference
 
 ```kotlin
 // Coroutines
@@ -923,6 +1140,30 @@ collectAsStateWithLifecycle()
 @Query @Insert @Update @Delete
 Flow<List<T>>
 ```
+
+---
+
+## 13. Why This Configuration Works
+
+1. **MVVM with Clean Architecture**: Separating UI, domain, and data layers keeps ViewModels testable, use cases reusable, and data sources swappable without touching presentation logic.
+
+2. **Jetpack Compose over XML**: Declarative UI eliminates View binding boilerplate, reduces layout bugs, and enables real-time previews with `@Preview` annotations.
+
+3. **Hilt for Dependency Injection**: Compile-time DI verification catches wiring errors at build time rather than runtime, while scoped bindings align lifecycles with Android components.
+
+4. **Kotlin Coroutines with Flows**: Structured concurrency prevents leaked coroutines, while `StateFlow` and `SharedFlow` provide lifecycle-aware reactive streams without RxJava complexity.
+
+5. **Room with Flow Return Types**: Reactive database queries automatically update the UI when data changes, eliminating manual refresh logic and stale data bugs.
+
+6. **ProGuard/R8 Optimization**: Code shrinking and obfuscation reduce APK size by 30-50% and make reverse engineering significantly harder.
+
+7. **Gradle Version Catalogs**: Centralizing dependency versions in `libs.versions.toml` prevents version conflicts across modules and simplifies updates.
+
+8. **TDD with JUnit 5 and Turbine**: Testing ViewModels with Turbine for Flow assertions ensures reactive streams emit the correct sequence of states.
+
+9. **Material 3 Theming**: Dynamic color and systematic theming ensure visual consistency while supporting personalization and dark mode out of the box.
+
+10. **Modular Build with Convention Plugins**: Shared build logic via convention plugins keeps multi-module builds consistent and reduces Gradle configuration duplication.
 
 ---
 

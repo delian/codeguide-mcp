@@ -1292,6 +1292,16 @@ Is it our fault?
 
 ---
 
+## 13. Why This Configuration Works
+
+- **Typed exception hierarchies enable precise handling**: A structured hierarchy (ValidationError, NotFoundError, TransientError, etc.) allows each layer of the application to catch and respond to specific failure modes rather than treating all errors the same, resulting in better user experiences and clearer debugging.
+- **Error context preservation accelerates debugging**: Wrapping errors with contextual information as they propagate up the call stack means engineers can reconstruct the full chain of events from a single error log entry, dramatically reducing mean time to resolution.
+- **Separation of user and internal messages prevents information leaks**: Maintaining distinct user-facing messages (helpful, non-technical) and internal log messages (detailed, with stack traces) ensures users get actionable guidance while attackers receive no exploitable system details.
+- **Retry and circuit breaker patterns build resilience**: Automatic retry with exponential backoff handles transient failures gracefully, while circuit breakers prevent cascading failures across services. Together they make distributed systems self-healing without manual intervention.
+- **Bug-fix-first testing prevents regressions**: Requiring a failing regression test before applying any fix ensures the bug is reproducible, the fix is verifiable, and the same defect cannot silently reappear in future changes.
+
+---
+
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** Engineering Team

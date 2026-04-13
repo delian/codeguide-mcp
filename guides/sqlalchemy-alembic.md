@@ -151,6 +151,208 @@ The agent must adhere to the **ORM-SMART** principles:
 
 ---
 
+## 2A. TDD Protocol (Red-Green-Refactor)
+
+EVERY new feature or module MUST follow the Red-Green-Refactor cycle. No production code without a failing test first.
+
+### Workflow
+
+1. **RED** -- Write a failing test that defines the expected behavior.
+2. **GREEN** -- Write the minimum production code to make the test pass.
+3. **REFACTOR** -- Clean up while keeping tests green.
+
+### Concrete Example -- Testing an ORM Model and Alembic Migration
+
+**Step 1 -- RED (Python `pytest` with SQLAlchemy):**
+
+```python
+# tests/test_user_model.py
+import pytest
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session
+from myapp.models import Base, User
+
+@pytest.fixture
+def db_session():
+    """In-memory SQLite session for fast, isolated tests."""
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        yield session
+
+def test_create_user_with_required_fields(db_session):
+    """User can be created with email and name; id is auto-generated."""
+    user = User(email="alice@example.com", name="Alice")
+    db_session.add(user)
+    db_session.commit()
+
+    result = db_session.execute(select(User).where(User.email == "alice@example.com")).scalar_one()
+    assert result.name == "Alice"
+    assert result.id is not None
+
+def test_user_email_unique_constraint(db_session):
+    """Duplicate email raises IntegrityError."""
+    from sqlalchemy.exc import IntegrityError
+
+    db_session.add(User(email="bob@example.com", name="Bob"))
+    db_session.commit()
+
+    db_session.add(User(email="bob@example.com", name="Bob2"))
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+
+def test_user_repr(db_session):
+    """User.__repr__ includes id and email."""
+    user = User(email="carol@example.com", name="Carol")
+    db_session.add(user)
+    db_session.commit()
+
+    assert "carol@example.com" in repr(user)
+```
+
+**Step 2 -- GREEN (model implementation):**
+
+```python
+# myapp/models.py
+from sqlalchemy import String
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+class Base(DeclarativeBase):
+    pass
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<User(id={self.id}, email={self.email!r})>"
+```
+
+**Step 3 -- REFACTOR:**
+
+- Extract the `db_session` fixture into `conftest.py`.
+- Add a factory fixture (e.g., `user_factory`) for complex test setups.
+- Verify Alembic migration generates the correct schema:
+
+```python
+# tests/test_migrations.py
+from alembic.config import Config
+from alembic.command import upgrade, downgrade
+from sqlalchemy import create_engine, inspect
+
+def test_migration_creates_users_table(tmp_path):
+    """Alembic upgrade head creates the users table with correct columns."""
+    db_url = f"sqlite:///{tmp_path / 'test.db'}"
+    engine = create_engine(db_url)
+    alembic_cfg = Config("alembic.ini")
+    alembic_cfg.set_main_option("sqlalchemy.url", db_url)
+
+    upgrade(alembic_cfg, "head")
+
+    inspector = inspect(engine)
+    columns = {col["name"] for col in inspector.get_columns("users")}
+    assert columns == {"id", "email", "name"}
+
+def test_migration_roundtrip(tmp_path):
+    """Upgrade then downgrade leaves no residual tables."""
+    db_url = f"sqlite:///{tmp_path / 'test.db'}"
+    alembic_cfg = Config("alembic.ini")
+    alembic_cfg.set_main_option("sqlalchemy.url", db_url)
+
+    upgrade(alembic_cfg, "head")
+    downgrade(alembic_cfg, "base")
+
+    engine = create_engine(db_url)
+    inspector = inspect(engine)
+    assert inspector.get_table_names() == []
+```
+
+### TDD Rules for SQLAlchemy/Alembic
+
+- Use `sqlite:///:memory:` for unit tests; PostgreSQL test container for integration tests.
+- Always test both `upgrade()` and `downgrade()` for every Alembic migration.
+- Test ORM constraints (unique, not-null, check) by asserting `IntegrityError`.
+- Test relationship loading (`joinedload`, `selectinload`) to catch N+1 regressions.
+- Never share session state between tests -- each test gets a fresh session.
+
+---
+
+## 2B. Bug Fix Protocol (Regression Testing)
+
+EVERY bug fix MUST include a regression test that fails before the fix and passes after.
+
+### Workflow
+
+1. **Reproduce** -- Write a test that triggers the exact bug.
+2. **Verify RED** -- Confirm the test fails on the current code.
+3. **Fix** -- Apply the minimal code change.
+4. **Verify GREEN** -- Confirm the test (and all others) pass.
+5. **Document** -- Reference the bug/ticket in the test docstring.
+
+### Concrete Example -- Alembic Migration Fails on Non-Nullable Column Addition
+
+**Bug report:** Adding a non-nullable column without a server default causes the migration to fail on existing data.
+
+**Step 1 -- Regression test:**
+
+```python
+# tests/test_bug_migration_nonnull.py
+import pytest
+from alembic.config import Config
+from alembic.command import upgrade
+from sqlalchemy import create_engine, text
+
+def test_add_nonnull_column_with_existing_data(tmp_path):
+    """Regression: BUG-5501 -- migration must handle existing rows
+    when adding a non-nullable column."""
+    db_url = f"sqlite:///{tmp_path / 'test.db'}"
+    engine = create_engine(db_url)
+    alembic_cfg = Config("alembic.ini")
+    alembic_cfg.set_main_option("sqlalchemy.url", db_url)
+
+    # Upgrade to the revision BEFORE the buggy migration
+    upgrade(alembic_cfg, "abc123")  # revision before the new column
+
+    # Insert a row so existing data is present
+    with engine.connect() as conn:
+        conn.execute(text("INSERT INTO users (email, name) VALUES ('old@test.com', 'Old')"))
+        conn.commit()
+
+    # Upgrade to the revision that adds the non-nullable column
+    # This MUST NOT raise an OperationalError
+    upgrade(alembic_cfg, "def456")  # revision with the fix
+
+    with engine.connect() as conn:
+        row = conn.execute(text("SELECT status FROM users WHERE email = 'old@test.com'")).fetchone()
+        assert row[0] == "active", "Default value should be 'active' for existing rows"
+```
+
+**Step 2 -- Verify the test fails** (migration crashes on `NOT NULL` without default).
+
+**Step 3 -- Fix** (add `server_default` to the migration):
+
+```python
+# alembic/versions/def456_add_status_column.py
+def upgrade():
+    op.add_column("users", sa.Column(
+        "status", sa.String(20), nullable=False, server_default="active"
+    ))
+```
+
+**Step 4 -- Verify GREEN** -- migration succeeds, existing rows get the default value.
+
+### Regression Test Rules for SQLAlchemy/Alembic
+
+- Name test files `test_bug_<description>.py` or `test_regression_<ticket>.py`.
+- Include the ticket/issue number in the docstring.
+- Regression tests are NEVER deleted.
+- Test migrations against databases with realistic seed data, not just empty schemas.
+
+---
+
 ## 3. Model Definition Standards (MANDATORY)
 
 ### A. Base Class Setup
@@ -2391,6 +2593,59 @@ stmt = select(User).limit(20).offset(40)
 # Aggregation
 stmt = select(func.count(User.id)).where(User.status == "active")
 ```
+
+---
+
+## 16. Deployment Checklist
+
+### Build and Configuration
+- [ ] SQLAlchemy and Alembic versions pinned in requirements
+- [ ] Connection pool settings tuned (`pool_size`, `max_overflow`, `pool_timeout`, `pool_recycle`)
+- [ ] `pool_pre_ping=True` enabled for connection liveness checks
+- [ ] Engine echo/logging disabled in production (`echo=False`)
+- [ ] Async engine configured if using async framework (FastAPI, Starlette)
+- [ ] Alembic `env.py` configured for target database
+
+### Testing
+- [ ] All migrations tested forward and backward (upgrade + downgrade)
+- [ ] `alembic upgrade head --sql` reviewed for generated SQL correctness
+- [ ] Migration tested against production-scale data copy
+- [ ] Session lifecycle tested under concurrent load
+- [ ] Eager/lazy loading strategies verified with SQL logging
+- [ ] Connection pool exhaustion behavior tested
+
+### Security
+- [ ] Database credentials loaded from environment or secrets manager
+- [ ] No connection strings in source control
+- [ ] SQL injection prevented (parameterized queries via ORM, no raw string interpolation)
+- [ ] Engine `connect_args` includes SSL/TLS configuration for production
+- [ ] Database user has minimum required privileges for migrations and runtime
+
+### Agent Workflow
+- [ ] Migration files version-controlled and reviewed in PRs
+- [ ] CI pipeline runs `alembic upgrade head` against test database
+- [ ] Rollback migration tested before merging schema changes
+- [ ] Monitoring configured for connection pool usage and query latency
+- [ ] Runbook for migration rollback and connection pool troubleshooting
+
+---
+
+## 17. Why This Configuration Works
+
+**Declarative Mapping with Type Safety**:
+- SQLAlchemy 2.0's `Mapped[]` annotations provide full IDE autocompletion and type checker support, catching schema-code mismatches at development time rather than runtime.
+
+**Unit of Work Pattern**:
+- The session batches and orders database operations automatically, minimizing round-trips and ensuring referential integrity without manual transaction management.
+
+**Autogenerated Migrations**:
+- Alembic compares the ORM model state against the database schema to generate accurate migration scripts, reducing manual SQL errors and keeping schema and code in sync.
+
+**Connection Pool Management**:
+- Built-in connection pooling with configurable recycling, overflow, and liveness checks prevents connection leaks, handles database restarts gracefully, and maintains consistent performance.
+
+**Database-Agnostic with Dialect Specialization**:
+- The same ORM code runs across PostgreSQL, MySQL, SQLite, and others, while dialect-specific features (JSONB, array types, upserts) remain accessible when needed.
 
 ---
 

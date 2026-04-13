@@ -769,6 +769,16 @@ jobs:
 
 ---
 
+## 13. Why This Configuration Works
+
+- **Prefixed comments eliminate ambiguity**: The [MUST]/[SHOULD]/[COULD]/[NIT]/[PRAISE] system makes reviewer intent explicit, so authors know exactly which feedback is blocking and which is optional. This eliminates the back-and-forth of clarifying whether a suggestion needs action.
+- **Prioritized review focus prevents security gaps**: Reviewing in a strict order (correctness, security, design, performance, testing, style) ensures the most critical issues are caught first. Teams that review style before security often ship vulnerabilities while debating naming conventions.
+- **Small PR culture accelerates delivery**: Encouraging PRs under 400 lines with same-day review turnaround keeps the feedback loop tight. Large, long-lived PRs accumulate merge conflicts, delay feedback, and are statistically more likely to receive superficial reviews.
+- **Automation handles the mundane**: Offloading formatting, linting, type checking, and security scanning to CI frees human reviewers to focus on logic correctness, architectural fit, and knowledge sharing, which are the aspects that require human judgment.
+- **Constructive feedback culture builds team knowledge**: The emphasis on explaining "why" behind suggestions and using PRAISE comments turns code review from a gatekeeping exercise into a learning mechanism, raising the overall skill level of the team over time.
+
+---
+
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** Engineering Team

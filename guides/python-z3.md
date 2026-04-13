@@ -1948,7 +1948,96 @@ def solve_sudoku(puzzle: list) -> list:
 
 ---
 
-## 10. Quick Reference
+## 10. Security & Dependency Management (MANDATORY)
+
+### A. Automated Dependency Management
+
+```bash
+# uv: fast Python package manager (preferred)
+uv pip install z3-solver
+uv pip compile requirements.in -o requirements.txt   # Generate lockfile
+uv pip sync requirements.txt                          # Install from lockfile
+
+# pip: standard package manager
+pip install z3-solver
+pip freeze > requirements.txt                         # Snapshot dependencies
+
+# Update Z3 to latest version
+uv pip install --upgrade z3-solver
+pip install --upgrade z3-solver
+
+# Show installed Z3 version and dependencies
+pip show z3-solver
+python -c "import z3; print(z3.get_version_string())"
+```
+
+**Always use a virtual environment** (`uv venv`, `python -m venv`) and commit `requirements.txt` or `pyproject.toml` with pinned versions.
+
+### B. Vulnerability Scanning & Security
+
+```bash
+# pip-audit: scan Python dependencies for known vulnerabilities
+pip-audit
+pip-audit -r requirements.txt
+
+# Safety: alternative vulnerability scanner
+safety check --file requirements.txt
+
+# Bandit: Python-specific security linter
+bandit -r src/ -ll
+
+# Trivy: filesystem scan for vulnerabilities
+trivy fs --scanners vuln .
+```
+
+**Security best practices:**
+- **Z3-specific**: Never pass unsanitized user input directly to Z3 solver expressions — construct constraints programmatically
+- **Z3-specific**: Be aware of denial-of-service risks — set solver timeouts with `solver.set("timeout", 30000)` to prevent unbounded computation
+- **Z3-specific**: When using `z3.parse_smt2_string()` with untrusted input, validate the SMT-LIB2 format first
+- Pin exact versions of `z3-solver` in production — Z3 API changes between versions can break constraint logic
+- Use `pip-audit` in CI/CD pipelines to catch vulnerabilities before deployment
+- Never use `eval()` or `exec()` with solver output
+- Validate model results before using them in security-critical decisions
+- Use `uv` or `pip-compile` for deterministic, reproducible dependency resolution
+
+### C. Dependency File
+
+```toml
+# pyproject.toml
+[project]
+name = "my-z3-project"
+version = "1.0.0"
+requires-python = ">=3.10"
+dependencies = [
+    "z3-solver==4.13.4.0",    # Pin exact Z3 version
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.0",
+    "pip-audit>=2.7",
+    "bandit>=1.7",
+    "mypy>=1.8",
+    "ruff>=0.3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short -q"
+
+[tool.ruff]
+target-version = "py310"
+```
+
+```txt
+# requirements.txt — Pinned production dependencies
+z3-solver==4.13.4.0
+```
+
+---
+
+## 11. Quick Reference
 
 ### Common Commands
 
@@ -2017,7 +2106,49 @@ def test_constraint_satisfiability():
 
 ---
 
-## 11. Summary
+## 12. Deployment Checklist
+
+### Build & Syntax
+- [ ] Code parses: `uv run python -m py_compile *.py` returns exit 0
+- [ ] Ruff passes: `uv run ruff check .` returns exit 0
+- [ ] Code formatted: `uv run black --check .` returns exit 0
+- [ ] Type checking passes: `uv run mypy .` returns no errors
+
+### Testing
+- [ ] All tests pass: `uv run pytest` returns exit 0
+- [ ] Satisfiability tests cover sat, unsat, and unknown cases
+- [ ] Model extraction and validation tests present
+- [ ] Timeout tests verify solver does not hang on hard instances
+
+### Security
+- [ ] All solver operations have explicit timeouts configured
+- [ ] No unbounded resource consumption (memory limits set)
+- [ ] No `eval()` or `exec()` used for constraint construction
+- [ ] Dependencies scanned: `uv run pip-audit` reports no vulnerabilities
+
+### Agent Workflow
+- [ ] Agent verified all constraints are well-formed
+- [ ] Agent confirmed `solver.check()` completes within timeout
+- [ ] Agent validated extracted models satisfy original constraints
+- [ ] Agent ran mypy and black before delivery
+
+---
+
+## 13. Why This Configuration Works
+
+1. **Simplify-Before-Solve Strategy**: Running `simplify()` and tactic pipelines before invoking the main solver reduces constraint complexity, often turning exponential problems into polynomial ones. This single practice can yield 10x-100x speedups on real-world instances.
+
+2. **Function Generation Pattern for Reuse**: Pre-compiling parameterized constraint functions avoids re-parsing and re-constructing Z3 AST nodes on every call. For repeated queries with different parameters, this eliminates redundant work and keeps solver context warm.
+
+3. **Uninterpreted Functions for Abstraction**: Using EUF (Equality with Uninterpreted Functions) allows reasoning about function properties without defining implementations. This dramatically reduces the search space when the solver only needs to know that a function is injective or monotonic, not its exact definition.
+
+4. **Mandatory Timeout Protection**: Setting explicit timeouts on every solver invocation prevents runaway computations from blocking production systems. Combined with the `unknown` result handling, this ensures graceful degradation when problems are too hard.
+
+5. **Separated Constraint Generation and Solving**: Keeping constraint construction as pure functions separate from solver invocation makes constraints composable, testable, and cacheable. Constraints can be inspected, simplified, and combined before committing to a solve call.
+
+---
+
+## 14. Summary
 
 **CRITICAL Requirements for Z3 Code:**
 

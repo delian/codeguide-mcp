@@ -1,12 +1,12 @@
 # Modern Go Programming Guidelines
-Mandatory coding style and practices for Go (Golang) programming. Modular, testable, maintainable. Go 1.23+, go modules, go workspaces, errgroup, generics, structured logging, hexagonal architecture.
+Mandatory coding style and practices for Go (Golang) programming. Modular, testable, maintainable. Go 1.24+, go modules, go workspaces, errgroup, generics, structured logging, hexagonal architecture.
 
 ---
 
 **Agent Profile**: The Go Architect  
 **Role**: Senior Go Developer & Systems Engineer  
 **Objective**: Generate production-ready, modular, testable, and maintainable Go code.  
-**Tools**: Go 1.23+, go modules, go workspaces, errgroup, generics, structured logging, hexagonal architecture.
+**Tools**: Go 1.24+, go modules, go workspaces, errgroup, generics, structured logging, hexagonal architecture.
 
 ---
 
@@ -1268,7 +1268,7 @@ func sendEmails(ctx context.Context, emails []string) error {
 }
 ```
 
-### E. Go 1.23+ Iterators (MANDATORY)
+### E. Go 1.24+ Iterators (MANDATORY)
 
 **Use range-over-functions for custom iteration patterns:**
 
@@ -2142,7 +2142,7 @@ func BenchmarkUserService_CreateUser(b *testing.B) {
 // go.mod
 module github.com/username/myservice
 
-go 1.23
+go 1.24
 
 require (
     github.com/google/uuid v1.6.0
@@ -2185,7 +2185,7 @@ go mod graph
 
 ```go
 // go.work
-go 1.23
+go 1.24
 
 use (
     ./service
@@ -2607,7 +2607,64 @@ func (e *ValidationError) IsEmpty() bool {
 
 ---
 
-## 12. Deployment Checklist
+## 12. Security & Dependency Management (MANDATORY)
+
+### A. Automated Dependency Management
+
+**Use Go Modules to manage and lock dependencies:**
+
+```bash
+# Install/sync dependencies
+go mod download
+
+# Add a new dependency
+go get github.com/package@version
+
+# Update dependencies
+go get -u ./...
+go mod tidy
+
+# Verify dependency integrity
+go mod verify
+```
+
+### B. Vulnerability Scanning & Security
+
+**Mandatory security checks for ALL Go projects:**
+
+1. **Vulnerability Scan**:
+   ```bash
+   # Scan for known vulnerabilities
+   govulncheck ./...
+   ```
+   - Agents MUST fix all HIGH/CRITICAL vulnerabilities before delivery.
+
+2. **Supply Chain Audit**:
+   - Verify `go.sum` integrity with `go mod verify`
+   - Audit licenses for compliance
+   - Review dependency tree with `go mod graph`
+
+### C. Dependency File
+
+```go
+// go.mod
+module github.com/username/myproject
+
+go 1.24
+
+require (
+    github.com/gin-gonic/gin v1.9.1
+    go.uber.org/zap v1.27.0
+)
+
+require (
+    // indirect dependencies managed automatically
+)
+```
+
+---
+
+## 13. Deployment Checklist
 
 ### Agent-Generated Go Code Verification (MANDATORY)
 
@@ -2696,7 +2753,7 @@ func (e *ValidationError) IsEmpty() bool {
 
 ---
 
-## 13. Why This Configuration Works
+## 14. Why This Configuration Works
 
 **Modular Architecture**: 
 - **Hexagonal Architecture**: Separates business logic from infrastructure, making code testable and maintainable. Core domain is independent of databases, HTTP, or any framework.
@@ -2736,11 +2793,11 @@ func (e *ValidationError) IsEmpty() bool {
 - **Functional Options**: Zero allocation configuration.
 - **Worker Pools**: Bounded concurrency prevents resource exhaustion.
 
-**Modern Go**: This guide emphasizes Go 1.23+ features: generics, workspaces, structured logging with slog, and contemporary patterns. Legacy approaches (global state, init functions, unstructured logging) are explicitly discouraged.
+**Modern Go**: This guide emphasizes Go 1.24+ features: generics, workspaces, structured logging with slog, and contemporary patterns. Legacy approaches (global state, init functions, unstructured logging) are explicitly discouraged.
 
 ---
 
-## 14. Quick Reference
+## 15. Quick Reference
 
 ### Project Commands
 

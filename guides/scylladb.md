@@ -81,6 +81,193 @@ Node 4 ────────────────────────�
 
 ---
 
+## 2A. TDD Protocol (Red-Green-Refactor)
+
+EVERY new feature or module MUST follow the Red-Green-Refactor cycle. No production code without a failing test first.
+
+### Workflow
+
+1. **RED** -- Write a failing test that defines the expected behavior.
+2. **GREEN** -- Write the minimum production code to make the test pass.
+3. **REFACTOR** -- Clean up while keeping tests green.
+
+### Concrete Example -- Testing CQL Batch Inserts and Queries
+
+**Step 1 -- RED (Python `pytest` with `cassandra-driver`):**
+
+```python
+# test_scylla_user_events.py
+import pytest
+from cassandra.cluster import Cluster
+from cassandra.query import BatchStatement, SimpleStatement
+
+@pytest.fixture(scope="module")
+def session():
+    """Connect to ScyllaDB test cluster and prepare keyspace."""
+    cluster = Cluster(["127.0.0.1"])
+    sess = cluster.connect()
+    sess.execute("""
+        CREATE KEYSPACE IF NOT EXISTS test_ks
+        WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}
+    """)
+    sess.set_keyspace("test_ks")
+    sess.execute("""
+        CREATE TABLE IF NOT EXISTS user_events (
+            user_id UUID,
+            event_ts TIMESTAMP,
+            event_type TEXT,
+            payload TEXT,
+            PRIMARY KEY (user_id, event_ts)
+        ) WITH CLUSTERING ORDER BY (event_ts DESC)
+    """)
+    yield sess
+    sess.execute("DROP TABLE IF EXISTS user_events")
+    cluster.shutdown()
+
+def test_batch_insert_and_query(session):
+    """Batch-inserted events are queryable by partition key."""
+    import uuid
+    from datetime import datetime, timedelta
+
+    uid = uuid.uuid4()
+    now = datetime.utcnow()
+    batch = BatchStatement()
+    for i in range(5):
+        batch.add(SimpleStatement(
+            "INSERT INTO user_events (user_id, event_ts, event_type, payload) "
+            "VALUES (%s, %s, %s, %s)"
+        ), (uid, now - timedelta(seconds=i), "click", f"page_{i}"))
+    session.execute(batch)
+
+    rows = list(session.execute(
+        "SELECT * FROM user_events WHERE user_id = %s", (uid,)
+    ))
+    assert len(rows) == 5
+    # Clustering order is DESC so first row is most recent
+    assert rows[0].event_type == "click"
+
+def test_query_with_time_range(session):
+    """Range query on clustering key returns correct subset."""
+    import uuid
+    from datetime import datetime, timedelta
+
+    uid = uuid.uuid4()
+    now = datetime.utcnow()
+    for i in range(10):
+        session.execute(
+            "INSERT INTO user_events (user_id, event_ts, event_type, payload) "
+            "VALUES (%s, %s, %s, %s)",
+            (uid, now - timedelta(hours=i), "view", f"item_{i}")
+        )
+
+    # Query last 5 hours only
+    rows = list(session.execute(
+        "SELECT * FROM user_events WHERE user_id = %s AND event_ts >= %s",
+        (uid, now - timedelta(hours=4, minutes=30))
+    ))
+    assert len(rows) == 5
+```
+
+**Step 2 -- GREEN:** Implement the service layer that uses the same CQL schema and queries.
+
+**Step 3 -- REFACTOR:**
+
+- Extract session fixture into `conftest.py`.
+- Use prepared statements instead of `SimpleStatement` for production code.
+- Parameterize test across multiple partition keys.
+
+### TDD Rules for ScyllaDB
+
+- Use a dedicated test keyspace with `replication_factor: 1` to run locally.
+- Always clean up tables in teardown to keep tests isolated.
+- Test with `cassandra-driver` (fully compatible with ScyllaDB's CQL).
+- Use `BatchStatement` only for same-partition writes (ScyllaDB anti-pattern otherwise).
+- Cover consistency levels: test with `LOCAL_ONE` for reads, `LOCAL_QUORUM` for writes.
+
+---
+
+## 2B. Bug Fix Protocol (Regression Testing)
+
+EVERY bug fix MUST include a regression test that fails before the fix and passes after.
+
+### Workflow
+
+1. **Reproduce** -- Write a test that triggers the exact bug.
+2. **Verify RED** -- Confirm the test fails on the current code.
+3. **Fix** -- Apply the minimal code change.
+4. **Verify GREEN** -- Confirm the test (and all others) pass.
+5. **Document** -- Reference the bug/ticket in the test docstring.
+
+### Concrete Example -- Incorrect Pagination with Token-Based Queries
+
+**Bug report:** The application's paginated listing skips rows when using token-based pagination because the boundary token is excluded rather than included.
+
+**Step 1 -- Regression test:**
+
+```python
+# test_bug_pagination_skip.py
+import pytest
+import uuid
+from cassandra.cluster import Cluster
+
+@pytest.fixture(scope="module")
+def session():
+    cluster = Cluster(["127.0.0.1"])
+    sess = cluster.connect()
+    sess.execute("""
+        CREATE KEYSPACE IF NOT EXISTS test_ks
+        WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}
+    """)
+    sess.set_keyspace("test_ks")
+    sess.execute("""
+        CREATE TABLE IF NOT EXISTS items (
+            id UUID PRIMARY KEY,
+            name TEXT
+        )
+    """)
+    yield sess
+    sess.execute("DROP TABLE IF EXISTS items")
+    cluster.shutdown()
+
+def test_token_pagination_includes_boundary(session):
+    """Regression: BUG-7102 -- token pagination must not skip boundary row."""
+    ids = [uuid.uuid4() for _ in range(20)]
+    for i, uid in enumerate(ids):
+        session.execute(
+            "INSERT INTO items (id, name) VALUES (%s, %s)",
+            (uid, f"item_{i}")
+        )
+
+    # Fetch all via two pages using TOKEN()
+    page1 = list(session.execute(
+        "SELECT id, name, TOKEN(id) AS tk FROM items LIMIT 10"
+    ))
+    assert len(page1) > 0
+    last_token = page1[-1].tk
+
+    page2 = list(session.execute(
+        "SELECT id, name FROM items WHERE TOKEN(id) > %s LIMIT 10",
+        (last_token,)
+    ))
+    total = len(page1) + len(page2)
+    assert total == 20, f"Expected 20 items, got {total} -- boundary row skipped"
+```
+
+**Step 2 -- Verify the test fails** (confirms the pagination bug).
+
+**Step 3 -- Fix** (change `>` to `>=` in the application query and deduplicate the boundary row).
+
+**Step 4 -- Verify GREEN** -- all tests pass.
+
+### Regression Test Rules for ScyllaDB
+
+- Name test files `test_bug_<description>.py` or `test_regression_<ticket>.py`.
+- Include the ticket/issue number in the docstring.
+- Regression tests are NEVER deleted.
+- Test with realistic data volumes (at least enough to span multiple pages/partitions).
+
+---
+
 ## 3. Data Modeling (MANDATORY)
 
 ### A. Partition Key Design (CRITICAL)
@@ -3161,6 +3348,25 @@ if err := session.Query(`SELECT name FROM users WHERE user_id = ?`, userID).Scan
 | **Lightweight Transactions** | More efficient | Less efficient |
 | **Monitoring** | ScyllaDB Monitoring Stack | Separate solutions |
 | **Management** | ScyllaDB Manager | Separate tools |
+
+---
+
+## 20. Why This Configuration Works
+
+**Shard-Per-Core Architecture**:
+- Each CPU core owns a dedicated shard of data with its own memory, network connections, and I/O queues, eliminating lock contention and context switching to deliver predictable low-latency performance.
+
+**Zero Garbage Collection Pauses**:
+- Written in C++ rather than Java, ScyllaDB eliminates JVM garbage collection pauses entirely, providing consistent sub-millisecond p99 latencies that Cassandra cannot achieve under heavy load.
+
+**Cassandra CQL Compatibility**:
+- Full CQL and SSTable compatibility allows existing Cassandra applications and drivers to migrate to ScyllaDB with no code changes, while gaining 2-5x throughput improvement.
+
+**Automatic Workload Optimization**:
+- The built-in I/O scheduler, task scheduler, and memory allocator adapt dynamically to workload patterns, reducing manual tuning effort compared to Cassandra's dozens of JVM and compaction parameters.
+
+**Integrated Operations Tooling**:
+- ScyllaDB Manager handles repairs, backups, and cluster management while the Monitoring Stack provides pre-built Grafana dashboards, delivering production observability without assembling separate tool chains.
 
 ---
 

@@ -1,12 +1,12 @@
 # Deno Development Guidelines
-Modern development practices for building secure, performant, and maintainable applications with Deno 2.1+.
+Modern development practices for building secure, performant, and maintainable applications with Deno 2.7+.
 
 ---
 
 **Agent Profile**: The Deno Security Architect
 **Role**: Senior Full-Stack Engineer & Deno Performance Specialist
 **Objective**: Generate production-ready, type-safe, secure-by-default, highly performant, and maintainable Deno applications.
-**Tools**: Deno 2.1+, TypeScript 5.x, JSR, Fresh, Oak, Standard Library, Built-in tooling.
+**Tools**: Deno 2.7+, TypeScript 5.x, JSR, Fresh, Oak, Standard Library, Built-in tooling.
 **Companion Guides**: typescript.md, nodejs.md, secure-coding.md, testing.md
 
 ---
@@ -97,7 +97,7 @@ If verification fails:
 
 ### A. Deno Installation & Version
 
-**Version**: Use Deno 2.1+ (latest stable)
+**Version**: Use Deno 2.7+ (latest stable)
 
 ```bash
 # Install Deno (official installer)
@@ -143,52 +143,6 @@ deno upgrade
   },
 
   "lock": true
-}
-```
-
----
-
-## 4. Test-Driven Development (TDD) Protocol (MANDATORY)
-    "@/": "./src/",
-    "@std/": "https://deno.land/std@0.224.0/",
-    "zod": "npm:zod@^3.22.4"
-  },
-
-  "compilerOptions": {
-    "lib": ["deno.window", "dom", "dom.iterable"],
-    "strict": true,
-    "allowJs": false,
-    "checkJs": false
-  },
-
-  "lint": {
-    "rules": {
-      "tags": ["recommended"],
-      "include": ["ban-untagged-todo"],
-      "exclude": ["no-unused-vars"]
-    },
-    "exclude": ["dist/", "coverage/"]
-  },
-
-  "fmt": {
-    "useTabs": false,
-    "lineWidth": 100,
-    "indentWidth": 2,
-    "semiColons": true,
-    "singleQuote": true,
-    "proseWrap": "preserve",
-    "exclude": ["dist/", "coverage/"]
-  },
-
-  "test": {
-    "include": ["**/*_test.ts"],
-    "exclude": ["dist/"]
-  },
-
-  "publish": {
-    "include": ["mod.ts", "src/", "README.md", "LICENSE"],
-    "exclude": ["**/*_test.ts", "scripts/"]
-  }
 }
 ```
 
@@ -270,7 +224,7 @@ import Stripe from 'npm:stripe@^14.0.0';
 
 ---
 
-## 3. Test-Driven Development (TDD) Protocol (MANDATORY)
+## 2A. TDD Protocol (MANDATORY)
 
 **CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
 
@@ -576,7 +530,7 @@ Deno.test('time-dependent function with FakeTime', () => {
 
 ---
 
-## 4. Bug Fix Protocol (MANDATORY)
+## 2B. Bug Fix Protocol (MANDATORY)
 
 **CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
 
@@ -667,7 +621,7 @@ export function parseDate(isoString: string): Date {
 
 ---
 
-## 5. Permission Model (MANDATORY)
+## 4. Permission Model (MANDATORY)
 
 ### A. Permission Best Practices
 
@@ -775,7 +729,7 @@ await withPermissions(
 
 ---
 
-## 6. Type Safety & Modern TypeScript (MANDATORY)
+## 5. Type Safety & Modern TypeScript (MANDATORY)
 
 ### A. Strict Typing with Deno
 
@@ -930,7 +884,7 @@ export async function createUserHandler(req: Request): Promise<Response> {
 
 ---
 
-## 7. Web Framework Patterns
+## 6. Web Framework Patterns
 
 ### A. Fresh Framework (Recommended for Web Apps)
 
@@ -1359,7 +1313,7 @@ export async function listUsers(req: Request): Promise<Response> {
 
 ---
 
-## 8. Database Access Patterns
+## 7. Database Access Patterns
 
 ### A. Using Deno KV (Built-in Key-Value Database)
 
@@ -1662,7 +1616,7 @@ export class UserPostgresRepository {
 
 ---
 
-## 9. Security Best Practices (MANDATORY)
+## 8. Security Best Practices (MANDATORY)
 
 ### A. Environment Variables
 
@@ -1890,7 +1844,7 @@ export function handleCors(req: Request): Response | null {
 
 ---
 
-## 10. Performance Optimization
+## 9. Performance Optimization
 
 ### A. Caching Strategies
 
@@ -2088,7 +2042,7 @@ const data = await parallelMap(
 
 ---
 
-## 11. Security & Dependency Management (MANDATORY)
+## 10. Security & Dependency Management (MANDATORY)
 
 ### A. Automated Dependency Management
 
@@ -2105,7 +2059,7 @@ const data = await parallelMap(
 }
 ```
 
-- **Lockfiles**: Deno 2.0+ uses `deno.lock` by default. ALWAYS commit this file.
+- **Lockfiles**: Deno 2.7+ uses `deno.lock` by default. ALWAYS commit this file.
 - **Frozen Builds**: Use `--frozen` in CI to ensure no lockfile changes are allowed.
 - **Dependency Auditing**: Use `deno audit` to scan for known vulnerabilities.
 
@@ -2138,7 +2092,7 @@ const data = await parallelMap(
 
 ---
 
-## 12. Deployment Checklist
+## 11. Deployment Checklist
 
 ### Agent-Generated Code Verification (MANDATORY)
 
@@ -2183,9 +2137,9 @@ const data = await parallelMap(
 
 ---
 
-## 13. Why This Configuration Works
+## 12. Why This Configuration Works
 
-**Deno 2.1+ Native Tooling**:
+**Deno 2.7+ Native Tooling**:
 - Combines the best of Deno (security, ESM) with modern Node.js compatibility, allowing use of `npm:` packages without the security risks of `node_modules` by default.
 
 **JSR (JavaScript Registry)**:
@@ -2196,7 +2150,7 @@ const data = await parallelMap(
 
 ---
 
-## 14. Quick Reference
+## 13. Quick Reference
 
 ### Common Commands
 
@@ -2223,15 +2177,15 @@ deno compile --allow-all main.ts
 ### Modern Deno Patterns Cheat Sheet
 
 ```typescript
-// Native .env handling (Deno 2.0+)
+// Native .env handling (Deno 2.7+)
 // Run with: deno run --env-file=.env main.ts
 const apiKey = Deno.env.get("API_KEY");
 
-// Native SQLite (Deno 2.1+)
+// Native SQLite (Deno 2.7+)
 import { DatabaseSync } from "node:sqlite";
 const db = new DatabaseSync("data.db");
 
-// Range-over-functions (Deno 2.1+)
+// Range-over-functions (Deno 2.7+)
 for (const user of service.allUsers()) { ... }
 ```
 

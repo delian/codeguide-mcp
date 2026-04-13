@@ -3717,6 +3717,101 @@ Performance:
 
 ---
 
+## 22. Deployment Checklist
+
+### Build and Configuration
+- [ ] TimescaleDB extension version pinned and documented
+- [ ] PostgreSQL version verified compatible (avoid known bad releases)
+- [ ] `timescaledb-tune` run against `postgresql.conf`
+- [ ] Chunk interval configured based on data volume and query patterns
+- [ ] Compression policies defined for hypertables
+- [ ] Continuous aggregates created for common aggregate queries
+- [ ] Retention policies configured for data lifecycle management
+
+### Testing
+- [ ] Insert throughput benchmarked with production-scale data rates
+- [ ] Query latency profiled for time-range, last-point, and aggregation queries
+- [ ] Compression ratios validated on representative data
+- [ ] Chunk exclusion verified with `EXPLAIN ANALYZE` on time-range queries
+- [ ] Continuous aggregate refresh tested under concurrent write load
+- [ ] Backup and restore tested with `pg_dump` / `pg_restore` including TimescaleDB catalog
+
+### Security
+- [ ] PostgreSQL authentication configured (scram-sha-256)
+- [ ] TLS enabled for all connections
+- [ ] Row-level security policies applied where needed
+- [ ] Database roles follow least-privilege principle
+- [ ] TimescaleDB telemetry disabled in production if required (`timescaledb.telemetry_level=off`)
+- [ ] Network access restricted via `pg_hba.conf` and firewall rules
+
+### Agent Workflow
+- [ ] Hypertable creation and policy scripts version-controlled
+- [ ] Schema migration strategy documented (ALTER TABLE considerations for hypertables)
+- [ ] Monitoring alerts configured (chunk count, compression jobs, continuous aggregate lag)
+- [ ] Automated backups scheduled with appropriate retention
+- [ ] Runbooks for chunk management, recompression, and space reclamation
+
+---
+
+## 23. Why This Configuration Works
+
+**Automatic Time-Based Partitioning**:
+- Hypertables transparently partition data into chunks by time interval, enabling the query planner to skip irrelevant chunks and maintain consistent query performance as data grows to terabytes.
+
+**Native Compression**:
+- Column-based compression with configurable algorithms achieves 90%+ storage reduction on time-series data while maintaining query performance through chunk-level decompression.
+
+**Continuous Aggregates**:
+- Materialized views that automatically refresh with incremental updates eliminate expensive real-time aggregation queries, providing dashboard-speed responses on massive datasets.
+
+**Full PostgreSQL Compatibility**:
+- Running as a PostgreSQL extension means all existing PostgreSQL tooling, connectors, extensions (PostGIS, pg_stat_statements), and operational knowledge applies without modification.
+
+**Flexible Retention and Tiering**:
+- Automated data retention policies and the ability to move older chunks to cheaper storage tiers enable cost-effective management of long-term time-series data.
+
+---
+
+## 24. Quick Reference
+
+### Common Commands
+
+```bash
+# Install TimescaleDB extension
+psql -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"
+
+# Create a hypertable
+psql -c "SELECT create_hypertable('metrics', by_range('time'));"
+
+# Check chunk information
+psql -c "SELECT show_chunks('metrics');"
+psql -c "SELECT chunk_name, range_start, range_end FROM timescaledb_information.chunks WHERE hypertable_name = 'metrics';"
+
+# Add compression policy
+psql -c "ALTER TABLE metrics SET (timescaledb.compress);"
+psql -c "SELECT add_compression_policy('metrics', INTERVAL '7 days');"
+
+# Add retention policy
+psql -c "SELECT add_retention_policy('metrics', INTERVAL '90 days');"
+
+# Create continuous aggregate
+psql -c "CREATE MATERIALIZED VIEW metrics_hourly WITH (timescaledb.continuous) AS SELECT time_bucket('1 hour', time) AS bucket, device_id, AVG(value) FROM metrics GROUP BY bucket, device_id;"
+
+# Refresh continuous aggregate
+psql -c "CALL refresh_continuous_aggregate('metrics_hourly', NOW() - INTERVAL '1 day', NOW());"
+
+# Check TimescaleDB version and settings
+psql -c "SELECT extversion FROM pg_extension WHERE extname = 'timescaledb';"
+
+# Run timescaledb-tune
+timescaledb-tune --pg-config=/usr/bin/pg_config
+
+# Check hypertable size
+psql -c "SELECT hypertable_detailed_size('metrics');"
+```
+
+---
+
 **Last Updated:** 2026-02-06
 **TimescaleDB Version:** 2.x (2.14+)
 **PostgreSQL Versions:** 12-17 (avoid 17.1, 16.5, 15.9, 14.14)

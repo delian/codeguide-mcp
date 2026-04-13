@@ -59,6 +59,141 @@ managed-by: terraform
 
 ---
 
+## 2A. TDD Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL infrastructure code.**
+
+### Red-Green-Refactor Cycle with Terratest
+
+```go
+// ═══════════════════════════════════════════════════════════════
+// STEP 1: RED - Write failing test first
+// ═══════════════════════════════════════════════════════════════
+
+// test/cloud_run_test.go
+package test
+
+import (
+    "testing"
+    "fmt"
+    "net/http"
+
+    "github.com/gruntwork-io/terratest/modules/terraform"
+    "github.com/stretchr/testify/assert"
+)
+
+func TestCloudRunServiceDeployment(t *testing.T) {
+    t.Parallel()
+
+    terraformOptions := &terraform.Options{
+        TerraformDir: "../infra/cloud-run",
+        Vars: map[string]interface{}{
+            "project_id":  "myorg-test-project",
+            "region":      "us-central1",
+            "service_name": "api-test",
+            "image":       "gcr.io/myorg-test-project/api:latest",
+        },
+    }
+
+    defer terraform.Destroy(t, terraformOptions)
+    terraform.InitAndApply(t, terraformOptions)
+
+    serviceUrl := terraform.Output(t, terraformOptions, "service_url")
+
+    // Verify Cloud Run service is reachable
+    resp, err := http.Get(serviceUrl)
+    assert.NoError(t, err)
+    assert.Equal(t, 200, resp.StatusCode)
+
+    // Verify ingress is set to internal-only
+    ingress := terraform.Output(t, terraformOptions, "ingress_setting")
+    assert.Equal(t, "internal", ingress)
+}
+
+// Run: go test -v -timeout 30m
+// ❌ FAILS - Terraform module not defined yet
+
+// ═══════════════════════════════════════════════════════════════
+// STEP 2: GREEN - Write minimal Terraform implementation
+// ═══════════════════════════════════════════════════════════════
+
+// infra/cloud-run/main.tf
+// resource "google_cloud_run_v2_service" "api" {
+//   name     = var.service_name
+//   location = var.region
+//   ingress  = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+//
+//   template {
+//     containers {
+//       image = var.image
+//       resources {
+//         limits = { cpu = "1", memory = "512Mi" }
+//       }
+//     }
+//   }
+// }
+
+// Run: go test -v -timeout 30m
+// ✅ PASSES - all assertions satisfied
+
+// ═══════════════════════════════════════════════════════════════
+// STEP 3: REFACTOR - Add IAM bindings, scaling, while tests stay green
+// ═══════════════════════════════════════════════════════════════
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow Example
+
+```go
+// ═══════════════════════════════════════════════════════════════
+// Bug Report #215: Cloud Run service publicly accessible despite
+// policy requiring internal-only ingress
+// ═══════════════════════════════════════════════════════════════
+
+// STEP 1: Write test that reproduces the bug
+// test/cloud_run_test.go
+
+func TestCloudRunIngressIsInternal_Bug215(t *testing.T) {
+    // Bug: Cloud Run deployed with "all" ingress instead of "internal"
+    // Discovered: 2026-03-12
+    // Root cause: Terraform variable default was "INGRESS_TRAFFIC_ALL"
+
+    t.Parallel()
+
+    terraformOptions := &terraform.Options{
+        TerraformDir: "../infra/cloud-run",
+        Vars: map[string]interface{}{
+            "project_id":   "myorg-test-project",
+            "region":       "us-central1",
+            "service_name": "api-ingress-test",
+            "image":        "gcr.io/myorg-test-project/api:latest",
+        },
+    }
+
+    defer terraform.Destroy(t, terraformOptions)
+    terraform.InitAndApply(t, terraformOptions)
+
+    ingress := terraform.Output(t, terraformOptions, "ingress_setting")
+    assert.Equal(t, "internal", ingress,
+        "Bug #215: Cloud Run service MUST use internal-only ingress")
+}
+
+// Run: go test -v -run TestCloudRunIngressIsInternal_Bug215
+// ❌ FAILS - ingress is "all"
+
+// STEP 2: Fix the bug - Change default variable to "INGRESS_TRAFFIC_INTERNAL_ONLY"
+
+// Run: go test -v -run TestCloudRunIngressIsInternal_Bug215
+// ✅ PASSES - bug fixed, regression prevented forever
+```
+
+---
+
 ## 3. IAM and Security (MANDATORY)
 
 ### A. Service Accounts
@@ -1305,7 +1440,69 @@ resource "google_project_service" "apis" {
 
 ---
 
-## 16. Deployment Checklist
+## 16. Security & Dependency Management (MANDATORY)
+
+### A. Infrastructure Security Scanning
+
+```bash
+# Security Command Center - centralized security findings
+gcloud scc findings list ORGANIZATION_ID --filter="severity=\"CRITICAL\" OR severity=\"HIGH\""
+gcloud scc findings list ORGANIZATION_ID --source=SOURCE_ID --filter="state=\"ACTIVE\""
+
+# Artifact Analysis - container vulnerability scanning
+gcloud artifacts docker images scan IMAGE_URI --remote
+gcloud artifacts docker images list-vulnerabilities IMAGE_URI --format=json
+
+# Binary Authorization - deploy-time attestation enforcement
+gcloud container binauthz policy export
+gcloud container binauthz attestors list
+
+# Prowler for GCP - open-source security auditing
+prowler gcp --severity critical high
+prowler gcp --compliance cis_2.0_gcp
+prowler gcp --service iam storage bigquery
+```
+
+### B. Vulnerability Scanning
+
+```bash
+# IaC scanning with checkov
+checkov -d . --framework terraform
+checkov --file main.tf --check CKV_GCP_1,CKV_GCP_12
+
+# IaC scanning with trivy
+trivy config .
+trivy config --severity HIGH,CRITICAL .
+
+# Container scanning in Artifact Registry (automatic when enabled)
+gcloud artifacts docker images describe IMAGE_URI --show-package-vulnerability
+gcloud services enable containerscanning.googleapis.com
+```
+
+### C. Policy & Compliance
+
+```bash
+# Organization Policy Service - guardrails across projects
+gcloud org-policies list --organization=ORGANIZATION_ID
+gcloud org-policies set-policy policy.yaml
+
+# Common constraints
+gcloud org-policies set-custom-constraint constraint.yaml
+# iam.disableServiceAccountKeyCreation - prevent long-lived keys
+# compute.requireShieldedVm - enforce shielded VMs
+# storage.uniformBucketLevelAccess - enforce uniform bucket access
+
+# Secret Manager - ALWAYS use for credential management
+gcloud secrets create my-secret --data-file=secret.txt
+gcloud secrets versions access latest --secret=my-secret
+# Enable automatic rotation with Pub/Sub triggers
+gcloud secrets update my-secret --add-rotation-schedule --rotation-period=30d \
+  --topics=projects/PROJECT_ID/topics/secret-rotation
+```
+
+---
+
+## 17. Deployment Checklist
 
 ### Security
 - [ ] Least privilege IAM roles (use custom roles when predefined are too broad)
@@ -1342,7 +1539,7 @@ resource "google_project_service" "apis" {
 
 ---
 
-## 17. Quick Reference
+## 18. Quick Reference
 
 ```bash
 gcloud auth login                                            # Authenticate
@@ -1360,6 +1557,30 @@ gcloud secrets versions access latest --secret=SECRET_ID     # Get secret
 gcloud logging read 'severity>=ERROR' --limit=50 --format=json  # Read logs
 gcloud projects get-iam-policy PROJECT_ID                    # IAM audit
 ```
+
+---
+
+## 19. Why This Configuration Works
+
+1. **Service Accounts with Workload Identity**: Binding Kubernetes service accounts to GCP service accounts via Workload Identity eliminates service account key files, the leading cause of credential leaks on GCP.
+
+2. **Cloud Run for Stateless Services**: Cloud Run scales to zero and charges per request, making it ideal for variable-traffic APIs while eliminating idle compute costs.
+
+3. **Project-per-Environment Structure**: Isolating dev, staging, and prod into separate projects provides natural IAM boundaries and prevents accidental cross-environment access.
+
+4. **Artifact Registry with Vulnerability Scanning**: Automatic container image scanning on push catches known CVEs before deployment, integrated natively with Cloud Build pipelines.
+
+5. **Cloud SQL with Private IP**: Connecting to Cloud SQL over private IP through VPC peering eliminates public internet exposure and reduces latency.
+
+6. **Pub/Sub for Event-Driven Architecture**: Pub/Sub provides exactly-once delivery with dead-letter topics and automatic retry, decoupling producers from consumers reliably at scale.
+
+7. **Cloud Build with Triggers**: Native CI/CD triggers on repository events provide hermetic builds without managing build infrastructure or exposing secrets to third-party CI systems.
+
+8. **Secret Manager with Automatic Rotation**: Centralized secret storage with IAM-based access control and audit logging provides a single source of truth for all credentials.
+
+9. **BigQuery for Analytics**: Separating analytical queries into BigQuery prevents heavy reporting workloads from impacting transactional databases.
+
+10. **Cloud Monitoring with SLO Alerting**: Defining SLOs with error budgets in Cloud Monitoring aligns alerting with user impact rather than arbitrary thresholds.
 
 ---
 

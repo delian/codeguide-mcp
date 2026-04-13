@@ -1815,7 +1815,131 @@ CMD ["python", "-m", "uvicorn", "myapp_api.main:app", "--host", "0.0.0.0", "--po
 
 ---
 
-## 7. Deployment Checklist
+## 7. Security & Dependency Management (MANDATORY)
+
+### A. Dependency Vulnerability Scanning
+
+**pip-audit (recommended):**
+```bash
+# Install pip-audit as a dev dependency
+poetry add --group dev pip-audit
+
+# Run vulnerability scan against the lock file
+poetry run pip-audit
+
+# Scan with specific output format for CI
+poetry run pip-audit --format=json --output=audit-report.json
+
+# Fix vulnerabilities automatically where possible
+poetry run pip-audit --fix
+```
+
+**safety check (alternative):**
+```bash
+# Install safety as a dev dependency
+poetry add --group dev safety
+
+# Run safety check
+poetry run safety check
+
+# Check against a specific requirements export
+poetry export -f requirements.txt | poetry run safety check --stdin
+```
+
+- Run `pip-audit` or `safety check` in CI on every PR and at least weekly on the main branch
+- Fail the build on any HIGH or CRITICAL severity finding
+
+### B. Lockfile Discipline
+
+- ALWAYS commit `poetry.lock` to version control for reproducible builds
+- Review `poetry.lock` diffs during code review to catch unexpected dependency changes
+- Use `poetry check` to verify consistency between `pyproject.toml` and the lockfile:
+
+```bash
+# Verify pyproject.toml and lockfile integrity
+poetry check
+
+# Update all dependencies (review changes before committing)
+poetry update
+
+# Update a specific package
+poetry update requests
+
+# Show outdated packages
+poetry show --outdated
+```
+
+### C. Dependency Update Workflow
+
+```bash
+# 1. Check for outdated packages
+poetry show --outdated
+
+# 2. Update dependencies
+poetry update
+
+# 3. Run vulnerability scan
+poetry run pip-audit
+
+# 4. Run full test suite to catch regressions
+poetry run pytest
+
+# 5. Verify lockfile integrity
+poetry check
+
+# 6. Commit updated lock file
+git add poetry.lock && git commit -m "chore: update dependencies"
+```
+
+### D. CI Integration
+
+Add vulnerability scanning to your GitHub Actions workflow:
+
+```yaml
+# Add to .github/workflows/ci.yml
+- name: Security audit
+  run: |
+    poetry install --only dev
+    poetry run pip-audit
+```
+
+### E. Secret Management
+
+- NEVER commit secrets, API keys, or tokens in `pyproject.toml` or source code
+- Use environment variables or `.env` files (excluded from VCS) for configuration:
+
+```bash
+# .gitignore
+.env
+.env.*
+```
+
+```python
+# Use pydantic-settings for type-safe configuration
+from pydantic_settings import BaseSettings
+
+class Settings(BaseSettings):
+    api_key: str
+    database_url: str
+
+    class Config:
+        env_file = ".env"
+```
+
+### F. Security Checklist
+
+- [ ] `poetry.lock` committed to version control
+- [ ] `pip-audit` or `safety` added as dev dependency
+- [ ] Vulnerability scan runs in CI on every PR
+- [ ] `poetry check` passes in CI
+- [ ] No secrets in `pyproject.toml` or source code
+- [ ] `.env` files excluded from version control
+- [ ] Dependencies updated at least monthly
+- [ ] All HIGH/CRITICAL vulnerabilities addressed before release
+
+---
+
+## 8. Deployment Checklist
 
 ### Project Setup
 - [ ] **Poetry installed**: Latest version via install script
@@ -1882,7 +2006,7 @@ CMD ["python", "-m", "uvicorn", "myapp_api.main:app", "--host", "0.0.0.0", "--po
 
 ---
 
-## 8. Why This Configuration Works
+## 9. Why This Configuration Works
 
 1. **Poetry Maturity**: Battle-tested, widely adopted Python packaging tool.
 2. **Distributed Architecture**: Separate pyproject.toml per layer maintains boundaries.
@@ -1899,7 +2023,7 @@ CMD ["python", "-m", "uvicorn", "myapp_api.main:app", "--host", "0.0.0.0", "--po
 
 ---
 
-## 9. Quick Reference
+## 10. Quick Reference
 
 ### Common Commands
 

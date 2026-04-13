@@ -1385,7 +1385,93 @@ npm install @anatine/zod-mock     # Generate mock data from schemas
 
 ---
 
-## 12. Deployment Checklist
+## 12. Security & Dependency Management (MANDATORY)
+
+### A. Automated Dependency Management
+
+```bash
+# npm: install dependencies from package.json
+npm install
+
+# npm: update all dependencies to latest compatible versions
+npm update
+
+# npm: check for outdated packages
+npm outdated
+
+# npm: install exact versions (no ^ or ~ ranges)
+npm install --save-exact zod@3.24.4
+
+# Regenerate lockfile from scratch
+rm -rf node_modules package-lock.json && npm install
+```
+
+**`package-lock.json`** is the lockfile. Always commit it to version control for reproducible builds.
+
+### B. Vulnerability Scanning & Security
+
+```bash
+# npm audit: scan dependencies for known vulnerabilities
+npm audit
+
+# npm audit: automatically fix vulnerabilities where possible
+npm audit fix
+
+# npm audit: full report in JSON format (for CI/CD)
+npm audit --json
+
+# Snyk: deeper vulnerability scanning
+snyk test
+
+# Check for unused or duplicate dependencies
+npx depcheck
+```
+
+**Security best practices:**
+- **Zod-specific**: Always use `.safeParse()` at API boundaries — never trust external input
+- **Zod-specific**: Use `.strict()` on schemas processing untrusted data to reject unexpected fields
+- **Zod-specific**: Avoid `.passthrough()` on schemas handling user input — it allows unvalidated fields through
+- Run `npm audit` in CI/CD pipelines and fail builds on high/critical vulnerabilities
+- Use `package-lock.json` and `npm ci` (not `npm install`) in CI for deterministic installs
+- Prefer `--save-exact` for production dependencies to prevent supply chain attacks via semver ranges
+- Review changelogs before upgrading Zod major versions — schema behavior may change
+- Never use `z.any()` without subsequent refinement in security-sensitive schemas
+- Validate environment variables at startup using Zod schemas (fail fast on misconfiguration)
+
+### C. Dependency File
+
+```json
+{
+  "name": "my-zod-project",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "zod": "3.24.4"
+  },
+  "devDependencies": {
+    "typescript": "5.7.3",
+    "vitest": "3.1.1",
+    "@types/node": "22.13.14",
+    "prettier": "3.5.3",
+    "eslint": "9.23.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "lint": "eslint src/ --ext .ts",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "audit": "npm audit --audit-level=high",
+    "typecheck": "tsc --noEmit --strict"
+  }
+}
+```
+
+---
+
+## 13. Deployment Checklist
 
 ### Agent-Generated Code Verification (MANDATORY)
 
@@ -1426,7 +1512,7 @@ npm install @anatine/zod-mock     # Generate mock data from schemas
 
 ---
 
-## 13. Why This Configuration Works
+## 14. Why This Configuration Works
 
 **Type Safety Without Duplication**:
 - Zod schemas serve as the single source of truth for both runtime validation and TypeScript types. No drift between interfaces and validators.
@@ -1442,7 +1528,7 @@ npm install @anatine/zod-mock     # Generate mock data from schemas
 
 ---
 
-## 14. Quick Reference
+## 15. Quick Reference
 
 ### Common Schema Patterns
 

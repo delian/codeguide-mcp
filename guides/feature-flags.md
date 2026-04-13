@@ -1015,6 +1015,16 @@ PERMISSION → Permanent (until plan changes)
 
 ---
 
+## 10. Why This Configuration Works
+
+- **Progressive delivery reduces deployment risk**: Percentage-based rollouts and ring-based deployment allow teams to expose new features to small user populations first, catching issues before they affect the entire user base. This turns risky big-bang releases into controlled, reversible experiments.
+- **Kill switches enable instant rollback**: Having pre-configured kill switches for critical features means any production issue can be mitigated in seconds without a code deployment, dramatically reducing incident duration.
+- **Typed flag categories enforce lifecycle discipline**: Classifying flags as release, experiment, ops, or permission types with explicit expiration dates prevents the accumulation of stale flags that create technical debt and make code increasingly difficult to reason about.
+- **Consistent hashing ensures stable user experience**: Using deterministic hash-based bucketing ensures individual users always see the same flag variation across sessions and page loads, preventing confusing experience inconsistencies during rollouts.
+- **Automated cleanup keeps the codebase clean**: The lifecycle management process with audit reports, automated cleanup PRs, and staleness detection ensures feature flags remain a temporary deployment mechanism rather than a permanent source of branching complexity.
+
+---
+
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** Platform Team

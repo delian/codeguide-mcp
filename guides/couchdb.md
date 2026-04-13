@@ -234,6 +234,148 @@ Each database:
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. RED: Write a failing test first
+   ↓
+2. GREEN: Write minimal code to make it pass
+   ↓
+3. REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for CouchDB (Python with pytest and couchdb library)
+
+```python
+# Step 1: RED - Write failing test first
+import pytest
+import couchdb
+
+@pytest.fixture
+def couch_db():
+    server = couchdb.Server("http://admin:password@localhost:5984/")
+    db_name = "test_db"
+    if db_name in server:
+        del server[db_name]
+    db = server.create(db_name)
+    yield db
+    del server[db_name]
+
+def test_save_and_retrieve_document(couch_db):
+    """Test saving and retrieving a JSON document."""
+    repo = DocumentRepository(couch_db)
+    doc_id = repo.save({"type": "article", "title": "TDD Guide", "author": "Alice"})
+    doc = repo.get(doc_id)
+    assert doc["title"] == "TDD Guide"
+    assert doc["author"] == "Alice"
+
+# Run: pytest test_couchdb.py -v
+# FAILS - NameError: name 'DocumentRepository' is not defined
+
+# Step 2: GREEN - Write minimal implementation
+class DocumentRepository:
+    def __init__(self, db):
+        self.db = db
+
+    def save(self, doc):
+        doc_id, _ = self.db.save(doc)
+        return doc_id
+
+    def get(self, doc_id):
+        return dict(self.db[doc_id])
+
+# Run: pytest test_couchdb.py -v
+# PASSES
+
+# Step 3: REFACTOR - Add conflict-safe update and view queries
+class DocumentRepository:
+    def __init__(self, db):
+        self.db = db
+
+    def save(self, doc):
+        doc_id, doc_rev = self.db.save(doc)
+        return doc_id
+
+    def get(self, doc_id):
+        try:
+            return dict(self.db[doc_id])
+        except couchdb.ResourceNotFound:
+            return None
+
+    def update(self, doc_id, updates):
+        doc = self.db[doc_id]
+        doc.update(updates)
+        self.db.save(doc)
+
+    def find_by_type(self, doc_type):
+        mango_query = {"selector": {"type": doc_type}}
+        return [dict(row) for row in self.db.find(mango_query)]
+
+# Tests still pass
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. Bug Reported/Discovered
+   ↓
+2. Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. Verify the test fails for the right reason
+   ↓
+4. Fix the bug (make the test pass)
+   ↓
+5. Verify the test now PASSES
+   ↓
+6. Document the bug in test comments
+```
+
+### Example Bug Fix
+
+```python
+# Bug: update() overwrites the entire document instead of merging fields,
+# causing data loss when only updating a single field
+
+import pytest
+
+# Step 1: Write test that reproduces the bug
+def test_update_preserves_existing_fields(couch_db):
+    """Regression: update() should merge fields, not replace the entire document."""
+    repo = DocumentRepository(couch_db)
+    doc_id = repo.save({"type": "article", "title": "Original", "author": "Alice"})
+    repo.update(doc_id, {"title": "Updated"})
+    doc = repo.get(doc_id)
+    assert doc["title"] == "Updated"
+    assert doc["author"] == "Alice"  # This field must be preserved
+
+# FAILS - KeyError: 'author' (field was lost during update)
+
+# Step 2: Fix the bug
+class DocumentRepository:
+    # ... existing code ...
+
+    def update(self, doc_id, updates):
+        doc = self.db[doc_id]
+        doc.update(updates)  # merge, don't replace
+        self.db.save(doc)
+
+# PASSES - bug fixed, regression prevented
+```
+
+---
+
 ## 3. Document Model and Design
 
 ### Document Structure
@@ -3374,6 +3516,76 @@ Critical Metrics:
 - [ ] Security audit
 - [ ] Version upgrade planning
 - [ ] Performance tuning review
+
+---
+
+## 22. Deployment Checklist
+
+### Agent-Generated Code Verification (MANDATORY)
+
+#### Build & Compilation
+- [ ] Code compiles/runs without errors
+- [ ] All imports/dependencies resolved (CouchDB client libraries)
+- [ ] Code formatted per project standards
+
+#### Testing
+- [ ] All tests pass
+- [ ] Coverage meets minimum threshold (>80%)
+- [ ] Integration tests pass against CouchDB test instance
+
+#### Security
+- [ ] Dependency scan: 0 HIGH/CRITICAL vulnerabilities
+- [ ] No hardcoded credentials or secrets
+- [ ] Connection strings use environment variables
+
+#### Agent Workflow Completed
+- [ ] Agent verified code builds successfully
+- [ ] Agent ran all tests and verified they pass
+- [ ] Agent verified documentation
+
+---
+
+## 23. Why This Configuration Works
+
+**HTTP/REST API as First-Class Interface**: Every operation uses standard HTTP methods, making CouchDB accessible from any language or tool without specialized drivers and enabling direct browser-to-database communication.
+
+**Multi-Master Replication with Conflict Detection**: CouchDB's replication protocol handles network partitions gracefully, allowing offline-first applications to sync bidirectionally with automatic conflict detection and deterministic resolution.
+
+**Append-Only B-Tree Storage for Crash Resilience**: The append-only design means CouchDB never overwrites data in place, providing inherent crash resistance without write-ahead logs and enabling consistent snapshots at any point.
+
+**PouchDB Ecosystem for Offline-First Applications**: The seamless PouchDB-to-CouchDB sync protocol enables building progressive web applications that work offline and automatically synchronize when connectivity returns.
+
+---
+
+## 24. Quick Reference
+
+### Common Commands
+
+```bash
+# Check CouchDB is running
+curl http://localhost:5984/
+
+# Create a database
+curl -X PUT http://admin:password@localhost:5984/mydb
+
+# Insert a document
+curl -X POST http://admin:password@localhost:5984/mydb \
+  -H "Content-Type: application/json" -d '{"name":"Alice","age":30}'
+
+# Query all documents
+curl http://admin:password@localhost:5984/mydb/_all_docs?include_docs=true
+
+# Set up continuous replication
+curl -X POST http://admin:password@localhost:5984/_replicate \
+  -H "Content-Type: application/json" \
+  -d '{"source":"mydb","target":"http://remote:5984/mydb","continuous":true}'
+
+# Compact a database
+curl -X POST http://admin:password@localhost:5984/mydb/_compact
+
+# Get database info and stats
+curl http://admin:password@localhost:5984/mydb
+```
 
 ---
 

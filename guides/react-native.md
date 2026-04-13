@@ -83,6 +83,144 @@ If verification fails:
 
 ---
 
+## 2A. TDD Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### Red-Green-Refactor Cycle with Jest and React Native Testing Library
+
+```tsx
+// ═══════════════════════════════════════════════════════════════
+// STEP 1: RED - Write failing test first
+// ═══════════════════════════════════════════════════════════════
+
+// __tests__/hooks/useOrders.test.ts
+import { renderHook, waitFor } from '@testing-library/react-native';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { useOrders } from '@/features/orders/hooks/useOrders';
+import { ordersApi } from '@/features/orders/services/ordersApi';
+
+jest.mock('@/features/orders/services/ordersApi');
+
+const wrapper = ({ children }: { children: React.ReactNode }) => {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
+};
+
+describe('useOrders', () => {
+  it('returns orders on successful fetch', async () => {
+    const mockOrders = [
+      { id: '1', title: 'Order 1' },
+      { id: '2', title: 'Order 2' },
+    ];
+    (ordersApi.getOrders as jest.Mock).mockResolvedValue({
+      orders: mockOrders,
+      hasMore: false,
+      page: 1,
+    });
+
+    const { result } = renderHook(() => useOrders(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(result.current.orders).toHaveLength(2);
+    expect(result.current.orders[0].title).toBe('Order 1');
+  });
+
+  it('returns error on failed fetch', async () => {
+    (ordersApi.getOrders as jest.Mock).mockRejectedValue(
+      new Error('Network error')
+    );
+
+    const { result } = renderHook(() => useOrders(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.error).toBeTruthy();
+    });
+
+    expect(result.current.error?.message).toBe('Network error');
+  });
+});
+
+// Run: npm test
+// ❌ FAILS - useOrders hook doesn't exist yet
+
+// ═══════════════════════════════════════════════════════════════
+// STEP 2: GREEN - Write minimal implementation
+// ═══════════════════════════════════════════════════════════════
+
+// Implement useOrders hook with React Query to make tests pass
+
+// Run: npm test
+// ✅ PASSES - all tests pass
+
+// ═══════════════════════════════════════════════════════════════
+// STEP 3: REFACTOR - Add pagination, improve while tests stay green
+// ═══════════════════════════════════════════════════════════════
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow Example
+
+```tsx
+// ═══════════════════════════════════════════════════════════════
+// Bug Report #789: Button component fires onPress callback even
+// when disabled prop is true on Android
+// ═══════════════════════════════════════════════════════════════
+
+// STEP 1: Write test that reproduces the bug
+// __tests__/Button.test.tsx
+
+import React from 'react';
+import { render, fireEvent } from '@testing-library/react-native';
+import { Button } from '@/components/ui/Button';
+
+test('does not fire onPress when disabled - Bug #789', () => {
+  // Bug: onPress fires on disabled button on Android
+  // Discovered: 2026-03-22
+  // Root cause: TouchableOpacity disabled prop not propagated
+
+  const onPress = jest.fn();
+  const { getByText } = render(
+    <Button title="Submit" onPress={onPress} disabled />
+  );
+
+  fireEvent.press(getByText('Submit'));
+  expect(onPress).not.toHaveBeenCalled();
+});
+
+test('does not fire onPress when loading - Bug #789', () => {
+  const onPress = jest.fn();
+  const { getByTestId } = render(
+    <Button title="Submit" onPress={onPress} loading />
+  );
+
+  fireEvent.press(getByTestId('activity-indicator'));
+  expect(onPress).not.toHaveBeenCalled();
+});
+
+// Run: npm test
+// ❌ FAILS - onPress is called even when disabled
+
+// STEP 2: Fix the bug - Ensure disabled={isDisabled} on TouchableOpacity
+
+// Run: npm test
+// ✅ PASSES - bug fixed, regression prevented forever
+```
+
+---
+
 ## 3. Project Structure (MANDATORY)
 
 ### A. Directory Layout

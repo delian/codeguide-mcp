@@ -121,6 +121,181 @@ The agent must adhere to the **DATA-FIRST** principles:
 
 ---
 
+## 2A. TDD Protocol (Red-Green-Refactor)
+
+EVERY new feature or module MUST follow the Red-Green-Refactor cycle. No production code without a failing test first.
+
+### Workflow
+
+1. **RED** -- Write a failing test that defines the expected behavior.
+2. **GREEN** -- Write the minimum production code to make the test pass.
+3. **REFACTOR** -- Clean up while keeping tests green.
+
+### Concrete Example -- Testing a Revenue Summary Query
+
+**Step 1 -- RED (language-agnostic SQL test pattern):**
+
+```sql
+-- test_revenue_summary.sql
+-- Framework: any SQL test runner (pgTAP, tSQLt, utPLSQL, or application-level)
+
+-- ARRANGE: seed test data
+BEGIN;
+
+CREATE TEMPORARY TABLE test_orders (
+    id         SERIAL PRIMARY KEY,
+    customer_id INT NOT NULL,
+    amount     DECIMAL(10,2) NOT NULL,
+    status     VARCHAR(20) NOT NULL,
+    created_at DATE NOT NULL
+);
+
+INSERT INTO test_orders (customer_id, amount, status, created_at) VALUES
+    (1, 100.00, 'completed', '2025-01-15'),
+    (1, 250.00, 'completed', '2025-01-20'),
+    (1,  50.00, 'cancelled', '2025-01-22'),
+    (2, 300.00, 'completed', '2025-02-01'),
+    (2, 175.00, 'completed', '2025-02-10');
+
+-- ACT: run the query under test
+CREATE TEMPORARY TABLE test_result AS
+SELECT
+    customer_id,
+    SUM(amount) AS total_revenue,
+    COUNT(*)    AS order_count
+FROM test_orders
+WHERE status = 'completed'
+GROUP BY customer_id
+ORDER BY customer_id;
+
+-- ASSERT: verify expected result set
+DO $$
+BEGIN
+    -- Customer 1: two completed orders totaling 350.00
+    ASSERT (SELECT total_revenue FROM test_result WHERE customer_id = 1) = 350.00,
+           'Customer 1 revenue should be 350.00';
+    ASSERT (SELECT order_count FROM test_result WHERE customer_id = 1) = 2,
+           'Customer 1 should have 2 completed orders';
+
+    -- Customer 2: two completed orders totaling 475.00
+    ASSERT (SELECT total_revenue FROM test_result WHERE customer_id = 2) = 475.00,
+           'Customer 2 revenue should be 475.00';
+END $$;
+
+ROLLBACK;  -- clean up
+```
+
+**Step 2 -- GREEN:** Write or adjust the production query/view to satisfy the assertions.
+
+```sql
+-- production: revenue_summary view
+CREATE OR REPLACE VIEW revenue_summary AS
+SELECT
+    customer_id,
+    SUM(amount)  AS total_revenue,
+    COUNT(*)     AS order_count
+FROM orders
+WHERE status = 'completed'
+GROUP BY customer_id;
+```
+
+**Step 3 -- REFACTOR:**
+
+- Extract test data seeding into reusable fixtures or stored procedures.
+- Add index on `(status, customer_id)` if query plan shows sequential scan.
+- Wrap assertions in the testing framework's native assertion functions (e.g., pgTAP `is()`).
+
+### TDD Rules for SQL
+
+- Run tests inside a transaction and ROLLBACK to leave the database clean.
+- Use temporary tables or a dedicated test schema for seed data.
+- Assert on **exact result sets** (row count, column values, ordering).
+- Test NULL handling, empty result sets, and boundary conditions.
+- Dialect-specific syntax is acceptable in tests -- document which engine is targeted.
+
+---
+
+## 2B. Bug Fix Protocol (Regression Testing)
+
+EVERY bug fix MUST include a regression test that fails before the fix and passes after.
+
+### Workflow
+
+1. **Reproduce** -- Write a test that triggers the exact bug.
+2. **Verify RED** -- Confirm the test fails on the current code.
+3. **Fix** -- Apply the minimal code change.
+4. **Verify GREEN** -- Confirm the test (and all others) pass.
+5. **Document** -- Reference the bug/ticket in the test docstring.
+
+### Concrete Example -- Duplicate Rows from Missing DISTINCT
+
+**Bug report:** The customer report query returns duplicate rows when a customer has multiple addresses, inflating revenue totals.
+
+**Step 1 -- Regression test:**
+
+```sql
+-- test_bug_duplicate_revenue.sql
+-- Regression: BUG-3390 -- JOIN on addresses must not duplicate order rows
+
+BEGIN;
+
+CREATE TEMPORARY TABLE test_customers (id INT PRIMARY KEY, name TEXT);
+CREATE TEMPORARY TABLE test_addresses (id INT PRIMARY KEY, customer_id INT, city TEXT);
+CREATE TEMPORARY TABLE test_orders (id INT PRIMARY KEY, customer_id INT, amount DECIMAL(10,2));
+
+INSERT INTO test_customers VALUES (1, 'Acme Corp');
+INSERT INTO test_addresses VALUES (10, 1, 'New York'), (11, 1, 'Chicago');
+INSERT INTO test_orders VALUES (100, 1, 500.00), (101, 1, 300.00);
+
+-- The buggy query JOINs addresses without deduplication
+CREATE TEMPORARY TABLE test_result AS
+SELECT
+    c.id AS customer_id,
+    c.name,
+    SUM(o.amount) AS total_revenue
+FROM test_customers c
+JOIN test_orders o ON o.customer_id = c.id
+JOIN test_addresses a ON a.customer_id = c.id  -- causes row multiplication
+GROUP BY c.id, c.name;
+
+-- ASSERT: revenue must equal 800.00, not 1600.00
+DO $$
+BEGIN
+    ASSERT (SELECT total_revenue FROM test_result WHERE customer_id = 1) = 800.00,
+           'BUG-3390: Revenue inflated by address JOIN -- expected 800.00';
+END $$;
+
+ROLLBACK;
+```
+
+**Step 2 -- Verify the test fails** (returns 1600.00 due to row duplication).
+
+**Step 3 -- Fix** (use a subquery or DISTINCT to eliminate duplication):
+
+```sql
+SELECT
+    c.id AS customer_id,
+    c.name,
+    order_totals.total_revenue
+FROM customers c
+JOIN (
+    SELECT customer_id, SUM(amount) AS total_revenue
+    FROM orders
+    GROUP BY customer_id
+) order_totals ON order_totals.customer_id = c.id;
+```
+
+**Step 4 -- Verify GREEN** -- the assertion now passes.
+
+### Regression Test Rules for SQL
+
+- Name test files `test_bug_<description>.sql` or `test_regression_<ticket>.sql`.
+- Include the ticket/issue number in comments or assertions.
+- Regression tests are NEVER deleted.
+- Test with minimal seed data that isolates the exact duplication or logic error.
+
+---
+
 ## 3. Schema Design Standards (MANDATORY)
 
 ### A. Table Design Template

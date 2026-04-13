@@ -1,12 +1,12 @@
 # TypeScript Development Guidelines
-Mandatory coding standards and development practices for modern TypeScript applications. TypeScript 5.x, TypeDoc, Modern testing frameworks (Vitest/Jest), ESLint, Prettier.
+Mandatory coding standards and development practices for modern TypeScript applications. TypeScript 5.7+, TypeDoc, Modern testing frameworks (Vitest/Jest), ESLint, Prettier.
 
 ---
 
 **Agent Profile**: The TypeScript Expert
 **Role**: Senior TypeScript Engineer & Type Safety Specialist
 **Objective**: Generate production-ready, type-safe, fully documented, minimalistic, and maintainable TypeScript code.
-**Tools**: TypeScript 5.x, TypeDoc, Modern testing frameworks (Vitest/Jest), ESLint, Biome/Oxlint (optional), Prettier.
+**Tools**: TypeScript 5.7+, TypeDoc, Modern testing frameworks (Vitest/Jest), ESLint, Biome/Oxlint (optional), Prettier.
 
 ---
 
@@ -2115,7 +2115,69 @@ export class UserService {
 }
 ```
 
-## 12. Deployment Checklist
+## 12. Security & Dependency Management (MANDATORY)
+
+### A. Automated Dependency Management
+
+**Use npm/yarn/pnpm to manage and lock dependencies:**
+
+```bash
+# Install/sync dependencies
+npm install
+
+# Add a new dependency
+npm install package-name
+
+# Update dependencies
+npm update
+
+# Verify dependency integrity
+npm audit signatures
+```
+
+### B. Vulnerability Scanning & Security
+
+**Mandatory security checks for ALL TypeScript projects:**
+
+1. **Vulnerability Scan**:
+   ```bash
+   # Scan for known vulnerabilities
+   npm audit
+   ```
+   - Agents MUST fix all HIGH/CRITICAL vulnerabilities before delivery.
+   - Also audit `@types/` packages -- they can introduce transitive vulnerabilities.
+
+2. **Supply Chain Audit**:
+   - Verify `package-lock.json` integrity
+   - Audit licenses for compliance
+   - Use `npm audit signatures` to verify registry signatures
+   - Review `@types/` packages for version alignment with their runtime counterparts
+
+### C. Dependency File
+
+```json
+{
+  "name": "my-project",
+  "version": "1.0.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "express": "^4.18.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.0",
+    "typescript": "^5.3.0",
+    "eslint": "^8.56.0",
+    "prettier": "^3.2.0",
+    "vitest": "^1.2.0"
+  }
+}
+```
+
+---
+
+## 13. Deployment Checklist
 
 ### Pre-Production Validation
 
@@ -2150,7 +2212,7 @@ export class UserService {
 - [ ] No prototype pollution vulnerabilities
 - [ ] Secrets not hardcoded
 
-## 13. Why This Configuration Works
+## 14. Why This Configuration Works
 
 1. **Strict TypeScript**: Catches 30-40% more bugs at compile time, prevents runtime type errors.
 
@@ -2174,7 +2236,7 @@ export class UserService {
 
 ---
 
-## 14. Quick Reference
+## 15. Quick Reference
 
 ### Common Commands
 

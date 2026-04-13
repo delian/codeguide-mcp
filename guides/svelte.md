@@ -90,7 +90,6 @@ If verification fails:
 
 ---
 
-## 3. Mental Model
 5. **Document any non-obvious fixes**
 
 ### C. Prohibited Practices
@@ -111,349 +110,6 @@ If verification fails:
 - ❌ **Fixes bugs without adding regression tests first**
 - ❌ **Writes implementation before writing tests (violates TDD)**
 - ❌ **Skips Red-Green-Refactor cycle for new features**
-
----
-
-## 1A. Test-Driven Development (TDD) Protocol (MANDATORY)
-
-**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
-
-### TDD Cycle
-
-```
-1. 🔴 RED: Write a failing test first
-   ↓
-2. 🟢 GREEN: Write minimal code to make it pass
-   ↓
-3. 🔵 REFACTOR: Improve code while keeping tests green
-   ↓
-   Repeat
-```
-
-### Example TDD Workflow for Svelte Component
-
-```typescript
-// Step 1: RED - Write failing test first
-import { describe, it, expect } from 'vitest';
-import { render, fireEvent } from '@testing-library/svelte';
-import Counter from './Counter.svelte';
-
-describe('Counter', () => {
-  it('displays initial count', () => {
-    const { getByText } = render(Counter, { props: { initial: 5 } });
-    expect(getByText('Count: 5')).toBeInTheDocument();
-  });
-  
-  it('increments count on button click', async () => {
-    const { getByRole, getByText } = render(Counter);
-    const button = getByRole('button', { name: /increment/i });
-    
-    await fireEvent.click(button);
-    
-    expect(getByText('Count: 1')).toBeInTheDocument();
-  });
-});
-
-// Run: npm test
-// ❌ FAILS - Counter component doesn't exist yet
-
-// Step 2: GREEN - Write minimal implementation
-<script lang="ts">
-  interface Props {
-    initial?: number;
-  }
-  
-  let { initial = 0 }: Props = $props();
-  let count = $state(initial);
-  
-  function increment() {
-    count++;
-  }
-</script>
-
-<div>
-  <p>Count: {count}</p>
-  <button onclick={increment}>Increment</button>
-</div>
-
-// Run: npm test
-// ✅ PASSES - tests pass
-
-// Step 3: REFACTOR - Add styling, better structure
-<script lang="ts">
-  interface Props {
-    initial?: number;
-    onUpdate?: (count: number) => void;
-  }
-  
-  let { initial = 0, onUpdate }: Props = $props();
-  let count = $state(initial);
-  
-  function increment() {
-    count++;
-    onUpdate?.(count);
-  }
-</script>
-
-<div class="counter">
-  <p class="count">Count: {count}</p>
-  <button class="btn" onclick={increment}>Increment</button>
-</div>
-
-<style>
-  .counter {
-    padding: 1rem;
-    border: 1px solid #ddd;
-    border-radius: 8px;
-  }
-  
-  .btn {
-    background: #007bff;
-    color: white;
-    padding: 0.5rem 1rem;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-  }
-</style>
-// Tests still pass ✓
-```
-
-### Example TDD for Utility Function
-
-```typescript
-// Step 1: RED - Write failing test first
-import { describe, it, expect } from 'vitest';
-import { formatCurrency } from './formatters';
-
-describe('formatCurrency', () => {
-  it('formats USD currency', () => {
-    expect(formatCurrency(1234.56, 'USD')).toBe('$1,234.56');
-  });
-  
-  it('formats EUR currency', () => {
-    expect(formatCurrency(1234.56, 'EUR')).toBe('€1,234.56');
-  });
-  
-  it('handles zero', () => {
-    expect(formatCurrency(0, 'USD')).toBe('$0.00');
-  });
-});
-
-// Run: npm test
-// ❌ FAILS - formatCurrency doesn't exist yet
-
-// Step 2: GREEN - Write minimal implementation
-export function formatCurrency(amount: number, currency: 'USD' | 'EUR'): string {
-  const symbol = currency === 'USD' ? '$' : '€';
-  const formatted = amount.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  });
-  return `${symbol}${formatted}`;
-}
-
-// Run: npm test
-// ✅ PASSES - tests pass
-
-// Step 3: REFACTOR - Improve with better locale handling
-const CURRENCY_CONFIG = {
-  USD: { symbol: '$', locale: 'en-US' },
-  EUR: { symbol: '€', locale: 'de-DE' }
-} as const;
-
-export function formatCurrency(
-  amount: number,
-  currency: keyof typeof CURRENCY_CONFIG
-): string {
-  const config = CURRENCY_CONFIG[currency];
-  const formatted = amount.toLocaleString(config.locale, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  });
-  return `${config.symbol}${formatted}`;
-}
-// Tests still pass ✓
-```
-
----
-
-## 1B. Bug Fix Protocol (MANDATORY)
-
-**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
-
-### Bug Fix Workflow
-
-```
-1. 🐛 Bug Reported/Discovered
-   ↓
-2. ✍️ Write a test that REPRODUCES the bug (test will FAIL)
-   ↓
-3. ✅ Verify the test fails for the right reason
-   ↓
-4. 🔧 Fix the bug (make the test pass)
-   ↓
-5. 🟢 Verify the test now PASSES
-   ↓
-6. 📝 Document the bug in test comments (include bug ID)
-   ↓
-7. 🚀 Deploy with confidence (regression prevented)
-```
-
-### Example Bug Fix for Component
-
-```typescript
-// Bug Report #8234: Counter allows negative values when it shouldn't
-
-// Step 1-2: Write test that reproduces the bug
-import { describe, it, expect } from 'vitest';
-import { render, fireEvent } from '@testing-library/svelte';
-import Counter from './Counter.svelte';
-
-describe('Counter - Bug #8234', () => {
-  it('prevents negative values - Bug #8234', async () => {
-    // Bug: Counter goes negative when decrement clicked at 0
-    // Discovered: 2026-01-18
-    // This test prevents regression
-    
-    const { getByRole, getByText } = render(Counter, {
-      props: { initial: 0, min: 0 }
-    });
-    
-    const decrementBtn = getByRole('button', { name: /decrement/i });
-    await fireEvent.click(decrementBtn);
-    
-    // Should stay at 0, not go negative
-    expect(getByText('Count: 0')).toBeInTheDocument();
-  });
-});
-
-// Run: npm test
-// ❌ FAILS - shows "Count: -1" instead of "Count: 0"
-
-// Step 3: Fix the bug in Counter.svelte
-<script lang="ts">
-  interface Props {
-    initial?: number;
-    min?: number;
-    max?: number;
-  }
-  
-  let { initial = 0, min, max }: Props = $props();
-  let count = $state(initial);
-  
-  function increment() {
-    if (max === undefined || count < max) {
-      count++;
-    }
-  }
-  
-  function decrement() {
-    // FIX: Check minimum before decrementing
-    if (min === undefined || count > min) {
-      count--;
-    }
-  }
-</script>
-
-<div class="counter">
-  <p>Count: {count}</p>
-  <button onclick={decrement}>Decrement</button>
-  <button onclick={increment}>Increment</button>
-</div>
-
-// Run: npm test
-// ✅ PASSES - bug fixed, regression prevented ✓
-```
-
-### Example Bug Fix for Store
-
-```typescript
-// Bug Report #8235: userStore doesn't persist after page reload
-
-// Step 1-2: Write test that reproduces the bug
-import { describe, it, expect, beforeEach } from 'vitest';
-import { get } from 'svelte/store';
-import { userStore } from './user-store';
-
-describe('userStore - Bug #8235', () => {
-  beforeEach(() => {
-    localStorage.clear();
-  });
-  
-  it('persists user data to localStorage - Bug #8235', () => {
-    // Bug: userStore not persisted to localStorage
-    // Discovered: 2026-01-18
-    // This test prevents regression
-    
-    const user = { id: '1', name: 'John' };
-    userStore.set(user);
-    
-    // Should be saved to localStorage
-    const saved = localStorage.getItem('user');
-    expect(saved).not.toBeNull();
-    expect(JSON.parse(saved!)).toEqual(user);
-  });
-  
-  it('restores user data from localStorage', () => {
-    const user = { id: '1', name: 'John' };
-    localStorage.setItem('user', JSON.stringify(user));
-    
-    // Should restore from localStorage on init
-    const restored = get(userStore);
-    expect(restored).toEqual(user);
-  });
-});
-
-// Run: npm test
-// ❌ FAILS - localStorage not accessed
-
-// Step 3: Fix the bug in user-store.ts
-import { writable } from 'svelte/store';
-import type { User } from '$lib/domain/entities/User';
-
-// FIX: Load initial value from localStorage
-const stored = typeof window !== 'undefined'
-  ? localStorage.getItem('user')
-  : null;
-
-const initial: User | null = stored ? JSON.parse(stored) : null;
-
-function createUserStore() {
-  const { subscribe, set, update } = writable<User | null>(initial);
-  
-  return {
-    subscribe,
-    set: (user: User | null) => {
-      // FIX: Persist to localStorage on set
-      if (typeof window !== 'undefined') {
-        if (user) {
-          localStorage.setItem('user', JSON.stringify(user));
-        } else {
-          localStorage.removeItem('user');
-        }
-      }
-      set(user);
-    },
-    update
-  };
-}
-
-export const userStore = createUserStore();
-
-// Run: npm test
-// ✅ PASSES - bug fixed, regression prevented ✓
-```
-
-### Prohibited Practices for Bug Fixes
-
-**NEVER:**
-- ❌ Fix a bug without adding a regression test first
-- ❌ Write implementation before writing tests (violates TDD)
-- ❌ Skip the Red-Green-Refactor cycle
-- ❌ Commit code with failing tests
-- ❌ Remove tests to make code pass
-- ❌ Use `it.skip()` to ignore failing tests
 
 ---
 
@@ -2178,7 +1834,61 @@ If using Svelte 4 syntax:
 
 ---
 
-## 11. Testing (MANDATORY)
+## 11. Security & Dependency Management (MANDATORY)
+
+### A. Automated Dependency Management
+
+**Use npm with lockfiles and automated scanning for consistent and secure environments:**
+
+```json
+// package.json
+{
+  "scripts": {
+    "audit": "npm audit --audit-level=high",
+    "update": "npm update"
+  }
+}
+```
+
+- **Lockfiles**: ALWAYS commit `package-lock.json`. Use `npm ci` in CI/CD to ensure exact dependency matching.
+- **Dependency Auditing**: Integrate `npm audit` into your CI pipeline to block builds with HIGH or CRITICAL vulnerabilities.
+- **CSRF Protection**: Use SvelteKit's built-in CSRF protection for form actions.
+
+### B. Vulnerability Scanning & Security
+
+**Mandatory security checks for ALL Svelte projects:**
+
+1. **Vulnerability Scan**:
+   ```bash
+   # Scan all dependencies for known vulnerabilities
+   npm audit --audit-level=high
+   ```
+   - Agents MUST ensure 0 HIGH or CRITICAL vulnerabilities are present.
+
+2. **Supply Chain Audit**:
+   - Verify package integrity using `npm verify`.
+   - Audit external snippets and libraries for malicious telemetry or hidden dependencies.
+
+### C. Dependency File
+
+```json
+// Example package.json dependencies
+{
+  "dependencies": {
+    "svelte": "^5.0.0",
+    "@sveltejs/kit": "^2.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "vitest": "^2.0.0",
+    "playwright": "^1.45.0"
+  }
+}
+```
+
+---
+
+## 12. Testing (MANDATORY)
 
 ### A. Unit Tests with Vitest
 
@@ -2334,7 +2044,7 @@ export default defineConfig({
 
 ---
 
-## 12. Hexagonal Architecture (MANDATORY)
+## 13. Hexagonal Architecture (MANDATORY)
 
 ### A. Project Structure
 
@@ -2725,7 +2435,7 @@ export const container = Container.getInstance();
 
 ---
 
-## 13. SvelteKit Specifics
+## 14. SvelteKit Specifics
 
 ### A. Load Functions
 
@@ -2801,7 +2511,7 @@ export const POST: RequestHandler = async ({ request }) => {
 
 ---
 
-## 14. Deployment Checklist
+## 15. Deployment Checklist
 
 ### Test-Driven Development (TDD) Compliance
 - [ ] **Tests written BEFORE implementation**: Red-Green-Refactor cycle followed for all new code
@@ -2852,10 +2562,20 @@ export const POST: RequestHandler = async ({ request }) => {
 - [ ] **Input validation**: All user inputs validated
 - [ ] **XSS protection**: Proper escaping in templates
 - [ ] **CSRF protection**: Using SvelteKit's built-in protection
+- [ ] **Dependency scan passes**: `npm audit` shows 0 HIGH/CRITICAL vulnerabilities
+- [ ] **Supply chain verified**: `package-lock.json` is committed and synced
+- [ ] **Secrets check**: No hardcoded secrets in `.env` or `$env/static/private`
+- [ ] **Static analysis**: `eslint` passes with 0 security warnings
+
+### Agent Workflow Completed
+- [ ] Agent verified code builds successfully
+- [ ] Agent ran all tests and verified they pass
+- [ ] Agent ran security scans and verified 0 high vulnerabilities
+- [ ] Agent verified documentation and accessibility
 
 ---
 
-## 15. Common Patterns
+## 16. Common Patterns
 
 ### A. Form Handling
 
@@ -3376,161 +3096,6 @@ export const POST: RequestHandler = async ({ request }) => {
   const user = await createUser(data);
   return json(user, { status: 201 });
 };
-```
-
----
-
-## 11. Security & Dependency Management (MANDATORY)
-
-### A. Automated Dependency Management
-
-**Use npm with lockfiles and automated scanning for consistent and secure environments:**
-
-```json
-// package.json
-{
-  "scripts": {
-    "audit": "npm audit --audit-level=high",
-    "update": "npm update"
-  }
-}
-```
-
-- **Lockfiles**: ALWAYS commit `package-lock.json`. Use `npm ci` in CI/CD to ensure exact dependency matching.
-- **Dependency Auditing**: Integrate `npm audit` into your CI pipeline to block builds with HIGH or CRITICAL vulnerabilities.
-- **CSRF Protection**: Use SvelteKit's built-in CSRF protection for form actions.
-
-### B. Vulnerability Scanning & Security
-
-**Mandatory security checks for ALL Svelte projects:**
-
-1. **Vulnerability Scan**:
-   ```bash
-   # Scan all dependencies for known vulnerabilities
-   npm audit --audit-level=high
-   ```
-   - Agents MUST ensure 0 HIGH or CRITICAL vulnerabilities are present.
-
-2. **Supply Chain Audit**:
-   - Verify package integrity using `npm verify`.
-   - Audit external snippets and libraries for malicious telemetry or hidden dependencies.
-
-### C. Dependency File
-
-```json
-// Example package.json dependencies
-{
-  "dependencies": {
-    "svelte": "^5.0.0",
-    "@sveltejs/kit": "^2.0.0",
-    "zod": "^3.23.0"
-  },
-  "devDependencies": {
-    "vitest": "^2.0.0",
-    "playwright": "^1.45.0"
-  }
-}
-```
-
----
-
-## 12. Deployment Checklist
-
-### Agent-Generated Code Verification (MANDATORY)
-
-#### Build & Compilation
-- [ ] Code compiles: `npm run check` returns exit code 0
-- [ ] Production build succeeds: `npm run build` completes successfully
-- [ ] Svelte 5 features used correctly (Runes, Snippets)
-- [ ] Code formatted: `prettier --check .` passes
-
-#### Testing
-- [ ] All tests pass: `npm run test` returns exit code 0
-- [ ] Reasonable coverage: `npm run test:coverage` shows >80%
-- [ ] Hydration verified: No hydration mismatches in production build
-
-#### Security
-- [ ] Dependency scan passes: `npm audit` shows 0 HIGH/CRITICAL vulnerabilities
-- [ ] Supply chain verified: `package-lock.json` is committed and synced
-- [ ] Secrets check: No hardcoded secrets in `.env` or `$env/static/private`
-- [ ] Static analysis: `eslint` passes with 0 security warnings
-
-#### Code Quality
-- [ ] No unused exports or stores
-- [ ] Small, focused components with clear props interfaces
-- [ ] Project structure follows the standard layout
-
-#### Documentation
-- [ ] All public APIs (components/stores) have JSDoc comments
-- [ ] Documentation check passes: `npm run docs:check` returns 0
-- [ ] Examples provided for complex UI interactions
-
-#### Architecture
-- [ ] Separation of concerns: business logic in stores/lib, UI in components
-- [ ] Server-side logic kept in `.server.ts` files
-- [ ] Accessibility: WCAG 2.1 AA compliance verified
-
-#### Agent Workflow Completed
-- [ ] Agent verified code builds successfully
-- [ ] Agent ran all tests and verified they pass
-- [ ] Agent ran security scans and verified 0 high vulnerabilities
-- [ ] Agent verified documentation and accessibility
-
----
-
-## 13. Why This Configuration Works
-
-**Svelte 5 Runes**:
-- Provides fine-grained reactivity that is more predictable and easier to debug than the legacy `$:` syntax, leading to fewer reactivity-related bugs.
-
-**SvelteKit 2 Server Actions**:
-- Simplifies data mutations by providing a type-safe, built-in way to handle form submissions and server-side logic without extra boilerplate.
-
-**Vite 6**:
-- Ensures lightning-fast development feedback and optimized production bundles using native ESM and modern bundling techniques.
-
----
-
-## 14. Quick Reference
-
-### Common Commands
-
-```bash
-# Build
-npm run build
-
-# Test with coverage
-npm run test:coverage
-
-# Security scan
-npm audit --audit-level=high
-
-# Lint and Format
-npm run lint && npm run format
-
-# Run dev server
-npm run dev
-```
-
-### Modern Svelte 5 Patterns Cheat Sheet
-
-```svelte
-// $state (Reactivity)
-let count = $state(0);
-
-// $derived (Computed)
-let doubled = $derived(count * 2);
-
-// $effect (Side Effects)
-$effect(() => {
-  console.log('Count is', count);
-});
-
-// Snippets (Reusable HTML)
-{#snippet card(title)}
-  <div class="card">{title}</div>
-{/snippet}
-{@render card('My Title')}
 ```
 
 ---

@@ -1,12 +1,12 @@
 # Modern PHP Development Guidelines
-Mandatory coding standards and development practices for modern PHP applications with emphasis on async programming, hexagonal architecture, and test-driven development. PHP 8.4+, Composer, PHPUnit, PHPDoc, AMPHP, Psalm/PHPStan, PHP-CS-Fixer.
+Mandatory coding standards and development practices for modern PHP applications with emphasis on async programming, hexagonal architecture, and test-driven development. PHP 8.5+, Composer, PHPUnit, PHPDoc, AMPHP, Psalm/PHPStan, PHP-CS-Fixer.
 
 ---
 
 **Agent Profile**: The Modern PHP Architect  
 **Role**: Senior PHP Engineer & Async Programming Specialist  
 **Objective**: Generate production-ready, minimalistic, clean, well-documented PHP code using hexagonal architecture with async-first approach.  
-**Tools**: PHP 8.4+, Composer, PHPUnit, PHPDoc, AMPHP, Psalm/PHPStan, PHP-CS-Fixer.
+**Tools**: PHP 8.5+, Composer, PHPUnit, PHPDoc, AMPHP, Psalm/PHPStan, PHP-CS-Fixer.
 
 ## Core Philosophies
 
@@ -76,7 +76,7 @@ If verification fails:
 1. **Identify the error**: Read the compiler, test, or security scan output.
 2. **Fix the root cause**:
    - Vulnerability? Update dependency version in `composer.json`.
-   - Syntax issue? Correct the PHP 8.4 syntax usage.
+   - Syntax issue? Correct the PHP 8.5 syntax usage.
 3. **Re-verify**: Run syntax check, static analysis, and tests again.
 
 ---
@@ -3112,7 +3112,7 @@ parameters:
 #### Build & Compilation
 - [ ] Code parses: `php -l` returns 0 for all files
 - [ ] No syntax errors or deprecated features
-- [ ] PHP 8.4 features used (Property hooks, Asymmetric visibility)
+- [ ] PHP 8.5 features used (Property hooks, Asymmetric visibility)
 - [ ] Code formatted: `php-cs-fixer fix --dry-run` passes
 
 #### Testing
@@ -3151,7 +3151,7 @@ parameters:
 
 ## 13. Why This Configuration Works
 
-**PHP 8.4 Property Hooks**:
+**PHP 8.5 Property Hooks**:
 - Dramatically reduces boilerplate by allowing validation and transformation logic directly inside property definitions, eliminating the need for many manual getters and setters.
 
 **AMPHP & Fibers**:
@@ -3183,16 +3183,16 @@ composer audit
 ./vendor/bin/php-cs-fixer fix
 ```
 
-### Modern PHP 8.4 Patterns Cheat Sheet
+### Modern PHP 8.5 Patterns Cheat Sheet
 
 ```php
-// Property Hooks (PHP 8.4)
+// Property Hooks (PHP 8.5)
 public string $name {
     set => strlen($value) < 2 ? throw new Error() : $value;
     get => strtoupper($value);
 }
 
-// Asymmetric Visibility (PHP 8.4)
+// Asymmetric Visibility (PHP 8.5)
 public private(set) string $id;
 
 // New without parentheses

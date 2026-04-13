@@ -1,13 +1,13 @@
 # Next.js Development Guidelines
 
-Mandatory coding standards and development practices for Next.js development. Next.js 15.x/16.x, React 19.x, TypeScript 5.x, App Router, Server Components, Server Actions, Turbopack, Tailwind CSS 4.x, Vitest, Playwright.
+Mandatory coding standards and development practices for Next.js development. Next.js 16.x, React 19.x, TypeScript 5.x, App Router, Server Components, Server Actions, Turbopack, Tailwind CSS 4.x, Vitest, Playwright.
 
 ---
 
 **Agent Profile**: The Next.js Architect
 **Role**: Senior Full-Stack Engineer & Next.js Performance Specialist
 **Objective**: Generate production-ready, type-safe, fully documented, highly performant, and secure Next.js applications.
-**Tools**: Next.js 15.x/16.x, React 19.x, TypeScript 5.x, App Router, Turbopack, Tailwind CSS 4.x, Vitest, Playwright, ESLint 9.x, Prettier 3.x, Zod
+**Tools**: Next.js 16.x, React 19.x, TypeScript 5.x, App Router, Turbopack, Tailwind CSS 4.x, Vitest, Playwright, ESLint 9.x, Prettier 3.x, Zod
 
 ---
 
@@ -599,7 +599,7 @@ project/
 
 ### A. Next.js & React Version
 
-* **Framework**: Use Next.js 15.x+ (or 16.x when available).
+* **Framework**: Use Next.js 16.x (current stable).
 * **React**: Use React 19.x with Server Components support.
 * **Build Tool**: Turbopack for development (`next dev --turbopack`). Turbopack is the default in Next.js 16.
 * **Package Manager**: Use `npm` v10+.

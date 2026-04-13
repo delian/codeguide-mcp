@@ -219,6 +219,192 @@ Requires majority (quorum) for writes
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. RED: Write a failing test first
+   ↓
+2. GREEN: Write minimal code to make it pass
+   ↓
+3. REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for CockroachDB (Python with pytest and psycopg2)
+
+```python
+# Step 1: RED - Write failing test first
+import pytest
+import psycopg2
+
+@pytest.fixture
+def crdb_conn():
+    conn = psycopg2.connect(
+        "postgresql://root@localhost:26257/testdb?sslmode=disable"
+    )
+    conn.autocommit = True
+    yield conn
+    conn.close()
+
+def test_create_and_read_account(crdb_conn):
+    """Test inserting and reading an account with transactions."""
+    repo = AccountRepository(crdb_conn)
+    repo.create_account("acct_001", "Alice", 1000.00)
+    account = repo.get_account("acct_001")
+    assert account["name"] == "Alice"
+    assert account["balance"] == 1000.00
+
+# Run: pytest test_cockroachdb.py -v
+# FAILS - NameError: name 'AccountRepository' is not defined
+
+# Step 2: GREEN - Write minimal implementation
+class AccountRepository:
+    def __init__(self, conn):
+        self.conn = conn
+
+    def create_account(self, account_id, name, balance):
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO accounts (id, name, balance) VALUES (%s, %s, %s)",
+                (account_id, name, balance)
+            )
+
+    def get_account(self, account_id):
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, name, balance FROM accounts WHERE id = %s",
+                (account_id,)
+            )
+            row = cur.fetchone()
+            return {"id": row[0], "name": row[1], "balance": float(row[2])}
+
+# Run: pytest test_cockroachdb.py -v
+# PASSES
+
+# Step 3: REFACTOR - Add retry logic for CockroachDB serialization errors
+import psycopg2.errors
+
+class AccountRepository:
+    def __init__(self, conn):
+        self.conn = conn
+
+    def _run_transaction(self, func, *args):
+        """Retry transaction on serialization failure (CockroachDB best practice)."""
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                self.conn.autocommit = False
+                result = func(*args)
+                self.conn.commit()
+                return result
+            except psycopg2.errors.SerializationFailure:
+                self.conn.rollback()
+                if attempt == max_retries - 1:
+                    raise
+            finally:
+                self.conn.autocommit = True
+
+    def create_account(self, account_id, name, balance):
+        def _do_create(aid, n, b):
+            with self.conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO accounts (id, name, balance) VALUES (%s, %s, %s)",
+                    (aid, n, b)
+                )
+        self._run_transaction(_do_create, account_id, name, balance)
+
+    def get_account(self, account_id):
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, name, balance FROM accounts WHERE id = %s",
+                (account_id,)
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None
+            return {"id": row[0], "name": row[1], "balance": float(row[2])}
+
+# Tests still pass
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. Bug Reported/Discovered
+   ↓
+2. Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. Verify the test fails for the right reason
+   ↓
+4. Fix the bug (make the test pass)
+   ↓
+5. Verify the test now PASSES
+   ↓
+6. Document the bug in test comments
+```
+
+### Example Bug Fix
+
+```python
+# Bug: transfer_funds() does not roll back when the source account
+# has insufficient balance, resulting in negative balances
+
+import pytest
+
+# Step 1: Write test that reproduces the bug
+def test_transfer_rejects_insufficient_balance(crdb_conn):
+    """Regression: transfer should raise and roll back if source
+    account has insufficient funds."""
+    repo = AccountRepository(crdb_conn)
+    repo.create_account("src_001", "Bob", 50.00)
+    repo.create_account("dst_001", "Carol", 100.00)
+
+    with pytest.raises(ValueError, match="Insufficient balance"):
+        repo.transfer_funds("src_001", "dst_001", 200.00)
+
+    # Verify balances unchanged
+    assert repo.get_account("src_001")["balance"] == 50.00
+    assert repo.get_account("dst_001")["balance"] == 100.00
+
+# FAILS - No ValueError raised, Bob's balance goes to -150.00
+
+# Step 2: Fix the bug
+class AccountRepository:
+    # ... existing code ...
+
+    def transfer_funds(self, from_id, to_id, amount):
+        def _do_transfer(fid, tid, amt):
+            with self.conn.cursor() as cur:
+                cur.execute("SELECT balance FROM accounts WHERE id = %s", (fid,))
+                balance = float(cur.fetchone()[0])
+                if balance < amt:
+                    raise ValueError(f"Insufficient balance: {balance} < {amt}")
+                cur.execute(
+                    "UPDATE accounts SET balance = balance - %s WHERE id = %s",
+                    (amt, fid)
+                )
+                cur.execute(
+                    "UPDATE accounts SET balance = balance + %s WHERE id = %s",
+                    (amt, tid)
+                )
+        self._run_transaction(_do_transfer, from_id, to_id, amount)
+
+# PASSES - bug fixed, regression prevented
+```
+
+---
+
 ## 3. SQL and Query Language
 
 ### PostgreSQL Compatibility
@@ -3551,6 +3737,73 @@ SET CLUSTER SETTING version = '23.1';
 # 6. Verify cluster health
 cockroach node status
 SHOW CLUSTER SETTING version
+```
+
+---
+
+## 22. Deployment Checklist
+
+### Agent-Generated Code Verification (MANDATORY)
+
+#### Build & Compilation
+- [ ] Code compiles/runs without errors
+- [ ] All imports/dependencies resolved
+- [ ] Code formatted per project standards
+
+#### Testing
+- [ ] All tests pass
+- [ ] Coverage meets minimum threshold (>80%)
+- [ ] Integration tests pass against CockroachDB test cluster
+
+#### Security
+- [ ] Dependency scan: 0 HIGH/CRITICAL vulnerabilities
+- [ ] No hardcoded credentials or secrets
+- [ ] Connection strings use environment variables
+
+#### Agent Workflow Completed
+- [ ] Agent verified code builds successfully
+- [ ] Agent ran all tests and verified they pass
+- [ ] Agent verified documentation
+
+---
+
+## 23. Why This Configuration Works
+
+**Distributed SQL with Serializable Isolation**: CockroachDB provides full SQL semantics with the strongest isolation level by default, eliminating entire classes of concurrency bugs common in eventually-consistent systems.
+
+**Automatic Sharding and Rebalancing**: Data is automatically split into ranges and distributed across nodes, removing the need for manual shard management and enabling seamless horizontal scaling.
+
+**Multi-Region Survivability**: Zone configurations and locality-aware SQL allow applications to survive entire region failures while maintaining low-latency reads from the nearest replica.
+
+**PostgreSQL Wire Compatibility**: Applications can use existing PostgreSQL drivers and ORMs, reducing migration effort and enabling gradual adoption without rewriting data access layers.
+
+---
+
+## 24. Quick Reference
+
+### Common Commands
+
+```bash
+# Start a single-node cluster for development
+cockroach start-single-node --insecure --store=node1 --listen-addr=localhost:26257
+
+# Connect to SQL shell
+cockroach sql --insecure --host=localhost:26257
+
+# Check cluster node status
+cockroach node status --host=localhost:26257
+
+# Run a full cluster backup to S3
+cockroach sql -e "BACKUP INTO 's3://bucket/backup?AUTH=implicit'"
+
+# Restore from backup
+cockroach sql -e "RESTORE FROM LATEST IN 's3://bucket/backup?AUTH=implicit'"
+
+# Show range distribution for a table
+cockroach sql -e "SHOW RANGES FROM TABLE mydb.mytable"
+
+# Drain a node for maintenance
+cockroach node drain <node-id> --host=localhost:26257
 ```
 
 ---

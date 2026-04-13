@@ -2204,6 +2204,25 @@ db.collection.stats().storageSize
 
 ---
 
+## 18. Why This Configuration Works
+
+**Flexible Document Model**:
+- Embedding related data within documents aligns storage with application access patterns, eliminating joins and delivering single-document reads for complex objects in sub-millisecond latency.
+
+**Horizontal Scaling with Sharding**:
+- Automatic data distribution across shards with zone-aware routing enables linear write scaling and geographic data locality without application-level partitioning logic.
+
+**Change Streams for Event-Driven Architecture**:
+- Real-time change streams provide database-level event notifications with resume tokens, enabling reliable event sourcing, cache invalidation, and cross-service synchronization without polling.
+
+**Tunable Consistency and Durability**:
+- Configurable read/write concerns per operation allow applications to balance between strong consistency (`majority`) and low latency (`local`) based on each operation's business requirements.
+
+**Rich Query Language and Aggregation Pipeline**:
+- The aggregation framework with $lookup, $merge, $unionWith, and window functions provides SQL-equivalent analytical capabilities while maintaining the flexibility of document-oriented storage.
+
+---
+
 **Last Updated:** 2026-02-06
 **Version:** 2.0
 **Maintainer:** Database Team

@@ -1338,36 +1338,143 @@ end
 
 ---
 
-## 12. Why Fish Makes Sense
+## 12. Security & Dependency Management (MANDATORY)
 
-**Fish's Design Philosophy**:
-- User-friendly and discoverable
-- Sane defaults (no word splitting, proper arrays)
-- Modern syntax (clean and readable)
-- Built-in features (autosuggestions, highlighting)
-- Designed for interactive use
+### A. Automated Dependency Management
 
-**Benefits of Fish**:
-- **Better UX**: Autosuggestions and syntax highlighting out of the box
-- **Fewer Bugs**: Sane defaults prevent common shell scripting errors
-- **Modern Syntax**: Clean, readable code without cryptic symbols
-- **Built-in Tools**: `string`, `math`, `argparse` reduce external dependencies
-- **Auto-loading**: Functions in `functions/` directory are auto-loaded
+Fish uses **Fisher** as the primary plugin manager:
 
-**Trade-offs**:
-- **No POSIX**: Can't run bash/zsh scripts (intentional design choice)
-- **Less Common**: Not pre-installed on most systems
-- **Different**: Requires learning new syntax
+```fish
+# Install Fisher (plugin manager)
+curl -sL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source && fisher install jorgebucaran/fisher
 
-**When Fish Excels**:
-- Interactive shell usage
-- Development environments
-- User-facing command-line tools
-- Modern automation scripts
+# Install plugins with Fisher
+fisher install jorgebucaran/nvm.fish
+fisher install PatrickF1/fzf.fish
+
+# List installed plugins
+fisher list
+
+# Update all plugins
+fisher update
+
+# Remove a plugin
+fisher remove jorgebucaran/nvm.fish
+```
+
+**Fisher stores its plugin list in `~/.config/fish/fish_plugins`.** Commit this file to version control for reproducibility.
+
+### B. Vulnerability Scanning & Security
+
+```fish
+# shellcheck does not natively support Fish syntax, but use fish --no-execute for syntax validation
+fish --no-execute script.fish
+
+# fish_indent for consistent formatting (reduces obfuscation risks)
+fish_indent --check script.fish
+
+# Trivy: filesystem scan for vulnerabilities in vendored dependencies
+trivy fs --scanners vuln .
+```
+
+**Security best practices:**
+- **Verify plugin sources** before installing — only use plugins from trusted repositories with active maintenance
+- **Review Fisher plugin code** before installation: `fisher install` runs arbitrary Fish code
+- **Avoid `eval`** in Fish scripts — use `command` and Fish's built-in string manipulation instead
+- **Sanitize user input** before passing to external commands:
+
+```fish
+# Input sanitization example
+function sanitize_input
+    set -l input $argv[1]
+    # Remove dangerous characters, keep only alphanumeric, dots, hyphens, underscores
+    string replace -ra '[^a-zA-Z0-9._-]' '' -- $input
+end
+
+# Safe command execution — never interpolate unsanitized input
+function safe_run
+    set -l filename (sanitize_input $argv[1])
+    if test -f "$filename"
+        cat -- "$filename"
+    end
+end
+```
+
+- **Never use `curl | source`** in production — download, inspect, verify, then source
+- **Pin plugin versions** by referencing specific Git tags or commits in `fish_plugins`
+- **Use `--` with commands** to prevent option injection (e.g., `rm -- "$file"`)
+- **Restrict `PATH`** at script start to known-safe directories
+
+### C. Dependency File
+
+```fish
+# ~/.config/fish/fish_plugins
+# Managed by Fisher — commit this to version control
+jorgebucaran/fisher
+jorgebucaran/nvm.fish
+PatrickF1/fzf.fish
+jethrokuan/z
+```
+
+```fish
+# conf.d/dependencies.fish — Verify required tools at shell startup
+function __check_dependencies --on-event fish_prompt
+    set -l required_tools jq curl git
+    for cmd in $required_tools
+        if not command -q $cmd
+            echo "WARNING: Missing dependency: $cmd" >&2
+        end
+    end
+    # Only run once
+    functions -e __check_dependencies
+end
+```
 
 ---
 
-## 13. Quick Reference
+## 13. Deployment Checklist
+
+### Build & Syntax
+- [ ] Fish syntax check passes: `fish -n script.fish` returns exit 0
+- [ ] fish_indent formatting verified: `fish_indent --check script.fish` returns exit 0
+- [ ] No bash/zsh syntax used (pure Fish)
+- [ ] All functions load correctly from `functions/` directory
+
+### Testing
+- [ ] All fishtape/littlecheck tests pass
+- [ ] Script executes with `--help`: `fish script.fish --help` returns exit 0
+- [ ] Edge cases tested (empty inputs, missing files, permission errors)
+- [ ] Autocompletions tested for all subcommands
+
+### Security
+- [ ] No hardcoded passwords, tokens, or secrets in source
+- [ ] All user inputs validated via `argparse`
+- [ ] No use of `eval` on untrusted input
+- [ ] Temporary files cleaned up on exit via `trap` equivalent
+
+### Agent Workflow
+- [ ] Agent verified syntax with `fish -n` before delivery
+- [ ] Agent verified formatting with `fish_indent --check`
+- [ ] Agent tested script execution with `--help` flag
+- [ ] All functions documented with `--description` flags
+
+---
+
+## 14. Why This Configuration Works
+
+1. **Sane Defaults Prevent Bugs**: Fish does not perform word splitting or glob expansion on variable expansion, eliminating entire categories of shell scripting bugs that plague bash and zsh scripts. Variables behave predictably without quoting gymnastics.
+
+2. **Built-in `argparse` for Argument Parsing**: Fish's native `argparse` command provides standardized, self-documenting argument handling with automatic help generation, removing the need for external tools like getopt and reducing boilerplate code.
+
+3. **`string` Command for Text Processing**: The built-in `string` command replaces `sed`, `awk`, `cut`, and `tr` for common text operations, keeping scripts portable and reducing external dependencies while providing consistent, well-documented behavior.
+
+4. **Auto-loading Function Architecture**: Functions stored in `~/.config/fish/functions/` are loaded on demand, enabling a naturally modular architecture where each function is independently testable and the shell starts instantly regardless of how many functions exist.
+
+5. **Syntax Highlighting and Autosuggestions**: Real-time syntax highlighting catches errors before execution, and history-based autosuggestions speed up interactive workflows. These features work out of the box with no configuration required.
+
+---
+
+## 15. Quick Reference
 
 ### Common Commands
 
@@ -1457,7 +1564,7 @@ command; or return $status
 
 ---
 
-## 14. Summary
+## 16. Summary
 
 **CRITICAL Requirements for All Fish Scripts:**
 

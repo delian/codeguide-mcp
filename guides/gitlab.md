@@ -2249,7 +2249,107 @@ wiki:update:
 
 ---
 
-## 7. Deployment Checklist
+## 7. Security & Dependency Management (MANDATORY)
+
+### A. Infrastructure Security Scanning
+
+```yaml
+# GitLab SAST - built into CI/CD pipeline
+# Add to .gitlab-ci.yml
+include:
+  - template: Security/SAST.gitlab-ci.yml
+  - template: Security/DAST.gitlab-ci.yml
+  - template: Security/Dependency-Scanning.gitlab-ci.yml
+  - template: Security/Container-Scanning.gitlab-ci.yml
+  - template: Security/Secret-Detection.gitlab-ci.yml
+  - template: Security/License-Scanning.gitlab-ci.yml
+
+# SAST configuration overrides
+sast:
+  stage: test
+  variables:
+    SAST_EXCLUDED_PATHS: "spec,test,tests,tmp"
+    SEARCH_MAX_DEPTH: 10
+    SAST_BANDIT_EXCLUDED_PATHS: "*/test/**"
+
+# DAST configuration
+dast:
+  stage: dast
+  variables:
+    DAST_WEBSITE: "https://staging.example.com"
+    DAST_FULL_SCAN_ENABLED: "true"
+```
+
+### B. Vulnerability Scanning
+
+```yaml
+# Dependency scanning with gemnasium
+dependency_scanning:
+  stage: test
+  variables:
+    DS_DEFAULT_ANALYZERS: "gemnasium,gemnasium-python,gemnasium-maven"
+    DS_EXCLUDED_PATHS: "spec,test,tests"
+
+# Container scanning
+container_scanning:
+  stage: test
+  variables:
+    CS_IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
+    CS_SEVERITY_THRESHOLD: "HIGH"
+
+# Secret detection - prevent credentials in source code
+secret_detection:
+  stage: test
+  variables:
+    SECRET_DETECTION_HISTORIC_SCAN: "true"
+    SECRET_DETECTION_EXCLUDED_PATHS: "tests/"
+```
+
+```bash
+# Query vulnerability reports via GitLab API
+curl --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+  "https://gitlab.com/api/v4/projects/$PROJECT_ID/vulnerability_findings?severity=critical&state=detected"
+
+# Export vulnerability report
+curl --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+  "https://gitlab.com/api/v4/security/projects/$PROJECT_ID/vulnerability_exports" -X POST
+```
+
+### C. Policy & Compliance
+
+```yaml
+# License compliance scanning
+license_scanning:
+  stage: test
+  variables:
+    LICENSE_MANAGEMENT_SETTINGS_FILE: ".license-compliance.yml"
+
+# Merge request approval rules for security
+# Configure via Settings > Merge Requests > Approval Rules
+# Require security team approval when vulnerabilities detected
+
+# Compliance frameworks (GitLab Ultimate)
+# Settings > General > Compliance framework
+# Enforces specific pipeline configurations across projects
+```
+
+```yaml
+# .license-compliance.yml - allowed and denied licenses
+allowlist:
+  - MIT
+  - Apache-2.0
+  - BSD-2-Clause
+  - BSD-3-Clause
+  - ISC
+denylist:
+  - GPL-3.0
+  - AGPL-3.0
+  - SSPL-1.0
+```
+
+---
+
+## 8. Deployment Checklist
 
 ### Repository Setup
 - [ ] **README.md**: Comprehensive with badges
@@ -2329,7 +2429,7 @@ wiki:update:
 
 ---
 
-## 8. Why This Configuration Works
+## 9. Why This Configuration Works
 
 1. **TDD Enforcement**: Pipelines verify tests exist and pass before merge, preventing untested code.
 2. **Regression Shield**: Bug fixes require regression tests, building safety net over time.

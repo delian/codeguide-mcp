@@ -1304,6 +1304,61 @@ mod tests {
 
 ---
 
+## 12. Quick Reference
+
+```
+TDD CYCLE:
+  1. RED    - Write a failing test (verify it fails for the right reason)
+  2. GREEN  - Write minimal code to pass (no extra features)
+  3. REFACTOR - Improve code, keep tests green (no new behavior)
+  Repeat.
+
+TEST NAMING:
+  test_<unit>_<scenario>_<expected_result>
+  "should <behavior> when <condition>"
+
+AAA PATTERN (Arrange-Act-Assert):
+  // Arrange - Set up test data and dependencies
+  // Act     - Execute the behavior under test
+  // Assert  - Verify the expected outcome
+
+COVERAGE TARGETS:
+  Overall:        >= 90%
+  Critical paths: 100% (payments, auth, data loss scenarios)
+  Branch:         >= 85%
+
+TEST DOUBLES:
+  Stub    - Returns canned data (no assertions on calls)
+  Mock    - Verifies interactions (asserts method was called)
+  Spy     - Records calls for later assertion
+  Fake    - Simplified working implementation (in-memory DB)
+  Dummy   - Placeholder, never actually used
+
+BUG FIX PROTOCOL:
+  1. Write a test that reproduces the bug (must FAIL)
+  2. Verify the test fails for the correct reason
+  3. Fix the bug (minimal change)
+  4. Verify the test PASSES
+  5. Reference bug ID in test name/comment
+
+COMMON ASSERTIONS:
+  assertEqual(expected, actual)
+  assertTrue(condition)
+  assertRaises(ExceptionType, callable)
+  assertContains(collection, element)
+  assertNull / assertNotNull
+
+ANTI-PATTERNS TO AVOID:
+  - Testing implementation details (not behavior)
+  - Shared mutable state between tests
+  - Tests that depend on execution order
+  - Excessive mocking (test the integration)
+  - Testing private methods directly
+  - Ignoring/skipping failing tests
+```
+
+---
+
 ## References
 
 - [Test Driven Development: By Example](https://www.pearson.com/en-us/subject-catalog/p/test-driven-development-by-example/P200000009421) - Kent Beck

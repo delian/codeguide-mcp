@@ -1100,7 +1100,105 @@ server := grpc.NewServer(
 
 ---
 
-## 9. Deployment Checklist
+## 9. Security & Dependency Management (MANDATORY)
+
+### A. Infrastructure Security Scanning
+
+```bash
+# Scan protobuf/gRPC library dependencies based on your language stack
+
+# Go projects
+govulncheck ./...
+go list -m all | nancy sleuth
+
+# Python projects
+pip-audit
+pip-audit --requirement requirements.txt --fix --dry-run
+safety check --full-report
+
+# Node.js projects (grpc-js, protobufjs)
+npm audit
+npm audit fix --dry-run
+
+# Java/Kotlin projects (grpc-java, protobuf-java)
+mvn dependency-check:check
+gradle dependencyCheckAnalyze
+
+# Buf - lint and breaking change detection for proto files
+buf lint
+buf breaking --against '.git#branch=main'
+```
+
+### B. Vulnerability Scanning
+
+```bash
+# TLS/mTLS configuration verification
+# Verify server TLS certificate
+openssl s_client -connect grpc-server:443 -alpn h2
+
+# Test gRPC health with TLS
+grpcurl -cacert ca.pem -cert client.pem -key client-key.pem \
+  grpc-server:443 grpc.health.v1.Health/Check
+
+# Scan container images running gRPC services
+trivy image myregistry.io/grpc-service:latest
+trivy image --severity CRITICAL,HIGH --exit-code 1 myregistry.io/grpc-service:latest
+
+# Scan IaC for gRPC service deployments
+trivy config ./k8s/
+checkov -d ./k8s/
+```
+
+### C. Policy & Compliance
+
+```go
+// TLS/mTLS - MANDATORY for production gRPC services
+// Server-side mTLS configuration
+creds, err := credentials.NewServerTLSFromFile("server.pem", "server-key.pem")
+if err != nil {
+    log.Fatalf("failed to load TLS credentials: %v", err)
+}
+
+// mTLS - require client certificates
+cert, _ := tls.LoadX509KeyPair("server.pem", "server-key.pem")
+caCert, _ := os.ReadFile("ca.pem")
+caPool := x509.NewCertPool()
+caPool.AppendCertsFromPEM(caCert)
+
+tlsConfig := &tls.Config{
+    Certificates: []tls.Certificate{cert},
+    ClientCAs:    caPool,
+    ClientAuth:   tls.RequireAndVerifyClientCert,
+    MinVersion:   tls.VersionTLS13,
+}
+
+server := grpc.NewServer(
+    grpc.Creds(credentials.NewTLS(tlsConfig)),
+)
+```
+
+```protobuf
+// Input validation for protobuf messages - use protovalidate
+// Enforce field constraints to prevent malformed input
+message CreateOrderRequest {
+  string customer_id = 1 [(validate.rules).string.uuid = true];
+  repeated OrderItem items = 2 [(validate.rules).repeated = {min_items: 1, max_items: 100}];
+  string currency = 3 [(validate.rules).string = {in: ["USD", "EUR", "GBP"]}];
+  int64 amount_cents = 4 [(validate.rules).int64 = {gte: 1, lte: 999999999}];
+}
+```
+
+```bash
+# Certificate management best practices
+# Use short-lived certificates with automatic rotation
+# Integrate with cert-manager (Kubernetes) or Vault PKI
+# Monitor certificate expiry
+openssl x509 -in server.pem -noout -enddate
+```
+
+---
+
+## 10. Deployment Checklist
 
 ### Proto Design
 - [ ] Use proto3 syntax
@@ -1129,7 +1227,7 @@ server := grpc.NewServer(
 
 ---
 
-## 10. Quick Reference
+## 11. Quick Reference
 
 ```protobuf
 // Message types
@@ -1164,6 +1262,20 @@ codes.Internal        // 13 - Server error
 codes.Unavailable     // 14 - Service unavailable
 codes.Unauthenticated // 16 - Not authenticated
 ```
+
+---
+
+## 12. Why This Configuration Works
+
+1. **Proto-First Schema Design**: Defining services and messages in `.proto` files before writing any implementation code ensures a language-neutral contract. Code generation produces type-safe clients and servers in any supported language, eliminating hand-written serialization bugs.
+
+2. **HTTP/2 with Binary Serialization**: gRPC's use of HTTP/2 multiplexing and Protocol Buffer binary encoding delivers significantly lower latency and bandwidth usage compared to JSON-over-HTTP/1.1, making it ideal for high-throughput microservice communication.
+
+3. **Built-in Deadlines and Cancellation**: Propagating deadlines through the entire call chain ensures that slow downstream services cannot cause cascading timeouts. Automatic cancellation frees resources immediately when a client disconnects or a deadline expires.
+
+4. **Interceptor Middleware Pattern**: Layering authentication, logging, metrics, and recovery logic as interceptors keeps service implementations focused on business logic. Interceptors compose cleanly and can be shared across all services in a deployment.
+
+5. **Streaming for Large Data and Real-Time Updates**: Server streaming, client streaming, and bidirectional streaming provide first-class support for use cases that REST APIs handle awkwardly (file uploads, live feeds, long-running operations), all with the same type-safe contract.
 
 ---
 

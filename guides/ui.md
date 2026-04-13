@@ -1870,6 +1870,16 @@ Need real-time updates?
 
 ---
 
+## 15. Why This Configuration Works
+
+- **Server-side operations scale to any dataset size**: By mandating that filtering, sorting, and pagination happen on the server for large datasets, the UI remains responsive regardless of whether the underlying data contains hundreds or millions of records. The browser never becomes a bottleneck.
+- **URL-driven state enables collaboration**: Storing filter, sort, and pagination state in URL parameters means users can bookmark, share, and return to exact views. This turns the application into a tool for collaboration rather than an isolated session-bound experience.
+- **Virtualization eliminates rendering bottlenecks**: Rendering only visible rows plus a small buffer ensures the DOM stays small and interaction remains smooth even for very large result sets, avoiding the jank and memory pressure that come from rendering thousands of hidden elements.
+- **Real-time protocols replace wasteful polling**: Using Socket.IO or WebSocket connections for live updates delivers changes instantly while consuming a fraction of the bandwidth and server resources that periodic polling would require, improving both user experience and infrastructure efficiency.
+- **Accessibility-first development prevents costly rework**: Building WCAG 2.1 AA compliance into components from the start (keyboard navigation, ARIA semantics, contrast ratios) is dramatically cheaper than retrofitting accessibility after the UI is built and avoids the risk of excluding users with disabilities.
+
+---
+
 ## References
 
 ### Required Companion Guides

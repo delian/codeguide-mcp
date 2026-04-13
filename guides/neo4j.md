@@ -3323,6 +3323,100 @@ class DualWriteService:
 
 ---
 
+## 22. Deployment Checklist
+
+### Build and Configuration
+- [ ] Neo4j version pinned and documented
+- [ ] JVM heap size configured (`dbms.memory.heap.initial_size` / `dbms.memory.heap.max_size`)
+- [ ] Page cache sized appropriately (`dbms.memory.pagecache.size`)
+- [ ] Transaction log retention configured
+- [ ] Bolt and HTTP connectors configured with appropriate bind addresses
+- [ ] `neo4j-admin memrec` run for memory recommendations
+
+### Testing
+- [ ] All Cypher queries profiled with `PROFILE` and `EXPLAIN`
+- [ ] Index usage verified for all query patterns
+- [ ] Load testing completed with production-scale graph data
+- [ ] Cluster failover tested (Enterprise)
+- [ ] Backup and restore procedure verified
+- [ ] Import pipeline tested with `neo4j-admin database import`
+
+### Security
+- [ ] Default `neo4j` password changed
+- [ ] Authentication enabled (`dbms.security.auth_enabled=true`)
+- [ ] Role-based access control configured (Enterprise)
+- [ ] TLS/SSL enabled for Bolt and HTTPS connectors
+- [ ] Network access restricted to required ports only (7474, 7687)
+- [ ] Audit logging enabled (Enterprise)
+- [ ] Property-level security configured where needed
+
+### Agent Workflow
+- [ ] Schema constraints and indexes defined in migration scripts
+- [ ] Graph data model documented with node labels and relationship types
+- [ ] Monitoring alerts configured (query latency, heap usage, page cache hit ratio)
+- [ ] Automated backups scheduled with `neo4j-admin database dump`
+- [ ] Runbooks documented for cluster recovery and rebalancing
+
+---
+
+## 23. Why This Configuration Works
+
+**Native Graph Storage**:
+- Index-free adjacency means traversals follow physical pointers rather than performing index lookups, delivering constant-time relationship traversal regardless of total graph size.
+
+**Cypher Query Language**:
+- Pattern-matching syntax maps directly to how developers think about connected data, making complex traversals readable and maintainable while the query planner optimizes execution.
+
+**ACID Transactions on Graphs**:
+- Full transactional support ensures data integrity during multi-node and multi-relationship mutations, critical for applications where relationship consistency matters.
+
+**Flexible Schema with Constraints**:
+- Schema-optional design allows rapid iteration on data models, while uniqueness and existence constraints enforce data quality where needed without rigid table definitions.
+
+**Causal Clustering (Enterprise)**:
+- Raft-based consensus with read replicas provides high availability, horizontal read scaling, and multi-datacenter deployment with causal consistency guarantees.
+
+---
+
+## 24. Quick Reference
+
+### Common Commands
+
+```bash
+# Start Neo4j
+neo4j start
+
+# Check status
+neo4j status
+
+# Open Cypher shell
+cypher-shell -u neo4j -p <password>
+
+# Memory recommendations
+neo4j-admin server memory-recommendation
+
+# Backup database
+neo4j-admin database dump neo4j --to-path=/backup/
+
+# Restore database
+neo4j-admin database load neo4j --from-path=/backup/neo4j.dump --overwrite-destination
+
+# Import CSV data
+neo4j-admin database import full neo4j --nodes=import/nodes.csv --relationships=import/rels.csv
+
+# Check database info
+cypher-shell "CALL dbms.listConfig() YIELD name, value WHERE name CONTAINS 'memory' RETURN name, value;"
+
+# Show indexes and constraints
+cypher-shell "SHOW INDEXES;"
+cypher-shell "SHOW CONSTRAINTS;"
+
+# Profile a query
+cypher-shell "PROFILE MATCH (p:Person)-[:KNOWS]->(f) WHERE p.name = 'Alice' RETURN f.name;"
+```
+
+---
+
 ## References and Resources
 
 ### Official Documentation

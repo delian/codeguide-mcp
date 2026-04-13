@@ -112,6 +112,173 @@ Key Features:
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. RED: Write a failing test first
+   ↓
+2. GREEN: Write minimal code to make it pass
+   ↓
+3. REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for libSQL/Turso (Python with pytest and libsql-experimental)
+
+```python
+# Step 1: RED - Write failing test first
+import pytest
+import libsql_experimental as libsql
+
+@pytest.fixture
+def db_conn():
+    conn = libsql.connect(":memory:")
+    conn.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT, email TEXT)")
+    conn.commit()
+    yield conn
+    conn.close()
+
+def test_insert_and_select_user(db_conn):
+    """Test inserting and selecting a user via SQL."""
+    repo = UserRepository(db_conn)
+    repo.add_user("Alice", "alice@example.com")
+    user = repo.get_user_by_name("Alice")
+    assert user["name"] == "Alice"
+    assert user["email"] == "alice@example.com"
+
+# Run: pytest test_libsql.py -v
+# FAILS - NameError: name 'UserRepository' is not defined
+
+# Step 2: GREEN - Write minimal implementation
+class UserRepository:
+    def __init__(self, conn):
+        self.conn = conn
+
+    def add_user(self, name, email):
+        self.conn.execute(
+            "INSERT INTO users (name, email) VALUES (?, ?)",
+            (name, email)
+        )
+        self.conn.commit()
+
+    def get_user_by_name(self, name):
+        cursor = self.conn.execute(
+            "SELECT id, name, email FROM users WHERE name = ?",
+            (name,)
+        )
+        row = cursor.fetchone()
+        return {"id": row[0], "name": row[1], "email": row[2]}
+
+# Run: pytest test_libsql.py -v
+# PASSES
+
+# Step 3: REFACTOR - Add parameterized queries and batch insert
+class UserRepository:
+    def __init__(self, conn):
+        self.conn = conn
+
+    def add_user(self, name, email):
+        self.conn.execute(
+            "INSERT INTO users (name, email) VALUES (?, ?)",
+            (name, email)
+        )
+        self.conn.commit()
+
+    def add_users_batch(self, users):
+        self.conn.executemany(
+            "INSERT INTO users (name, email) VALUES (?, ?)",
+            [(u["name"], u["email"]) for u in users]
+        )
+        self.conn.commit()
+
+    def get_user_by_name(self, name):
+        cursor = self.conn.execute(
+            "SELECT id, name, email FROM users WHERE name = ?",
+            (name,)
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        return {"id": row[0], "name": row[1], "email": row[2]}
+
+    def search_users(self, query):
+        cursor = self.conn.execute(
+            "SELECT id, name, email FROM users WHERE name LIKE ?",
+            (f"%{query}%",)
+        )
+        return [{"id": r[0], "name": r[1], "email": r[2]} for r in cursor.fetchall()]
+
+# Tests still pass
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. Bug Reported/Discovered
+   ↓
+2. Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. Verify the test fails for the right reason
+   ↓
+4. Fix the bug (make the test pass)
+   ↓
+5. Verify the test now PASSES
+   ↓
+6. Document the bug in test comments
+```
+
+### Example Bug Fix
+
+```python
+# Bug: add_user() allows duplicate emails, violating business rule
+# that emails must be unique across users
+
+import pytest
+
+# Step 1: Write test that reproduces the bug
+def test_add_user_rejects_duplicate_email(db_conn):
+    """Regression: add_user() should raise ValueError when inserting
+    a user with an email that already exists."""
+    repo = UserRepository(db_conn)
+    repo.add_user("Alice", "alice@example.com")
+    with pytest.raises(ValueError, match="Email already exists"):
+        repo.add_user("Bob", "alice@example.com")
+
+# FAILS - duplicate row inserted without error
+
+# Step 2: Fix the bug
+class UserRepository:
+    # ... existing code ...
+
+    def add_user(self, name, email):
+        cursor = self.conn.execute(
+            "SELECT COUNT(*) FROM users WHERE email = ?",
+            (email,)
+        )
+        if cursor.fetchone()[0] > 0:
+            raise ValueError(f"Email already exists: {email}")
+        self.conn.execute(
+            "INSERT INTO users (name, email) VALUES (?, ?)",
+            (name, email)
+        )
+        self.conn.commit()
+
+# PASSES - bug fixed, regression prevented
+```
+
+---
+
 ## 3. Architecture and Design
 
 ### Database Hierarchy
@@ -2646,6 +2813,60 @@ BEGIN TRANSACTION;
 COMMIT;
 -- or ROLLBACK;
 ```
+
+---
+
+## 22. Deployment Checklist
+
+### Build and Configuration
+- [ ] Turso CLI version and libSQL client SDK version pinned
+- [ ] Database group created in appropriate primary region
+- [ ] Replica locations added for target user regions
+- [ ] Auth tokens generated with appropriate scopes (read-only vs read-write)
+- [ ] Embedded replica sync interval configured for latency requirements
+- [ ] Schema migrations tracked and applied via Turso CLI or migration tool
+
+### Testing
+- [ ] All queries profiled with `EXPLAIN QUERY PLAN`
+- [ ] Embedded replica sync behavior tested (conflict resolution, latency)
+- [ ] Connection handling tested for token expiration and renewal
+- [ ] Batch transaction performance validated
+- [ ] Backup and restore tested with `turso db shell` export/import
+- [ ] Edge function cold start tested with embedded replica initialization
+
+### Security
+- [ ] Auth tokens stored in environment variables or secrets manager
+- [ ] No tokens committed to source control
+- [ ] Token rotation procedure documented and tested
+- [ ] Database-level access scoped per service/application
+- [ ] TLS enforced for all remote connections (default with Turso)
+- [ ] Group-level access control configured
+
+### Agent Workflow
+- [ ] Schema migration scripts version-controlled
+- [ ] CI pipeline validates migrations against test database
+- [ ] Monitoring configured for sync lag, query latency, and storage usage
+- [ ] Alerting on auth token expiration
+- [ ] Runbooks for region failover and replica re-initialization
+
+---
+
+## 23. Why This Configuration Works
+
+**Edge-Local Reads with Embedded Replicas**:
+- Embedded replicas store a local SQLite copy that syncs with the remote primary, delivering sub-millisecond read latency at the edge while maintaining global consistency through periodic synchronization.
+
+**SQLite Compatibility**:
+- Full SQLite wire and SQL compatibility means existing SQLite knowledge, tooling, and libraries work without modification, reducing migration effort and enabling local-first development.
+
+**Global Distribution with Turso Platform**:
+- Database groups with multi-region replicas place data close to users worldwide, providing low-latency access without application-level sharding or routing logic.
+
+**Serverless Cost Model**:
+- Pay-per-query pricing with automatic scaling eliminates capacity planning, making it cost-effective for applications with variable or unpredictable traffic patterns.
+
+**Seamless Local Development**:
+- The same client SDK connects to a local SQLite file for development, an embedded replica for staging, or a remote Turso database for production, with only a URL change.
 
 ---
 

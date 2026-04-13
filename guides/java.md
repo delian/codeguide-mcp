@@ -1,12 +1,12 @@
 # Modern Java Development Guidelines
-Mandatory coding standards and development practices for modern Java applications with emphasis on performance, portability, minimalistic code, and modern language features. Java 23+, Gradle (preferred) / Maven (fallback), JUnit 5, JavaDoc, Project Reactor, Virtual Threads.
+Mandatory coding standards and development practices for modern Java applications with emphasis on performance, portability, minimalistic code, and modern language features. Java 25+, Gradle (preferred) / Maven (fallback), JUnit 5, JavaDoc, Project Reactor, Virtual Threads.
 
 ---
 
 **Agent Profile**: The Java Modernist  
 **Role**: Senior Java Engineer & Performance Specialist  
 **Objective**: Generate production-ready, minimalistic, clean, readable, well-documented Java code using hexagonal architecture with focus on performance, scalability, and memory footprint.  
-**Tools**: Java 23+, Gradle (preferred) / Maven (fallback), JUnit 5, JavaDoc, Project Reactor, Virtual Threads.
+**Tools**: Java 25+, Gradle (preferred) / Maven (fallback), JUnit 5, JavaDoc, Project Reactor, Virtual Threads.
 
 ---
 
@@ -82,8 +82,8 @@ If verification fails:
 
 ---
 
-## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
-   ```
+### B. Code Quality & Documentation Verification
+
    - **MUST** pass code style checks
    - No static analysis issues
    - Follows project coding standards
@@ -115,7 +115,7 @@ If verification fails:
    # Exit code MUST be 0
    ```
 
-### B. Error Correction Process
+### C. Error Correction Process
 
 If verification fails:
 
@@ -126,7 +126,7 @@ If verification fails:
 5. **Document fixes** in comments if non-obvious
 6. **Only present working, tested code** to the user
 
-### C. Example Verification Workflow
+### D. Example Verification Workflow
 
 ```bash
 # Agent must simulate/verify this workflow
@@ -156,7 +156,8 @@ mvn javadoc:javadoc
 
 **CRITICAL**: Never provide Java code to the user that doesn't compile or pass tests. Always verify first, fix issues, then present the working solution.
 
-**MANDATORY RULES:**
+### E. Mandatory Rules
+
 1. **Compilation is ALWAYS required** - Code MUST compile successfully
 2. **Unit tests are ALWAYS required** - All new/modified code MUST have unit tests
 3. **Tests MUST pass** - All unit tests MUST pass before code delivery
@@ -656,7 +657,7 @@ plugins {
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
+        languageVersion = JavaLanguageVersion.of(25)
     }
 }
 
@@ -2505,7 +2506,7 @@ class UserServiceTest {
 
 ---
 
-## 11. Security & Dependency Management (MANDATORY)
+## 14. Security & Dependency Management (MANDATORY)
 
 ### A. Automated Dependency Management
 
@@ -2551,14 +2552,14 @@ dependencies {
 
 ---
 
-## 12. Deployment Checklist
+## 15. Deployment Checklist
 
 ### Agent-Generated Code Verification (MANDATORY)
 
 #### Build & Compilation
 - [ ] Code compiles: `./gradlew compileJava` returns exit code 0
 - [ ] No compilation errors or warnings (Werror=true)
-- [ ] Java 23 features used appropriately (Pattern matching, Scoped values)
+- [ ] Java 25 features used appropriately (Pattern matching, Scoped values)
 - [ ] Code formatted: `./gradlew spotlessCheck` passes
 
 #### Testing
@@ -2595,9 +2596,9 @@ dependencies {
 
 ---
 
-## 13. Why This Configuration Works
+## 16. Why This Configuration Works
 
-**Java 23 Virtual Threads**:
+**Java 25 Virtual Threads**:
 - Provides massive scalability for I/O-bound applications with minimal memory overhead, eliminating the need for complex reactive programming in many cases.
 
 **Generational ZGC**:
@@ -2608,7 +2609,7 @@ dependencies {
 
 ---
 
-## 14. Quick Reference
+## 17. Quick Reference
 
 ### Common Commands
 
@@ -2632,7 +2633,7 @@ dependencies {
 ### Modern Java Patterns Cheat Sheet
 
 ```java
-// Pattern Matching for Primitives (Java 23)
+// Pattern Matching for Primitives (Java 25)
 if (obj instanceof int i) { ... }
 
 // Scoped Values (Preview)

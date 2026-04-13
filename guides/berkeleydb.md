@@ -273,6 +273,159 @@ project/
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. RED: Write a failing test first
+   ↓
+2. GREEN: Write minimal code to make it pass
+   ↓
+3. REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for Berkeley DB (Python with bsddb3)
+
+```python
+# Step 1: RED - Write failing test first
+import unittest
+import bsddb3.db as bdb
+import tempfile
+import os
+
+class TestBerkeleyDBKeyValue(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.tmpdir, 'test.db')
+
+    def tearDown(self):
+        if os.path.exists(self.db_path):
+            os.remove(self.db_path)
+        os.rmdir(self.tmpdir)
+
+    def test_put_and_get_key_value(self):
+        """Test storing and retrieving a key-value pair."""
+        store = BerkeleyStore(self.db_path)
+        store.put(b'user:1001', b'Alice')
+        result = store.get(b'user:1001')
+        self.assertEqual(result, b'Alice')
+        store.close()
+
+# Run: python -m unittest test_berkeleydb.py
+# FAILS - NameError: name 'BerkeleyStore' is not defined
+
+# Step 2: GREEN - Write minimal implementation
+class BerkeleyStore:
+    def __init__(self, path):
+        self.db = bdb.DB()
+        self.db.open(path, None, bdb.DB_HASH, bdb.DB_CREATE)
+
+    def put(self, key, value):
+        self.db.put(key, value)
+
+    def get(self, key):
+        return self.db.get(key)
+
+    def close(self):
+        self.db.close()
+
+# Run: python -m unittest test_berkeleydb.py
+# PASSES
+
+# Step 3: REFACTOR - Add environment and transaction support
+class BerkeleyStore:
+    def __init__(self, path, use_env=False):
+        self.env = None
+        self.db = bdb.DB()
+        if use_env:
+            self.env = bdb.DBEnv()
+            self.env.open(os.path.dirname(path),
+                          bdb.DB_CREATE | bdb.DB_INIT_MPOOL)
+            self.db = bdb.DB(self.env)
+        self.db.open(path, None, bdb.DB_HASH, bdb.DB_CREATE)
+
+    def put(self, key, value):
+        self.db.put(key, value)
+
+    def get(self, key):
+        return self.db.get(key)
+
+    def close(self):
+        self.db.close()
+        if self.env:
+            self.env.close()
+
+# Tests still pass
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. Bug Reported/Discovered
+   ↓
+2. Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. Verify the test fails for the right reason
+   ↓
+4. Fix the bug (make the test pass)
+   ↓
+5. Verify the test now PASSES
+   ↓
+6. Document the bug in test comments
+```
+
+### Example Bug Fix
+
+```python
+# Bug: BerkeleyStore.get() raises DBNotFoundError instead of
+# returning None when key does not exist
+
+import unittest
+import bsddb3.db as bdb
+
+# Step 1: Write test that reproduces the bug
+class TestBerkeleyStoreMissingKey(unittest.TestCase):
+    def setUp(self):
+        self.store = BerkeleyStore('/tmp/test_bugfix.db')
+
+    def tearDown(self):
+        self.store.close()
+        os.remove('/tmp/test_bugfix.db')
+
+    def test_get_missing_key_returns_none(self):
+        """Regression: get() should return None for missing keys,
+        not raise DBNotFoundError."""
+        result = self.store.get(b'nonexistent_key')
+        self.assertIsNone(result)
+
+# FAILS - bsddb3.db.DBNotFoundError raised
+
+# Step 2: Fix the bug
+class BerkeleyStore:
+    # ... existing code ...
+
+    def get(self, key):
+        try:
+            return self.db.get(key)
+        except bdb.DBNotFoundError:
+            return None
+
+# PASSES - bug fixed, regression prevented
+```
+
+---
+
 ## 3. Basic Operations (C API)
 
 ### Environment Creation
@@ -2216,7 +2369,74 @@ db->stat_print(db, DB_STAT_CLEAR);
 
 ---
 
-## 20. Resources and References
+## 20. Deployment Checklist
+
+### Agent-Generated Code Verification (MANDATORY)
+
+#### Build & Compilation
+- [ ] Code compiles/runs without errors
+- [ ] All imports/dependencies resolved (libdb, language bindings)
+- [ ] Code formatted per project standards
+
+#### Testing
+- [ ] All tests pass
+- [ ] Coverage meets minimum threshold (>80%)
+- [ ] Integration tests pass with embedded DB lifecycle
+
+#### Security
+- [ ] Dependency scan: 0 HIGH/CRITICAL vulnerabilities
+- [ ] No hardcoded credentials or secrets
+- [ ] Database file paths use environment variables
+
+#### Agent Workflow Completed
+- [ ] Agent verified code builds successfully
+- [ ] Agent ran all tests and verified they pass
+- [ ] Agent verified documentation
+
+---
+
+## 21. Why This Configuration Works
+
+**Embedded Architecture Eliminates Network Overhead**: Berkeley DB runs in-process, removing TCP/IP latency and serialization costs that client-server databases incur, making it ideal for high-throughput local storage.
+
+**Multiple Access Methods for Flexible Data Modeling**: B-tree, Hash, Queue, and Recno access methods let you choose the optimal data structure for your workload without switching databases.
+
+**Full ACID Transactions with MVCC**: Write-ahead logging and multi-version concurrency control provide crash recovery and concurrent access guarantees typically found only in larger database systems.
+
+**Hot Backup and Replication Support**: Production environments benefit from online backup and high-availability replication without requiring downtime or external tooling.
+
+---
+
+## 22. Quick Reference
+
+### Common Commands
+
+```bash
+# Open a database with db_load
+db_load -f input.txt -t btree mydb.db
+
+# Dump database contents
+db_dump -p mydb.db
+
+# Verify database integrity
+db_verify mydb.db
+
+# Recover database after crash
+db_recover -h /path/to/env
+
+# Display database statistics
+db_stat -d mydb.db
+
+# Archive log files for backup
+db_archive -l -h /path/to/env
+
+# Hot backup an environment
+db_hotbackup -h /path/to/env -b /path/to/backup
+```
+
+---
+
+## 23. Resources and References
 
 ### Official Documentation
 

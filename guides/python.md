@@ -2987,7 +2987,67 @@ def correlate_two_signals(
 
 
 
-## 14. Quick Reference
+## 14. Security & Dependency Management (MANDATORY)
+
+### A. Automated Dependency Management
+
+**Use uv (preferred) to manage and lock dependencies:**
+
+```bash
+# Install/sync dependencies
+uv sync
+
+# Add a new dependency
+uv add package_name
+
+# Update dependencies
+uv lock --upgrade
+
+# Verify dependency integrity
+pip-audit --require-hashes
+```
+
+### B. Vulnerability Scanning & Security
+
+**Mandatory security checks for ALL Python projects:**
+
+1. **Vulnerability Scan**:
+   ```bash
+   # Scan for known vulnerabilities
+   uv run pip-audit
+   ```
+   - Agents MUST fix all HIGH/CRITICAL vulnerabilities before delivery.
+
+2. **Supply Chain Audit**:
+   - Verify `uv.lock` / `requirements.txt` integrity
+   - Audit licenses for compliance
+   - Use `uv run pip-audit --require-hashes` for hash verification
+
+### C. Dependency File
+
+```toml
+# pyproject.toml
+[project]
+name = "my-project"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.109.0",
+    "uvicorn>=0.27.0",
+    "dynaconf>=3.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.2.0",
+    "pip-audit>=2.7.0",
+]
+```
+
+---
+
+## 15. Quick Reference
 
 
 ### Command Cheat Sheet
@@ -3096,7 +3156,7 @@ ruff check .                        # Missing uv run
 ---
 
 
-## 15. Enforcement
+## 16. Enforcement
 
 ### Automated Checks
 
@@ -3134,6 +3194,48 @@ Code that violates these guidelines will be **rejected** with feedback:
 - Coverage < 100% → Add tests for uncovered code
 - Syntax errors → Fix code to parse correctly
 - Agent code not verified → Re-verify with proper checks
+
+---
+
+## 17. Deployment Checklist
+
+### Build & Syntax
+- [ ] Code parses: `uv run python -m py_compile *.py` returns exit 0
+- [ ] Ruff passes: `uv run ruff check .` returns exit 0
+- [ ] Code formatted: `uv run ruff format --check .` returns exit 0
+- [ ] Type checking passes: `uv run mypy .` returns no errors
+
+### Testing
+- [ ] All tests pass: `uv run pytest` returns exit 0
+- [ ] Coverage at 100%: `uv run pytest --cov --cov-fail-under=100`
+- [ ] No skipped or xfail tests without justification
+- [ ] Integration tests pass against staging environment
+
+### Security
+- [ ] Dependencies scanned: `uv run pip-audit` reports no vulnerabilities
+- [ ] No hardcoded secrets or API keys in source
+- [ ] Dynaconf used for all configuration values
+- [ ] No use of `eval()`, `exec()`, or `pickle.loads()` on untrusted input
+
+### Agent Workflow
+- [ ] Agent-generated code was syntax-checked before delivery
+- [ ] Agent-generated code was tested with `uv run pytest`
+- [ ] All docstrings present (Google style) with type hints
+- [ ] `uv run` prefix used for every command
+
+---
+
+## 18. Why This Configuration Works
+
+1. **UV-Only Dependency Management**: Using `uv` exclusively eliminates version conflicts between pip, pipenv, and poetry. A single lockfile ensures reproducible builds across development, CI, and production environments.
+
+2. **Ruff as a Unified Linter and Formatter**: Ruff replaces flake8, isort, black, and dozens of other tools with a single Rust-based binary. This reduces CI time by an order of magnitude while enforcing consistent style and catching real bugs.
+
+3. **100% Test Coverage with Pytest**: Mandatory full coverage ensures every code path is exercised, preventing regressions and giving developers confidence to refactor. Combined with TDD, this catches bugs at write time rather than deploy time.
+
+4. **Dynaconf for Configuration**: Externalizing all configuration prevents hardcoded values from reaching production, supports environment-specific overrides, and makes secrets management straightforward.
+
+5. **Google-Style Docstrings with Type Hints**: Combining runtime documentation with static type annotations enables IDE autocompletion, automated API doc generation with pydoc, and early detection of type errors via mypy.
 
 ---
 

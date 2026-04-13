@@ -150,6 +150,155 @@ Memcached Memory Structure:
 └─────────────────────────────────────────┘
 ```
 
+---
+
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. RED: Write a failing test first
+   ↓
+2. GREEN: Write minimal code to make it pass
+   ↓
+3. REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for Memcached (Python with pytest and pymemcache)
+
+```python
+# Step 1: RED - Write failing test first
+import pytest
+from pymemcache.client.base import Client
+
+@pytest.fixture
+def mc_client():
+    client = Client("localhost:11211")
+    client.flush_all()
+    yield client
+    client.close()
+
+def test_set_and_get_cache_value(mc_client):
+    """Test setting and retrieving a cached value."""
+    cache = CacheService(mc_client)
+    cache.set("user:1001", "Alice", ttl=300)
+    result = cache.get("user:1001")
+    assert result == "Alice"
+
+# Run: pytest test_memcached.py -v
+# FAILS - NameError: name 'CacheService' is not defined
+
+# Step 2: GREEN - Write minimal implementation
+class CacheService:
+    def __init__(self, client):
+        self.client = client
+
+    def set(self, key, value, ttl=0):
+        self.client.set(key, value, expire=ttl)
+
+    def get(self, key):
+        result = self.client.get(key)
+        if result is not None:
+            return result.decode("utf-8") if isinstance(result, bytes) else result
+        return None
+
+# Run: pytest test_memcached.py -v
+# PASSES
+
+# Step 3: REFACTOR - Add delete, multi-get, and cache-aside pattern
+import json
+
+class CacheService:
+    def __init__(self, client):
+        self.client = client
+
+    def set(self, key, value, ttl=0):
+        self.client.set(key, value, expire=ttl)
+
+    def get(self, key):
+        result = self.client.get(key)
+        if result is not None:
+            return result.decode("utf-8") if isinstance(result, bytes) else result
+        return None
+
+    def delete(self, key):
+        self.client.delete(key, noreply=False)
+
+    def get_multi(self, keys):
+        results = self.client.get_many(keys)
+        return {k: v.decode("utf-8") if isinstance(v, bytes) else v
+                for k, v in results.items()}
+
+    def cache_aside(self, key, fetch_func, ttl=300):
+        """Cache-aside pattern: check cache first, fetch and store on miss."""
+        value = self.get(key)
+        if value is None:
+            value = fetch_func()
+            if value is not None:
+                self.set(key, value, ttl=ttl)
+        return value
+
+# Tests still pass
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. Bug Reported/Discovered
+   ↓
+2. Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. Verify the test fails for the right reason
+   ↓
+4. Fix the bug (make the test pass)
+   ↓
+5. Verify the test now PASSES
+   ↓
+6. Document the bug in test comments
+```
+
+### Example Bug Fix
+
+```python
+# Bug: delete() returns success even when the key does not exist,
+# causing the caller to believe a stale entry was removed
+
+import pytest
+
+# Step 1: Write test that reproduces the bug
+def test_delete_nonexistent_key_returns_false(mc_client):
+    """Regression: delete() should return False when the key does not
+    exist in the cache, not silently succeed."""
+    cache = CacheService(mc_client)
+    result = cache.delete("nonexistent_key")
+    assert result is False
+
+# FAILS - AssertionError: True != False (delete reported success)
+
+# Step 2: Fix the bug
+class CacheService:
+    # ... existing code ...
+
+    def delete(self, key):
+        return self.client.delete(key, noreply=False)
+
+# PASSES - bug fixed, regression prevented
+# pymemcache's delete() with noreply=False returns True if deleted,
+# False if key didn't exist
+```
+
+---
+
 ## 3. Installation and Setup
 
 ### Ubuntu/Debian Installation
@@ -2377,7 +2526,77 @@ tail -f /var/log/memcached.log
 - Pub/sub messaging
 - Session storage
 
-## 16. Resources and References
+## 16. Deployment Checklist
+
+### Agent-Generated Code Verification (MANDATORY)
+
+#### Build & Compilation
+- [ ] Code compiles/runs without errors
+- [ ] All imports/dependencies resolved (Memcached client libraries)
+- [ ] Code formatted per project standards
+
+#### Testing
+- [ ] All tests pass
+- [ ] Coverage meets minimum threshold (>80%)
+- [ ] Integration tests pass against Memcached test instance
+
+#### Security
+- [ ] Dependency scan: 0 HIGH/CRITICAL vulnerabilities
+- [ ] No hardcoded credentials or secrets
+- [ ] Connection strings use environment variables
+
+#### Agent Workflow Completed
+- [ ] Agent verified code builds successfully
+- [ ] Agent ran all tests and verified they pass
+- [ ] Agent verified documentation
+
+---
+
+## 17. Why This Configuration Works
+
+**In-Memory Hash Table for Sub-Millisecond Latency**: Memcached stores all data in RAM using an efficient slab allocator and hash table, delivering consistent sub-millisecond response times regardless of dataset size.
+
+**Consistent Hashing for Horizontal Scaling**: Client-side consistent hashing distributes keys across servers with minimal disruption when nodes are added or removed, enabling linear scaling of cache capacity.
+
+**Protocol Simplicity Ensures Reliability**: The text and binary protocols are intentionally minimal (get/set/delete), making the server extremely stable and predictable under load with virtually no edge cases.
+
+**LRU Eviction Provides Self-Managing Cache**: Automatic least-recently-used eviction means the cache manages its own memory without manual intervention, gracefully handling capacity limits without crashing or blocking.
+
+---
+
+## 18. Quick Reference
+
+### Common Commands
+
+```bash
+# Start Memcached with 1GB memory on default port
+memcached -m 1024 -p 11211 -d
+
+# Start with verbose logging for debugging
+memcached -m 256 -p 11211 -vv
+
+# Connect with telnet for manual testing
+telnet localhost 11211
+
+# Set a value (via telnet)
+# set mykey 0 3600 5\r\nhello\r\n
+
+# Get a value (via telnet)
+# get mykey\r\n
+
+# View server stats (via telnet)
+# stats\r\n
+
+# Flush all cached data
+# flush_all\r\n
+
+# Check stats via command line
+echo "stats" | nc localhost 11211
+```
+
+---
+
+## 19. Resources and References
 
 ### Official Documentation
 - **Memcached Wiki**: https://github.com/memcached/memcached/wiki

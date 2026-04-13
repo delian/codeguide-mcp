@@ -2692,6 +2692,25 @@ CONNECTION POOL CONFIGURATION (Application Side):
 
 ---
 
+## 16. Why This Configuration Works
+
+**In-Memory Data Store with Persistence**:
+- All data resides in memory for sub-millisecond access, while AOF and RDB persistence options provide configurable durability guarantees without sacrificing read/write performance.
+
+**Versatile Data Structures**:
+- Native support for strings, hashes, lists, sets, sorted sets, streams, and HyperLogLog enables solving caching, queueing, leaderboards, rate limiting, and pub/sub with a single system instead of multiple specialized tools.
+
+**Redis Cluster for Horizontal Scaling**:
+- Automatic hash-slot-based sharding across nodes with built-in failover provides linear throughput scaling and high availability without external coordination services.
+
+**Atomic Operations and Lua Scripting**:
+- Single-threaded execution guarantees atomicity for individual commands, while server-side Lua scripts enable complex multi-key operations without race conditions or distributed locking overhead.
+
+**Pub/Sub and Streams for Real-Time Messaging**:
+- Redis Streams provide persistent, consumer-group-based message processing with acknowledgment and replay, bridging the gap between simple pub/sub and full message brokers for event-driven architectures.
+
+---
+
 ## Related Guides
 
 - **[kafka.md](kafka.md)**: Apache Kafka for event streaming (when Redis Streams isn't enough)

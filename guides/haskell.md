@@ -1,12 +1,12 @@
 # Haskell Development Guidelines
-Mandatory coding standards and development practices for Haskell development. GHC 9.10+, Cabal 3.12+, HLS, Haddock, HSpec, QuickCheck, HLint.
+Mandatory coding standards and development practices for Haskell development. GHC 9.12+, Cabal 3.12+, HLS, Haddock, HSpec, QuickCheck, HLint.
 
 ---
 
 **Agent Profile**: The Haskell Expert
 **Role**: Senior Functional Programming Engineer & Type-System Specialist
 **Objective**: Generate production-ready, correct and maintainable functional code.
-**Tools**: GHC 9.10+, Cabal 3.12+, HLS, Haddock, HSpec, QuickCheck, HLint
+**Tools**: GHC 9.12+, Cabal 3.12+, HLS, Haddock, HSpec, QuickCheck, HLint
 
 ---
 
@@ -3125,7 +3125,52 @@ vindex (FS i) (VCons _ xs) = vindex i xs
 
 ---
 
-## 12. Deployment Checklist
+## 12. Security & Dependency Management (MANDATORY)
+
+### A. Automated Dependency Management
+
+**Use Cabal with freeze files and automated auditing for consistent and secure environments:**
+
+```bash
+# Freeze dependencies for reproducible builds
+cabal freeze
+
+# Check for outdated dependencies
+cabal outdated
+```
+
+- **Lockfiles**: ALWAYS commit `cabal.project.freeze`. Use `cabal build --offline` in CI/CD (after fetching) to ensure no unexpected downloads.
+- **Dependency Auditing**: Regularly check `Hackage` security advisories for used packages.
+- **PVP Compliance**: Follow the Package Versioning Policy (PVP) for all internal and external dependencies.
+
+### B. Vulnerability Scanning & Security
+
+**Mandatory security checks for ALL Haskell implementations:**
+
+1. **Vulnerability Scan**:
+   ```bash
+   # Use cabal-audit if available, otherwise check advisories
+   cabal-audit
+   ```
+   - Agents MUST ensure 0 HIGH or CRITICAL vulnerabilities are present in the dependency tree.
+
+2. **Supply Chain Audit**:
+   - Verify package integrity using `cabal build --dry-run`.
+   - Audit `Custom` setup scripts in `.cabal` files for malicious behavior.
+
+### C. Dependency File
+
+```cabal
+-- Example .cabal dependencies
+build-depends:
+    , base           >=4.20 && <5
+    , text           >=2.1
+    , effectful-core >=2.3
+```
+
+---
+
+## 13. Deployment Checklist
 
 ### Before Every Release:
 
@@ -3134,6 +3179,12 @@ vindex (FS i) (VCons _ xs) = vindex i xs
 - [ ] All bug fixes have regression tests
 - [ ] No tests skipped or marked as pending
 - [ ] Property-based tests for critical functions
+
+#### Build & Compilation
+- [ ] Code compiles: `cabal build` returns exit code 0
+- [ ] GHC 9.12 features used correctly (e.g., Extended Overloaded Labels, improved specialization)
+- [ ] Strictness: `-XStrictData` verified for data-heavy modules to prevent space leaks
+- [ ] Formatting: `fourmolu` or `ormolu` passes
 
 #### Code Quality
 - [ ] All tests pass: `cabal test`
@@ -3144,6 +3195,9 @@ vindex (FS i) (VCons _ xs) = vindex i xs
 - [ ] All public functions have Haddock comments
 - [ ] No partial functions in production code
 - [ ] All pattern matches are exhaustive
+- [ ] No unused imports or dead code
+- [ ] Explicit type signatures for all top-level exports
+- [ ] Smart constructors used for domain validation
 
 #### Type Safety
 - [ ] All top-level functions have explicit type signatures
@@ -3154,11 +3208,18 @@ vindex (FS i) (VCons _ xs) = vindex i xs
 
 #### Testing
 - [ ] Unit tests cover all modules
-- [ ] Property-based tests for pure functions
+- [ ] Property-based tests for pure functions: `QuickCheck` used for complex domain logic
+- [ ] Golden tests: Verified for API/JSON stability
 - [ ] Integration tests for adapters
 - [ ] Test coverage > 80%: `cabal test --enable-coverage`
 - [ ] Benchmarks run: `cabal bench`
 - [ ] No performance regressions
+
+#### Security
+- [ ] Dependency scan passes: 0 HIGH/CRITICAL vulnerabilities
+- [ ] Supply chain verified: `cabal.project.freeze` is committed and synced
+- [ ] Secrets check: 0 hardcoded secrets in code or configuration files
+- [ ] Static analysis: `hlint` passes with 0 security-related warnings
 
 #### Documentation
 - [ ] README updated with usage examples
@@ -3187,6 +3248,8 @@ vindex (FS i) (VCons _ xs) = vindex i xs
 - [ ] Adapters implement ports correctly
 - [ ] No business logic in adapters
 - [ ] Dependency inversion maintained
+- [ ] Effect management: `effectful` or `cleff` preferred over raw `mtl`
+- [ ] Type safety: `newtype` wrappers used for primitive types
 
 #### Agent Verification
 - [ ] Agent-generated code compiles
@@ -3194,6 +3257,8 @@ vindex (FS i) (VCons _ xs) = vindex i xs
 - [ ] Agent followed TDD protocol
 - [ ] Agent added regression tests for bug fixes
 - [ ] Agent documented all changes
+- [ ] Agent ran security audits and verified 0 vulnerabilities
+- [ ] Agent verified documentation and type correctness
 
 #### Version Control
 - [ ] All changes committed
@@ -3204,7 +3269,7 @@ vindex (FS i) (VCons _ xs) = vindex i xs
 
 ---
 
-## 13. Why This Configuration Works
+## 14. Why This Configuration Works
 
 ### Type Safety
 - **Smart Constructors**: Make invalid states unrepresentable
@@ -3225,8 +3290,8 @@ vindex (FS i) (VCons _ xs) = vindex i xs
 - **Testability**: Easy to mock external dependencies
 
 ### Modern Tooling
-- **Cabal 3.10+**: Modern dependency management
-- **GHC 9.4+**: Latest language features
+- **Cabal 3.12+**: Modern dependency management
+- **GHC 9.12+**: Latest language features
 - **HLS**: IDE integration with Language Server
 - **HLint**: Automated code suggestions
 - **Ormolu**: Consistent code formatting
@@ -3249,12 +3314,21 @@ vindex (FS i) (VCons _ xs) = vindex i xs
 - **Strong Typing**: Refactoring is safe
 - **Composition**: Build complex from simple
 
+### Type-Driven Development
+- **GADTs & Type Families**: Leveraging Haskell's advanced type system ensures that many business logic errors are caught at compile-time rather than runtime.
+
+### Effect Systems (Effectful)
+- **High-Performance Effects**: Provides a type-safe way to manage side effects, making the application easier to test and reason about compared to traditional monad transformers.
+
+### GHC 9.12+ Optimizations
+- **Improved Compilation**: Benefit from improved compile times and more efficient machine code generation, particularly for generic and overloaded code.
+
 This configuration creates a solid foundation for building reliable,
 maintainable Haskell applications with confidence.
 
 ---
 
-## 14. Quick Reference
+## 15. Quick Reference
 
 ### Common Commands
 
@@ -3688,131 +3762,6 @@ spec = do
     it "handles null" pending
   describe "error cases" $ do
     it "rejects invalid" pending
-```
-
----
-
-## 11. Security & Dependency Management (MANDATORY)
-
-### A. Automated Dependency Management
-
-**Use Cabal with freeze files and automated auditing for consistent and secure environments:**
-
-```bash
-# Freeze dependencies for reproducible builds
-cabal freeze
-
-# Check for outdated dependencies
-cabal outdated
-```
-
-- **Lockfiles**: ALWAYS commit `cabal.project.freeze`. Use `cabal build --offline` in CI/CD (after fetching) to ensure no unexpected downloads.
-- **Dependency Auditing**: Regularly check `Hackage` security advisories for used packages.
-- **PVP Compliance**: Follow the Package Versioning Policy (PVP) for all internal and external dependencies.
-
-### B. Vulnerability Scanning & Security
-
-**Mandatory security checks for ALL Haskell implementations:**
-
-1. **Vulnerability Scan**:
-   ```bash
-   # Use cabal-audit if available, otherwise check advisories
-   cabal-audit
-   ```
-   - Agents MUST ensure 0 HIGH or CRITICAL vulnerabilities are present in the dependency tree.
-
-2. **Supply Chain Audit**:
-   - Verify package integrity using `cabal build --dry-run`.
-   - Audit `Custom` setup scripts in `.cabal` files for malicious behavior.
-
-### C. Dependency File
-
-```cabal
--- Example .cabal dependencies
-build-depends:
-    , base           >=4.20 && <5
-    , text           >=2.1
-    , effectful-core >=2.3
-```
-
----
-
-## 12. Deployment Checklist
-
-### Agent-Generated Code Verification (MANDATORY)
-
-#### Build & Compilation
-- [ ] Code compiles: `cabal build` returns exit code 0
-- [ ] GHC 9.10 features used correctly (e.g., Extended Overloaded Labels, improved specialization)
-- [ ] Strictness: `-XStrictData` verified for data-heavy modules to prevent space leaks
-- [ ] Formatting: `fourmolu` or `ormolu` passes
-
-#### Testing
-- [ ] All tests pass: `cabal test` returns exit code 0
-- [ ] Property-based: `QuickCheck` used for complex domain logic
-- [ ] Golden tests: Verified for API/JSON stability
-
-#### Security
-- [ ] Dependency scan passes: 0 HIGH/CRITICAL vulnerabilities
-- [ ] Supply chain verified: `cabal.project.freeze` is committed and synced
-- [ ] Secrets check: 0 hardcoded secrets in code or configuration files
-- [ ] Static analysis: `hlint` passes with 0 security-related warnings
-
-#### Code Quality
-- [ ] No unused imports or dead code
-- [ ] Explicit type signatures for all top-level exports
-- [ ] Smart constructors used for domain validation
-
-#### Documentation
-- [ ] All public APIs have Haddock comments (`-- |`)
-- [ ] Documentation builds: `cabal haddock` succeeds
-- [ ] Examples provided for complex type-level logic
-
-#### Architecture
-- [ ] Hexagonal architecture: Pure domain, effectful adapters
-- [ ] Effect management: `effectful` or `cleff` preferred over raw `mtl`
-- [ ] Type safety: `newtype` wrappers used for primitive types
-
-#### Agent Workflow Completed
-- [ ] Agent verified code builds successfully
-- [ ] Agent ran all tests and verified 100% pass rate
-- [ ] Agent ran security audits and verified 0 vulnerabilities
-- [ ] Agent verified documentation and type correctness
-
----
-
-## 13. Why This Configuration Works
-
-**Type-Driven Development**:
-- Leveraging Haskell's advanced type system (GADTs, Type Families) ensures that many business logic errors are caught at compile-time rather than runtime.
-
-**Effect Systems (Effectful)**:
-- Provides a high-performance, type-safe way to manage side effects, making the application easier to test and reason about compared to traditional monad transformers.
-
-**GHC 9.10+ Optimizations**:
-- Benefit from improved compile times and more efficient machine code generation, particularly for generic and overloaded code.
-
----
-
-## 14. Quick Reference
-
-### Common Commands
-
-```bash
-# Build
-cabal build
-
-# Test with coverage
-cabal test --enable-coverage
-
-# Security/Outdated check
-cabal outdated
-
-# Lint
-hlint .
-
-# Generate docs
-cabal haddock
 ```
 
 ### Modern Haskell 9.10+ Patterns Cheat Sheet

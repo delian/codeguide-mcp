@@ -1,13 +1,13 @@
 # Node.js & TypeScript Development Guidelines
 
-Mandatory coding standards and development practices for Node.js and TypeScript development. Node.js 22.x LTS, TypeScript 5.x, ESM modules, TypeDoc, Modern tooling (Biome/oxc, tsx, npm).
+Mandatory coding standards and development practices for Node.js and TypeScript development. Node.js 24.x LTS, TypeScript 5.x, ESM modules, TypeDoc, Modern tooling (Biome/oxc, tsx, npm).
 
 ---
 
 **Agent Profile**: The TypeScript Architect
 **Role**: Senior Full-Stack Engineer & Node.js Performance Specialist
 **Objective**: Generate production-ready, type-safe, fully documented, highly performant, and maintainable Node.js applications.
-**Tools**: Node.js 22.x LTS, TypeScript 5.x, ESM modules, TypeDoc, Modern tooling (Biome/oxc, tsx, npm)
+**Tools**: Node.js 24.x LTS, TypeScript 5.x, ESM modules, TypeDoc, Modern tooling (Biome/oxc, tsx, npm)
 
 ---
 
@@ -17,7 +17,7 @@ The agent must adhere to the **NODEJS-FIRST** principles for every Node.js/TypeS
 
 **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
 **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
-**Modern**: Use latest LTS Node.js (22.x+), ESM modules, top-level await, native fetch.
+**Modern**: Use latest LTS Node.js (24.x+), ESM modules, top-level await, native fetch.
 **Async-First**: Embrace async/await, avoid callbacks, leverage concurrency.
 **Strict**: TypeScript strict mode, no `any`, comprehensive type coverage.
 **Tested**: 80%+ coverage, use native `node --test` for zero-dependency testing.
@@ -30,7 +30,7 @@ The agent must adhere to the **NODEJS-FIRST** principles for every Node.js/TypeS
 ## 2. Mandatory Setup Requirements
 
 ### A. Node.js Version & Runtime
-* **Version**: Use Node.js 22.x LTS or latest stable (with fallback to 20.x LTS minimum).
+* **Version**: Use Node.js 24.x LTS or latest stable (with fallback to 22.x LTS minimum).
 
 * **Module System**: ALWAYS prefer ESM (ECMAScript Modules) over CommonJS unless an ESM build is not available.
 
@@ -41,7 +41,7 @@ The agent must adhere to the **NODEJS-FIRST** principles for every Node.js/TypeS
 {
   "type": "module",
   "engines": {
-    "node": ">=22.0.0",
+    "node": ">=24.0.0",
     "npm": ">=10.0.0"
   }
 }
@@ -191,7 +191,7 @@ project/
     "typedoc": "^0.25.0",
     "typedoc-plugin-markdown": "^3.17.0",
     // Node.js types
-    "@types/node": "^22.0.0"
+    "@types/node": "^24.0.0"
   }
 }
 ```
@@ -1939,7 +1939,7 @@ try {
 }
 ```
 
-### G. Node.js 22+ Native Features (MANDATORY)
+### G. Node.js 24+ Native Features (MANDATORY)
 
 **Prefer built-in modules over external dependencies:**
 
@@ -1948,7 +1948,7 @@ try {
 // Run with: node --env-file=.env index.js
 const apiKey = process.env.API_KEY;
 
-// 2. Native SQLite (Node.js 22.5+)
+// 2. Native SQLite (Node.js 24.x+)
 import { DatabaseSync } from 'node:sqlite';
 const db = new DatabaseSync('data.db');
 
@@ -2526,7 +2526,7 @@ app.use('/api/', limiter);
   "version": "1.0.0",
   "type": "module",
   "engines": {
-    "node": ">=22.0.0",
+    "node": ">=24.0.0",
     "npm": ">=10.0.0"
   },
   "scripts": {
@@ -3256,7 +3256,7 @@ project/
   "version": "1.0.0",
   "type": "module",
   "engines": {
-    "node": ">=22.0.0",
+    "node": ">=24.0.0",
     "npm": ">=10.0.0"
   },
   "scripts": {

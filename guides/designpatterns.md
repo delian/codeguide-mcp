@@ -3634,6 +3634,47 @@ PATTERN ANTI-PATTERNS:
 
 ---
 
+## 11. Implementation Checklist
+
+### Pattern Compliance
+- [ ] **Pattern solves a real problem**: The pattern addresses an identified complexity, not speculative future needs
+- [ ] **Simplest pattern chosen**: No more abstract than necessary for the current requirements
+- [ ] **Pattern correctly implemented**: Implementation matches the pattern's intent and structure
+- [ ] **No pattern mixing**: Each component uses one pattern clearly, not a hybrid of several
+- [ ] **Composition preferred**: Strategy, Decorator, and composition used over deep inheritance hierarchies
+
+### Code Quality
+- [ ] **Single Responsibility**: Each class/module has one reason to change
+- [ ] **Open/Closed Principle**: New behavior added via extension, not modification of existing code
+- [ ] **Interface Segregation**: Interfaces are small and focused, not bloated
+- [ ] **Dependency Inversion**: High-level modules depend on abstractions, not concrete implementations
+- [ ] **No Singleton abuse**: Dependency injection used instead of global Singleton access
+
+### Testing Verification
+- [ ] **Pattern behavior tested**: Tests verify the pattern's intended behavior (e.g., Strategy swaps algorithms)
+- [ ] **Tests written first**: TDD Red-Green-Refactor cycle followed for pattern implementation
+- [ ] **Edge cases covered**: Null strategies, empty decorators, missing observers handled
+- [ ] **Refactoring tests exist**: Tests confirm the pattern can be refactored without breaking behavior
+- [ ] **No implementation detail tests**: Tests assert behavior, not internal pattern wiring
+
+### Documentation
+- [ ] **Pattern choice documented**: ADR or code comment explains why this pattern was selected
+- [ ] **Participants identified**: Classes and their roles in the pattern are clearly named
+- [ ] **Extension points documented**: How to add new strategies, observers, or decorators is explained
+- [ ] **Anti-patterns noted**: Known misuses and pitfalls for the chosen pattern are documented
+
+---
+
+## 12. Why This Configuration Works
+
+- **Problem-first pattern selection prevents over-engineering**: Requiring a concrete problem before applying a pattern stops developers from building abstract frameworks for hypothetical future needs, which is the most common source of unnecessary complexity in codebases.
+- **Composition-over-inheritance guidance reduces fragile hierarchies**: Steering teams toward Strategy, Decorator, and dependency injection instead of deep class hierarchies prevents the fragile base class problem and makes code easier to test, extend, and reason about.
+- **Modern language awareness eliminates redundant patterns**: Recognizing that functional features (closures, pattern matching, optional chaining) replace many traditional OOP patterns prevents teams from writing boilerplate wrapper classes when a lambda or built-in feature would suffice.
+- **Anti-pattern documentation prevents common traps**: Explicitly calling out misuses (Singleton for everything, God Object facades, observer memory leaks) helps teams recognize and avoid the mistakes that turn design patterns from solutions into new problems.
+- **Pattern quick reference accelerates decision-making**: A concise lookup table mapping problem types to appropriate patterns lets teams make consistent design choices quickly without re-reading chapters of the Gang of Four book for every decision.
+
+---
+
 ## Related Guides
 
 - **[architectures.md](architectures.md)**: Application architectures that use these patterns

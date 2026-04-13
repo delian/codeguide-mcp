@@ -1,12 +1,12 @@
 # Elixir Development Guidelines
-Mandatory standards for Elixir development, following OTP principles and community best practices. Elixir 1.15+, Phoenix 1.7+, Mix, ExUnit, Credo, Dialyzer.
+Mandatory standards for Elixir development, following OTP principles and community best practices. Elixir 1.18+, Phoenix 1.8+, Mix, ExUnit, Credo, Dialyzer.
 
 ---
 
 **Agent Profile**: The Elixir Expert
 **Role**: Senior Elixir Developer & OTP Architect
 **Objective**: Generate fault-tolerant, concurrent, and maintainable Elixir code following functional programming and OTP principles.
-**Tools**: Elixir 1.15+, Phoenix 1.7+, Mix, ExUnit, Credo, Dialyzer.
+**Tools**: Elixir 1.18+, Phoenix 1.8+, Mix, ExUnit, Credo, Dialyzer.
 
 ---
 
@@ -1456,7 +1456,67 @@ Ash is an optional declarative, resource-oriented framework that generates CRUD,
 
 ---
 
-## 13. Deployment Checklist
+## 13. Security & Dependency Management (MANDATORY)
+
+### A. Automated Dependency Management
+
+**Use Mix/Hex to manage and lock dependencies:**
+
+```bash
+# Install/sync dependencies
+mix deps.get
+
+# Add a new dependency (edit mix.exs, then)
+mix deps.get
+
+# Update dependencies
+mix deps.update --all
+mix hex.outdated
+
+# Verify dependency integrity
+mix deps.get --check-locked
+```
+
+### B. Vulnerability Scanning & Security
+
+**Mandatory security checks for ALL Elixir projects:**
+
+1. **Vulnerability Scan**:
+   ```bash
+   # Scan for known vulnerabilities (MixAudit)
+   mix deps.audit
+
+   # Check for retired Hex packages
+   mix hex.audit
+   ```
+   - Agents MUST fix all HIGH/CRITICAL vulnerabilities before delivery.
+
+2. **Supply Chain Audit**:
+   - Verify `mix.lock` integrity
+   - Audit licenses for compliance
+   - Review retired packages with `mix hex.audit`
+
+### C. Dependency File
+
+```elixir
+# mix.exs
+defp deps do
+  [
+    {:phoenix, "~> 1.7"},
+    {:ecto_sql, "~> 3.11"},
+    {:postgrex, ">= 0.0.0"},
+    {:jason, "~> 1.4"},
+    {:bandit, "~> 1.2"},
+
+    # Security
+    {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false}
+  ]
+end
+```
+
+---
+
+## 14. Deployment Checklist
 
 - [ ] Credo and Dialyzer pass with no warnings
 - [ ] All tests passing, no IO.inspect/dbg in production code
@@ -1468,7 +1528,7 @@ Ash is an optional declarative, resource-oriented framework that generates CRUD,
 
 ---
 
-## 14. Quick Reference
+## 15. Quick Reference
 
 ```elixir
 # Pattern matching
@@ -1507,6 +1567,20 @@ Map.put(map, key, value)
 Map.merge(map1, map2)
 %{map | key: new_value}
 ```
+
+---
+
+## 16. Why This Configuration Works
+
+1. **OTP Supervision Trees for Fault Tolerance**: Structuring applications around supervisors and GenServers means individual process crashes are isolated and automatically recovered. This "let it crash" philosophy eliminates defensive coding and produces systems that self-heal in production.
+
+2. **Pattern Matching with Tagged Tuples**: Using `{:ok, value}` and `{:error, reason}` as return conventions throughout the codebase forces explicit error handling at every call site. Combined with `with` blocks, this creates clear happy-path pipelines with no hidden exception flows.
+
+3. **Credo + Dialyzer Dual Analysis**: Credo enforces style consistency and catches code smells, while Dialyzer performs success typing analysis to find type mismatches, unreachable code, and contract violations without requiring type annotations on every function.
+
+4. **Mix Releases for Deployment**: Compiling to self-contained releases with `mix release` produces a single deployable artifact that includes the Erlang runtime, requires no build tools on the target system, and starts in milliseconds with predictable memory usage.
+
+5. **Ecto Changesets for Data Integrity**: Validating and casting data through changesets before it reaches the database ensures schema-level constraints, required fields, and business rules are enforced consistently whether data arrives from forms, APIs, or background jobs.
 
 ---
 

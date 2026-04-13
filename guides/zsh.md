@@ -1705,50 +1705,161 @@ validate_file_path() {
 
 ---
 
-## 12. Why Bash Compatibility Matters
+## 12. Security & Dependency Management (MANDATORY)
 
-🔴 **CRITICAL: Bash compatibility is the #1 priority for shell scripts.**
+### A. Automated Dependency Management
 
-**Portability Benefits**:
-- Scripts work across ALL environments (bash and zsh users)
-- No "this requires zsh" support requests
-- Works in CI/CD systems (typically bash-based)
-- Compatible with POSIX-compliant shells
-- Easier to maintain and share
+Zsh uses plugin managers for extensions. **Oh My Zsh** is the most common:
 
-**Universal Deployment**:
-- Bash is pre-installed on virtually all Unix systems
-- No need to install or configure zsh
-- Works in restricted environments (Docker, CI, minimal systems)
-- Single script runs everywhere
+```bash
+# Oh My Zsh: manage plugins via .zshrc
+plugins=(git docker kubectl z fzf)
 
-**Team Collaboration**:
-- Team members can use their preferred shell (bash or zsh)
-- No shell-specific knowledge required
-- Standard syntax everyone understands
-- Lower barrier to entry for contributors
+# Antigen: alternative plugin manager
+antigen bundle zsh-users/zsh-autosuggestions
+antigen bundle zsh-users/zsh-syntax-highlighting
+antigen apply
 
-**Safety and Reliability**:
-- set -euo pipefail catches errors early (bash-compatible)
-- Proper quoting prevents word splitting (works in both)
-- Consistent behavior across environments
-- Type declarations (declare -A) work in both shells
+# Zinit: high-performance plugin manager
+zinit light zsh-users/zsh-autosuggestions
+zinit light zsh-users/zsh-syntax-highlighting
 
-**Long-term Maintainability**:
-- Hexagonal architecture keeps code modular
-- Pure functions are easy to test in any shell
-- Clear separation of concerns
-- No vendor lock-in to specific shell features
+# List installed Oh My Zsh plugins
+ls ~/.oh-my-zsh/custom/plugins/
 
-**When Zsh-Specific Features Are Acceptable**:
-- Only when bash cannot accomplish the task (rare)
-- Must include bash fallback mechanism
-- Must detect shell and warn user
-- Must document zsh requirement clearly
+# Update Oh My Zsh
+omz update
+```
+
+**For shell scripts** (not interactive config), manage system dependencies the same way as bash — document required commands and verify at startup.
+
+### B. Vulnerability Scanning & Security
+
+```bash
+# shellcheck: static analysis for zsh scripts (use --shell=bash for compatible scripts)
+shellcheck --shell=bash script.sh
+zsh -n script.sh                    # Zsh-native syntax check
+
+# Trivy: filesystem scan for vulnerabilities in vendored dependencies
+trivy fs --scanners vuln .
+
+# Verify Oh My Zsh plugin sources
+# ALWAYS review plugin code before installing custom plugins:
+ls ~/.oh-my-zsh/custom/plugins/<plugin>/
+cat ~/.oh-my-zsh/custom/plugins/<plugin>/*.plugin.zsh
+```
+
+**Security best practices:**
+- **Verify plugin sources** — only install Oh My Zsh / Zinit plugins from trusted, actively maintained repositories
+- **Review custom plugin code** before adding to `~/.oh-my-zsh/custom/plugins/`
+- **Avoid `curl | sh` installation patterns** — download, inspect, verify checksums, then execute
+- Always quote variables: `"$var"` not `$var` (prevents word splitting and injection)
+- Use `set -euo pipefail` in scripts for strict error handling
+- Sanitize all user input before use in commands or filenames
+- Avoid `eval` — use arrays and indirect expansion instead
+- Sign scripts with GPG for integrity verification in production
+- Never store secrets in `.zshrc` or plugin files — use environment variables or secret managers
+
+```bash
+# Input sanitization example
+sanitize_input() {
+    local input="$1"
+    # Remove dangerous characters
+    input="${input//[^a-zA-Z0-9._-]/}"
+    echo "$input"
+}
+
+# Verify integrity of Oh My Zsh installation
+cd ~/.oh-my-zsh && git log --oneline -5 && git verify-commit HEAD
+```
+
+### C. Dependency File
+
+```bash
+#!/usr/bin/env bash
+# project-deps.sh — Source this file to verify project dependencies
+# Compatible with both bash and zsh
+
+set -euo pipefail
+
+readonly REQUIRED_COMMANDS=(
+    "jq:1.6:JSON processor"
+    "curl:7.68:HTTP client"
+    "shellcheck:0.8:Shell script linter"
+    "shfmt:3.0:Shell script formatter"
+)
+
+verify_dependencies() {
+    local errors=0
+    for entry in "${REQUIRED_COMMANDS[@]}"; do
+        IFS=: read -r cmd min_ver desc <<< "$entry"
+        if ! command -v "$cmd" &>/dev/null; then
+            echo "MISSING: $cmd ($desc) — minimum version $min_ver" >&2
+            ((errors++))
+        fi
+    done
+    return "$errors"
+}
+```
+
+```bash
+# .zshrc plugin manifest (commit to dotfiles repo)
+plugins=(
+    git
+    docker
+    kubectl
+    z
+    fzf
+    zsh-autosuggestions
+    zsh-syntax-highlighting
+)
+```
 
 ---
 
-## 13. Quick Reference
+## 13. Deployment Checklist
+
+### Build & Syntax
+- [ ] Bash syntax check passes: `bash -n script.sh` returns exit 0 (FIRST)
+- [ ] Zsh syntax check passes: `zsh -n script.sh` returns exit 0
+- [ ] shellcheck passes: `shellcheck script.sh` reports no errors
+- [ ] shfmt formatting verified: `shfmt -d script.sh` shows no diff
+
+### Testing
+- [ ] All Bats tests pass in bash: `bash -c 'bats tests/'` returns exit 0
+- [ ] All Bats tests pass in zsh: `zsh -c 'bats tests/'` returns exit 0
+- [ ] Script executes with `--help` in both shells
+- [ ] Output is identical in bash and zsh
+
+### Security
+- [ ] No hardcoded passwords, tokens, or secrets in source
+- [ ] All user inputs validated and sanitized
+- [ ] Temporary files created with `mktemp` and cleaned up via `trap`
+- [ ] No use of `eval` on untrusted input
+
+### Agent Workflow
+- [ ] Agent verified syntax in bash FIRST, then zsh
+- [ ] Agent ran shellcheck and shfmt before delivery
+- [ ] Agent tested script execution in BOTH shells
+- [ ] No zsh-only features used (zparseopts, zsh arrays) without bash fallback
+
+---
+
+## 14. Why This Configuration Works
+
+1. **Bash-First Compatibility**: Targeting bash as the primary shell ensures scripts work in CI/CD pipelines, Docker containers, minimal Linux systems, and on macOS out of the box. Zsh compatibility is verified second, giving maximum portability with zero extra effort.
+
+2. **Dual-Shell Verification Protocol**: Testing in both bash and zsh catches subtle behavioral differences (array indexing, word splitting, glob expansion) at development time rather than in production, eliminating "works on my machine" failures.
+
+3. **getopt Over zparseopts**: Using `getopt` for argument parsing keeps scripts portable across all POSIX-compatible shells, while zparseopts would lock scripts to zsh-only execution and break CI environments.
+
+4. **set -euo pipefail Safety Net**: These bash-compatible safety settings work identically in zsh, catching undefined variables, command failures, and broken pipelines immediately rather than allowing silent data corruption.
+
+5. **Hexagonal Architecture for Shell Scripts**: Separating core logic functions from I/O adapters makes shell scripts testable with Bats in isolation, enabling TDD practices that are normally associated with higher-level languages.
+
+---
+
+## 15. Quick Reference
 
 ### Common Commands
 
@@ -1837,7 +1948,7 @@ trap 'rm -f "$temp_file"' EXIT ERR
 
 ---
 
-## 14. Summary
+## 16. Summary
 
 🔴 **CRITICAL Requirements for All Shell Scripts (Bash-Compatible):**
 

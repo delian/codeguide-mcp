@@ -1746,4 +1746,18 @@ model = MyModel()  # Don't compile — debug in eager mode
 
 ---
 
+## 18. Why This Configuration Works
+
+1. **torch.compile by Default**: Compiling models with `torch.compile` enables TorchDynamo graph capture and TorchInductor code generation, delivering 20-50% inference speedups and significant training acceleration without changing model code. Developing in eager mode and compiling for production gives the best of both worlds.
+
+2. **safetensors Over pickle-Based Formats**: Using safetensors for model serialization eliminates arbitrary code execution vulnerabilities inherent in pickle-based `torch.save`. The format is zero-copy memory-mapped, loads faster, and is safe to share publicly without security review.
+
+3. **Mixed Precision with torch.autocast**: Automatic mixed precision reduces GPU memory usage by nearly half and accelerates training on modern hardware with Tensor Cores. Using `torch.autocast` and `GradScaler` handles dtype casting automatically without manual intervention.
+
+4. **Reproducibility-by-Default Configuration**: Seeding all RNGs (Python, NumPy, PyTorch, CUDA), using deterministic algorithms, and saving full checkpoint state (model, optimizer, scheduler, scaler, RNG states) ensures that any training run can be exactly reproduced for debugging or auditing.
+
+5. **Profile-Before-Optimize Discipline**: Using `torch.profiler` to identify actual bottlenecks prevents wasted optimization effort. The profiler reveals whether time is spent in data loading, host-device transfers, kernel execution, or synchronization, directing effort to the real bottleneck.
+
+---
+
 **End of PyTorch Development Guidelines**

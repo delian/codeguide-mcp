@@ -2348,6 +2348,30 @@ terraform graph | dot -Tpng > graph.png  # Visualize
 
 ---
 
+## 13. Why This Configuration Works
+
+1. **Remote State with Locking**: Storing state in S3/GCS/Azure Blob with DynamoDB/native locking prevents concurrent `apply` runs from corrupting infrastructure state.
+
+2. **Workspace-per-Environment**: Using workspaces with environment-specific `.tfvars` files keeps code identical across dev/staging/prod while varying only configuration values.
+
+3. **Module Composition**: Building infrastructure from small, tested modules with clear input/output contracts enables reuse across teams and projects.
+
+4. **Plan Before Apply**: Mandatory `terraform plan` review before every `apply` prevents accidental resource destruction and surfaces unexpected changes.
+
+5. **No Locals Rule**: Driving all values through variables with defaults, types, and descriptions makes modules self-documenting and prevents hidden logic.
+
+6. **Passwordless Authentication**: Using managed identities, IAM roles, or workload identity federation eliminates static credentials in pipelines and state files.
+
+7. **File Naming Convention**: Prefixing files with incremental numbers (`001-network.tf`, `002-compute.tf`) provides clear reading order and prevents merge conflicts.
+
+8. **Pre-commit with tflint and tfsec**: Automated formatting, linting, and security scanning before commit catches misconfigurations before they enter version control.
+
+9. **Explicit Dependency Management**: Using module outputs instead of implicit dependencies makes the resource graph predictable and parallelizable.
+
+10. **Infracost Integration**: Estimating cost changes in pull requests prevents surprise cloud bills and enables cost-aware infrastructure decisions during code review.
+
+---
+
 **Last Updated:** 2026-02-27
 **Version:** 3.0
 **Maintainer:** Infrastructure Team

@@ -73,6 +73,132 @@ MyApp/
 
 ---
 
+## 2A. TDD Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### Red-Green-Refactor Cycle with XCTest
+
+```swift
+// ═══════════════════════════════════════════════════════════════
+// STEP 1: RED - Write failing test first
+// ═══════════════════════════════════════════════════════════════
+
+// MyAppTests/ViewModels/HomeViewModelTests.swift
+import XCTest
+@testable import MyApp
+
+@MainActor
+final class HomeViewModelTDDTests: XCTestCase {
+    var sut: HomeViewModel!
+    var mockService: MockItemService!
+
+    override func setUp() {
+        super.setUp()
+        mockService = MockItemService()
+        sut = HomeViewModel(itemService: mockService)
+    }
+
+    override func tearDown() {
+        sut = nil
+        mockService = nil
+        super.tearDown()
+    }
+
+    func test_loadInitialData_success_setsLoadedState() async {
+        // Given
+        let items = [Item(title: "Test", description: "Description")]
+        mockService.itemsToReturn = items
+
+        // When
+        await sut.loadInitialData()
+
+        // Then
+        if case .loaded(let loadedItems) = sut.state {
+            XCTAssertEqual(loadedItems.count, 1)
+            XCTAssertEqual(loadedItems.first?.title, "Test")
+        } else {
+            XCTFail("Expected loaded state, got \(sut.state)")
+        }
+    }
+
+    func test_loadInitialData_empty_setsEmptyState() async {
+        // Given
+        mockService.itemsToReturn = []
+
+        // When
+        await sut.loadInitialData()
+
+        // Then
+        if case .empty = sut.state {
+            // Success
+        } else {
+            XCTFail("Expected empty state")
+        }
+    }
+}
+
+// Run: Cmd+U or xcodebuild test
+// ❌ FAILS - HomeViewModel doesn't exist yet
+
+// ═══════════════════════════════════════════════════════════════
+// STEP 2: GREEN - Write minimal implementation
+// ═══════════════════════════════════════════════════════════════
+
+// Implement HomeViewModel with loadInitialData() to make tests pass
+
+// Run: Cmd+U
+// ✅ PASSES - all tests pass
+
+// ═══════════════════════════════════════════════════════════════
+// STEP 3: REFACTOR - Add analytics, improve while tests stay green
+// ═══════════════════════════════════════════════════════════════
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow Example
+
+```swift
+// ═══════════════════════════════════════════════════════════════
+// Bug Report #112: HomeViewModel never exits loading state when
+// network request fails with timeout error
+// ═══════════════════════════════════════════════════════════════
+
+// STEP 1: Write test that reproduces the bug
+// MyAppTests/ViewModels/HomeViewModelTests.swift
+
+func test_loadInitialData_timeout_setsErrorState_Bug112() async {
+    // Bug: ViewModel stays in .loading state on timeout
+    // Discovered: 2026-03-18
+    // Root cause: catch block didn't update state on URLError
+
+    mockService.errorToThrow = URLError(.timedOut)
+
+    await sut.loadInitialData()
+
+    if case .error(let error) = sut.state {
+        XCTAssertTrue(error is URLError)
+    } else {
+        XCTFail("Bug #112: Expected error state after timeout, got \(sut.state)")
+    }
+}
+
+// Run: Cmd+U
+// ❌ FAILS - state is still .loading after timeout
+
+// STEP 2: Fix the bug - Update catch block to handle URLError
+
+// Run: Cmd+U
+// ✅ PASSES - bug fixed, regression prevented forever
+```
+
+---
+
 ## 3. SwiftUI Views (MANDATORY)
 
 ### A. View Structure
@@ -946,7 +1072,106 @@ struct ItemRow: View, Equatable {
 
 ---
 
-## 10. Deployment Checklist
+## 10. Security & Dependency Management (MANDATORY)
+
+### A. Dependency Vulnerability Scanning
+
+SPM and CocoaPods do not include a native audit command. Use third-party scanners:
+
+**Snyk (recommended):**
+```bash
+# Install Snyk CLI
+brew install snyk
+
+# Scan SPM dependencies
+snyk test --file=Package.swift
+
+# Scan CocoaPods dependencies
+snyk test --file=Podfile.lock
+
+# Monitor for new vulnerabilities continuously
+snyk monitor --file=Package.swift
+```
+
+**OWASP Dependency-Check:**
+```bash
+# Run against the project directory
+dependency-check --project "MyApp" --scan . --format HTML
+```
+
+- Run scans in CI on every PR and at least weekly on the main branch
+- Review and triage all HIGH and CRITICAL findings before release
+
+### B. Lockfile Discipline
+
+- **SPM**: ALWAYS commit `Package.resolved` to version control for reproducible builds
+- **CocoaPods**: ALWAYS commit `Podfile.lock` to version control
+- Review lockfile diffs during code review to catch unexpected dependency changes
+
+```bash
+# Verify dependency resolution is deterministic
+swift package resolve
+git diff Package.resolved  # Should show no changes on clean resolve
+```
+
+### C. App Transport Security (ATS)
+
+- NEVER disable ATS globally. All network connections MUST use HTTPS.
+- If an exception is absolutely required, scope it to a single domain with justification:
+
+```xml
+<!-- Info.plist - scoped exception (avoid if possible) -->
+<key>NSAppTransportSecurity</key>
+<dict>
+    <key>NSExceptionDomains</key>
+    <dict>
+        <key>legacy-api.example.com</key>
+        <dict>
+            <key>NSTemporaryExceptionAllowsInsecureHTTPLoads</key>
+            <true/>
+        </dict>
+    </dict>
+</dict>
+```
+
+- Apple will reject apps that disable ATS without a valid reason
+
+### D. Secret Management with Keychain
+
+- NEVER store API keys, tokens, or passwords in `UserDefaults`, plists, or source code
+- Use the iOS Keychain for all sensitive data (see Section 6B for `KeychainManager` implementation)
+- For build-time secrets, use Xcode Build Configuration files (`.xcconfig`) excluded from VCS:
+
+```bash
+# .gitignore
+*.xcconfig
+!Shared.xcconfig  # Only commit non-secret configs
+```
+
+```
+// Secrets.xcconfig (NOT committed to VCS)
+API_KEY = your-secret-key-here
+```
+
+```swift
+// Access in code via Info.plist
+let apiKey = Bundle.main.infoDictionary?["API_KEY"] as? String
+```
+
+### E. Security Checklist
+
+- [ ] Snyk or OWASP Dependency-Check configured in CI
+- [ ] `Package.resolved` / `Podfile.lock` committed to version control
+- [ ] App Transport Security enforced (no global exceptions)
+- [ ] All secrets stored in Keychain, never in UserDefaults or source code
+- [ ] Build-time secrets in `.xcconfig` files excluded from VCS
+- [ ] Certificate pinning enabled for critical API endpoints
+- [ ] Sensitive data cleared from memory when no longer needed
+- [ ] CI pipeline runs vulnerability scans on every build
+
+---
+
+## 11. Deployment Checklist
 
 ### Code Quality
 - [ ] No force unwraps
@@ -968,7 +1193,7 @@ struct ItemRow: View, Equatable {
 
 ---
 
-## 11. Quick Reference
+## 12. Quick Reference
 
 ```swift
 // Swift Concurrency
@@ -996,6 +1221,30 @@ NavigationStack { }
 NavigationLink(value: item) { }
 .navigationDestination(for: Item.self) { }
 ```
+
+---
+
+## 13. Why This Configuration Works
+
+1. **SwiftUI with MVVM**: Declarative UI with observable ViewModels provides automatic view updates, eliminating the delegate/datasource boilerplate of UIKit.
+
+2. **Swift Concurrency over GCD**: Structured concurrency with async/await and actors prevents data races at compile time, replacing error-prone dispatch queue patterns.
+
+3. **SwiftData over Core Data**: SwiftData's macro-driven model definitions reduce boilerplate by 60-70% while maintaining Core Data's mature persistence engine underneath.
+
+4. **SPM over CocoaPods**: Swift Package Manager integrates natively with Xcode, eliminates workspace complexity, and provides hermetic builds with resolved dependency graphs.
+
+5. **@Observable Macro**: The Observation framework provides fine-grained view invalidation, re-rendering only views that read changed properties instead of entire view hierarchies.
+
+6. **Protocol-Oriented Architecture**: Defining service interfaces as protocols enables dependency injection with mock implementations, making ViewModels fully testable without a device.
+
+7. **NavigationStack with Type-Safe Routing**: Value-based navigation with `navigationDestination(for:)` eliminates stringly-typed segue identifiers and enables deep linking.
+
+8. **XCTest with async/await Support**: Native async test methods verify concurrent code without expectations or timeouts, producing deterministic and readable test suites.
+
+9. **App Intents and Widgets**: Exposing functionality via App Intents enables Siri, Shortcuts, and Spotlight integration from a single declaration.
+
+10. **Privacy Manifests and Tracking Transparency**: Declaring data usage in privacy manifests and using ATT ensures App Store compliance and builds user trust.
 
 ---
 

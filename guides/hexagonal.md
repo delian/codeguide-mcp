@@ -1616,6 +1616,54 @@ VALIDATION CHECKLIST:
 
 ---
 
+## 14. Why This Configuration Works
+
+- **Technology swaps become trivial**: Because all external dependencies are hidden behind port interfaces, replacing a database (PostgreSQL to MongoDB), messaging system (RabbitMQ to Kafka), or payment provider (Stripe to Adyen) requires only writing a new adapter without touching any business logic.
+- **Domain logic is tested in isolation**: The domain layer has zero external dependencies, so its tests are pure unit tests that run in milliseconds with no mocks, containers, or network calls. This makes the most critical code in the system also the most thoroughly and cheaply testable.
+- **Multiple entry points coexist naturally**: Adding a CLI, GraphQL API, or event consumer alongside an existing REST API requires only a new driving adapter. Each adapter translates its protocol to the same application service calls, eliminating code duplication across interfaces.
+- **Port interfaces enforce clean contracts**: Defining driven ports in the application layer using domain language (not SQL queries or HTTP concepts) creates contracts that are naturally resistant to leaky abstractions, keeping infrastructure details from polluting business logic.
+- **Incremental migration is practical**: The layered approach allows existing applications to adopt hexagonal architecture one module at a time, extracting domain logic inward and wrapping infrastructure outward, rather than requiring a risky full rewrite.
+
+---
+
+## 15. Implementation Checklist
+
+### Port and Adapter Compliance
+- [ ] **Ports defined in application layer**: All port interfaces live in the application layer, not infrastructure
+- [ ] **Ports use domain types only**: Port method signatures reference domain objects, not SQL types, HTTP objects, or framework classes
+- [ ] **Driving adapters translate protocols**: REST controllers, CLI handlers, and message consumers only translate and delegate to application services
+- [ ] **Driven adapters implement ports**: Each external system interaction (database, API, messaging) implements a port interface
+- [ ] **Adapters do not call each other**: No direct adapter-to-adapter dependencies; all communication flows through application services
+
+### Dependency Direction
+- [ ] **Domain has zero external imports**: No framework, ORM, HTTP, or library references in domain layer code
+- [ ] **Application depends only on domain**: Application layer imports only from the domain layer
+- [ ] **Infrastructure depends inward**: Infrastructure layer imports from application and domain, never the reverse
+- [ ] **Dependency direction automated**: Architecture linting tool (ArchUnit, dependency-cruiser, import-linter, deptrac) enforces rules in CI
+- [ ] **No circular dependencies**: Static analysis confirms zero circular imports across all layers
+
+### Testing Verification
+- [ ] **Domain tests have no mocks**: Domain unit tests run with plain objects, zero external dependencies
+- [ ] **Application tests mock all driven ports**: Use case tests substitute port interfaces, exercising orchestration logic
+- [ ] **Integration tests use real infrastructure**: Adapter tests run against real or containerized databases and services
+- [ ] **TDD cycle followed**: All new code developed via Red-Green-Refactor
+- [ ] **Bug fixes include regression tests**: Every resolved defect has a failing-then-passing test
+
+### Code Quality
+- [ ] **One use case per application service**: Each service class has a single public method for one operation
+- [ ] **Value objects replace primitives**: Domain concepts (CustomerId, Money, Email) are typed, not raw strings or numbers
+- [ ] **Aggregate roots enforce invariants**: Entity modifications go through aggregate root methods that validate business rules
+- [ ] **Domain services are stateless**: Cross-entity logic in domain services operates only on passed-in domain objects
+- [ ] **Directory structure reflects architecture**: Folder names (domain, application, infrastructure) make the architecture visible
+
+### Documentation
+- [ ] **Port catalog maintained**: All driving and driven ports listed with their purpose and implementing adapters
+- [ ] **Adapter swappability verified**: At least one adapter has been swapped (e.g., in-memory to database) to prove the architecture works
+- [ ] **Layer responsibilities documented**: Each layer's purpose, allowed dependencies, and testing strategy described
+- [ ] **Architecture diagram current**: Hexagon diagram updated to reflect current ports, adapters, and domain components
+
+---
+
 ## Related Guides
 
 - **[cleanarch.md](cleanarch.md)**: Clean Architecture - Robert C. Martin's complementary architectural pattern

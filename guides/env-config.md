@@ -793,6 +793,16 @@ ARRAY=a,b,c
 
 ---
 
+## 12. Why This Configuration Works
+
+- **Fail-fast validation prevents runtime surprises**: Validating all configuration at startup with Zod schemas ensures misconfigurations are caught immediately during deployment, not at 2 AM when a code path finally touches an unset variable.
+- **Secrets never touch version control**: The strict separation between committed templates (.env.example) and gitignored local overrides (.env), combined with production secrets management (Vault, SSM, Kubernetes Secrets), eliminates the most common vector for credential leaks.
+- **Hierarchical overrides support all environments**: The layered configuration approach (defaults, environment files, environment variables, CLI arguments) allows a single codebase to run correctly across development, test, staging, and production without code changes.
+- **Schema-driven documentation stays in sync**: Generating configuration documentation from the same schema used for validation guarantees that docs always reflect reality, eliminating stale or incomplete environment variable documentation.
+- **Typed configuration prevents subtle bugs**: Parsing environment strings into proper types (numbers, booleans, arrays, URLs) at the configuration boundary means application code works with correct types throughout, avoiding string comparison bugs and type coercion surprises.
+
+---
+
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** Platform Team

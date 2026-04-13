@@ -1519,7 +1519,143 @@ process_file() {
 
 ---
 
-## 16. Why This Configuration Works
+## 16. Security & Dependency Management (MANDATORY)
+
+### A. Automated Dependency Management
+
+Bash scripts do not use a traditional package manager. Instead, manage dependencies through system packages and vendored binaries:
+
+```bash
+# Document required system dependencies in a manifest
+# requirements.txt or DEPENDENCIES file
+cat <<'EOF' > DEPENDENCIES
+# System packages required by this project
+# Install with: apt-get install / brew install / yum install
+coreutils >= 8.0
+jq >= 1.6
+curl >= 7.68
+openssl >= 1.1
+EOF
+
+# Check all required commands exist before running
+check_dependencies() {
+    local missing=()
+    for cmd in jq curl openssl; do
+        if ! command -v "$cmd" &>/dev/null; then
+            missing+=("$cmd")
+        fi
+    done
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        echo "ERROR: Missing dependencies: ${missing[*]}" >&2
+        return 1
+    fi
+}
+```
+
+### B. Vulnerability Scanning & Security
+
+```bash
+# shellcheck: static analysis for security and correctness issues
+shellcheck --severity=warning script.sh
+shellcheck --shell=bash --enable=all script.sh
+
+# Trivy: scan vendored binaries and filesystem for vulnerabilities
+trivy fs --scanners vuln .
+
+# Check scripts for dangerous patterns
+# Avoid curl|bash anti-pattern (NEVER do this):
+# ❌ curl -s https://example.com/install.sh | bash
+# ✅ Instead: download, inspect, verify, then execute
+curl -o install.sh https://example.com/install.sh
+sha256sum install.sh  # Verify checksum
+less install.sh       # Inspect contents
+bash install.sh       # Execute after verification
+```
+
+**Security best practices:**
+- **NEVER** use `curl | bash` or `wget | sh` patterns — always download, verify checksums, inspect, then execute
+- Always quote variables: `"$var"` not `$var` (prevents word splitting and injection)
+- Use `set -euo pipefail` in every script for strict error handling
+- Sanitize all user input before use in commands, filenames, or SQL
+- Avoid `eval` — use arrays and indirect expansion instead
+- Use `mktemp` for temporary files with cleanup traps
+- Sign scripts with GPG for integrity verification in production
+- Restrict `PATH` to known-safe directories at script start
+- Never store secrets in scripts — use environment variables or secret managers
+
+```bash
+# Input sanitization example
+sanitize_input() {
+    local input="$1"
+    # Remove dangerous characters
+    input="${input//[^a-zA-Z0-9._-]/}"
+    echo "$input"
+}
+
+# Script signing with GPG
+gpg --detach-sign --armor script.sh           # Sign
+gpg --verify script.sh.asc script.sh          # Verify before running
+```
+
+### C. Dependency File
+
+```bash
+#!/usr/bin/env bash
+# project-deps.sh — Source this file to verify project dependencies
+
+set -euo pipefail
+
+readonly REQUIRED_COMMANDS=(
+    "jq:1.6:JSON processor"
+    "curl:7.68:HTTP client"
+    "shellcheck:0.8:Shell script linter"
+    "shfmt:3.0:Shell script formatter"
+)
+
+verify_dependencies() {
+    local errors=0
+    for entry in "${REQUIRED_COMMANDS[@]}"; do
+        IFS=: read -r cmd min_ver desc <<< "$entry"
+        if ! command -v "$cmd" &>/dev/null; then
+            echo "MISSING: $cmd ($desc) — minimum version $min_ver" >&2
+            ((errors++))
+        fi
+    done
+    return "$errors"
+}
+```
+
+---
+
+## 17. Deployment Checklist
+
+### Build & Syntax
+- [ ] Bash syntax check passes: `bash -n script.sh` returns exit 0
+- [ ] Zsh syntax check passes: `zsh -n script.sh` returns exit 0
+- [ ] shellcheck passes: `shellcheck script.sh` reports no errors
+- [ ] shfmt formatting verified: `shfmt -d script.sh` shows no diff
+
+### Testing
+- [ ] All Bats tests pass: `bats tests/` returns exit 0
+- [ ] Script executes with `--help`: `bash script.sh --help` returns exit 0
+- [ ] Script tested in both bash and zsh with identical output
+- [ ] Edge cases tested (empty inputs, missing files, permission errors)
+
+### Security
+- [ ] No hardcoded passwords, tokens, or secrets in source
+- [ ] All user inputs validated and sanitized
+- [ ] Temporary files created with `mktemp` and cleaned up via `trap`
+- [ ] No use of `eval` on untrusted input
+
+### Agent Workflow
+- [ ] Agent verified syntax in bash first, then zsh
+- [ ] Agent ran shellcheck and shfmt before delivery
+- [ ] Agent tested script execution with `--help` flag
+- [ ] All functions documented with usage comments
+
+---
+
+## 18. Why This Configuration Works
 
 1. **Hexagonal Architecture**: Separates business logic from I/O operations, making scripts testable and maintainable. Core functions can be tested in isolation.
 
@@ -1543,7 +1679,7 @@ process_file() {
 
 ---
 
-## 17. Quick Reference
+## 19. Quick Reference
 
 ### Command Cheat Sheet
 
@@ -1629,7 +1765,7 @@ trap 'rm -f "$tmp_file"' EXIT
 
 ---
 
-## 18. Summary
+## 20. Summary
 
 **CRITICAL Requirements for All Bash Scripts:**
 

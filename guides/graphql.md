@@ -1264,7 +1264,7 @@ export const userResolvers: Resolvers = {
 
 ---
 
-## 11. Security Best Practices
+## 12. Security Best Practices
 
 ### A. Query Allowlisting (Production)
 
@@ -1347,7 +1347,7 @@ const resolvers = {
 
 ---
 
-## 12. Deployment Checklist
+## 13. Deployment Checklist
 
 ### Schema Design
 - [ ] Clear, descriptive type names
@@ -1377,7 +1377,7 @@ const resolvers = {
 
 ---
 
-## 13. Quick Reference
+## 14. Quick Reference
 
 ```graphql
 # Common patterns
@@ -1413,6 +1413,20 @@ subscription {
   }
 }
 ```
+
+---
+
+## 15. Why This Configuration Works
+
+1. **DataLoader for N+1 Prevention**: Batching and caching database lookups per request cycle eliminates the N+1 query problem that plagues naive resolver implementations. A single query fetches all needed records regardless of how many resolvers request the same entity type.
+
+2. **Relay-Style Connection Pagination**: Using cursor-based pagination with `edges`, `node`, and `pageInfo` provides stable pagination that works correctly even when data is inserted or deleted between pages, unlike offset-based pagination which skips or duplicates records.
+
+3. **Schema-as-Documentation Principle**: A well-designed GraphQL schema with descriptive type names, field descriptions, and deprecation notices serves as living API documentation. Clients can introspect the schema to discover available operations without external docs.
+
+4. **Resolver-Level Authorization**: Enforcing permissions at the resolver level rather than at the schema or gateway level ensures that every data access path is authorized, regardless of how the query is structured. This prevents authorization bypass through nested queries.
+
+5. **Query Complexity and Depth Limiting**: Setting maximum query depth and complexity scores prevents abusive queries (deeply nested or exponentially expanding) from overwhelming the server. This provides a predictable performance ceiling without restricting legitimate client usage.
 
 ---
 

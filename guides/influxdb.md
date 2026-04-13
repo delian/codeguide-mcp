@@ -3331,6 +3331,79 @@ Problems_and_Solutions:
 
 ---
 
+## 22. Deployment Checklist
+
+### Agent-Generated Code Verification (MANDATORY)
+
+#### Build & Compilation
+- [ ] Code compiles/runs without errors
+- [ ] All imports/dependencies resolved (InfluxDB client libraries, Telegraf plugins)
+- [ ] Code formatted per project standards
+
+#### Testing
+- [ ] All tests pass
+- [ ] Coverage meets minimum threshold (>80%)
+- [ ] Integration tests pass against InfluxDB test instance
+
+#### Security
+- [ ] Dependency scan: 0 HIGH/CRITICAL vulnerabilities
+- [ ] No hardcoded credentials or secrets
+- [ ] Connection strings and API tokens use environment variables
+
+#### Agent Workflow Completed
+- [ ] Agent verified code builds successfully
+- [ ] Agent ran all tests and verified they pass
+- [ ] Agent verified documentation
+
+---
+
+## 23. Why This Configuration Works
+
+**Purpose-Built Storage Engine for Time-Series Data**: The TSM (Time-Structured Merge Tree) and newer Parquet-based storage engines are optimized for high-ingest, time-ordered data with automatic compression ratios exceeding 10:1.
+
+**Retention Policies and Downsampling Automate Data Lifecycle**: Built-in retention policies automatically expire old data while continuous queries or tasks downsample high-resolution data, keeping storage costs predictable without manual intervention.
+
+**Telegraf Plugin Ecosystem for Universal Data Collection**: Over 300 input plugins allow collecting metrics from virtually any source (servers, containers, cloud services, IoT devices) with minimal configuration.
+
+**Flux and InfluxQL for Flexible Querying**: Dual query language support lets teams use familiar SQL-like InfluxQL for simple queries while leveraging Flux's functional pipeline for complex transformations and cross-measurement joins.
+
+---
+
+## 24. Quick Reference
+
+### Common Commands
+
+```bash
+# Start InfluxDB (v2.x)
+influxd
+
+# Set up initial user, org, and bucket
+influx setup --username admin --password changeme \
+  --org myorg --bucket mybucket --retention 30d
+
+# Write line protocol data
+influx write --bucket mybucket --org myorg \
+  "cpu,host=server01 usage=45.2 $(date +%s%N)"
+
+# Query data with InfluxQL
+influx query --org myorg \
+  'from(bucket:"mybucket") |> range(start:-1h) |> filter(fn:(r) => r._measurement == "cpu")'
+
+# Create a backup
+influx backup /path/to/backup --org myorg --token mytoken
+
+# Restore from backup
+influx restore /path/to/backup --org myorg --token mytoken
+
+# Check InfluxDB health
+curl http://localhost:8086/health
+
+# List all buckets
+influx bucket list --org myorg
+```
+
+---
+
 ## Additional Resources
 
 ### Official Documentation

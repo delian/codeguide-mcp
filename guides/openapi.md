@@ -129,6 +129,127 @@ components:
 
 ---
 
+## 2A. TDD Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL API specification changes.**
+
+### Red-Green-Refactor Cycle with Spectral Linting
+
+```yaml
+# ═══════════════════════════════════════════════════════════════
+# STEP 1: RED - Write failing Spectral rules first
+# ═══════════════════════════════════════════════════════════════
+
+# .spectral.yml - Custom linting rules
+extends: ["spectral:oas", "spectral:asyncapi"]
+
+rules:
+  operation-operationId:
+    severity: error
+    description: Every operation must have an operationId
+  operation-description:
+    severity: error
+    description: Every operation must have a description
+  path-params:
+    severity: error
+  oas3-valid-media-example:
+    severity: error
+  require-pagination:
+    severity: warn
+    description: List endpoints must support pagination
+    given: "$.paths[*].get"
+    then:
+      field: parameters
+      function: schema
+      functionOptions:
+        schema:
+          type: array
+          contains:
+            type: object
+            properties:
+              name:
+                enum: ["limit", "cursor", "page"]
+
+# Run: npx @stoplight/spectral-cli lint openapi.yaml
+# ❌ FAILS - spec is missing operationIds, descriptions, pagination
+```
+
+```bash
+# test/validate-spec.sh
+#!/bin/bash
+set -euo pipefail
+
+# Lint with Spectral
+npx @stoplight/spectral-cli lint openapi.yaml --fail-severity=error || {
+  echo "FAIL: Spectral linting errors found"
+  exit 1
+}
+
+# Validate schema is valid OpenAPI 3.1
+npx swagger-cli validate openapi.yaml || {
+  echo "FAIL: Invalid OpenAPI document"
+  exit 1
+}
+
+echo "PASS: OpenAPI specification is valid"
+
+# ═══════════════════════════════════════════════════════════════
+# STEP 2: GREEN - Fix spec to pass all Spectral rules
+# ═══════════════════════════════════════════════════════════════
+
+# Add operationIds, descriptions, and pagination parameters
+
+# Run: bash test/validate-spec.sh
+# ✅ PASSES - all rules satisfied
+
+# ═══════════════════════════════════════════════════════════════
+# STEP 3: REFACTOR - Improve examples, add more schemas, keep valid
+# ═══════════════════════════════════════════════════════════════
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every spec bug MUST receive a validation test BEFORE fixing.**
+
+### Bug Fix Workflow Example
+
+```bash
+# ═══════════════════════════════════════════════════════════════
+# Bug Report #108: Breaking API change shipped because response
+# schema was modified without version bump
+# ═══════════════════════════════════════════════════════════════
+
+# STEP 1: Write test that detects breaking changes
+# test/detect-breaking-changes.sh
+
+#!/bin/bash
+set -euo pipefail
+
+# Compare current spec against the last released version
+npx openapi-diff \
+  https://api.example.com/v1/openapi.yaml \
+  openapi.yaml \
+  --fail-on-incompatible || {
+  echo "FAIL Bug #108: Breaking changes detected without version bump"
+  echo "Either bump the API version or make the change backward-compatible"
+  exit 1
+}
+
+echo "PASS: No breaking changes found"
+
+# Run: bash test/detect-breaking-changes.sh
+# ❌ FAILS - breaking change detected in response schema
+
+# STEP 2: Fix the bug - Revert schema change or bump API version
+
+# Run: bash test/detect-breaking-changes.sh
+# ✅ PASSES - spec is backward-compatible or properly versioned
+```
+
+---
+
 ## 3. Path Definitions (MANDATORY)
 
 ### A. Resource Endpoints
@@ -1120,6 +1241,30 @@ writeOnly: true
 nullable: true
 deprecated: true
 ```
+
+---
+
+## 12. Why This Configuration Works
+
+1. **Design-First Approach**: Writing the OpenAPI spec before implementation aligns frontend and backend teams on the contract, catching design issues before any code is written.
+
+2. **Reusable Component Schemas**: Defining schemas in `components/schemas` and referencing them with `$ref` eliminates duplication and ensures consistent data structures across endpoints.
+
+3. **Rich Examples on Every Endpoint**: Concrete request/response examples enable instant "try it out" testing in Swagger UI and serve as living documentation that never goes stale.
+
+4. **Spectral Linting Rules**: Automated style enforcement catches inconsistent naming, missing descriptions, and schema violations in CI before specs are merged.
+
+5. **Semantic Versioning with URL Paths**: Including the major version in the URL (`/v1/`, `/v2/`) allows breaking changes without disrupting existing consumers.
+
+6. **Standardized Error Responses**: Consistent error schemas with `type`, `title`, `status`, and `detail` fields (RFC 7807) enable clients to build generic error handling.
+
+7. **Security Scheme Declarations**: Explicit security definitions document authentication requirements and enable code generators to produce clients with built-in auth support.
+
+8. **Pagination with Cursor-Based Patterns**: Cursor pagination in the spec prevents offset-based performance degradation and provides stable page boundaries during concurrent writes.
+
+9. **Code Generation from Spec**: Generating server stubs and client SDKs from the OpenAPI spec guarantees implementation matches the contract and reduces hand-written boilerplate.
+
+10. **Webhook Definitions (OpenAPI 3.1)**: Documenting webhooks alongside REST endpoints gives consumers a complete integration picture in a single specification file.
 
 ---
 

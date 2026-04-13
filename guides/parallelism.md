@@ -1323,4 +1323,120 @@ function sum_array(array):
 🔴 **Test concurrent code extensively - bugs are non-deterministic**
 🔴 **Correctness > Performance - safe code first**
 
+---
+
+## 10. Implementation Checklist
+
+### Design Phase
+- [ ] Confirmed sequential implementation is insufficient (profiled first)
+- [ ] Selected appropriate concurrency level from hierarchy (async > threads > processes)
+- [ ] Identified shared state and ownership boundaries
+- [ ] Designed for immutability and message passing where possible
+- [ ] Documented concurrency model and data flow
+
+### Safety
+- [ ] No shared mutable state without proper synchronization
+- [ ] Lock ordering defined and documented (prevents deadlocks)
+- [ ] All blocking operations have timeouts
+- [ ] Bounded queues and thread pools (prevents resource exhaustion)
+- [ ] Clean shutdown path implemented (signal handling, cancellation tokens)
+- [ ] Backpressure handling for producer-consumer patterns
+
+### Error Handling
+- [ ] Exceptions in threads/tasks are caught and propagated
+- [ ] Failed tasks do not leave shared state in an inconsistent state
+- [ ] Circuit breakers for external service calls
+- [ ] Retry logic with exponential backoff and jitter
+
+### Testing
+- [ ] Unit tests for concurrent logic with deterministic scheduling
+- [ ] Stress tests with high thread/task counts
+- [ ] Thread sanitizer (TSan) or race detector enabled in CI
+- [ ] Deadlock detection tests with timeout assertions
+- [ ] Memory leak detection under concurrent load
+
+### Performance
+- [ ] Thread pool sizes tuned for workload (CPU-bound: N cores, I/O-bound: N * multiplier)
+- [ ] Contention measured and minimized (lock-free where proven necessary)
+- [ ] False sharing avoided (cache line padding for hot variables)
+- [ ] Batch size tuned for throughput vs. latency tradeoff
+
+---
+
+## 11. Why This Configuration Works
+
+1. **Async-First Hierarchy**: Defaulting to async/await for I/O-bound work avoids thread overhead and context switching, handling thousands of concurrent operations on a single thread.
+
+2. **Immutability by Default**: Immutable data structures eliminate data races by definition, removing the need for locks in the majority of concurrent code paths.
+
+3. **Message Passing over Shared Memory**: Communicating via channels isolates state to a single owner, making concurrency bugs visible as protocol violations rather than subtle data corruption.
+
+4. **Structured Concurrency**: Binding task lifetimes to scopes (structured concurrency) prevents leaked goroutines/tasks/threads and ensures cleanup on cancellation.
+
+5. **Lock Ordering Convention**: Establishing a global lock acquisition order makes deadlocks impossible by construction rather than requiring runtime detection.
+
+6. **Bounded Resources**: Fixed-size thread pools and bounded queues convert unbounded load into backpressure, preventing OOM kills and thread exhaustion under spike traffic.
+
+7. **Thread Sanitizer in CI**: Running tests with TSan/race detectors catches data races that manual review misses, especially in code paths exercised only under contention.
+
+8. **Functional Core, Imperative Shell**: Keeping pure computation separate from concurrent orchestration means the complex logic is easily testable without threading.
+
+9. **Timeout on Every Blocking Call**: Universal timeouts prevent indefinite hangs from network partitions, deadlocks, or unresponsive dependencies.
+
+10. **Cooperative Cancellation**: Using cancellation tokens instead of thread interruption provides clean shutdown without leaving resources in an undefined state.
+
+---
+
+## 12. Quick Reference
+
+```
+CONCURRENCY HIERARCHY (prefer higher):
+  1. Sequential code        - Default, safest
+  2. Async/Await            - I/O-bound, cooperative
+  3. Thread pool + immutable - CPU-bound, independent tasks
+  4. Threads + channels     - Communication between threads
+  5. Threads + locks        - Shared mutable state (minimize)
+  6. Lock-free algorithms   - Expert only, proven bottleneck
+  7. Multiprocessing        - Memory isolation, highest overhead
+
+THREAD POOL SIZING:
+  CPU-bound:  num_cores (or num_cores - 1)
+  I/O-bound:  num_cores * (1 + wait_time / compute_time)
+  Mixed:      Separate pools for CPU and I/O work
+
+SYNCHRONIZATION PRIMITIVES:
+  Mutex / Lock       - Exclusive access to shared resource
+  RWLock             - Multiple readers OR one writer
+  Semaphore          - Limit concurrent access count
+  Condition Variable - Wait for a condition to become true
+  Atomic             - Lock-free single-variable operations
+  Channel / Queue    - Message passing between threads
+  Barrier            - Synchronize N threads at a point
+
+COMMON PATTERNS:
+  Producer-Consumer  - Bounded queue between producer/consumer threads
+  Fan-Out/Fan-In     - Distribute work, collect results
+  Pipeline           - Chain of processing stages
+  Worker Pool        - Fixed threads pulling from work queue
+  Actor Model        - Isolated state, message-driven
+
+DEADLOCK PREVENTION:
+  1. Lock ordering     - Always acquire locks in same global order
+  2. Lock timeout      - Use try_lock with timeout
+  3. Single lock       - Reduce to one lock if possible
+  4. Lock-free design  - Eliminate locks entirely
+
+RACE CONDITION CHECKLIST:
+  - Check-then-act    → Use atomic compare-and-swap
+  - Read-modify-write → Use atomic operations or lock
+  - Lazy initialization → Use once/call_once
+  - Double-checked lock → Use language-specific safe pattern
+
+TESTING TOOLS:
+  ThreadSanitizer (TSan)  - Compile-time race detection
+  Helgrind (Valgrind)     - Runtime race detection
+  Go race detector        - go test -race
+  stress / stress-ng      - Load testing
+```
+
 **End of Parallel and Concurrent Programming Guidelines**

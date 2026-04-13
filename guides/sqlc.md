@@ -82,6 +82,215 @@ npx tsc --noEmit
 
 ---
 
+## 2A. TDD Protocol (Red-Green-Refactor)
+
+EVERY new feature or module MUST follow the Red-Green-Refactor cycle. No production code without a failing test first.
+
+### Workflow
+
+1. **RED** -- Write a failing test that defines the expected behavior.
+2. **GREEN** -- Write the minimum production code to make the test pass.
+3. **REFACTOR** -- Clean up while keeping tests green.
+
+### Concrete Example -- Testing sqlc-Generated Query Functions
+
+**Step 1 -- RED (Go `testing` package):**
+
+```go
+// db/query_test.go
+package db_test
+
+import (
+	"context"
+	"database/sql"
+	"testing"
+
+	_ "github.com/lib/pq"
+	"myapp/db"
+)
+
+func setupTestDB(t *testing.T) *db.Queries {
+	t.Helper()
+	conn, err := sql.Open("postgres", "postgres://test:test@localhost:5432/testdb?sslmode=disable")
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+	t.Cleanup(func() {
+		conn.Exec("DELETE FROM authors")
+		conn.Close()
+	})
+	return db.New(conn)
+}
+
+func TestCreateAuthor(t *testing.T) {
+	q := setupTestDB(t)
+	ctx := context.Background()
+
+	author, err := q.CreateAuthor(ctx, db.CreateAuthorParams{
+		Name: "Ursula K. Le Guin",
+		Bio:  sql.NullString{String: "Science fiction author", Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateAuthor failed: %v", err)
+	}
+	if author.Name != "Ursula K. Le Guin" {
+		t.Errorf("expected name 'Ursula K. Le Guin', got %q", author.Name)
+	}
+	if author.ID == 0 {
+		t.Error("expected non-zero ID")
+	}
+}
+
+func TestGetAuthor(t *testing.T) {
+	q := setupTestDB(t)
+	ctx := context.Background()
+
+	created, _ := q.CreateAuthor(ctx, db.CreateAuthorParams{
+		Name: "Octavia Butler",
+		Bio:  sql.NullString{String: "Visionary author", Valid: true},
+	})
+
+	fetched, err := q.GetAuthor(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetAuthor failed: %v", err)
+	}
+	if fetched.Name != "Octavia Butler" {
+		t.Errorf("expected 'Octavia Butler', got %q", fetched.Name)
+	}
+}
+
+func TestListAuthors(t *testing.T) {
+	q := setupTestDB(t)
+	ctx := context.Background()
+
+	for _, name := range []string{"Author A", "Author B", "Author C"} {
+		q.CreateAuthor(ctx, db.CreateAuthorParams{Name: name})
+	}
+
+	authors, err := q.ListAuthors(ctx)
+	if err != nil {
+		t.Fatalf("ListAuthors failed: %v", err)
+	}
+	if len(authors) != 3 {
+		t.Errorf("expected 3 authors, got %d", len(authors))
+	}
+}
+```
+
+**Step 2 -- GREEN (sqlc SQL definitions):**
+
+```sql
+-- query/authors.sql
+
+-- name: CreateAuthor :one
+INSERT INTO authors (name, bio)
+VALUES ($1, $2)
+RETURNING *;
+
+-- name: GetAuthor :one
+SELECT * FROM authors WHERE id = $1;
+
+-- name: ListAuthors :many
+SELECT * FROM authors ORDER BY name;
+```
+
+Then run `sqlc generate` to produce the Go code that satisfies the tests.
+
+**Step 3 -- REFACTOR:**
+
+- Extract `setupTestDB` into a shared `testutil` package.
+- Use `t.Parallel()` for tests that do not share state.
+- Add table-driven subtests for edge cases (empty bio, long name).
+
+### TDD Rules for sqlc
+
+- Write Go tests **against the generated code** -- never hand-edit sqlc output.
+- Use a real PostgreSQL test database (Docker container or testcontainers-go).
+- Clean up test data in `t.Cleanup` to keep tests isolated.
+- Re-run `sqlc generate` in CI to ensure SQL and Go stay in sync.
+- Test both `:one` and `:many` query annotations for correct return types.
+
+---
+
+## 2B. Bug Fix Protocol (Regression Testing)
+
+EVERY bug fix MUST include a regression test that fails before the fix and passes after.
+
+### Workflow
+
+1. **Reproduce** -- Write a test that triggers the exact bug.
+2. **Verify RED** -- Confirm the test fails on the current code.
+3. **Fix** -- Apply the minimal code change.
+4. **Verify GREEN** -- Confirm the test (and all others) pass.
+5. **Document** -- Reference the bug/ticket in the test docstring.
+
+### Concrete Example -- NULL Bio Causes Scan Error
+
+**Bug report:** `GetAuthor` panics when `bio` is NULL because the generated struct uses `string` instead of `sql.NullString`.
+
+**Step 1 -- Regression test:**
+
+```go
+// db/query_bug_test.go
+package db_test
+
+import (
+	"context"
+	"database/sql"
+	"testing"
+
+	"myapp/db"
+)
+
+func TestGetAuthorWithNullBio(t *testing.T) {
+	// Regression: BUG-2201 -- GetAuthor must handle NULL bio without panic
+	q := setupTestDB(t)
+	ctx := context.Background()
+
+	// Create author with NULL bio
+	created, err := q.CreateAuthor(ctx, db.CreateAuthorParams{
+		Name: "Anonymous",
+		Bio:  sql.NullString{Valid: false},
+	})
+	if err != nil {
+		t.Fatalf("CreateAuthor failed: %v", err)
+	}
+
+	// This must not panic or return an error
+	fetched, err := q.GetAuthor(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("BUG-2201: GetAuthor failed on NULL bio: %v", err)
+	}
+	if fetched.Bio.Valid {
+		t.Error("expected bio to be NULL/invalid")
+	}
+}
+```
+
+**Step 2 -- Verify the test fails** (scan error or panic on NULL).
+
+**Step 3 -- Fix** (update the schema or sqlc config to use `sql.NullString`):
+
+```yaml
+# sqlc.yaml
+overrides:
+  - column: "authors.bio"
+    go_type: "database/sql.NullString"
+```
+
+Re-run `sqlc generate`.
+
+**Step 4 -- Verify GREEN** -- `GetAuthor` handles NULL bio correctly.
+
+### Regression Test Rules for sqlc
+
+- Name test files `query_bug_test.go` or `query_regression_test.go`.
+- Include the ticket/issue number in the test name or comment.
+- Regression tests are NEVER deleted.
+- After fixing, always re-run `sqlc generate` and verify the generated code compiles.
+
+---
+
 ## 3. Project Structure (MANDATORY)
 
 ### A. Recommended Directory Layout
@@ -1927,7 +2136,26 @@ overrides:
 
 ---
 
-## 16. Related Guidelines
+## 16. Why This Configuration Works
+
+**Compile-Time SQL Validation**:
+- SQL queries are parsed and validated against the actual database schema at code generation time, catching syntax errors, type mismatches, and missing columns before runtime.
+
+**Zero Runtime Overhead**:
+- Generated code is plain Go (or Python/TypeScript) with direct database driver calls, providing the same performance as hand-written database code without reflection or runtime query building.
+
+**Type-Safe Query Results**:
+- Each query generates a dedicated struct with correctly typed fields, eliminating `interface{}` assertions, `sql.Scan` ordering bugs, and nil pointer issues from nullable columns.
+
+**SQL as the Source of Truth**:
+- Writing standard SQL rather than an ORM abstraction means developers leverage full database capabilities (window functions, CTEs, lateral joins) with exact control over generated queries.
+
+**Seamless CI Integration**:
+- Running `sqlc vet` and `sqlc diff` in CI pipelines ensures schema and query consistency across the team, preventing drift between SQL files and generated code.
+
+---
+
+## 17. Related Guidelines
 
 - [SQL Guidelines](sql.md) - General SQL best practices
 - [PostgreSQL Guidelines](postgresql.md) - PostgreSQL-specific patterns

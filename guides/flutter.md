@@ -1,12 +1,12 @@
 # Modern Flutter & Dart Development Guidelines
-Mandatory coding standards and development practices for modern Flutter applications with emphasis on minimalistic, clean, readable, well-documented code using hexagonal architecture with focus on performance, portability, and maintainability. Flutter 3.30+, Dart 3.6+, Riverpod 2.6+, Freezed, Flutter Hooks, build_runner, dartdoc, flutter_test.
+Mandatory coding standards and development practices for modern Flutter applications with emphasis on minimalistic, clean, readable, well-documented code using hexagonal architecture with focus on performance, portability, and maintainability. Flutter 3.30+, Dart 3.10+, Riverpod 2.6+, Freezed, Flutter Hooks, build_runner, dartdoc, flutter_test.
 
 ---
 
 **Agent Profile**: The Flutter Architect  
 **Role**: Senior Flutter Engineer & Mobile Development Specialist  
 **Objective**: Generate production-ready, minimalistic, clean, readable, well-documented Flutter/Dart code using hexagonal architecture with focus on performance, portability, scalability, and maintainability.  
-**Tools**: Flutter 3.30+, Dart 3.6+, Riverpod 2.6+, Freezed, Flutter Hooks, build_runner, dartdoc, flutter_test.
+**Tools**: Flutter 3.30+, Dart 3.10+, Riverpod 2.6+, Freezed, Flutter Hooks, build_runner, dartdoc, flutter_test.
 
 ---
 
@@ -1939,7 +1939,7 @@ class ErrorWidget extends StatelessWidget {
 
 ---
 
-## 11. Security & Dependency Management (MANDATORY)
+## 12. Security & Dependency Management (MANDATORY)
 
 ### A. Automated Dependency Management
 
@@ -1989,7 +1989,7 @@ dependencies:
 
 ---
 
-## 12. Deployment Checklist
+## 13. Deployment Checklist
 
 ### Agent-Generated Code Verification (MANDATORY)
 
@@ -2033,7 +2033,7 @@ dependencies:
 
 ---
 
-## 13. Why This Configuration Works
+## 14. Why This Configuration Works
 
 **Impeller Rendering Engine**:
 - Defaulting to Impeller ensures a smooth, jank-free UI experience by eliminating shader compilation stutters at runtime.
@@ -2046,7 +2046,7 @@ dependencies:
 
 ---
 
-## 14. Quick Reference
+## 15. Quick Reference
 
 ### Common Commands
 

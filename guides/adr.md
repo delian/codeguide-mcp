@@ -698,6 +698,16 @@ Example: 0015-use-react-for-frontend.md
 
 ---
 
+## 10. Why This Configuration Works
+
+- **Preserves institutional knowledge**: ADRs capture the reasoning behind decisions at the time they are made, preventing the loss of context when team members leave or memories fade. Future developers can understand not just what was decided, but why.
+- **Prevents repeated debates**: By documenting rejected alternatives and their rationale, teams avoid re-litigating settled decisions. When context changes enough to warrant reconsideration, the original reasoning is available for comparison.
+- **Improves onboarding**: New team members can read the ADR log to quickly understand the system's evolution and the constraints that shaped it, dramatically reducing ramp-up time.
+- **Enforces structured thinking**: The ADR template forces decision-makers to articulate context, consider alternatives, and evaluate consequences before committing, leading to higher-quality architectural choices.
+- **Creates an auditable decision trail**: The immutable, version-controlled nature of ADRs provides a clear history that supports compliance requirements and enables teams to trace how and when architectural direction shifted.
+
+---
+
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** Architecture Team

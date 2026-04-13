@@ -69,6 +69,150 @@ ManagedBy: Bicep
 
 ---
 
+## 2A. TDD Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL infrastructure code.**
+
+### Red-Green-Refactor Cycle with Terratest / Bicep Validation
+
+```go
+// ═══════════════════════════════════════════════════════════════
+// STEP 1: RED - Write failing test first
+// ═══════════════════════════════════════════════════════════════
+
+// test/app_service_test.go
+package test
+
+import (
+    "testing"
+
+    "github.com/gruntwork-io/terratest/modules/azure"
+    "github.com/gruntwork-io/terratest/modules/terraform"
+    "github.com/stretchr/testify/assert"
+)
+
+func TestAppServiceDeployment(t *testing.T) {
+    t.Parallel()
+
+    terraformOptions := &terraform.Options{
+        TerraformDir: "../infra/app-service",
+        Vars: map[string]interface{}{
+            "environment": "test",
+            "location":    "eastus",
+            "app_name":    "myapp-test",
+        },
+    }
+
+    defer terraform.Destroy(t, terraformOptions)
+    terraform.InitAndApply(t, terraformOptions)
+
+    resourceGroupName := terraform.Output(t, terraformOptions, "resource_group_name")
+    appName := terraform.Output(t, terraformOptions, "app_service_name")
+
+    // Verify App Service exists and is running
+    site := azure.GetAppService(t, appName, resourceGroupName, "")
+    assert.Equal(t, "Running", *site.State)
+
+    // Verify HTTPS-only is enforced
+    assert.True(t, *site.HTTPSOnly)
+
+    // Verify managed identity is enabled
+    assert.NotNil(t, site.Identity)
+    assert.Equal(t, "SystemAssigned", string(site.Identity.Type))
+}
+
+// Run: go test -v -timeout 30m
+// ❌ FAILS - infrastructure not defined yet
+
+// ═══════════════════════════════════════════════════════════════
+// STEP 2: GREEN - Write minimal Bicep implementation
+// ═══════════════════════════════════════════════════════════════
+
+// infra/app-service/main.bicep
+// param environment string
+// param location string = resourceGroup().location
+// param appName string
+//
+// resource appServicePlan 'Microsoft.Web/serverfarms@2023-01-01' = {
+//   name: 'plan-${appName}-${environment}'
+//   location: location
+//   sku: { name: 'B1', tier: 'Basic' }
+//   kind: 'linux'
+//   properties: { reserved: true }
+// }
+//
+// resource appService 'Microsoft.Web/sites@2023-01-01' = {
+//   name: 'app-${appName}-${environment}'
+//   location: location
+//   identity: { type: 'SystemAssigned' }
+//   properties: {
+//     serverFarmId: appServicePlan.id
+//     httpsOnly: true
+//   }
+// }
+
+// Run: go test -v -timeout 30m
+// ✅ PASSES - all assertions satisfied
+
+// ═══════════════════════════════════════════════════════════════
+// STEP 3: REFACTOR - Add diagnostics, improve while tests stay green
+// ═══════════════════════════════════════════════════════════════
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow Example
+
+```go
+// ═══════════════════════════════════════════════════════════════
+// Bug Report #340: App Service allows HTTP traffic despite policy
+// requiring HTTPS-only. ARM template missing httpsOnly property.
+// ═══════════════════════════════════════════════════════════════
+
+// STEP 1: Write test that reproduces the bug
+// test/app_service_test.go
+
+func TestAppServiceEnforcesHTTPS_Bug340(t *testing.T) {
+    // Bug: App Service deployed without httpsOnly = true
+    // Discovered: 2026-03-15
+    // Root cause: Bicep template missing httpsOnly property
+
+    t.Parallel()
+
+    terraformOptions := &terraform.Options{
+        TerraformDir: "../infra/app-service",
+        Vars: map[string]interface{}{
+            "environment": "test",
+            "app_name":    "myapp-https-test",
+        },
+    }
+
+    defer terraform.Destroy(t, terraformOptions)
+    terraform.InitAndApply(t, terraformOptions)
+
+    appName := terraform.Output(t, terraformOptions, "app_service_name")
+    rgName := terraform.Output(t, terraformOptions, "resource_group_name")
+
+    site := azure.GetAppService(t, appName, rgName, "")
+    assert.True(t, *site.HTTPSOnly,
+        "Bug #340: App Service MUST enforce HTTPS-only")
+}
+
+// Run: go test -v -run TestAppServiceEnforcesHTTPS_Bug340
+// ❌ FAILS - httpsOnly is false
+
+// STEP 2: Fix the bug - Add httpsOnly: true to Bicep template
+
+// Run: go test -v -run TestAppServiceEnforcesHTTPS_Bug340
+// ✅ PASSES - bug fixed, regression prevented forever
+```
+
+---
+
 ## 3. Identity and Access (MANDATORY)
 
 ### A. Managed Identity
@@ -1323,7 +1467,66 @@ Cache secrets with short TTL (15 minutes) using `IMemoryCache` for automatic rot
 
 ---
 
-## 18. Deployment Checklist
+## 18. Security & Dependency Management (MANDATORY)
+
+### A. Infrastructure Security Scanning
+
+```bash
+# Microsoft Defender for Cloud - security posture management
+az security assessment list --output table
+az security secure-score list --output table
+az security alert list --output table
+
+# Azure Policy - compliance assessment
+az policy state summarize --subscription "${SUBSCRIPTION_ID}" --output table
+az policy state list --filter "complianceState eq 'NonCompliant'" --output table
+
+# Prowler for Azure - open-source security auditing
+prowler azure --severity critical high
+prowler azure --compliance cis_2.0_azure
+prowler azure --service storage keyvault
+```
+
+### B. Vulnerability Scanning
+
+```bash
+# IaC scanning with checkov
+checkov -d . --framework arm
+checkov -d . --framework bicep
+checkov -d . --framework terraform
+checkov --file main.bicep --check CKV_AZURE_1,CKV_AZURE_35
+
+# IaC scanning with trivy
+trivy config .
+trivy config --severity HIGH,CRITICAL .
+
+# Container image scanning with Defender for Containers
+az acr task create --name container-scan --registry myacr \
+  --cmd "trivy image myacr.azurecr.io/myapp:latest" --schedule "0 */6 * * *"
+```
+
+### C. Policy & Compliance
+
+```bash
+# Azure Policy built-in initiatives
+az policy assignment create --name "cis-benchmark" \
+  --policy-set-definition "06f19060-9e68-4070-92ca-f15cc126059e" \
+  --scope "/subscriptions/${SUBSCRIPTION_ID}"
+
+# Custom policy definitions for organizational standards
+az policy definition create --name "require-tls-12" \
+  --rules @policy-rules.json --params @policy-params.json
+
+# Key Vault - ALWAYS use for secrets and certificate management
+az keyvault secret set --vault-name kv-myapp --name db-password --value "${DB_PASSWORD}"
+az keyvault certificate create --vault-name kv-myapp --name my-cert --policy @cert-policy.json
+# Enable soft-delete and purge protection
+az keyvault update --name kv-myapp --enable-soft-delete true --enable-purge-protection true
+```
+
+---
+
+## 19. Deployment Checklist
 
 ### Security
 - [ ] Managed Identity (user-assigned), Key Vault for secrets, private endpoints
@@ -1342,7 +1545,7 @@ Cache secrets with short TTL (15 minutes) using `IMemoryCache` for automatic rot
 
 ---
 
-## 19. Quick Reference
+## 20. Quick Reference
 
 ```bash
 az login && az account set --subscription "Name"
@@ -1357,6 +1560,30 @@ az deployment group what-if --resource-group rg-myapp --template-file main.bicep
 az network private-endpoint list --resource-group rg-myapp --output table
 az policy state summarize --subscription "${SUBSCRIPTION_ID}"
 ```
+
+---
+
+## 21. Why This Configuration Works
+
+1. **Managed Identity Everywhere**: Eliminating service principal secrets in favor of managed identities removes the most common source of credential leakage in Azure deployments.
+
+2. **Bicep over ARM Templates**: Bicep provides a cleaner, type-safe syntax with automatic dependency resolution, reducing template errors by an order of magnitude compared to raw ARM JSON.
+
+3. **Resource Group Segmentation**: Grouping resources by lifecycle (shared infra, per-app, per-environment) enables targeted deployments and clean teardowns without affecting unrelated services.
+
+4. **Key Vault with RBAC**: Using Azure RBAC instead of vault access policies provides granular, auditable secret access integrated with Entra ID and Conditional Access.
+
+5. **Private Endpoints**: Routing traffic over the Azure backbone via Private Link eliminates public internet exposure for storage, databases, and key vaults.
+
+6. **Azure Policy and Governance**: Enforcing tagging, allowed SKUs, and region restrictions at the subscription level prevents configuration drift before resources are created.
+
+7. **Container Apps for Microservices**: Azure Container Apps provides Kubernetes-grade scaling with KEDA integration while abstracting cluster management overhead.
+
+8. **Azure DevOps Pipelines with Environments**: Environment gates with approval workflows and deployment history provide full traceability from commit to production.
+
+9. **Application Insights with Distributed Tracing**: End-to-end correlation across Azure Functions, App Service, and Container Apps surfaces latency bottlenecks without custom instrumentation.
+
+10. **Availability Zones and Paired Regions**: Deploying across zones within a region handles hardware failures, while paired region DR provides resilience against regional outages.
 
 ---
 

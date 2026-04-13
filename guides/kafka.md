@@ -2202,7 +2202,89 @@ OPERATIONAL VERIFICATION:
 
 ---
 
-## 15. Summary
+## 15. Security & Dependency Management (MANDATORY)
+
+### A. Infrastructure Security Scanning
+
+```properties
+# SASL/SSL configuration for Kafka brokers
+# server.properties - broker-side security
+listeners=SASL_SSL://0.0.0.0:9093
+advertised.listeners=SASL_SSL://broker1.example.com:9093
+security.inter.broker.protocol=SASL_SSL
+ssl.keystore.location=/etc/kafka/ssl/kafka.server.keystore.jks
+ssl.keystore.password=${KEYSTORE_PASSWORD}
+ssl.key.password=${KEY_PASSWORD}
+ssl.truststore.location=/etc/kafka/ssl/kafka.server.truststore.jks
+ssl.truststore.password=${TRUSTSTORE_PASSWORD}
+ssl.client.auth=required
+sasl.enabled.mechanisms=SCRAM-SHA-512
+sasl.mechanism.inter.broker.protocol=SCRAM-SHA-512
+```
+
+```bash
+# Verify SSL/TLS configuration
+openssl s_client -connect broker1:9093 -tls1_2 -showcerts
+kafka-broker-api-versions.sh --bootstrap-server broker1:9093 \
+  --command-config client-ssl.properties
+```
+
+### B. Vulnerability Scanning
+
+```bash
+# Kafka has no direct package manager - scan client library dependencies
+# Java/Maven projects
+mvn dependency-check:check
+mvn org.owasp:dependency-check-maven:check -DfailBuildOnCVSS=7
+
+# Python projects using kafka-python or confluent-kafka
+pip-audit
+pip-audit --fix --dry-run
+
+# Node.js projects using kafkajs
+npm audit
+npm audit fix --dry-run
+
+# Go projects using confluent-kafka-go or sarama
+govulncheck ./...
+
+# Scan Kafka container images
+trivy image confluentinc/cp-kafka:latest
+trivy image --severity CRITICAL,HIGH bitnami/kafka:latest
+```
+
+### C. Policy & Compliance
+
+```bash
+# ACL management - restrict topic access per principal
+kafka-acls.sh --bootstrap-server broker1:9093 \
+  --command-config admin.properties \
+  --add --allow-principal User:producer-app \
+  --operation Write --topic orders
+
+kafka-acls.sh --bootstrap-server broker1:9093 \
+  --command-config admin.properties \
+  --add --allow-principal User:consumer-app \
+  --operation Read --topic orders --group consumer-group
+
+# List all ACLs
+kafka-acls.sh --bootstrap-server broker1:9093 \
+  --command-config admin.properties --list
+
+# Network segmentation - isolate Kafka in dedicated network
+# Use firewall rules to restrict broker ports (9092, 9093) to authorized clients only
+# Place ZooKeeper/KRaft controllers on internal-only network
+# Use separate listeners for internal vs external traffic
+
+# Audit logging
+# Enable audit log in broker config
+authorizer.class.name=kafka.security.authorizer.AclAuthorizer
+log4j.logger.kafka.authorizer.logger=INFO, authorizerAppender
+```
+
+---
+
+## 16. Summary
 
 ### Core Principles
 
@@ -2615,6 +2697,71 @@ BROKER CONFIGURATION (Critical Settings):
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## 17. Deployment Checklist
+
+### Cluster Configuration
+- [ ] Minimum 3 brokers for production (odd number preferred)
+- [ ] `default.replication.factor=3` and `min.insync.replicas=2`
+- [ ] `unclean.leader.election.enable=false` to prevent data loss
+- [ ] Dedicated disks for Kafka log directories (no shared storage)
+- [ ] JVM heap sized appropriately (6-8 GB typical, never more than 50% of RAM)
+
+### Topic Design
+- [ ] Partition count based on throughput requirements and consumer parallelism
+- [ ] Retention policies configured per topic (time-based or compaction)
+- [ ] Dead letter queue topics created for error handling
+- [ ] Schema registry deployed for schema evolution and compatibility
+
+### Producer Configuration
+- [ ] `acks=all` for durability
+- [ ] `enable.idempotence=true` for deduplication
+- [ ] `transactional.id` set for exactly-once pipelines
+- [ ] Compression enabled (`lz4` or `zstd`)
+
+### Consumer Configuration
+- [ ] `enable.auto.commit=false` with manual offset management
+- [ ] `isolation.level=read_committed` for transactional consumers
+- [ ] Consumer group lag monitoring configured
+- [ ] Graceful shutdown with `wakeup()` and partition revocation handling
+
+### Security
+- [ ] TLS encryption for inter-broker and client connections
+- [ ] SASL authentication enabled (SCRAM-SHA-512 or mTLS)
+- [ ] ACLs restricting topic access per service identity
+- [ ] Audit logging for topic creation and configuration changes
+
+### Monitoring
+- [ ] Consumer group lag alerting (threshold per topic)
+- [ ] Under-replicated partition alerts
+- [ ] Broker disk usage monitoring with retention adjustment
+- [ ] End-to-end latency tracking across producer-broker-consumer
+
+---
+
+## 18. Why This Configuration Works
+
+1. **Immutable Commit Log**: Kafka's append-only log provides a replayable, auditable event history that enables state reconstruction and temporal debugging.
+
+2. **Exactly-Once with Transactions**: Wrapping read-process-write in transactions guarantees no duplicates and no data loss across topic boundaries.
+
+3. **Manual Offset Commits**: Committing offsets only after successful processing prevents message loss on consumer crashes, unlike auto-commit which acknowledges before processing.
+
+4. **Partition-Based Parallelism**: Partitioning by entity key (order_id, user_id) guarantees per-key ordering while scaling horizontally across consumer instances.
+
+5. **Idempotent Producers**: Enabling idempotence deduplicates retried produces at the broker level, eliminating duplicate messages from network timeouts.
+
+6. **Dead Letter Queues**: Routing non-retryable failures to a DLQ preserves the original message with error metadata for investigation without blocking the main consumer.
+
+7. **Schema Registry with Compatibility Checks**: Enforcing backward/forward compatibility on schema changes prevents producers from breaking downstream consumers.
+
+8. **Cooperative Sticky Rebalancing**: The CooperativeStickyAssignor minimizes partition movement during rebalances, reducing stop-the-world pauses in consumer groups.
+
+9. **Log Compaction for State Topics**: Compacted topics retain only the latest value per key, providing an efficient materialized view without unbounded growth.
+
+10. **Replication Factor 3 with ISR 2**: Tolerating one broker failure for writes and two for reads provides strong durability without excessive replication overhead.
 
 ---
 

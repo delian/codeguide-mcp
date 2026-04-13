@@ -1,11 +1,11 @@
 # Angular & TypeScript Development Guidelines
-Mandatory coding standards and development practices for modern Angular applications. Angular 19+, TypeScript 5.6+, Signals, Linked Signals, Resources, Standalone Components, NgRx Signal Store, TypeDoc.
+Mandatory coding standards and development practices for modern Angular applications. Angular 19+, TypeScript 5.7+, Signals, Linked Signals, Resources, Standalone Components, NgRx Signal Store, TypeDoc.
 
 ---
 **Agent Profile**: The Angular Architect
 **Role**: Senior Frontend Engineer & Angular Performance Specialist
 **Objective**: Generate production-ready, type-safe, fully documented, highly performant, and maintainable Angular SPAs.
-**Tools**: Angular 19+, TypeScript 5.6+, Signals, Standalone Components, RxJS 8.x, NgRx Signal Store, TypeDoc.
+**Tools**: Angular 19+, TypeScript 5.7+, Signals, Standalone Components, RxJS 8.x, NgRx Signal Store, TypeDoc.
 
 ## 1. Core Philosophies
 The agent must adhere to the "ANGULAR-FIRST" principles for every Angular application:
@@ -4516,7 +4516,57 @@ export const appConfig: ApplicationConfig = {
 
 ---
 
-## Why This Configuration Works
+## 17. Security & Dependency Management (MANDATORY)
+
+### A. Automated Dependency Management
+
+**Use npm with lockfiles and automated scanning for consistent and secure environments:**
+
+```json
+// package.json
+{
+  "scripts": {
+    "audit": "npm audit --audit-level=high",
+    "update": "ng update"
+  }
+}
+```
+
+- **Lockfiles**: ALWAYS commit `package-lock.json`. Use `npm ci` in CI/CD to ensure exact dependency matching.
+- **Dependency Auditing**: Integrate `npm audit` into your CI pipeline to block builds with HIGH or CRITICAL vulnerabilities.
+- **Angular Update**: Use `ng update` to manage framework migrations and peer dependency synchronization.
+
+### B. Vulnerability Scanning & Security
+
+**Mandatory security checks for ALL Angular projects:**
+
+1. **Vulnerability Scan**:
+   ```bash
+   # Scan all dependencies for known vulnerabilities
+   npm audit --audit-level=high
+   ```
+   - Agents MUST ensure 0 HIGH or CRITICAL vulnerabilities are present.
+
+2. **Supply Chain Audit**:
+   - Verify package integrity using `npm verify`.
+   - Use `DomSanitizer` for any dynamic HTML; avoid `dangerouslySetInnerHTML` patterns unless sanitized via `trusted-types`.
+
+### C. Dependency File
+
+```json
+// Example package.json dependencies
+{
+  "dependencies": {
+    "@angular/core": "^19.0.0",
+    "@angular/common": "^19.0.0",
+    "zod": "^3.23.0"
+  }
+}
+```
+
+---
+
+## 18. Why This Configuration Works
 
 1. **Standalone Components**: Simplified architecture, better tree-shaking, faster builds.
 
@@ -4554,7 +4604,7 @@ export const appConfig: ApplicationConfig = {
 
 ---
 
-## Quick Reference
+## 19. Quick Reference
 
 ### Common Commands
 
@@ -4955,157 +5005,6 @@ src/
 | Test | `name.*.spec.ts` | `user.service.spec.ts` |
 | Routes | `name.routes.ts` | `dashboard.routes.ts` |
 | Store | `name.store.ts` | `user.store.ts` |
-
----
-
-## 16. Security & Dependency Management (MANDATORY)
-
-### A. Automated Dependency Management
-
-**Use npm with lockfiles and automated scanning for consistent and secure environments:**
-
-```json
-// package.json
-{
-  "scripts": {
-    "audit": "npm audit --audit-level=high",
-    "update": "ng update"
-  }
-}
-```
-
-- **Lockfiles**: ALWAYS commit `package-lock.json`. Use `npm ci` in CI/CD to ensure exact dependency matching.
-- **Dependency Auditing**: Integrate `npm audit` into your CI pipeline to block builds with HIGH or CRITICAL vulnerabilities.
-- **Angular Update**: Use `ng update` to manage framework migrations and peer dependency synchronization.
-
-### B. Vulnerability Scanning & Security
-
-**Mandatory security checks for ALL Angular projects:**
-
-1. **Vulnerability Scan**:
-   ```bash
-   # Scan all dependencies for known vulnerabilities
-   npm audit --audit-level=high
-   ```
-   - Agents MUST ensure 0 HIGH or CRITICAL vulnerabilities are present.
-
-2. **Supply Chain Audit**:
-   - Verify package integrity using `npm verify`.
-   - Use `DomSanitizer` for any dynamic HTML; avoid `dangerouslySetInnerHTML` patterns unless sanitized via `trusted-types`.
-
-### C. Dependency File
-
-```json
-// Example package.json dependencies
-{
-  "dependencies": {
-    "@angular/core": "^19.0.0",
-    "@angular/common": "^19.0.0",
-    "zod": "^3.23.0"
-  }
-}
-```
-
----
-
-## 17. Deployment Checklist
-
-### Agent-Generated Code Verification (MANDATORY)
-
-#### Build & Compilation
-- [ ] Code compiles: `ng build` returns exit code 0
-- [ ] Template type checking passes (strict mode)
-- [ ] Angular 19 features used correctly (Signals, `linkedSignal`, `resource`)
-- [ ] Code formatted: `npm run lint` passes
-
-#### Testing
-- [ ] All unit tests pass: `ng test` returns exit code 0
-- [ ] Reasonable coverage: `ng test --code-coverage` shows >80%
-- [ ] Zoneless verified (if applicable): No reliance on `NgZone`
-
-#### Security
-- [ ] Dependency scan passes: `npm audit` shows 0 HIGH/CRITICAL vulnerabilities
-- [ ] Supply chain verified: `package-lock.json` is committed and synced
-- [ ] Secrets check: 0 hardcoded secrets in code or `environment.ts`
-- [ ] XSS prevention: No raw user input in `[innerHTML]` without `DomSanitizer`
-
-#### Code Quality
-- [ ] No unused imports or dead code
-- [ ] Standalone components used throughout (no `NgModules`)
-- [ ] Project structure follows the standard layout
-
-#### Documentation
-- [ ] All public APIs (components/services) have JSDoc comments
-- [ ] Documentation check passes: `npm run docs:check` returns 0
-- [ ] Examples provided for complex Signal patterns
-
-#### Architecture
-- [ ] Separation of concerns: logic in services/stores, UI in components
-- [ ] Accessibility: WCAG 2.1 AA compliance verified
-- [ ] SSR & Hydration: Verified compatibility (no direct DOM access)
-
-#### Agent Workflow Completed
-- [ ] Agent verified code builds successfully
-- [ ] Agent ran all tests and verified 100% pass rate
-- [ ] Agent ran security audits and verified 0 high vulnerabilities
-- [ ] Agent verified documentation and accessibility
-
----
-
-## 18. Why This Configuration Works
-
-**Angular 19 Signals**:
-- Provides fine-grained reactivity that eliminates the overhead of `zone.js` monkey-patching, leading to significantly faster initial loads and more predictable UI updates.
-
-**Linked Signals & Resources**:
-- Simplifies state synchronization and data fetching, replacing complex RxJS chains with native, declarative primitives that are easier to test.
-
-**Standalone Architecture**:
-- Reduces boilerplate and improves build performance by allowing the Angular compiler to better tree-shake unused code at the component level.
-
----
-
-## 19. Quick Reference
-
-### Common Commands
-
-```bash
-# Build
-ng build --configuration production
-
-# Test with coverage
-ng test --no-watch --code-coverage
-
-# Security scan
-npm audit --audit-level=high
-
-# Lint
-ng lint
-
-# Run dev server
-ng serve
-```
-
-### Modern Angular 19 Patterns Cheat Sheet
-
-```typescript
-// linkedSignal (Sync state)
-const value = signal(10);
-const derived = linkedSignal(() => value() * 2);
-
-// resource (Async data)
-const userResource = resource({
-  loader: () => fetchUser(id())
-});
-
-// rxResource (RxJS data)
-const users = rxResource({
-  loader: () => this.http.get<User[]>('/api/users')
-});
-
-// model() (Two-way binding)
-checked = model(false);
-```
 
 ---
 

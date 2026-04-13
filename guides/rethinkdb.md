@@ -126,6 +126,156 @@ RethinkDB Cluster:
 - Real-time cluster monitoring
 - Visual query builder
 
+---
+
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. RED: Write a failing test first
+   ↓
+2. GREEN: Write minimal code to make it pass
+   ↓
+3. REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for RethinkDB (Python with pytest and rethinkdb driver)
+
+```python
+# Step 1: RED - Write failing test first
+import pytest
+from rethinkdb import r
+
+@pytest.fixture
+def rdb_conn():
+    conn = r.connect(host="localhost", port=28015)
+    db_name = "test_db"
+    if db_name not in r.db_list().run(conn):
+        r.db_create(db_name).run(conn)
+    conn.use(db_name)
+    if "users" not in r.table_list().run(conn):
+        r.table_create("users").run(conn)
+    r.table("users").delete().run(conn)
+    yield conn
+    conn.close()
+
+def test_insert_and_get_document(rdb_conn):
+    """Test inserting and retrieving a document via ReQL."""
+    repo = UserRepository(rdb_conn)
+    repo.create_user({"id": "user_001", "name": "Alice", "email": "alice@example.com"})
+    user = repo.get_user("user_001")
+    assert user["name"] == "Alice"
+    assert user["email"] == "alice@example.com"
+
+# Run: pytest test_rethinkdb.py -v
+# FAILS - NameError: name 'UserRepository' is not defined
+
+# Step 2: GREEN - Write minimal implementation
+class UserRepository:
+    def __init__(self, conn):
+        self.conn = conn
+
+    def create_user(self, user_data):
+        r.table("users").insert(user_data).run(self.conn)
+
+    def get_user(self, user_id):
+        return r.table("users").get(user_id).run(self.conn)
+
+# Run: pytest test_rethinkdb.py -v
+# PASSES
+
+# Step 3: REFACTOR - Add filtering, update, and conflict handling
+class UserRepository:
+    def __init__(self, conn):
+        self.conn = conn
+
+    def create_user(self, user_data):
+        result = r.table("users").insert(
+            user_data, conflict="error"
+        ).run(self.conn)
+        if result["errors"] > 0:
+            raise ValueError(f"User already exists: {user_data.get('id')}")
+        return result
+
+    def get_user(self, user_id):
+        result = r.table("users").get(user_id).run(self.conn)
+        return result
+
+    def find_by_email(self, email):
+        cursor = r.table("users").filter(
+            r.row["email"] == email
+        ).run(self.conn)
+        return list(cursor)
+
+    def update_user(self, user_id, updates):
+        return r.table("users").get(user_id).update(updates).run(self.conn)
+
+# Tests still pass
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. Bug Reported/Discovered
+   ↓
+2. Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. Verify the test fails for the right reason
+   ↓
+4. Fix the bug (make the test pass)
+   ↓
+5. Verify the test now PASSES
+   ↓
+6. Document the bug in test comments
+```
+
+### Example Bug Fix
+
+```python
+# Bug: get_user() returns None for missing users, but downstream code
+# calls .get() on the result, causing AttributeError: 'NoneType'
+
+import pytest
+
+# Step 1: Write test that reproduces the bug
+def test_get_missing_user_raises_not_found(rdb_conn):
+    """Regression: get_user() should raise UserNotFoundError when the
+    user does not exist, not return None."""
+    repo = UserRepository(rdb_conn)
+    with pytest.raises(UserNotFoundError, match="user_999"):
+        repo.get_user("user_999")
+
+# FAILS - No exception raised, None returned silently
+
+# Step 2: Fix the bug
+class UserNotFoundError(Exception):
+    pass
+
+class UserRepository:
+    # ... existing code ...
+
+    def get_user(self, user_id):
+        result = r.table("users").get(user_id).run(self.conn)
+        if result is None:
+            raise UserNotFoundError(f"User not found: {user_id}")
+        return result
+
+# PASSES - bug fixed, regression prevented
+```
+
+---
+
 ## 3. Installation and Setup
 
 ### Ubuntu/Debian Installation
@@ -2119,6 +2269,95 @@ conn.close()
 ```
 
 This guide provides comprehensive coverage of RethinkDB for building real-time applications with its unique push architecture and changefeeds.
+
+---
+
+## 18. Deployment Checklist
+
+### Build and Configuration
+- [ ] RethinkDB version pinned and documented
+- [ ] Cache size configured appropriately (`--cache-size`)
+- [ ] Cluster port (29015) and driver port (28015) configured
+- [ ] Data directory set to dedicated storage volume
+- [ ] IO threads configured for storage type (`--io-threads`)
+- [ ] Web UI access restricted in production (`--no-http-admin` or firewall)
+
+### Testing
+- [ ] All ReQL queries profiled with `.info()` for index usage
+- [ ] Secondary indexes created for all filter and orderBy patterns
+- [ ] Changefeed performance tested under load
+- [ ] Cluster rebalancing tested after node addition/removal
+- [ ] Backup and restore procedure verified with `rethinkdb dump` / `rethinkdb restore`
+- [ ] Connection pool sizing validated for changefeed concurrency
+
+### Security
+- [ ] Authentication enabled with admin user password set
+- [ ] User permissions configured with least-privilege grants
+- [ ] TLS enabled for driver and cluster connections
+- [ ] Web UI disabled or restricted to internal network
+- [ ] Firewall rules limit access to cluster and driver ports
+- [ ] No default `admin` password in production
+
+### Agent Workflow
+- [ ] Table creation and index scripts version-controlled
+- [ ] Changefeed consumers handle reconnection gracefully
+- [ ] Monitoring alerts configured (cluster health, table availability, disk usage)
+- [ ] Automated backups scheduled with retention policy
+- [ ] Runbooks documented for shard rebalancing and node recovery
+
+---
+
+## 19. Why This Configuration Works
+
+**Push Architecture with Changefeeds**:
+- Real-time push notifications eliminate polling overhead, enabling applications to react to data changes instantly with minimal server load and consistent low latency.
+
+**Distributed Joins and Subqueries**:
+- Unlike most NoSQL databases, RethinkDB supports server-side joins across tables, reducing application-level complexity and network round-trips for relational queries.
+
+**Automatic Sharding and Rebalancing**:
+- Data is automatically distributed across cluster nodes with transparent rebalancing when nodes are added or removed, simplifying horizontal scaling without manual shard management.
+
+**ReQL Composability**:
+- The chainable query language embeds naturally in application code, enabling programmatic query construction with full IDE support, type checking, and no SQL injection risk.
+
+**Built-in Web Administration**:
+- The integrated web UI provides real-time cluster monitoring, table management, and query exploration without requiring external tooling during development and debugging.
+
+---
+
+## 20. Quick Reference
+
+### Common Commands
+
+```bash
+# Start RethinkDB
+rethinkdb --directory /var/lib/rethinkdb --bind all
+
+# Join a cluster
+rethinkdb --join host1:29015 --directory /var/lib/rethinkdb/node2
+
+# Backup entire database
+rethinkdb dump -c localhost:28015 -f backup.tar.gz
+
+# Restore from backup
+rethinkdb restore -c localhost:28015 backup.tar.gz
+
+# Export a single table
+rethinkdb export -c localhost:28015 -e mydb.mytable --format json
+
+# Import data
+rethinkdb import -c localhost:28015 -f data.json --table mydb.mytable --format json
+
+# Start with custom cache size (in MB)
+rethinkdb --cache-size 4096
+
+# Connect via Python driver
+python3 -c "import rethinkdb as r; conn = r.connect('localhost', 28015); print(r.db_list().run(conn))"
+
+# Check cluster status (via ReQL)
+python3 -c "import rethinkdb as r; conn = r.connect('localhost', 28015); print(list(r.db('rethinkdb').table('server_status').run(conn)))"
+```
 
 ---
 

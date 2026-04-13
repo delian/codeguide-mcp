@@ -212,6 +212,121 @@ class TokenManager {
 
 ---
 
+## 2A. TDD Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL OAuth implementation code.**
+
+### Red-Green-Refactor Cycle for OAuth Flows
+
+```javascript
+// ═══════════════════════════════════════════════════════════════
+// STEP 1: RED - Write failing test first
+// ═══════════════════════════════════════════════════════════════
+
+// __tests__/oauth/pkce.test.js
+const { generatePKCE, handleCallback } = require('../../src/oauth/pkce');
+
+describe('PKCE Flow', () => {
+  test('generatePKCE returns verifier and challenge', async () => {
+    const { codeVerifier, codeChallenge } = await generatePKCE();
+
+    // Verifier must be 43-128 chars (RFC 7636)
+    expect(codeVerifier.length).toBeGreaterThanOrEqual(43);
+    expect(codeVerifier.length).toBeLessThanOrEqual(128);
+
+    // Challenge must be base64url encoded
+    expect(codeChallenge).toMatch(/^[A-Za-z0-9_-]+$/);
+
+    // Challenge must differ from verifier (it's a hash)
+    expect(codeChallenge).not.toEqual(codeVerifier);
+  });
+
+  test('handleCallback rejects mismatched state (CSRF protection)', async () => {
+    const callbackUrl = 'https://app.example.com/callback?code=abc&state=wrong';
+
+    await expect(
+      handleCallback(callbackUrl, { savedState: 'correct' })
+    ).rejects.toThrow('State mismatch');
+  });
+
+  test('handleCallback rejects when error param is present', async () => {
+    const callbackUrl =
+      'https://app.example.com/callback?error=access_denied';
+
+    await expect(
+      handleCallback(callbackUrl, { savedState: 'any' })
+    ).rejects.toThrow('OAuth error: access_denied');
+  });
+});
+
+// Run: npm test
+// ❌ FAILS - PKCE functions don't exist yet
+
+// ═══════════════════════════════════════════════════════════════
+// STEP 2: GREEN - Write minimal implementation
+// ═══════════════════════════════════════════════════════════════
+
+// Implement generatePKCE() and handleCallback() to make tests pass
+
+// Run: npm test
+// ✅ PASSES - all tests pass
+
+// ═══════════════════════════════════════════════════════════════
+// STEP 3: REFACTOR - Add token caching, improve while tests stay green
+// ═══════════════════════════════════════════════════════════════
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow Example
+
+```javascript
+// ═══════════════════════════════════════════════════════════════
+// Bug Report #267: Token refresh silently fails when refresh_token
+// is expired, leaving user stuck with invalid access_token
+// ═══════════════════════════════════════════════════════════════
+
+// STEP 1: Write test that reproduces the bug
+// __tests__/oauth/token-manager.test.js
+
+const { TokenManager } = require('../../src/oauth/token-manager');
+
+test('refreshToken throws AuthError when refresh_token is expired - Bug #267', async () => {
+  // Bug: refreshToken() returned stale access_token on 400 response
+  // Discovered: 2026-03-14
+  // Root cause: 400 response not treated as refresh failure
+
+  const tokenManager = new TokenManager({
+    tokenEndpoint: 'https://auth.example.com/token',
+  });
+
+  // Mock fetch to return 400 (expired refresh token)
+  global.fetch = jest.fn().mockResolvedValue({
+    ok: false,
+    status: 400,
+    json: async () => ({ error: 'invalid_grant' }),
+  });
+
+  await expect(
+    tokenManager.refreshToken('expired-refresh-token')
+  ).rejects.toThrow('invalid_grant');
+});
+
+// Run: npm test
+// ❌ FAILS - refreshToken silently returns stale token
+
+// STEP 2: Fix the bug - Check response.ok before parsing tokens
+
+// Run: npm test
+// ✅ PASSES - bug fixed, regression prevented forever
+```
+
+---
+
 ## 3. JWT Handling (MANDATORY)
 
 ### A. Token Validation (Server-Side)
@@ -928,6 +1043,30 @@ exp  // Expiration
 iat  // Issued at
 jti  // JWT ID (unique identifier)
 ```
+
+---
+
+## 11. Why This Configuration Works
+
+1. **PKCE for All Public Clients**: Proof Key for Code Exchange prevents authorization code interception attacks, making the authorization code flow safe for SPAs and mobile apps without a client secret.
+
+2. **Short-Lived Access Tokens**: Access tokens with 5-15 minute lifetimes limit the damage window if a token is compromised, while refresh tokens maintain session continuity.
+
+3. **Refresh Token Rotation**: Issuing a new refresh token with each use and invalidating the old one detects token theft immediately when a stolen token is replayed.
+
+4. **State Parameter for CSRF Protection**: Binding each authorization request to a cryptographically random state value prevents cross-site request forgery on the callback endpoint.
+
+5. **Scope Minimization**: Requesting only the scopes needed for each operation follows least privilege, reducing the impact of token compromise.
+
+6. **OIDC Discovery**: Using `.well-known/openid-configuration` endpoints enables automatic key rotation and endpoint updates without client-side configuration changes.
+
+7. **JWT Validation at the Edge**: Verifying token signatures, expiration, issuer, and audience at the API gateway rejects invalid tokens before they reach application code.
+
+8. **HttpOnly Secure Cookies for Web**: Storing tokens in HttpOnly, Secure, SameSite=Strict cookies prevents XSS-based token theft that localStorage and sessionStorage are vulnerable to.
+
+9. **Token Revocation Endpoints**: Explicit revocation on logout ensures tokens cannot be used after session end, closing the window that passive expiration leaves open.
+
+10. **Centralized Authorization Server**: A single identity provider with consistent policies across all clients simplifies audit, enables SSO, and provides one place to enforce MFA and conditional access.
 
 ---
 

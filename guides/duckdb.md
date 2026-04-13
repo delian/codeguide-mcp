@@ -3603,6 +3603,208 @@ new_conn.execute("CREATE TABLE table1 AS SELECT * FROM 'backup/table1.parquet'")
 
 ---
 
+## 22. Security & Dependency Management (MANDATORY)
+
+### A. Dependency Vulnerability Scanning
+
+DuckDB is an embedded database with minimal external dependencies. Scan via the host language toolchain:
+
+**Python:**
+```bash
+# Scan all installed packages including duckdb
+pip-audit
+
+# Scan with JSON output for CI
+pip-audit --format=json --output=audit-report.json
+```
+
+**Node.js:**
+```bash
+npm audit --audit-level=high
+```
+
+**R:**
+```r
+# Use oysteR for vulnerability scanning
+install.packages("oysteR")
+library(oysteR)
+audit <- audit_installed_r_pkgs()
+```
+
+- Run scans in CI on every PR and at least weekly on the main branch
+- Keep `duckdb` and its extensions up to date
+
+### B. SQL Injection Prevention
+
+DuckDB executes arbitrary SQL. ALWAYS use parameterized queries to prevent injection:
+
+```python
+import duckdb
+
+conn = duckdb.connect()
+
+# CORRECT - parameterized query
+user_input = "some_value"
+result = conn.execute(
+    "SELECT * FROM users WHERE name = ?",
+    [user_input]
+).fetchall()
+
+# WRONG - string interpolation (SQL injection risk)
+# result = conn.execute(f"SELECT * FROM users WHERE name = '{user_input}'").fetchall()
+```
+
+- NEVER construct SQL by concatenating user input
+- Use `?` placeholders for all dynamic values
+- Validate and sanitize inputs at the application boundary
+
+### C. File System Access Controls
+
+DuckDB can read and write files directly. Restrict file access to prevent data exfiltration:
+
+```python
+import duckdb
+
+conn = duckdb.connect()
+
+# Restrict file access to specific directories
+conn.execute("SET file_search_path = '/data/allowed'")
+
+# Disable external access in untrusted contexts
+conn.execute("SET enable_external_access = false")
+```
+
+- In multi-tenant or web-facing applications, ALWAYS disable external file access
+- Run DuckDB processes under a restricted OS user with minimal filesystem permissions
+- Never allow user-supplied file paths without validation and allowlisting
+
+### D. Extension Security
+
+- Only install extensions from the official DuckDB extension repository
+- Pin extension versions in production environments
+- Review extension permissions before installation:
+
+```python
+import duckdb
+
+conn = duckdb.connect()
+
+# List installed extensions
+conn.execute("SELECT * FROM duckdb_extensions()").fetchall()
+
+# Install only from official repository
+conn.execute("INSTALL httpfs")
+conn.execute("LOAD httpfs")
+```
+
+- Disable unsigned extension loading in production:
+
+```python
+conn.execute("SET allow_unsigned_extensions = false")
+```
+
+### E. Secret Management
+
+- NEVER hardcode credentials for remote storage (S3, GCS, Azure) in source code
+- Use environment variables or instance roles:
+
+```python
+import os
+import duckdb
+
+conn = duckdb.connect()
+
+# Configure S3 credentials from environment
+conn.execute(f"""
+    SET s3_access_key_id = '{os.environ["AWS_ACCESS_KEY_ID"]}';
+    SET s3_secret_access_key = '{os.environ["AWS_SECRET_ACCESS_KEY"]}';
+    SET s3_region = '{os.environ.get("AWS_REGION", "us-east-1")}';
+""")
+```
+
+- Prefer IAM roles or instance profiles over static credentials
+
+### F. Security Checklist
+
+- [ ] Vulnerability scanning via `pip-audit` / `npm audit` configured in CI
+- [ ] All SQL queries use parameterized placeholders
+- [ ] `enable_external_access` set to `false` in untrusted contexts
+- [ ] `allow_unsigned_extensions` set to `false` in production
+- [ ] File system access restricted to allowlisted directories
+- [ ] No credentials hardcoded in source code
+- [ ] IAM roles preferred over static credentials for cloud storage
+- [ ] DuckDB process runs under a least-privilege OS user
+- [ ] Dependencies updated at least monthly
+
+---
+
+## 23. Deployment Checklist
+
+### Agent-Generated Code Verification (MANDATORY)
+
+#### Build & Compilation
+- [ ] Code compiles/runs without errors
+- [ ] All imports/dependencies resolved (duckdb package, extensions)
+- [ ] Code formatted per project standards
+
+#### Testing
+- [ ] All tests pass
+- [ ] Coverage meets minimum threshold (>80%)
+- [ ] Integration tests pass with DuckDB in-process
+
+#### Security
+- [ ] Dependency scan: 0 HIGH/CRITICAL vulnerabilities
+- [ ] No hardcoded credentials or secrets
+- [ ] Connection strings and S3 credentials use environment variables
+
+#### Agent Workflow Completed
+- [ ] Agent verified code builds successfully
+- [ ] Agent ran all tests and verified they pass
+- [ ] Agent verified documentation
+
+---
+
+## 24. Why This Configuration Works
+
+**In-Process Execution Eliminates Infrastructure Overhead**: DuckDB runs embedded within your application process, removing the need to deploy, configure, or maintain a separate database server while delivering full analytical SQL capabilities.
+
+**Columnar Storage with Vectorized Execution**: The columnar engine processes data in large batches using SIMD instructions, achieving orders-of-magnitude speedups over row-oriented databases for analytical queries on modern hardware.
+
+**Zero-Copy Integration with Arrow and Pandas**: Native Apache Arrow support enables transferring data between DuckDB and Python DataFrames without serialization, making it the fastest path from raw files to analytical results.
+
+**Direct Querying of Parquet, CSV, and JSON Files**: DuckDB can query external files in place without requiring a separate ETL step, enabling rapid exploration and transformation of data lake assets.
+
+---
+
+## 25. Quick Reference
+
+### Common Commands
+
+```bash
+# Launch DuckDB CLI with a persistent database
+duckdb mydb.duckdb
+
+# Launch DuckDB CLI in memory-only mode
+duckdb
+
+# Query a Parquet file directly from CLI
+duckdb -c "SELECT * FROM 'data.parquet' LIMIT 10"
+
+# Query a CSV file directly
+duckdb -c "SELECT count(*) FROM read_csv_auto('data.csv')"
+
+# Export query results to Parquet
+duckdb -c "COPY (SELECT * FROM 'input.csv') TO 'output.parquet' (FORMAT PARQUET)"
+
+# Install and load an extension
+duckdb -c "INSTALL httpfs; LOAD httpfs;"
+
+# Run a SQL script file
+duckdb mydb.duckdb < queries.sql
+```
+
+---
+
 ## References and Resources
 
 ### Official Documentation

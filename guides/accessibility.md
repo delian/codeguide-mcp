@@ -820,6 +820,16 @@ aria-owns="id"
 
 ---
 
+## 13. Why This Configuration Works
+
+- **Inclusive by default**: Designing for accessibility from the start means all users, including those with disabilities, can use the application without retrofitting. Retrofitting accessibility is significantly more expensive and error-prone than building it in from day one.
+- **Legal and compliance confidence**: Following WCAG 2.1 AA standards provides a defensible, internationally recognized baseline that satisfies accessibility regulations across jurisdictions (ADA, EAA, Section 508) and reduces legal risk.
+- **Improved usability for everyone**: Accessibility best practices like semantic HTML, clear focus management, and proper form labeling improve the experience for all users, not just those using assistive technologies. Keyboard navigation benefits power users, captions help in noisy environments, and good contrast helps in bright sunlight.
+- **Automated testing catches regressions early**: Integrating axe-core and Lighthouse into CI/CD ensures accessibility violations are caught during development rather than reported by users in production, keeping remediation costs low.
+- **Structured checklists reduce human error**: The combination of automated checks, manual testing protocols, and deployment checklists creates multiple layers of verification, ensuring that no single oversight results in an inaccessible experience.
+
+---
+
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** UX Team

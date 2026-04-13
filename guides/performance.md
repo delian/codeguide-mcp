@@ -701,9 +701,569 @@ code {
 
 ---
 
-## 9. Monitoring and Budgets (MANDATORY)
+## 9. Backend Performance Patterns (MANDATORY)
 
-### A. Performance Budgets
+### A. Caching Strategies
+
+```python
+# Python: Multi-layer caching pattern
+import functools
+import hashlib
+import json
+import time
+from typing import Optional, Any
+import redis
+
+redis_client = redis.Redis(host='localhost', port=6379, decode_responses=True)
+
+class MultiLayerCache:
+    """L1: In-process memory, L2: Redis, L3: Database."""
+
+    def __init__(self):
+        self._local_cache: dict[str, tuple[Any, float]] = {}  # key -> (value, expiry)
+        self._local_max_size = 1000
+
+    def get(self, key: str) -> Optional[Any]:
+        # L1: Check local memory (fastest)
+        if key in self._local_cache:
+            value, expiry = self._local_cache[key]
+            if time.time() < expiry:
+                return value
+            del self._local_cache[key]
+
+        # L2: Check Redis
+        cached = redis_client.get(f"cache:{key}")
+        if cached is not None:
+            value = json.loads(cached)
+            # Promote to L1
+            self._set_local(key, value, ttl=60)
+            return value
+
+        return None
+
+    def set(self, key: str, value: Any, ttl: int = 300):
+        # Set in both layers
+        self._set_local(key, value, ttl=min(ttl, 60))  # L1: shorter TTL
+        redis_client.setex(f"cache:{key}", ttl, json.dumps(value))
+
+    def _set_local(self, key: str, value: Any, ttl: int):
+        if len(self._local_cache) >= self._local_max_size:
+            # Evict expired entries first, then oldest
+            now = time.time()
+            self._local_cache = {
+                k: (v, e) for k, (v, e) in self._local_cache.items() if e > now
+            }
+        self._local_cache[key] = (value, time.time() + ttl)
+
+    def invalidate(self, key: str):
+        self._local_cache.pop(key, None)
+        redis_client.delete(f"cache:{key}")
+
+cache = MultiLayerCache()
+
+# Cache-aside pattern decorator
+def cached(ttl: int = 300, key_prefix: str = ""):
+    def decorator(func):
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            cache_key = f"{key_prefix}{func.__name__}:{hashlib.md5(json.dumps({'a': args[1:], 'k': kwargs}, sort_keys=True, default=str).encode()).hexdigest()}"
+
+            result = cache.get(cache_key)
+            if result is not None:
+                return result
+
+            result = await func(*args, **kwargs)
+            cache.set(cache_key, result, ttl=ttl)
+            return result
+        return wrapper
+    return decorator
+
+# Usage
+class ProductService:
+    @cached(ttl=600, key_prefix="products:")
+    async def get_product(self, product_id: str) -> dict:
+        return await self.db.fetch_one("SELECT * FROM products WHERE id = $1", product_id)
+
+    async def update_product(self, product_id: str, data: dict):
+        await self.db.execute("UPDATE products SET ... WHERE id = $1", product_id)
+        cache.invalidate(f"products:get_product:{product_id}")  # Invalidate on write
+```
+
+### B. Connection Pooling
+
+```python
+# Python: Database connection pool with health checks
+import asyncpg
+import asyncio
+from contextlib import asynccontextmanager
+
+class DatabasePool:
+    """Properly configured connection pool with monitoring."""
+
+    def __init__(self, dsn: str):
+        self.dsn = dsn
+        self.pool: Optional[asyncpg.Pool] = None
+
+    async def initialize(self):
+        self.pool = await asyncpg.create_pool(
+            self.dsn,
+            min_size=5,          # Keep 5 connections warm
+            max_size=20,         # Never exceed 20 connections
+            max_inactive_connection_lifetime=300,  # Close idle after 5 min
+            command_timeout=30,  # Query timeout
+            statement_cache_size=100,  # Cache prepared statements
+        )
+
+    @asynccontextmanager
+    async def acquire(self):
+        """Acquire a connection with timeout and error handling."""
+        try:
+            async with self.pool.acquire(timeout=5) as conn:
+                yield conn
+        except asyncpg.exceptions.TooManyConnectionsError:
+            # Log and raise a clear error
+            logger.error("connection_pool_exhausted",
+                pool_size=self.pool.get_size(),
+                free_size=self.pool.get_idle_size(),
+            )
+            raise
+        except asyncio.TimeoutError:
+            logger.error("connection_pool_timeout",
+                pool_size=self.pool.get_size(),
+                free_size=self.pool.get_idle_size(),
+            )
+            raise
+
+    async def health_check(self) -> bool:
+        try:
+            async with self.acquire() as conn:
+                await conn.fetchval("SELECT 1")
+            return True
+        except Exception:
+            return False
+```
+
+```go
+// Go: HTTP client connection pool tuning
+package main
+
+import (
+    "net"
+    "net/http"
+    "time"
+)
+
+func newHTTPClient() *http.Client {
+    transport := &http.Transport{
+        // Connection pool settings
+        MaxIdleConns:        100,              // Total idle connections
+        MaxIdleConnsPerHost: 10,               // Per-host idle connections
+        MaxConnsPerHost:     50,               // Max connections per host
+        IdleConnTimeout:     90 * time.Second, // Close idle after 90s
+
+        // Timeouts for connection establishment
+        DialContext: (&net.Dialer{
+            Timeout:   5 * time.Second,  // TCP connect timeout
+            KeepAlive: 30 * time.Second, // TCP keepalive interval
+        }).DialContext,
+
+        TLSHandshakeTimeout:   5 * time.Second,
+        ResponseHeaderTimeout: 10 * time.Second,
+        ExpectContinueTimeout: 1 * time.Second,
+
+        // Enable HTTP/2
+        ForceAttemptHTTP2: true,
+    }
+
+    return &http.Client{
+        Transport: transport,
+        Timeout:   30 * time.Second, // Overall request timeout
+    }
+}
+
+// IMPORTANT: Reuse the client, do NOT create one per request
+var httpClient = newHTTPClient()
+```
+
+### C. Query Optimization Patterns
+
+```sql
+-- Common query anti-patterns and their fixes
+
+-- ❌ WRONG: SELECT * when you only need specific columns
+SELECT * FROM orders WHERE user_id = 123;
+
+-- ✅ CORRECT: Select only needed columns
+SELECT id, status, total, created_at FROM orders WHERE user_id = 123;
+
+
+-- ❌ WRONG: N+1 query pattern
+-- Code: for order in orders: get_items(order.id)
+SELECT * FROM orders WHERE user_id = 123;
+SELECT * FROM order_items WHERE order_id = 1;
+SELECT * FROM order_items WHERE order_id = 2;
+-- ... repeats N times
+
+-- ✅ CORRECT: Single JOIN or batched query
+SELECT o.id, o.status, o.total, oi.product_id, oi.quantity
+FROM orders o
+JOIN order_items oi ON o.id = oi.order_id
+WHERE o.user_id = 123;
+
+
+-- ❌ WRONG: Missing index on frequently filtered/joined columns
+SELECT * FROM orders WHERE status = 'pending' AND created_at > NOW() - INTERVAL '1 day';
+
+-- ✅ CORRECT: Add composite index matching query pattern
+CREATE INDEX idx_orders_status_created ON orders(status, created_at);
+
+
+-- ❌ WRONG: Using OFFSET for pagination (scans all skipped rows)
+SELECT * FROM products ORDER BY created_at DESC LIMIT 20 OFFSET 10000;
+
+-- ✅ CORRECT: Keyset/cursor pagination (constant performance)
+SELECT * FROM products
+WHERE created_at < '2024-01-15T10:30:00Z'
+ORDER BY created_at DESC
+LIMIT 20;
+
+
+-- ❌ WRONG: Counting all rows for "has any" check
+SELECT COUNT(*) FROM notifications WHERE user_id = 123 AND read = false;
+
+-- ✅ CORRECT: EXISTS is faster when you only need boolean
+SELECT EXISTS(SELECT 1 FROM notifications WHERE user_id = 123 AND read = false);
+
+
+-- ❌ WRONG: OR conditions that prevent index usage
+SELECT * FROM users WHERE email = 'a@b.com' OR phone = '555-1234';
+
+-- ✅ CORRECT: UNION ALL uses indexes on both columns
+SELECT * FROM users WHERE email = 'a@b.com'
+UNION ALL
+SELECT * FROM users WHERE phone = '555-1234' AND email != 'a@b.com';
+```
+
+### D. Memory Profiling Techniques
+
+```python
+# Python: Memory profiling with tracemalloc
+import tracemalloc
+import linecache
+
+def profile_memory(func):
+    """Decorator to profile memory usage of a function."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        tracemalloc.start()
+
+        result = func(*args, **kwargs)
+
+        snapshot = tracemalloc.take_snapshot()
+        top_stats = snapshot.statistics('lineno')
+
+        print(f"\n--- Memory profile for {func.__name__} ---")
+        print(f"Top 10 memory allocations:")
+        for stat in top_stats[:10]:
+            print(f"  {stat}")
+
+        current, peak = tracemalloc.get_traced_memory()
+        print(f"Current memory: {current / 1024:.1f} KB")
+        print(f"Peak memory: {peak / 1024:.1f} KB")
+
+        tracemalloc.stop()
+        return result
+    return wrapper
+
+# Usage
+@profile_memory
+def process_large_dataset():
+    # ❌ WRONG: Loading entire dataset into memory
+    # data = db.fetch_all("SELECT * FROM events")  # Could be millions of rows
+
+    # ✅ CORRECT: Process in chunks using a generator
+    for chunk in db.fetch_chunks("SELECT * FROM events", chunk_size=1000):
+        for record in chunk:
+            process_record(record)
+```
+
+```javascript
+// Node.js: Memory leak detection
+// Run with: node --inspect app.js
+// Then use Chrome DevTools to take heap snapshots
+
+// Common memory leak patterns and fixes:
+
+// ❌ WRONG: Unbounded event listener accumulation
+class Leaky {
+  constructor() {
+    // Each instance adds a listener, never removed
+    process.on('message', this.handleMessage.bind(this));
+  }
+}
+
+// ✅ CORRECT: Clean up listeners
+class NotLeaky {
+  constructor() {
+    this._handler = this.handleMessage.bind(this);
+    process.on('message', this._handler);
+  }
+  destroy() {
+    process.removeListener('message', this._handler);
+  }
+}
+
+// ❌ WRONG: Unbounded cache without eviction
+const cache = new Map(); // Grows forever!
+function lookup(key) {
+  if (!cache.has(key)) {
+    cache.set(key, expensiveComputation(key));
+  }
+  return cache.get(key);
+}
+
+// ✅ CORRECT: LRU cache with max size
+class LRUCache {
+  constructor(maxSize = 1000) {
+    this.maxSize = maxSize;
+    this.cache = new Map();
+  }
+
+  get(key) {
+    if (!this.cache.has(key)) return undefined;
+    // Move to end (most recently used)
+    const value = this.cache.get(key);
+    this.cache.delete(key);
+    this.cache.set(key, value);
+    return value;
+  }
+
+  set(key, value) {
+    if (this.cache.has(key)) this.cache.delete(key);
+    this.cache.set(key, value);
+    if (this.cache.size > this.maxSize) {
+      // Delete oldest entry (first key)
+      const oldestKey = this.cache.keys().next().value;
+      this.cache.delete(oldestKey);
+    }
+  }
+}
+```
+
+### E. Load Testing with k6
+
+```javascript
+// k6 load test script: load-test.js
+// Run: k6 run --vus 50 --duration 5m load-test.js
+import http from 'k6/http';
+import { check, sleep, group } from 'k6';
+import { Rate, Trend } from 'k6/metrics';
+
+// Custom metrics
+const errorRate = new Rate('errors');
+const orderDuration = new Trend('order_processing_time');
+
+export const options = {
+  // Ramp-up pattern
+  stages: [
+    { duration: '1m', target: 10 },   // Warm up
+    { duration: '3m', target: 50 },   // Normal load
+    { duration: '2m', target: 100 },  // Peak load
+    { duration: '1m', target: 0 },    // Cool down
+  ],
+  thresholds: {
+    http_req_duration: ['p(95)<500', 'p(99)<1000'],  // 95% under 500ms
+    http_req_failed: ['rate<0.01'],                    // Error rate under 1%
+    errors: ['rate<0.05'],                             // Custom error rate
+  },
+};
+
+const BASE_URL = __ENV.BASE_URL || 'http://localhost:3000';
+
+export default function () {
+  group('Browse Products', () => {
+    const res = http.get(`${BASE_URL}/api/products`);
+    check(res, {
+      'status is 200': (r) => r.status === 200,
+      'response time < 200ms': (r) => r.timings.duration < 200,
+      'has products': (r) => JSON.parse(r.body).length > 0,
+    });
+    errorRate.add(res.status !== 200);
+  });
+
+  sleep(1); // Think time between actions
+
+  group('Place Order', () => {
+    const payload = JSON.stringify({
+      productId: 'PROD-001',
+      quantity: 1,
+    });
+
+    const params = {
+      headers: { 'Content-Type': 'application/json' },
+    };
+
+    const start = Date.now();
+    const res = http.post(`${BASE_URL}/api/orders`, payload, params);
+    orderDuration.add(Date.now() - start);
+
+    check(res, {
+      'order created': (r) => r.status === 201,
+      'has order id': (r) => JSON.parse(r.body).orderId !== undefined,
+    });
+    errorRate.add(res.status !== 201);
+  });
+
+  sleep(Math.random() * 3); // Random think time 0-3s
+}
+```
+
+### F. Common Performance Anti-Patterns
+
+```yaml
+anti_patterns:
+  synchronous_external_calls:
+    problem: "Calling external APIs sequentially when they are independent"
+    impact: "Total latency = sum of all call latencies"
+    fix: "Use Promise.all / asyncio.gather for independent calls"
+    example_bad: |
+      const user = await getUser(id);       // 100ms
+      const orders = await getOrders(id);   // 150ms
+      const prefs = await getPreferences(id); // 80ms
+      // Total: 330ms
+    example_good: |
+      const [user, orders, prefs] = await Promise.all([
+        getUser(id),         // 100ms
+        getOrders(id),       // 150ms
+        getPreferences(id),  // 80ms
+      ]);
+      // Total: 150ms (max of all three)
+
+  missing_database_indexes:
+    problem: "Full table scans on large tables"
+    impact: "Query time grows linearly with table size"
+    fix: "Add indexes for columns used in WHERE, JOIN, ORDER BY"
+    detection: |
+      -- PostgreSQL: Find slow queries
+      SELECT query, mean_exec_time, calls
+      FROM pg_stat_statements
+      ORDER BY mean_exec_time DESC
+      LIMIT 20;
+
+      -- Find missing indexes
+      SELECT relname, seq_scan, seq_tup_read,
+             idx_scan, idx_tup_fetch
+      FROM pg_stat_user_tables
+      WHERE seq_scan > 1000
+      ORDER BY seq_tup_read DESC;
+
+  unbatched_operations:
+    problem: "Inserting/updating records one at a time in a loop"
+    impact: "1000 individual INSERTs vs 1 batch INSERT: 50x slower"
+    fix: "Use batch/bulk operations"
+    example_bad: |
+      for item in items:
+          db.execute("INSERT INTO events (data) VALUES ($1)", item)
+    example_good: |
+      db.executemany("INSERT INTO events (data) VALUES ($1)", items)
+      # Or better: COPY for PostgreSQL bulk inserts
+
+  no_pagination:
+    problem: "Returning unbounded result sets from APIs"
+    impact: "Memory exhaustion, slow responses, network timeouts"
+    fix: "Always paginate with a max page size"
+
+  serializing_too_much:
+    problem: "Converting entire ORM objects to JSON including all relations"
+    impact: "Excessive memory, CPU, and bandwidth usage"
+    fix: "Use explicit serialization schemas / DTOs with only needed fields"
+```
+
+---
+
+## 10. Performance Budgets (MANDATORY)
+
+### A. Defining and Enforcing Budgets
+
+```yaml
+# performance-budget.yml
+# Define budgets for different page types
+
+budgets:
+  homepage:
+    lcp: 2500           # ms
+    inp: 200             # ms
+    cls: 0.1
+    total_js: 200        # KB (compressed)
+    total_css: 60        # KB (compressed)
+    total_images: 500    # KB
+    total_requests: 30
+    total_weight: 1000   # KB
+    time_to_interactive: 3500  # ms
+
+  product_page:
+    lcp: 2000
+    inp: 150
+    cls: 0.05
+    total_js: 180
+    total_css: 50
+    total_images: 800
+    total_weight: 1200
+
+  checkout:
+    lcp: 1500            # Fastest for conversion-critical pages
+    inp: 100
+    cls: 0.02
+    total_js: 150
+    total_css: 40
+    total_images: 200
+    total_weight: 600
+
+  api_endpoints:
+    p50_latency: 50      # ms
+    p95_latency: 200     # ms
+    p99_latency: 500     # ms
+    error_rate: 0.1      # percent
+    max_response_size: 500  # KB
+```
+
+```javascript
+// Enforce budgets in CI with Lighthouse CI
+// lighthouserc.js
+module.exports = {
+  ci: {
+    collect: {
+      numberOfRuns: 5,  // Multiple runs for stability
+      url: [
+        'http://localhost:3000/',
+        'http://localhost:3000/products/1',
+        'http://localhost:3000/checkout',
+      ],
+      settings: {
+        preset: 'desktop',
+      },
+    },
+    assert: {
+      assertions: {
+        'categories:performance': ['error', { minScore: 0.9 }],
+        'largest-contentful-paint': ['error', { maxNumericValue: 2500 }],
+        'cumulative-layout-shift': ['error', { maxNumericValue: 0.1 }],
+        'interactive': ['error', { maxNumericValue: 3500 }],
+        'total-byte-weight': ['warning', { maxNumericValue: 1000000 }],
+        'mainthread-work-breakdown': ['warning', { maxNumericValue: 4000 }],
+        'dom-size': ['warning', { maxNumericValue: 1500 }],
+        'resource-summary:script:size': ['error', { maxNumericValue: 200000 }],
+      },
+    },
+  },
+};
+```
+
+---
+
+## 11. Frontend Monitoring and Budgets (MANDATORY)
+
+### A. Frontend Performance Budgets
 
 ```json
 // bundlesize configuration
@@ -787,7 +1347,7 @@ longTaskObserver.observe({ entryTypes: ['longtask'] });
 
 ---
 
-## 10. Deployment Checklist
+## 12. Deployment Checklist
 
 ### Build
 - [ ] JavaScript minified and tree-shaken
@@ -807,15 +1367,23 @@ longTaskObserver.observe({ entryTypes: ['longtask'] });
 - [ ] Service worker implemented
 - [ ] Asset filenames hashed
 
+### Backend
+- [ ] Database queries optimized (no N+1, proper indexes)
+- [ ] Connection pooling configured
+- [ ] Caching strategy implemented (application + HTTP)
+- [ ] Pagination on all list endpoints
+- [ ] Load tested with realistic traffic patterns
+
 ### Monitoring
 - [ ] Core Web Vitals tracked
-- [ ] Performance budgets enforced
+- [ ] Performance budgets enforced in CI
 - [ ] RUM configured
 - [ ] Alerts set up
+- [ ] Backend latency percentiles tracked (p50, p95, p99)
 
 ---
 
-## 11. Quick Reference
+## 13. Quick Reference
 
 ```html
 <!-- Resource hints -->
@@ -841,6 +1409,16 @@ contain: layout style paint;
 will-change: transform;
 font-display: swap;
 ```
+
+---
+
+## 14. Why This Configuration Works
+
+- **Core Web Vitals alignment with real user experience**: Optimizing for LCP, INP, and CLS ensures improvements target what users actually perceive rather than synthetic benchmarks. These metrics directly correlate with user satisfaction, engagement, and conversion rates.
+- **Performance budgets prevent gradual degradation**: Enforcing bundle size limits and Lighthouse score thresholds in CI/CD catches performance regressions at the pull request stage, before they accumulate into a slow application that is expensive to optimize retroactively.
+- **Progressive loading prioritizes perceived speed**: Techniques like critical CSS inlining, resource hints, and code splitting ensure users see meaningful content as quickly as possible, even while the full application continues loading in the background.
+- **Image optimization delivers the largest payload savings**: Images are typically the heaviest assets on a page. Modern formats (AVIF, WebP), responsive srcsets, and lazy loading together can reduce image transfer sizes by 50-80%, producing the single largest performance improvement for most sites.
+- **Caching strategy minimizes redundant transfers**: Content-hash-based immutable caching for static assets combined with service worker caching eliminates repeat downloads for returning visitors, reducing both load times and server costs.
 
 ---
 

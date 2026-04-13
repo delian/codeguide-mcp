@@ -1673,7 +1673,65 @@ export class UserService {
  */
 ```
 
-## 11. Deployment Checklist
+## 11. Security & Dependency Management (MANDATORY)
+
+### A. Automated Dependency Management
+
+**Use npm/yarn/pnpm to manage and lock dependencies:**
+
+```bash
+# Install/sync dependencies
+npm install
+
+# Add a new dependency
+npm install package-name
+
+# Update dependencies
+npm update
+
+# Verify dependency integrity
+npm audit signatures
+```
+
+### B. Vulnerability Scanning & Security
+
+**Mandatory security checks for ALL JavaScript projects:**
+
+1. **Vulnerability Scan**:
+   ```bash
+   # Scan for known vulnerabilities
+   npm audit
+   ```
+   - Agents MUST fix all HIGH/CRITICAL vulnerabilities before delivery.
+
+2. **Supply Chain Audit**:
+   - Verify `package-lock.json` integrity
+   - Audit licenses for compliance
+   - Use `npm audit signatures` to verify registry signatures
+
+### C. Dependency File
+
+```json
+{
+  "name": "my-project",
+  "version": "1.0.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "express": "^4.18.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.56.0",
+    "prettier": "^3.2.0",
+    "vitest": "^1.2.0"
+  }
+}
+```
+
+---
+
+## 12. Deployment Checklist
 
 ### Agent Code Generation (MANDATORY)
 - [ ] **Code parses successfully**: `node --check` on all files passes
@@ -1708,7 +1766,7 @@ export class UserService {
 - [ ] No prototype pollution vulnerabilities
 - [ ] Secrets not hardcoded
 
-## 12. Why This Configuration Works
+## 13. Why This Configuration Works
 
 1. **Modern ECMAScript**: Latest features provide cleaner, more expressive code.
 
@@ -1736,7 +1794,7 @@ export class UserService {
 
 ---
 
-## 13. Quick Reference
+## 14. Quick Reference
 
 ### Common Commands
 

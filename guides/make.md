@@ -2586,6 +2586,11 @@ make -n build          # Show commands without executing
 
 # Parallel builds
 make -j4 build        # Build with 4 parallel jobs
+make -j$(nproc)       # Build using all available cores
+
+# Debugging and introspection
+make -p | grep MY_VAR          # Trace variable values
+make --warn-undefined-variables # Check for undefined variables
 
 # Include specific Makefile
 make -f Makefile.custom
@@ -2635,29 +2640,30 @@ MODULE_MK := 1
 endif
 ```
 
+### Modern GNU Make 4.4+ Patterns Cheat Sheet
+
+```makefile
+# Immediate assignment for performance
+VERSION := $(shell git describe --tags)
+
+# Order-only prerequisite for directories
+$(OBJ_DIR)/%.o: %.c | $(OBJ_DIR)
+	@$(CC) -c $< -o $@
+
+$(OBJ_DIR):
+	@mkdir -p $@
+
+# Built-in help pattern
+help: ## Show this help
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+# Delete on error (Global safety)
+.DELETE_ON_ERROR:
+```
+
 ---
 
-## 10. Summary
-
-**CRITICAL Requirements for All Makefiles:**
-
-1. **Modular Structure**: Split into logical modules in `make/` directory, keep main Makefile small and readable.
-2. **Reproducible Builds**: Deterministic outputs, `SOURCE_DATE_EPOCH`, version pinning, reproducible flags.
-3. **Incremental Builds**: Proper dependency tracking, caching to prevent duplicate work.
-4. **Progress Indicators**: Progress logs or progress bars by default (unless verbose mode).
-5. **Clean Comments**: Simple, clean, helpful comments throughout.
-6. **Verbose Mode**: Support `V=1` for command visibility.
-7. **Debug Mode**: Support `DEBUG=1` for troubleshooting.
-8. **Help System**: Built-in `help` target documenting all targets.
-9. **Minimal Dependencies**: Use only POSIX tools, avoid external dependencies.
-10. **Reusability**: Use functions and templates for common patterns.
-11. **Error Handling**: Validate prerequisites, clear error messages.
-12. **Verification**: Agent MUST test Makefile before delivery.
-13. **Post-Modification Check**: Agent MUST verify parseability after ANY modification.
-
----
-
-## 11. Security & Dependency Management (MANDATORY)
+## 16. Security & Dependency Management (MANDATORY)
 
 ### A. Automated Dependency Management
 
@@ -2700,7 +2706,7 @@ $(foreach tool,$(REQUIRED_TOOLS),\
 
 ---
 
-## 12. Deployment Checklist
+## 17. Deployment Checklist
 
 ### Agent-Generated Code Verification (MANDATORY)
 
@@ -2742,7 +2748,7 @@ $(foreach tool,$(REQUIRED_TOOLS),\
 
 ---
 
-## 13. Why This Configuration Works
+## 18. Why This Configuration Works
 
 **Immediate Assignment (`:=`)**:
 - Prevents expensive recursive expansion of variables every time they are referenced, significantly speeding up large Makefiles.
@@ -2752,50 +2758,6 @@ $(foreach tool,$(REQUIRED_TOOLS),\
 
 **`.DELETE_ON_ERROR`**:
 - A critical safety feature that ensures if a recipe fails, the target file is deleted, forcing a re-run next time instead of leaving a broken file.
-
----
-
-## 14. Quick Reference
-
-### Common Commands
-
-```bash
-# Dry-run (Check what would happen)
-make -n
-
-# Parallel build (Use all cores)
-make -j$(nproc)
-
-# Trace variables (Debug)
-make -p | grep MY_VAR
-
-# Check for undefined variables
-make --warn-undefined-variables
-
-# Self-documented help
-make help
-```
-
-### Modern GNU Make 4.4+ Patterns Cheat Sheet
-
-```makefile
-# Immediate assignment for performance
-VERSION := $(shell git describe --tags)
-
-# Order-only prerequisite for directories
-$(OBJ_DIR)/%.o: %.c | $(OBJ_DIR)
-	@$(CC) -c $< -o $@
-
-$(OBJ_DIR):
-	@mkdir -p $@
-
-# Built-in help pattern
-help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
-
-# Delete on error (Global safety)
-.DELETE_ON_ERROR:
-```
 
 ---
 

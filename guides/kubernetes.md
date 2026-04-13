@@ -1,12 +1,12 @@
 # Kubernetes Best Practices Guidelines
-Mandatory standards and development practices for secure, production-ready Kubernetes deployments with emphasis on security, observability, resilience, and maintainability. This guide is cloud-agnostic and applies to any Kubernetes distribution (on-premises, managed, or self-hosted). Kubernetes 1.28+, Istio 1.20+, Helm 3.x, Kustomize, kubectl, Message Brokers (Kafka/RabbitMQ/Redis/NATS).
+Mandatory standards and development practices for secure, production-ready Kubernetes deployments with emphasis on security, observability, resilience, and maintainability. This guide is cloud-agnostic and applies to any Kubernetes distribution (on-premises, managed, or self-hosted). Kubernetes 1.31+, Istio 1.22+, Helm 3.x, Kustomize, kubectl, Message Brokers (Kafka/RabbitMQ/Redis/NATS).
 
 ---
 
 **Agent Profile**: The Kubernetes Platform Engineer
 **Role**: Senior Platform Engineer & Cloud-Native Security Specialist
 **Objective**: Generate production-ready, secure, observable, and maintainable Kubernetes configurations with Istio service mesh, proper resource management, and GitOps deployment practices.
-**Tools**: Kubernetes 1.28+, Istio 1.20+, Helm 3.x, Kustomize, kubectl, Message Brokers (Kafka/RabbitMQ/Redis/NATS).
+**Tools**: Kubernetes 1.31+, Istio 1.22+, Helm 3.x, Kustomize, kubectl, Message Brokers (Kafka/RabbitMQ/Redis/NATS).
 
 ---
 
@@ -2391,7 +2391,102 @@ kubectl get networkpolicies -n team-orders
 
 ---
 
-## 15. Summary
+## 15. Security & Dependency Management (MANDATORY)
+
+### A. Infrastructure Security Scanning
+
+```bash
+# Cluster-wide vulnerability scan with trivy
+trivy k8s --report summary cluster
+trivy k8s --report all --severity CRITICAL,HIGH cluster
+
+# CIS Kubernetes Benchmark compliance
+trivy k8s --compliance k8s-cis-1.23 --report summary cluster
+trivy k8s --compliance k8s-cis-1.23 --report all cluster
+
+# Namespace-scoped scan
+trivy k8s --namespace production --report summary all
+
+# Scan specific resource types
+trivy k8s --report summary deployments,statefulsets,daemonsets
+```
+
+### B. Vulnerability Scanning
+
+```bash
+# Container image scanning
+trivy image myregistry.io/myapp:latest
+trivy image --severity CRITICAL,HIGH --exit-code 1 myregistry.io/myapp:latest
+
+# Scan all images in a namespace
+kubectl get pods -n production -o jsonpath='{range .items[*]}{range .spec.containers[*]}{.image}{"\n"}{end}{end}' | sort -u | xargs -I{} trivy image {}
+
+# SBOM generation for cluster images
+trivy k8s --format cyclonedx --output cluster-sbom.json cluster
+
+# Scan Kubernetes manifests before apply
+trivy config ./k8s/
+trivy config --severity HIGH,CRITICAL ./k8s/
+checkov -d ./k8s/ --framework kubernetes
+```
+
+### C. Policy & Compliance
+
+```yaml
+# Kyverno - Kubernetes-native policy engine
+# Require non-root containers
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-run-as-nonroot
+spec:
+  validationFailureAction: Enforce
+  rules:
+    - name: run-as-non-root
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: "Containers must run as non-root"
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  runAsNonRoot: true
+---
+# OPA Gatekeeper - alternative policy engine
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sDisallowedTags
+metadata:
+  name: no-latest-tag
+spec:
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+  parameters:
+    tags: ["latest"]
+```
+
+```bash
+# Runtime security with Falco
+# Install via Helm
+helm repo add falcosecurity https://falcosecurity.github.io/charts
+helm install falco falcosecurity/falco --namespace falco --create-namespace
+
+# Check Falco alerts
+kubectl logs -n falco -l app.kubernetes.io/name=falco --tail=50
+
+# Verify policies are enforced
+kubectl get clusterpolicy          # Kyverno
+kubectl get constraints            # OPA Gatekeeper
+```
+
+---
+
+## 16. Summary
 
 ### Core Principles
 
@@ -2421,7 +2516,7 @@ kubectl get networkpolicies -n team-orders
 
 ---
 
-## 16. Quick Reference
+## 17. Quick Reference
 
 ### Common kubectl Commands
 
@@ -2802,6 +2897,73 @@ spec:
     tls:
       mode: ISTIO_MUTUAL
 ```
+
+---
+
+## 18. Deployment Checklist
+
+### Cluster Readiness
+- [ ] Kubernetes version is supported (N-2 policy)
+- [ ] Node pools sized for workload requirements
+- [ ] Cluster autoscaler configured with min/max bounds
+- [ ] etcd backup and restore procedure tested
+
+### Workload Configuration
+- [ ] Resource requests and limits set on all containers
+- [ ] Liveness, readiness, and startup probes configured
+- [ ] PodDisruptionBudgets defined for all production workloads
+- [ ] Anti-affinity rules spread replicas across nodes/zones
+- [ ] Horizontal Pod Autoscaler configured with appropriate metrics
+
+### Security
+- [ ] Pod security standards enforced (restricted profile)
+- [ ] NetworkPolicies default-deny with explicit allows
+- [ ] No containers running as root
+- [ ] Service accounts scoped per workload with automount disabled
+- [ ] Image pull from private registry with vulnerability scanning
+- [ ] Secrets managed via External Secrets Operator, not kubectl
+
+### Networking and Traffic
+- [ ] Istio sidecar injection enabled on target namespaces
+- [ ] mTLS set to STRICT in PeerAuthentication
+- [ ] Ingress Gateway with TLS termination configured
+- [ ] VirtualService timeouts and retry policies defined
+
+### Observability
+- [ ] Prometheus ServiceMonitor scraping application metrics
+- [ ] Structured logging to stdout in JSON format
+- [ ] Distributed tracing headers propagated
+- [ ] Alerting rules defined for SLO violations
+
+### GitOps
+- [ ] All manifests stored in Git (no manual kubectl apply)
+- [ ] Kustomize overlays for each environment
+- [ ] ArgoCD Application syncing with self-heal enabled
+- [ ] Drift detection and notification configured
+
+---
+
+## 19. Why This Configuration Works
+
+1. **Namespace-per-Team Isolation**: Dedicating namespaces to teams with RBAC and ResourceQuotas prevents noisy-neighbor issues and enforces resource accountability.
+
+2. **Declarative GitOps with ArgoCD**: Storing all manifests in Git and syncing with ArgoCD ensures the cluster state always matches the repository, with full audit history.
+
+3. **Pod Security Standards**: Enforcing the restricted security profile prevents privilege escalation, root containers, and host namespace access by default.
+
+4. **Resource Requests and Limits**: Setting requests guarantees scheduling capacity while limits prevent any single pod from consuming all node resources.
+
+5. **Three-Probe Health Pattern**: Startup probes handle slow initialization, liveness probes restart deadlocked processes, and readiness probes control traffic routing.
+
+6. **PodDisruptionBudgets**: PDBs ensure voluntary disruptions (node drains, upgrades) never take too many replicas offline simultaneously.
+
+7. **Anti-Affinity across Zones**: Spreading replicas across availability zones provides resilience against zone-level failures without manual intervention.
+
+8. **Default-Deny NetworkPolicies**: Starting with deny-all and adding explicit allows follows zero-trust networking, limiting lateral movement.
+
+9. **External Secrets Operator**: Syncing secrets from a vault into Kubernetes secrets keeps sensitive data out of Git while maintaining declarative configuration.
+
+10. **Kustomize Overlays**: Sharing a common base with environment-specific overlays eliminates manifest duplication and ensures consistency across dev, staging, and prod.
 
 ---
 

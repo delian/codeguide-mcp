@@ -1,13 +1,13 @@
 # Ruby Development Guidelines
 
-Mandatory standards for Ruby development, following community conventions and best practices. Ruby 3.2+, Rails 7+, RuboCop, RSpec, Bundler.
+Mandatory standards for Ruby development, following community conventions and best practices. Ruby 3.3+, Rails 8+, RuboCop, RSpec, Bundler.
 
 ---
 
 **Agent Profile**: The Ruby Expert
 **Role**: Senior Ruby Developer & Rails Architect
 **Objective**: Generate elegant, maintainable, and performant Ruby code following the Ruby Way.
-**Tools**: Ruby 3.2+, Rails 7+, RuboCop, RSpec, Bundler.
+**Tools**: Ruby 3.3+, Rails 8+, RuboCop, RSpec, Bundler.
 
 ---
 
@@ -1178,7 +1178,64 @@ end
 
 ---
 
-## 10. Deployment Checklist
+## 10. Security & Dependency Management (MANDATORY)
+
+### A. Automated Dependency Management
+
+**Use Bundler to manage and lock dependencies:**
+
+```bash
+# Install dependencies from Gemfile
+bundle install
+
+# Add a new dependency
+bundle add gem_name
+
+# Update dependencies
+bundle update
+bundle outdated
+
+# Verify dependency integrity
+bundle-audit check
+```
+
+### B. Vulnerability Scanning & Security
+
+**Mandatory security checks for ALL Ruby projects:**
+
+1. **Vulnerability Scan**:
+   ```bash
+   # Scan for known vulnerabilities
+   bundle-audit check --update
+   ```
+   - Agents MUST fix all HIGH/CRITICAL vulnerabilities before delivery.
+
+2. **Supply Chain Audit**:
+   - Verify `Gemfile.lock` integrity
+   - Audit licenses for compliance
+
+### C. Dependency File
+
+```ruby
+# Gemfile
+source 'https://rubygems.org'
+
+ruby '~> 3.3'
+
+gem 'rails', '~> 8.0'
+gem 'pg', '~> 1.5'
+gem 'puma', '~> 6.4'
+
+group :development, :test do
+  gem 'rspec-rails', '~> 6.1'
+  gem 'rubocop', '~> 1.60', require: false
+  gem 'bundler-audit', require: false
+end
+```
+
+---
+
+## 11. Deployment Checklist
 
 ### Code Quality
 - [ ] RuboCop passes with no offenses
@@ -1206,7 +1263,7 @@ end
 
 ---
 
-## 11. Quick Reference
+## 12. Quick Reference
 
 ```ruby
 # String methods
@@ -1237,6 +1294,20 @@ Date.current        # Use instead of Date.today
 n.days.ago          # Time calculation
 n.hours.from_now    # Time calculation
 ```
+
+---
+
+## 13. Why This Configuration Works
+
+1. **RuboCop as a Living Style Guide**: RuboCop enforces community conventions automatically, eliminating style debates in code review and ensuring every file follows the same naming, formatting, and structural patterns. Auto-correction fixes the majority of offenses without developer intervention.
+
+2. **RSpec with Factories over Fixtures**: Using FactoryBot factories instead of YAML fixtures makes test data explicit, composable, and traceable. Combined with `let` blocks and `subject`, tests read like specifications and clearly document expected behavior.
+
+3. **Service Objects for Business Logic**: Extracting complex operations into service objects with a standard `call` interface keeps controllers thin, models focused on persistence, and business rules independently testable without loading the full Rails stack.
+
+4. **Eager Loading to Eliminate N+1 Queries**: Mandatory use of `includes`, `preload`, and `eager_load` prevents the most common Rails performance problem. Combined with Bullet gem detection in development, N+1 queries are caught before they reach production.
+
+5. **Bundler with bundle-audit for Supply Chain Security**: Locking all gem versions in `Gemfile.lock` ensures reproducible builds, while `bundle-audit` scans for known CVEs in dependencies. This catches vulnerable gems before deployment rather than after a security incident.
 
 ---
 

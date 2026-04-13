@@ -247,6 +247,149 @@ Working Set:
 
 ---
 
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. RED: Write a failing test first
+   ↓
+2. GREEN: Write minimal code to make it pass
+   ↓
+3. REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for Couchbase (Python with pytest and Couchbase SDK)
+
+```python
+# Step 1: RED - Write failing test first
+import pytest
+from couchbase.cluster import Cluster
+from couchbase.options import ClusterOptions
+from couchbase.auth import PasswordAuthenticator
+
+@pytest.fixture
+def cb_collection():
+    cluster = Cluster(
+        "couchbase://localhost",
+        ClusterOptions(PasswordAuthenticator("admin", "password"))
+    )
+    bucket = cluster.bucket("test_bucket")
+    collection = bucket.default_collection()
+    yield collection
+    cluster.close()
+
+def test_upsert_and_get_document(cb_collection):
+    """Test upserting and retrieving a JSON document."""
+    repo = UserRepository(cb_collection)
+    repo.upsert_user("user::1001", {"name": "Alice", "email": "alice@example.com"})
+    user = repo.get_user("user::1001")
+    assert user["name"] == "Alice"
+    assert user["email"] == "alice@example.com"
+
+# Run: pytest test_couchbase.py -v
+# FAILS - NameError: name 'UserRepository' is not defined
+
+# Step 2: GREEN - Write minimal implementation
+class UserRepository:
+    def __init__(self, collection):
+        self.collection = collection
+
+    def upsert_user(self, doc_id, user_data):
+        self.collection.upsert(doc_id, user_data)
+
+    def get_user(self, doc_id):
+        result = self.collection.get(doc_id)
+        return result.content_as[dict]
+
+# Run: pytest test_couchbase.py -v
+# PASSES
+
+# Step 3: REFACTOR - Add N1QL query support and type field
+from couchbase.cluster import QueryOptions
+
+class UserRepository:
+    def __init__(self, collection, cluster=None):
+        self.collection = collection
+        self.cluster = cluster
+
+    def upsert_user(self, doc_id, user_data):
+        user_data["type"] = "user"
+        self.collection.upsert(doc_id, user_data)
+
+    def get_user(self, doc_id):
+        result = self.collection.get(doc_id)
+        return result.content_as[dict]
+
+    def find_users_by_email(self, email):
+        query = "SELECT META().id, * FROM test_bucket WHERE type = 'user' AND email = $email"
+        result = self.cluster.query(query, QueryOptions(named_parameters={"email": email}))
+        return [row for row in result]
+
+# Tests still pass
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. Bug Reported/Discovered
+   ↓
+2. Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. Verify the test fails for the right reason
+   ↓
+4. Fix the bug (make the test pass)
+   ↓
+5. Verify the test now PASSES
+   ↓
+6. Document the bug in test comments
+```
+
+### Example Bug Fix
+
+```python
+# Bug: get_user() raises DocumentNotFoundException for missing documents
+# instead of returning None, causing unhandled crashes in the API layer
+
+import pytest
+from couchbase.exceptions import DocumentNotFoundException
+
+# Step 1: Write test that reproduces the bug
+def test_get_missing_user_returns_none(cb_collection):
+    """Regression: get_user() should return None for missing documents,
+    not raise DocumentNotFoundException."""
+    repo = UserRepository(cb_collection)
+    result = repo.get_user("user::nonexistent")
+    assert result is None
+
+# FAILS - DocumentNotFoundException is raised
+
+# Step 2: Fix the bug
+class UserRepository:
+    # ... existing code ...
+
+    def get_user(self, doc_id):
+        try:
+            result = self.collection.get(doc_id)
+            return result.content_as[dict]
+        except DocumentNotFoundException:
+            return None
+
+# PASSES - bug fixed, regression prevented
+```
+
+---
+
 ## 3. Document Model and Data Modeling
 
 ### Document Structure
@@ -3054,6 +3197,76 @@ Critical Metrics:
 - [ ] Security audit
 - [ ] Version upgrade planning
 - [ ] Performance tuning review
+
+---
+
+## 22. Deployment Checklist
+
+### Agent-Generated Code Verification (MANDATORY)
+
+#### Build & Compilation
+- [ ] Code compiles/runs without errors
+- [ ] All imports/dependencies resolved (Couchbase SDK)
+- [ ] Code formatted per project standards
+
+#### Testing
+- [ ] All tests pass
+- [ ] Coverage meets minimum threshold (>80%)
+- [ ] Integration tests pass against Couchbase test cluster
+
+#### Security
+- [ ] Dependency scan: 0 HIGH/CRITICAL vulnerabilities
+- [ ] No hardcoded credentials or secrets
+- [ ] Connection strings use environment variables
+
+#### Agent Workflow Completed
+- [ ] Agent verified code builds successfully
+- [ ] Agent ran all tests and verified they pass
+- [ ] Agent verified documentation
+
+---
+
+## 23. Why This Configuration Works
+
+**Multi-Model Architecture in a Single Platform**: Couchbase combines key-value, document, full-text search, analytics, and eventing services, eliminating the need for separate database systems and reducing operational complexity.
+
+**Memory-First Design with Managed Caching**: The integrated caching layer serves reads from RAM with sub-millisecond latency, removing the need for a separate caching tier like Redis or Memcached.
+
+**N1QL Provides SQL Familiarity for JSON Documents**: Developers can query JSON documents using familiar SQL syntax with JOINs, aggregations, and subqueries, lowering the learning curve compared to other NoSQL query languages.
+
+**Built-In Cross-Datacenter Replication (XDCR)**: Active-active replication across data centers provides disaster recovery and geo-locality without third-party tooling or complex configuration.
+
+---
+
+## 24. Quick Reference
+
+### Common Commands
+
+```bash
+# Initialize a new Couchbase cluster
+couchbase-cli cluster-init -c localhost:8091 \
+  --cluster-username admin --cluster-password password \
+  --cluster-ramsize 1024 --services data,index,query
+
+# Create a new bucket
+couchbase-cli bucket-create -c localhost:8091 \
+  -u admin -p password --bucket mybucket --bucket-ramsize 512
+
+# Run a N1QL query from CLI
+cbq -e http://localhost:8093 -u admin -p password \
+  --script="SELECT * FROM mybucket LIMIT 10"
+
+# Backup a cluster
+cbbackupmgr backup -a /backup/archive -r myrepo \
+  -c couchbase://localhost -u admin -p password
+
+# Restore from backup
+cbbackupmgr restore -a /backup/archive -r myrepo \
+  -c couchbase://localhost -u admin -p password
+
+# Check cluster server list
+couchbase-cli server-list -c localhost:8091 -u admin -p password
+```
 
 ---
 

@@ -121,6 +121,158 @@ Space:  Efficient
 | **Concurrent Readers** | Unlimited | Unlimited |
 | **Concurrent Writers** | 1 | 1 (LevelDB), Many (RocksDB) |
 
+---
+
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. RED: Write a failing test first
+   ↓
+2. GREEN: Write minimal code to make it pass
+   ↓
+3. REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for LMDB (Python with pytest and lmdb library)
+
+```python
+# Step 1: RED - Write failing test first
+import pytest
+import lmdb
+import tempfile
+import shutil
+
+@pytest.fixture
+def lmdb_env(tmp_path):
+    env = lmdb.open(str(tmp_path / "test.lmdb"), map_size=10 * 1024 * 1024)
+    yield env
+    env.close()
+
+def test_put_and_get_in_transaction(lmdb_env):
+    """Test storing and retrieving a key-value pair within a transaction."""
+    store = LMDBStore(lmdb_env)
+    store.put(b"user:1001", b"Alice")
+    result = store.get(b"user:1001")
+    assert result == b"Alice"
+
+# Run: pytest test_lmdb.py -v
+# FAILS - NameError: name 'LMDBStore' is not defined
+
+# Step 2: GREEN - Write minimal implementation
+class LMDBStore:
+    def __init__(self, env):
+        self.env = env
+
+    def put(self, key, value):
+        with self.env.begin(write=True) as txn:
+            txn.put(key, value)
+
+    def get(self, key):
+        with self.env.begin() as txn:
+            return txn.get(key)
+
+# Run: pytest test_lmdb.py -v
+# PASSES
+
+# Step 3: REFACTOR - Add batch operations and cursor-based iteration
+class LMDBStore:
+    def __init__(self, env):
+        self.env = env
+
+    def put(self, key, value):
+        with self.env.begin(write=True) as txn:
+            txn.put(key, value)
+
+    def get(self, key):
+        with self.env.begin() as txn:
+            return txn.get(key)
+
+    def batch_put(self, pairs):
+        with self.env.begin(write=True) as txn:
+            for key, value in pairs:
+                txn.put(key, value)
+
+    def iter_prefix(self, prefix):
+        results = []
+        with self.env.begin() as txn:
+            cursor = txn.cursor()
+            if cursor.set_range(prefix):
+                for key, value in cursor:
+                    if not key.startswith(prefix):
+                        break
+                    results.append((key, value))
+        return results
+
+    def delete(self, key):
+        with self.env.begin(write=True) as txn:
+            return txn.delete(key)
+
+# Tests still pass
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. Bug Reported/Discovered
+   ↓
+2. Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. Verify the test fails for the right reason
+   ↓
+4. Fix the bug (make the test pass)
+   ↓
+5. Verify the test now PASSES
+   ↓
+6. Document the bug in test comments
+```
+
+### Example Bug Fix
+
+```python
+# Bug: put() silently overwrites existing keys without any indication,
+# causing data loss when callers expect insert-only behavior
+
+import pytest
+
+# Step 1: Write test that reproduces the bug
+def test_put_no_overwrite_raises_on_duplicate(lmdb_env):
+    """Regression: put_no_overwrite() should return False when key
+    already exists, not silently overwrite."""
+    store = LMDBStore(lmdb_env)
+    store.put(b"config:timeout", b"30")
+    result = store.put_no_overwrite(b"config:timeout", b"60")
+    assert result is False
+    # Original value must be preserved
+    assert store.get(b"config:timeout") == b"30"
+
+# FAILS - AttributeError: 'LMDBStore' has no attribute 'put_no_overwrite'
+
+# Step 2: Fix the bug
+class LMDBStore:
+    # ... existing code ...
+
+    def put_no_overwrite(self, key, value):
+        """Insert only if key does not exist. Returns False if key exists."""
+        with self.env.begin(write=True) as txn:
+            return txn.put(key, value, overwrite=False)
+
+# PASSES - bug fixed, regression prevented
+```
+
+---
+
 ## 3. Installation and Setup
 
 ### Ubuntu/Debian Installation
@@ -2399,7 +2551,71 @@ int migrate_leveldb_to_lmdb(const char *leveldb_path,
 }
 ```
 
-## 18. Resources and References
+## 18. Deployment Checklist
+
+### Agent-Generated Code Verification (MANDATORY)
+
+#### Build & Compilation
+- [ ] Code compiles/runs without errors
+- [ ] All imports/dependencies resolved (liblmdb, language bindings)
+- [ ] Code formatted per project standards
+
+#### Testing
+- [ ] All tests pass
+- [ ] Coverage meets minimum threshold (>80%)
+- [ ] Integration tests pass with LMDB environment lifecycle
+
+#### Security
+- [ ] Dependency scan: 0 HIGH/CRITICAL vulnerabilities
+- [ ] No hardcoded credentials or secrets
+- [ ] Database file paths use environment variables
+
+#### Agent Workflow Completed
+- [ ] Agent verified code builds successfully
+- [ ] Agent ran all tests and verified they pass
+- [ ] Agent verified documentation
+
+---
+
+## 19. Why This Configuration Works
+
+**Memory-Mapped I/O for Zero-Copy Reads**: LMDB maps the database file directly into process memory, allowing reads to access data without any copy or serialization overhead, achieving read performance limited only by memory bandwidth.
+
+**Single-Writer MVCC Eliminates Read Locks**: The copy-on-write B+ tree design means readers never block writers and writers never block readers, providing lock-free read access with full ACID transaction guarantees.
+
+**Crash-Proof by Design**: LMDB uses a single-level store with no write-ahead log or recovery process; the database is always in a consistent state because pages are never overwritten in place.
+
+**Minimal Resource Footprint**: The entire library is roughly 10,000 lines of C with no dependencies, making it trivial to embed, audit, and deploy in constrained environments from IoT devices to high-frequency trading systems.
+
+---
+
+## 20. Quick Reference
+
+### Common Commands
+
+```bash
+# Compile an LMDB application (C)
+gcc -O3 app.c -llmdb -o app
+
+# Display database statistics
+mdb_stat -a /path/to/env
+
+# Copy/compact a database
+mdb_copy -c /path/to/env /path/to/compacted
+
+# Dump database contents to text
+mdb_dump /path/to/env
+
+# Load data from text dump
+mdb_load /path/to/env < dump.txt
+
+# Python (lmdb) - open and read
+python3 -c "import lmdb; env=lmdb.open('/path/to/env'); txn=env.begin(); print(list(txn.cursor().iternext()))"
+```
+
+---
+
+## 21. Resources and References
 
 ### Official Documentation
 - **LMDB Homepage**: http://www.lmdb.tech/doc/

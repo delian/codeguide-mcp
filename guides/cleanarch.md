@@ -2275,6 +2275,54 @@ CLEAN ARCHITECTURE CODE REVIEW CHECKLIST:
 
 ---
 
+## 15. Why This Configuration Works
+
+- **The dependency rule protects business logic from change**: By enforcing that dependencies always point inward (from frameworks toward entities), the core business rules remain stable even when databases, UI frameworks, or external services are replaced. This is the single most valuable constraint in the architecture.
+- **Testability without infrastructure**: Because entities and use cases have no dependencies on frameworks or databases, they can be unit tested with plain objects and no mocks of external systems. This makes the most important code in the system also the easiest and fastest to test.
+- **Framework independence reduces migration risk**: Keeping all framework-specific code in the outermost layer means upgrading or replacing a web framework, ORM, or messaging system affects only adapter code, not business logic. This future-proofs the system against technology churn.
+- **Use case clarity makes the system self-documenting**: Organizing application logic as explicit use case classes (CreateOrder, CancelSubscription) makes the system's capabilities visible from its directory structure alone. New developers can understand what the system does without reading implementation details.
+- **Concentric layers enforce separation of concerns**: The clear boundary between entities, use cases, interface adapters, and frameworks prevents the common failure mode where business rules, persistence logic, and presentation code become entangled into an unmaintainable whole.
+
+---
+
+## 16. Implementation Checklist
+
+### Dependency Rule Compliance
+- [ ] **Entities have zero external imports**: No framework, ORM, or library references in entity code
+- [ ] **Use cases depend only on entities**: Use case layer imports only from the entity/domain layer
+- [ ] **Adapters implement interfaces from inner layers**: Repository and gateway implementations satisfy interfaces defined in use cases
+- [ ] **Frameworks confined to outermost layer**: Web framework, DI container, and ORM configuration isolated in infrastructure
+- [ ] **Dependency direction automated**: Architecture linting tool (ArchUnit, import-linter, dependency-cruiser) enforces rules in CI
+
+### Layer Separation
+- [ ] **Business logic in entities**: Domain rules live in entity methods, not in controllers or repositories
+- [ ] **Use cases are single-purpose**: Each use case class has one public method executing one application operation
+- [ ] **Controllers are thin**: Controllers only translate HTTP requests to use case input and format responses
+- [ ] **Presenters only format**: No business decisions in presenter or view model code
+- [ ] **Repositories only persist**: No domain logic in repository implementations
+
+### Testing Verification
+- [ ] **Entity tests have no mocks**: Domain/entity unit tests run with plain objects, no external dependencies
+- [ ] **Use case tests mock only outer interfaces**: Repository and gateway interfaces mocked, entity logic exercised directly
+- [ ] **Adapter tests use real infrastructure**: Integration tests run against real (or containerized) databases and services
+- [ ] **TDD cycle followed**: All new code developed via Red-Green-Refactor
+- [ ] **Bug fixes include regression tests**: Every resolved defect has a failing-then-passing test
+
+### Code Quality
+- [ ] **Directory structure screams architecture**: Folder names reflect domain concepts and Clean Architecture layers
+- [ ] **Feature organization preferred**: Code organized by feature/use case, not by technical type
+- [ ] **DTOs used at layer boundaries**: Data transfer objects prevent leaking internal representations across layers
+- [ ] **No circular dependencies**: Static analysis confirms zero circular imports between modules
+- [ ] **Value objects replace primitives**: Domain concepts (Money, Email, OrderId) are typed, not raw strings or numbers
+
+### Documentation
+- [ ] **Layer responsibilities documented**: Each layer's purpose and allowed dependencies described
+- [ ] **Use case catalog maintained**: List of all use cases visible from directory structure
+- [ ] **Dependency rule violations tracked**: Any temporary violations documented with remediation timeline
+- [ ] **Architecture diagram current**: Concentric layer diagram updated to reflect current implementation
+
+---
+
 ## Related Guides
 
 - **[hexagonal.md](hexagonal.md)**: Hexagonal Architecture (Ports & Adapters) - a related architectural pattern with similar goals

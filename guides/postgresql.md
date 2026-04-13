@@ -2134,7 +2134,7 @@ See section 2B for detailed GENERATED ALWAYS AS IDENTITY patterns.
 
 ---
 
-## 11. Security & Dependency Management (MANDATORY)
+## 15. Security & Dependency Management (MANDATORY)
 
 ### A. Automated Dependency Management
 
@@ -2179,7 +2179,7 @@ CREATE TABLE users (
 
 ---
 
-## 12. Deployment Checklist
+## 16. Deployment Checklist
 
 ### Agent-Generated Code Verification (MANDATORY)
 
@@ -2216,7 +2216,7 @@ CREATE TABLE users (
 
 ---
 
-## 13. Why This Configuration Works
+## 17. Why This Configuration Works
 
 **PostgreSQL 17 JSONB Improvements**:
 - Modern SQL/JSON standard functions provide significantly faster and more standard-compliant ways to query semi-structured data.
@@ -2229,7 +2229,7 @@ CREATE TABLE users (
 
 ---
 
-## 14. Quick Reference
+## 18. Quick Reference
 
 ### Common Commands
 

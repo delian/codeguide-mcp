@@ -287,6 +287,132 @@ deploy-production:
 
 ---
 
+## 2A. TDD Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL pipeline definitions.**
+
+### Red-Green-Refactor Cycle with Pipeline Linting and Validation
+
+```yaml
+# ═══════════════════════════════════════════════════════════════
+# STEP 1: RED - Write failing validation test first
+# ═══════════════════════════════════════════════════════════════
+
+# test/validate-pipeline.sh
+#!/bin/bash
+set -euo pipefail
+
+echo "Validating GitHub Actions workflow syntax..."
+for workflow in .github/workflows/*.yml; do
+  # Validate YAML syntax
+  python3 -c "import yaml; yaml.safe_load(open('$workflow'))" || {
+    echo "FAIL: Invalid YAML in $workflow"
+    exit 1
+  }
+done
+
+# Validate with actionlint
+actionlint .github/workflows/ci-cd.yml || {
+  echo "FAIL: actionlint found errors"
+  exit 1
+}
+
+# Custom validation: ensure all jobs have timeout
+python3 - <<'PYTHON'
+import yaml, sys
+
+with open('.github/workflows/ci-cd.yml') as f:
+    config = yaml.safe_load(f)
+
+for job_name, job in config.get('jobs', {}).items():
+    if 'timeout-minutes' not in job:
+        print(f"FAIL: Job '{job_name}' missing timeout-minutes")
+        sys.exit(1)
+
+print("PASS: All jobs have timeout-minutes set")
+PYTHON
+
+# Custom validation: ensure security scanning stage exists
+python3 - <<'PYTHON'
+import yaml, sys
+
+with open('.github/workflows/ci-cd.yml') as f:
+    config = yaml.safe_load(f)
+
+jobs = config.get('jobs', {})
+has_security = any('security' in name.lower() or 'scan' in name.lower()
+                    for name in jobs)
+if not has_security:
+    print("FAIL: Pipeline must include a security scanning job")
+    sys.exit(1)
+
+print("PASS: Security scanning job found")
+PYTHON
+
+# Run: bash test/validate-pipeline.sh
+# ❌ FAILS - pipeline definition incomplete
+
+# ═══════════════════════════════════════════════════════════════
+# STEP 2: GREEN - Write minimal pipeline to pass validation
+# ═══════════════════════════════════════════════════════════════
+
+# Add timeout-minutes and security-scan job to ci-cd.yml
+
+# Run: bash test/validate-pipeline.sh
+# ✅ PASSES - all validations pass
+
+# ═══════════════════════════════════════════════════════════════
+# STEP 3: REFACTOR - Optimize caching, parallelism, keep valid
+# ═══════════════════════════════════════════════════════════════
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every pipeline bug MUST receive a validation test BEFORE fixing.**
+
+### Bug Fix Workflow Example
+
+```bash
+# ═══════════════════════════════════════════════════════════════
+# Bug Report #501: Deploy job runs even when tests fail because
+# needs dependency was missing
+# ═══════════════════════════════════════════════════════════════
+
+# STEP 1: Write test that reproduces the bug
+# test/validate-pipeline.sh (add to validation)
+
+echo "Checking deploy job depends on test job - Bug #501..."
+python3 - <<'PYTHON'
+import yaml, sys
+
+with open('.github/workflows/ci-cd.yml') as f:
+    config = yaml.safe_load(f)
+
+deploy_job = config.get('jobs', {}).get('deploy', {})
+needs = deploy_job.get('needs', [])
+if isinstance(needs, str):
+    needs = [needs]
+
+if 'test' not in needs:
+    print("FAIL Bug #501: deploy job MUST depend on test job")
+    sys.exit(1)
+
+print("PASS: deploy job correctly depends on test job")
+PYTHON
+
+# Run: bash test/validate-pipeline.sh
+# ❌ FAILS - deploy job missing "needs: test"
+
+# STEP 2: Fix the bug - Add needs: [build, test] to deploy job
+
+# Run: bash test/validate-pipeline.sh
+# ✅ PASSES - bug fixed, regression prevented forever
+```
+
+---
+
 ## 3. Testing in CI (MANDATORY)
 
 ### A. Test Matrix
@@ -901,6 +1027,30 @@ if: success()
 if: failure()
 if: always()
 ```
+
+---
+
+## 11. Why This Configuration Works
+
+1. **Concurrency Control**: Canceling in-progress runs on the same branch prevents wasted compute and conflicting deployments from stale commits.
+
+2. **Artifact Passing between Stages**: Building once and passing artifacts via upload/download ensures identical binaries are tested and deployed, eliminating "works on CI" inconsistencies.
+
+3. **Parallel Test Sharding**: Splitting test suites across matrix shards reduces feedback time linearly while maintaining full coverage.
+
+4. **Environment-Based Approvals**: GitHub/GitLab environments with required reviewers and wait timers prevent unauthorized production deployments.
+
+5. **Security Scanning in Pipeline**: Running SAST, dependency scans, and container image scans as required pipeline stages catches vulnerabilities before they reach production.
+
+6. **Blue-Green and Canary Strategies**: Gradual traffic shifting with automated rollback on failure metrics limits blast radius to a fraction of users.
+
+7. **Secretless Authentication**: Using OIDC/Workload Identity for cloud provider access eliminates long-lived credentials stored in CI variables.
+
+8. **Deployment Notifications**: Slack/Teams notifications on deploy success and failure ensure the team has immediate visibility into production changes.
+
+9. **Multi-Stage Docker Builds**: Separating build and runtime stages produces minimal production images without build tools, reducing attack surface and pull times.
+
+10. **Pipeline as Code**: Defining pipelines in version-controlled YAML ensures changes are reviewed, auditable, and reproducible across environments.
 
 ---
 

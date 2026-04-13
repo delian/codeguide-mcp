@@ -1888,7 +1888,67 @@ cargo test --doc
 
 ---
 
-## 13. Deployment Checklist
+## 13. Security & Dependency Management (MANDATORY)
+
+### A. Automated Dependency Management
+
+**Use Cargo to manage and lock dependencies:**
+
+```bash
+# Install/sync dependencies
+cargo build
+
+# Add a new dependency
+cargo add crate_name
+
+# Update dependencies
+cargo update
+
+# Verify dependency integrity
+cargo audit
+```
+
+### B. Vulnerability Scanning & Security
+
+**Mandatory security checks for ALL Rust projects:**
+
+1. **Vulnerability Scan**:
+   ```bash
+   # Scan for known vulnerabilities (RustSec Advisory DB)
+   cargo audit
+
+   # Broader checks including license and ban policies
+   cargo deny check advisories
+   ```
+   - Agents MUST fix all HIGH/CRITICAL vulnerabilities before delivery.
+
+2. **Supply Chain Audit**:
+   - Verify `Cargo.lock` integrity
+   - Audit licenses for compliance with `cargo deny check licenses`
+   - Review dependency tree with `cargo tree`
+
+### C. Dependency File
+
+```toml
+# Cargo.toml
+[package]
+name = "my_project"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "1"
+
+[dev-dependencies]
+mockall = "0.11"
+cargo-audit = "0.20"
+```
+
+---
+
+## 14. Deployment Checklist
 
 ### Pre-Production Validation
 
@@ -1940,7 +2000,7 @@ cargo test --doc
 
 ---
 
-## 14. Complete Example
+## 15. Complete Example
 
 ```rust
 //! Order management module demonstrating hexagonal architecture.
@@ -2406,7 +2466,7 @@ mod tests {
 
 ---
 
-## 15. Why This Configuration Works
+## 16. Why This Configuration Works
 
 1. **Hexagonal Architecture**: Clear separation of concerns, testable in isolation, easy to swap adapters.
 
@@ -2432,7 +2492,7 @@ mod tests {
 
 ---
 
-## 16. Quick Reference
+## 17. Quick Reference
 
 ### Common Commands
 

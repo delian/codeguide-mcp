@@ -2529,7 +2529,92 @@ deploy:
 
 ---
 
-## 9. Deployment Checklist
+## 9. Security & Dependency Management (MANDATORY)
+
+### A. Infrastructure Security Scanning
+
+```bash
+# vulnix - scan Nix packages for known vulnerabilities
+vulnix --system
+vulnix --path ./result
+vulnix --path ./result --json > vuln-report.json
+
+# Scan a specific derivation
+nix-build -A mypackage | xargs vulnix
+
+# Check specific packages from flake
+nix build .#mypackage && vulnix --path ./result
+```
+
+### B. Vulnerability Scanning
+
+```bash
+# Lock file management - flake.lock pins ALL dependencies
+# Update all inputs to latest
+nix flake update
+
+# Update a specific input only
+nix flake update nixpkgs
+nix flake update --input-overrides nixpkgs/nixpkgs-unstable
+
+# Show current lock state
+nix flake metadata
+nix flake info
+
+# Diff lock file changes before committing
+git diff flake.lock
+
+# Verify integrity of locked inputs
+nix flake check
+```
+
+### C. Policy & Compliance
+
+```nix
+# Reproducible builds are inherent to Nix - every build is deterministic
+# Verify reproducibility by building twice and comparing
+# nix build .#mypackage && cp -L result result-first
+# nix build .#mypackage --rebuild && diff <(nix hash path result-first) <(nix hash path result)
+
+# Pin nixpkgs to a specific, audited revision in flake.nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";  # Use stable release branch
+    # NEVER use nixpkgs-unstable in production
+  };
+}
+
+# Override vulnerable packages in flake.nix
+{
+  nixpkgs.overlays = [
+    (final: prev: {
+      vulnerablePackage = prev.vulnerablePackage.overrideAttrs (old: {
+        version = "patched-version";
+        src = prev.fetchurl {
+          url = "https://example.com/patched-source.tar.gz";
+          hash = "sha256-...";
+        };
+      });
+    })
+  ];
+}
+```
+
+```bash
+# Audit the full dependency closure
+nix path-info --closure-size --human-readable ./result
+nix path-info -rsSh ./result | sort -k2 -h  # Sort by size
+
+# List all runtime dependencies
+nix-store --query --requisites ./result
+
+# Check for unfree or insecure packages
+nix flake check  # Will fail if allowUnfree/allowInsecure not explicitly set
+```
+
+---
+
+## 10. Deployment Checklist
 
 ### Before Every Release:
 
@@ -2604,7 +2689,7 @@ deploy:
 
 ---
 
-## 10. Why This Configuration Works
+## 11. Why This Configuration Works
 
 ### Reproducibility
 - **Locked Dependencies**: `flake.lock` ensures exact versions
@@ -2653,7 +2738,7 @@ reproducible development environments and applications with Nix flakes.
 
 ---
 
-## 11. Quick Reference
+## 12. Quick Reference
 
 ### Common Commands
 

@@ -603,7 +603,7 @@ git commit -m "chore(deps): update dependencies"
 
 ---
 
-## 4. Test-Driven Development with uv (MANDATORY)
+## 2A. TDD Protocol (MANDATORY)
 
 ### A. TDD Workflow Example
 
@@ -753,7 +753,11 @@ class User:
 # Tests still pass ✓
 ```
 
-### B. Bug Fix with Regression Test
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### A. Bug Fix with Regression Test
 
 ```python
 # Bug Report #123: User.create crashes with empty name
@@ -788,7 +792,7 @@ def test_user_create_with_whitespace_name_raises_error_bug_123() -> None:
 # ✅ PASSES - Bug fixed, regression prevented
 ```
 
-### C. Running Tests with uv
+### B. Running Tests with uv
 
 ```bash
 # Run all tests
@@ -818,7 +822,7 @@ uv run ptw packages/domain/tests/
 
 ---
 
-## 5. Hexagonal Architecture Implementation
+## 3. Hexagonal Architecture Implementation
 
 ### A. Domain Layer (Core)
 
@@ -1090,7 +1094,7 @@ async def get_user(
 
 ---
 
-## 6. CI/CD Integration with uv
+## 4. CI/CD Integration with uv
 
 ### A. GitHub Actions Workflow
 
@@ -1220,7 +1224,7 @@ CMD ["uv", "run", "--no-sync", "serve-prod"]
 
 ---
 
-## 7. Deployment Checklist
+## 5. Deployment Checklist
 
 ### Project Setup
 - [ ] **uv installed**: Latest version via install script
@@ -1271,7 +1275,7 @@ CMD ["uv", "run", "--no-sync", "serve-prod"]
 
 ---
 
-## 7. Security & Dependency Management (MANDATORY)
+## 6. Security & Dependency Management (MANDATORY)
 
 ### A. Automated Dependency Management
 
@@ -1325,7 +1329,7 @@ dev = [
 
 ---
 
-## 8. Deployment Checklist
+## 7. Deployment Checklist
 
 ### Agent-Generated Code Verification (MANDATORY)
 
@@ -1364,7 +1368,7 @@ dev = [
 
 ---
 
-## 9. Why This Configuration Works
+## 8. Why This Configuration Works
 
 **uv Performance**:
 - Replaces pip, pip-tools, and virtualenv with a single tool that is 10-100x faster, enabling instant developer feedback loops.
@@ -1377,7 +1381,7 @@ dev = [
 
 ---
 
-## 10. Quick Reference
+## 9. Quick Reference
 
 ### Common Commands
 

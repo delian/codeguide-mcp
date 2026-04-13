@@ -283,9 +283,7 @@ src/
 }
 ```
 
-## 3. Agent Code Generation Requirements (MANDATORY)
-
-### A. Build Verification Protocol
+### B. Build Verification Protocol (Detailed)
 
 **CRITICAL: Agents MUST verify that all generated code compiles before presenting it to the user.**
 
@@ -358,7 +356,7 @@ If verification fails:
 4. **Re-verify**: Run checks again until all pass
 5. **Document changes**: Note any significant fixes made
 
-### B. Testing Requirements (MANDATORY)
+### C. Testing Requirements (MANDATORY)
 
 **EVERY component, hook, and utility function MUST have unit tests.**
 
@@ -488,7 +486,7 @@ describe('UserCard', () => {
 });
 ```
 
-### C. Agent Workflow Example
+### D. Agent Workflow Example
 
 **Complete agent code generation workflow:**
 
@@ -525,7 +523,7 @@ describe('UserCard', () => {
 
 6. **Present Code**: Only after ALL checks pass
 
-### D. Prohibited Practices
+### E. Prohibited Practices
 
 **NEVER deliver code that:**
 - ❌ Has TypeScript compilation errors
@@ -3063,9 +3061,42 @@ describe('UserDashboard Integration', () => {
 });
 ```
 
-## 12. Security Best Practices
+## 12. Security & Dependency Management (MANDATORY)
 
-### A. XSS Prevention
+### A. Automated Dependency Management
+
+**Use npm with lockfiles and automated scanning for consistent and secure environments:**
+
+```json
+// package.json
+{
+  "scripts": {
+    "audit": "npm audit --audit-level=high",
+    "update": "npm update"
+  }
+}
+```
+
+- **Lockfiles**: ALWAYS commit `package-lock.json`. Use `npm ci` in CI/CD to ensure exact dependency matching.
+- **Dependency Auditing**: Integrate `npm audit` into your pre-commit hooks or CI pipeline.
+- **Selective Pinning**: Pin versions of high-risk dependencies (e.g., encryption or auth libraries) to specific versions.
+
+### B. Vulnerability Scanning & Security
+
+**Mandatory security checks for ALL React projects:**
+
+1. **Vulnerability Scan**:
+   ```bash
+   # Scan all dependencies for known vulnerabilities
+   npm audit --audit-level=high
+   ```
+   - Agents MUST ensure 0 HIGH or CRITICAL vulnerabilities are present in the dependency tree.
+
+2. **Supply Chain Audit**:
+   - Verify package integrity using `npm verify`.
+   - Use tools like `Snyk` or `Socket` to detect malicious packages or telemetry in dependencies.
+
+### C. XSS Prevention
 ```typescript
 // ✅ CORRECT - React automatically escapes
 function UserComment({ comment }: { comment: string }) {
@@ -3087,7 +3118,7 @@ function Unsafe({ html }: { html: string }) {
 }
 ```
 
-### B. Authentication
+### D. Authentication
 ```typescript
 // ✅ CORRECT - Secure token handling
 import { jwtDecode } from 'jwt-decode';
@@ -3128,7 +3159,7 @@ axios.interceptors.response.use(
 );
 ```
 
-### C. Environment Variables
+### E. Environment Variables
 ```typescript
 // ✅ CORRECT - Type-safe environment variables
 import { z } from 'zod';
@@ -3146,6 +3177,23 @@ console.log(env.VITE_API_URL); // Type-safe, validated
 
 // ❌ WRONG - Direct access without validation
 const apiUrl = import.meta.env.VITE_API_URL; // Could be undefined, no validation
+```
+
+### F. Dependency File
+
+```json
+// Example package.json dependencies
+{
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "vitest": "^2.0.0",
+    "@biomejs/biome": "^1.9.0"
+  }
+}
 ```
 
 ## 13. Build Configuration
@@ -3351,6 +3399,12 @@ export class ErrorBoundary extends React.Component<Props, State> {
 - Time to Interactive (TTI): < 3.8s
 - Cumulative Layout Shift (CLS): < 0.1
 - Bundle size (gzipped): < 200KB (initial)
+
+### Agent Workflow Completed
+- [ ] Agent verified code builds successfully
+- [ ] Agent ran all tests and verified they pass
+- [ ] Agent ran security scans and verified 0 vulnerabilities
+- [ ] Agent verified documentation and accessibility
 
 ---
 
@@ -3816,157 +3870,6 @@ vi.mock('./api', () => ({
 
 // Spy on method
 vi.spyOn(console, 'error').mockImplementation(() => {});
-```
-
----
-
-## 11. Security & Dependency Management (MANDATORY)
-
-### A. Automated Dependency Management
-
-**Use npm with lockfiles and automated scanning for consistent and secure environments:**
-
-```json
-// package.json
-{
-  "scripts": {
-    "audit": "npm audit --audit-level=high",
-    "update": "npm update"
-  }
-}
-```
-
-- **Lockfiles**: ALWAYS commit `package-lock.json`. Use `npm ci` in CI/CD to ensure exact dependency matching.
-- **Dependency Auditing**: Integrate `npm audit` into your pre-commit hooks or CI pipeline.
-- **Selective Pinning**: Pin versions of high-risk dependencies (e.g., encryption or auth libraries) to specific versions.
-
-### B. Vulnerability Scanning & Security
-
-**Mandatory security checks for ALL React projects:**
-
-1. **Vulnerability Scan**:
-   ```bash
-   # Scan all dependencies for known vulnerabilities
-   npm audit --audit-level=high
-   ```
-   - Agents MUST ensure 0 HIGH or CRITICAL vulnerabilities are present in the dependency tree.
-
-2. **Supply Chain Audit**:
-   - Verify package integrity using `npm verify`.
-   - Use tools like `Snyk` or `Socket` to detect malicious packages or telemetry in dependencies.
-
-### C. Dependency File
-
-```json
-// Example package.json dependencies
-{
-  "dependencies": {
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "zod": "^3.23.0"
-  },
-  "devDependencies": {
-    "vitest": "^2.0.0",
-    "@biomejs/biome": "^1.9.0"
-  }
-}
-```
-
----
-
-## 12. Deployment Checklist
-
-### Agent-Generated Code Verification (MANDATORY)
-
-#### Build & Compilation
-- [ ] Code compiles: `npm run typecheck` returns 0
-- [ ] Production build succeeds: `npm run build` completes successfully
-- [ ] React 19 features used correctly (Actions, `use` hook)
-- [ ] Code formatted: `npx @biomejs/biome check --apply .` passes
-
-#### Testing
-- [ ] All tests pass: `npm test` returns exit code 0
-- [ ] Reasonable coverage: `npm test -- --coverage` shows >80%
-- [ ] Components tested with `user-event` for realistic behavior
-
-#### Security
-- [ ] Dependency scan passes: `npm audit` shows 0 HIGH/CRITICAL vulnerabilities
-- [ ] Supply chain verified: `package-lock.json` is committed and synced
-- [ ] Secrets check: 0 hardcoded secrets in code or `.env.local`
-- [ ] Static analysis: `biome` passes with 0 security warnings
-
-#### Code Quality
-- [ ] No unused dependencies or imports
-- [ ] Small, focused components with clear props interfaces
-- [ ] Project structure follows the standard layout
-
-#### Documentation
-- [ ] All public APIs (components/hooks) have JSDoc comments
-- [ ] Documentation check passes: `npm run docs:check` returns 0
-- [ ] Examples provided for complex components and hooks
-
-#### Architecture
-- [ ] Separation of concerns: business logic in hooks, UI in components
-- [ ] Accessibility: WCAG 2.1 AA compliance verified
-- [ ] No global mutable state (use stores or context)
-
-#### Agent Workflow Completed
-- [ ] Agent verified code builds successfully
-- [ ] Agent ran all tests and verified they pass
-- [ ] Agent ran security scans and verified 0 vulnerabilities
-- [ ] Agent verified documentation and accessibility
-
----
-
-## 13. Why This Configuration Works
-
-**React 19 Actions**:
-- Simplifies data mutations by automatically managing pending states and error handling, reducing the need for manual `isLoading` state management.
-
-**React Compiler**:
-- Eliminates manual performance optimization (memoization) by automatically generating the most efficient code, reducing developer cognitive load.
-
-**Vite 6+**:
-- Provides near-instant development starts and lightning-fast HMR using native ESM, ensuring a high-velocity developer feedback loop.
-
----
-
-## 14. Quick Reference
-
-### Common Commands
-
-```bash
-# Build
-npm run build
-
-# Test with coverage
-npm test -- --coverage
-
-# Security scan
-npm audit --audit-level=high
-
-# Lint and Format
-npx @biomejs/biome check --apply .
-
-# Run dev server
-npm run dev
-```
-
-### Modern React 19 Patterns Cheat Sheet
-
-```tsx
-// useActionState (Mutations)
-const [state, formAction, isPending] = useActionState(updateUser, null);
-
-// useFormStatus (Sub-component UI)
-const { pending } = useFormStatus();
-
-// use (Promises in Render)
-const data = use(fetchDataPromise);
-
-// Native Metadata (SEO)
-<title>My App</title>
-<meta name="description" content="React 19" />
 ```
 
 ---

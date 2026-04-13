@@ -1,12 +1,12 @@
 # C# Development Guidelines
-Mandatory standards for C# development, following modern .NET patterns and best practices. .NET 9+, Visual Studio, Rider, Roslyn analyzers, dotnet CLI.
+Mandatory standards for C# development, following modern .NET patterns and best practices. .NET 10+, Visual Studio, Rider, Roslyn analyzers, dotnet CLI.
 
 ---
 
 **Agent Profile**: The C# Expert
 **Role**: Senior .NET Developer & Software Architect
 **Objective**: Generate clean, efficient, and maintainable C# code following Microsoft and community best practices.
-**Tools**: .NET 9+, Visual Studio, Rider, Roslyn analyzers, dotnet CLI.
+**Tools**: .NET 10+, Visual Studio, Rider, Roslyn analyzers, dotnet CLI.
 
 ---
 
@@ -1079,7 +1079,7 @@ public class OrdersControllerTests : IClassFixture<WebApplicationFactory<Program
 
 ---
 
-## 11. Security & Dependency Management (MANDATORY)
+## 12. Security & Dependency Management (MANDATORY)
 
 ### A. Automated Dependency Management
 
@@ -1131,7 +1131,7 @@ public class OrdersControllerTests : IClassFixture<WebApplicationFactory<Program
 
 ---
 
-## 12. Deployment Checklist
+## 13. Deployment Checklist
 
 ### Agent-Generated Code Verification (MANDATORY)
 
@@ -1176,7 +1176,7 @@ public class OrdersControllerTests : IClassFixture<WebApplicationFactory<Program
 
 ---
 
-## 13. Why This Configuration Works
+## 14. Why This Configuration Works
 
 **Central Package Management**:
 - Ensures consistent dependency versions across the entire solution, preventing "dependency hell" and simplifying security updates.
@@ -1185,14 +1185,14 @@ public class OrdersControllerTests : IClassFixture<WebApplicationFactory<Program
 - Eliminates an entire class of runtime errors (NullReferenceException) by forcing explicit intent and compile-time checks.
 
 **Modern Synchronization (Lock type)**:
-- The .NET 9 `System.Threading.Lock` provides a more efficient and structured way to handle thread safety than the traditional `lock(obj)` keyword.
+- The .NET 10 `System.Threading.Lock` provides a more efficient and structured way to handle thread safety than the traditional `lock(obj)` keyword.
 
 **Performance (params Span)**:
 - Using `params ReadOnlySpan<T>` allows high-performance APIs that avoid heap allocations when calling methods with varying numbers of arguments.
 
 ---
 
-## 14. Quick Reference
+## 15. Quick Reference
 
 ### Common Commands
 
@@ -1216,10 +1216,10 @@ dotnet run --project src/MyApp.Api
 dotnet clean
 ```
 
-### Modern C# 13 Patterns Cheat Sheet
+### Modern C# 14 Patterns Cheat Sheet
 
 ```csharp
-// New Lock type (.NET 9)
+// New Lock type (.NET 10)
 private readonly System.Threading.Lock _gate = new();
 public void ThreadSafeMethod()
 {
@@ -1229,7 +1229,7 @@ public void ThreadSafeMethod()
     }
 }
 
-// params ReadOnlySpan (.NET 9)
+// params ReadOnlySpan (.NET 10)
 public void ProcessData(params ReadOnlySpan<int> numbers)
 {
     foreach (var n in numbers) { ... }

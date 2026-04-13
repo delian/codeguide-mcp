@@ -2773,6 +2773,106 @@ except sqlite3.OperationalError:
 
 ---
 
+## 22. Deployment Checklist
+
+### Build and Configuration
+- [ ] SQLite version pinned and documented
+- [ ] WAL mode enabled (`PRAGMA journal_mode=WAL`)
+- [ ] Foreign keys enabled (`PRAGMA foreign_keys=ON`)
+- [ ] Busy timeout set (`PRAGMA busy_timeout=5000`)
+- [ ] Synchronous mode set appropriately (`NORMAL` for WAL mode)
+- [ ] Page size optimized for workload (`PRAGMA page_size=4096` or `8192`)
+- [ ] `mmap_size` configured for read-heavy workloads
+
+### Testing
+- [ ] All queries profiled with `EXPLAIN QUERY PLAN`
+- [ ] Indexes verified for all frequent query patterns
+- [ ] Concurrent write behavior tested under expected load
+- [ ] Database integrity verified with `PRAGMA integrity_check`
+- [ ] Backup procedure tested with `.backup` command or SQLite Online Backup API
+- [ ] Maximum database size validated for deployment target
+
+### Security
+- [ ] Database file permissions restricted (0600 or equivalent)
+- [ ] WAL and SHM file permissions match database file
+- [ ] No database files served via public web paths
+- [ ] SQLite Encryption Extension (SEE) or SQLCipher configured if encryption required
+- [ ] Parameterized queries used exclusively (no string interpolation)
+- [ ] `SQLITE_DBCONFIG_DEFENSIVE` enabled to prevent corruption via SQL
+
+### Agent Workflow
+- [ ] Schema migration scripts version-controlled and sequential
+- [ ] Application handles `SQLITE_BUSY` gracefully with retry logic
+- [ ] Monitoring configured for database file size and WAL checkpoint frequency
+- [ ] Automated backups scheduled with Litestream or application-level backup
+- [ ] Runbooks for database recovery, WAL reset, and corruption handling
+
+---
+
+## 23. Why This Configuration Works
+
+**WAL Mode for Concurrency**:
+- Write-ahead logging allows concurrent readers during writes, eliminating reader-writer contention and providing significantly higher throughput for mixed read-write workloads.
+
+**Zero-Configuration Deployment**:
+- As a serverless embedded database, SQLite requires no separate process management, network configuration, or user authentication setup, reducing operational complexity to near zero.
+
+**ACID Compliance with Full Durability**:
+- Atomic commits, rollback journals or WAL, and configurable synchronous modes ensure data integrity even during power failures or crashes without sacrificing performance.
+
+**Single-File Portability**:
+- The entire database lives in a single cross-platform file, enabling simple backups (file copy), easy testing (in-memory databases), and straightforward deployment across any environment.
+
+**Extensive SQL Feature Coverage**:
+- Support for window functions, CTEs, JSON functions, FTS5 full-text search, and R-tree spatial indexes provides relational database capabilities without server overhead.
+
+---
+
+## 24. Quick Reference
+
+### Common Commands
+
+```bash
+# Open database
+sqlite3 mydb.db
+
+# Enable WAL mode
+sqlite3 mydb.db "PRAGMA journal_mode=WAL;"
+
+# Check database integrity
+sqlite3 mydb.db "PRAGMA integrity_check;"
+
+# Analyze tables for query optimizer
+sqlite3 mydb.db "ANALYZE;"
+
+# Backup database
+sqlite3 mydb.db ".backup /path/to/backup.db"
+
+# Dump database to SQL
+sqlite3 mydb.db ".dump" > backup.sql
+
+# Restore from SQL dump
+sqlite3 newdb.db < backup.sql
+
+# Show tables and schema
+sqlite3 mydb.db ".tables"
+sqlite3 mydb.db ".schema tablename"
+
+# Explain query plan
+sqlite3 mydb.db "EXPLAIN QUERY PLAN SELECT * FROM users WHERE email = 'test@example.com';"
+
+# Check database size
+sqlite3 mydb.db "SELECT page_count * page_size AS size FROM pragma_page_count(), pragma_page_size();"
+
+# Vacuum database to reclaim space
+sqlite3 mydb.db "VACUUM;"
+
+# Checkpoint WAL
+sqlite3 mydb.db "PRAGMA wal_checkpoint(TRUNCATE);"
+```
+
+---
+
 ## References and Resources
 
 ### Official Documentation

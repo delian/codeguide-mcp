@@ -1,12 +1,12 @@
 # Swift Development Guidelines
-Mandatory standards for Swift development, following Apple's guidelines and community best practices. Xcode, Swift 5.9+, SwiftLint, SwiftFormat, Instruments.
+Mandatory standards for Swift development, following Apple's guidelines and community best practices. Xcode, Swift 6.0+, SwiftLint, SwiftFormat, Instruments.
 
 ---
 
 **Agent Profile**: The Swift Expert
 **Role**: Senior iOS/macOS Developer & Swift Architect
 **Objective**: Generate clean, safe, and performant Swift code following Apple's Human Interface Guidelines and Swift API Design Guidelines.
-**Tools**: Xcode, Swift 5.9+, SwiftLint, SwiftFormat, Instruments.
+**Tools**: Xcode, Swift 6.0+, SwiftLint, SwiftFormat, Instruments.
 
 ---
 
@@ -1041,7 +1041,85 @@ class MockNetworkClient: NetworkClientProtocol {
 
 ---
 
-## 11. Deployment Checklist
+## 11. Security & Dependency Management (MANDATORY)
+
+### A. Automated Dependency Management
+
+```bash
+# Update all SPM dependencies to latest compatible versions
+swift package update
+
+# Resolve dependencies (regenerates Package.resolved)
+swift package resolve
+
+# Show dependency tree
+swift package show-dependencies --format json
+
+# Generate Software Bill of Materials (SBOM)
+swift package generate-sbom
+```
+
+**Package.resolved** is the lockfile for SPM. Always commit it to version control for reproducible builds.
+
+### B. Vulnerability Scanning & Security
+
+Swift Package Manager does not include a native `audit` command. Use third-party tools:
+
+```bash
+# Snyk: scan Swift dependencies for known vulnerabilities
+snyk test --all-projects
+
+# OWASP Dependency-Check (supports Swift/CocoaPods/SPM)
+dependency-check --project "MyApp" --scan .
+
+# Trivy: filesystem scan for vulnerabilities in vendored dependencies
+trivy fs --scanners vuln .
+```
+
+**Security best practices:**
+- Pin dependency versions in `Package.swift` using `.exact()` or `.upToNextMinor()` instead of `.upToNextMajor()`
+- Review dependency source code before adding new packages
+- Monitor Apple Security Updates and CVE databases for Swift runtime vulnerabilities
+- Enable App Transport Security (ATS) — never disable it in production
+- Use Keychain for secrets storage, never hardcode credentials
+
+### C. Dependency File
+
+```swift
+// Package.swift
+// swift-tools-version: 6.0
+import PackageDescription
+
+let package = Package(
+    name: "MyApp",
+    platforms: [
+        .iOS(.v17),
+        .macOS(.v14)
+    ],
+    dependencies: [
+        // Pin to exact versions for reproducibility
+        .package(url: "https://github.com/Alamofire/Alamofire.git", exact: "5.9.1"),
+        .package(url: "https://github.com/apple/swift-log.git", .upToNextMinor(from: "1.5.0")),
+    ],
+    targets: [
+        .target(
+            name: "MyApp",
+            dependencies: [
+                .product(name: "Alamofire", package: "Alamofire"),
+                .product(name: "Logging", package: "swift-log"),
+            ]
+        ),
+        .testTarget(
+            name: "MyAppTests",
+            dependencies: ["MyApp"]
+        ),
+    ]
+)
+```
+
+---
+
+## 12. Deployment Checklist
 
 ### Code Quality
 - [ ] No force unwraps without safety comments
@@ -1067,7 +1145,7 @@ class MockNetworkClient: NetworkClientProtocol {
 
 ---
 
-## 12. Quick Reference
+## 13. Quick Reference
 
 ```swift
 // Optional handling
@@ -1096,6 +1174,20 @@ internal  // Default, visible in module
 fileprivate // Visible in file
 private   // Visible in enclosing scope
 ```
+
+---
+
+## 14. Why This Configuration Works
+
+1. **Protocol-Oriented Design for Testability**: Defining dependencies as protocols and injecting them via initializers makes every component independently testable with mock implementations. This eliminates the need for heavyweight test frameworks and keeps unit tests fast.
+
+2. **Value Types with Struct-First Approach**: Preferring structs and enums over classes eliminates shared mutable state, retain cycles, and data races by default. Value semantics make code behavior predictable and thread-safe without explicit synchronization.
+
+3. **Swift Concurrency with async/await**: Structured concurrency with `async let`, `TaskGroup`, and actors replaces callback pyramids and Combine chains with linear, readable code. The compiler enforces `Sendable` compliance, catching data races at compile time.
+
+4. **SwiftLint + SwiftFormat Enforcement**: Automated linting catches API design guideline violations, force-unwrap abuse, and naming inconsistencies before code review. Combined with SwiftFormat, every file follows identical formatting regardless of author.
+
+5. **Guard-Let for Early Return Pattern**: Using `guard let` to unwrap optionals at the top of functions eliminates nested pyramid-of-doom `if let` chains. The forced `else { return }` clause ensures the failure path is handled immediately, keeping the happy path at the top indentation level.
 
 ---
 

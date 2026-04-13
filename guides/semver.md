@@ -643,6 +643,16 @@ alpha < beta < rc < stable
 
 ---
 
+## 13. Why This Configuration Works
+
+- **Version numbers communicate change impact**: Following SemVer strictly means consumers can look at a version bump and immediately know whether the update is a safe patch, a feature addition, or a potentially breaking change. This clarity enables confident dependency management at scale.
+- **Automated versioning eliminates human error**: Deriving version numbers from conventional commit messages removes the subjective judgment from versioning decisions. The commit history becomes the single source of truth, ensuring version bumps are consistent and accurate.
+- **Deprecation before removal protects consumers**: The disciplined deprecation-then-removal cycle gives downstream users advance notice and migration time. This builds trust with API consumers and avoids the surprise breakage that erodes confidence in a library or service.
+- **Changelogs provide actionable upgrade guidance**: Automatically generated changelogs grouped by type (features, fixes, breaking changes) give consumers exactly the information they need to evaluate and plan upgrades, reducing the friction of staying up to date.
+- **Pre-release versions enable safe experimentation**: The alpha/beta/rc progression provides a structured path for testing major changes with early adopters before committing to a stable release, catching integration issues without affecting the broader user base.
+
+---
+
 **Last Updated:** 2026-01-31
 **Version:** 1.0
 **Maintainer:** Release Team

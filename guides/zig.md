@@ -2181,9 +2181,10 @@ test "Memory leak detection" {
 ### Pre-Production Validation
 
 #### Compilation (MANDATORY)
-- [ ] **Builds successfully**: `zig build` passes
+- [ ] **Builds successfully**: `zig build` passes (returns exit code 0)
 - [ ] **Release builds**: `zig build -Doptimize=ReleaseFast` passes
 - [ ] **Safe release builds**: `zig build -Doptimize=ReleaseSafe` passes
+- [ ] **Multi-platform build**: `zig build -Dtarget=x86_64-linux` verified
 - [ ] **No warnings**: Compilation produces no warnings
 - [ ] **Cross-compilation tested**: Tested on target platforms
 
@@ -2193,14 +2194,26 @@ test "Memory leak detection" {
 
 #### Testing (MANDATORY)
 - [ ] **All tests pass**: `zig test src/main.zig` returns exit code 0
-- [ ] **No memory leaks**: Tests use `std.testing.allocator`
+- [ ] **No memory leaks**: Tests use `std.testing.allocator` (0 leaks)
 - [ ] **Integration tests pass**: `zig build test` succeeds
+- [ ] **Edge cases**: Integer overflows and null pointer checks verified in `ReleaseSafe`
 - [ ] **Benchmarks run**: Performance tests complete
 
+#### Security
+- [ ] **Supply chain verified**: `build.zig.zon` hashes match remote sources
+- [ ] **Secrets check**: 0 hardcoded secrets in `src/` or `build.zig`
+- [ ] **Bounds checking**: Verified active in development/staging builds
+
+#### Code Quality
+- [ ] **No unused imports or variables**
+- [ ] **Small, focused structs and functions**
+- [ ] **Memory ownership is clear** (who allocates, who frees)
+
 #### Documentation (MANDATORY)
-- [ ] **All public APIs documented**: Doc comments on all `pub` items
-- [ ] **Documentation builds**: `zig build docs` succeeds
+- [ ] **All public APIs documented**: Doc comments (`///`) on all `pub` items
+- [ ] **Documentation builds**: `zig build docs` / `zig build-lib -femit-docs` succeeds
 - [ ] **Examples in docs**: Code examples in doc comments
+- [ ] **Examples provided for complex `comptime` logic**
 - [ ] **Module docs present**: Top-level module documentation
 
 #### Memory Management
@@ -2211,6 +2224,8 @@ test "Memory leak detection" {
 
 #### Architecture
 - [ ] **Hexagonal architecture**: Clear layer separation
+- [ ] **Separation of concerns**: Logic in modules, I/O in main
+- [ ] **Allocators passed explicitly** (no global allocators)
 - [ ] **CQRS implemented**: Commands and queries separated
 - [ ] **Ports as interfaces**: Repository pattern used
 - [ ] **Pure Zig**: No C/C++ dependencies unless necessary
@@ -2220,9 +2235,15 @@ test "Memory leak detection" {
 - [ ] **Comptime leveraged**: Generic code uses comptime
 - [ ] **Cache-friendly**: Sequential data access patterns
 
+#### Agent Workflow Completed
+- [ ] Agent verified code builds successfully
+- [ ] Agent ran all tests and verified 0 leaks
+- [ ] Agent verified dependency hashes in `build.zig.zon`
+- [ ] Agent verified documentation and formatting
+
 ---
 
-## 11. Security & Dependency Management (MANDATORY)
+## 15. Security & Dependency Management (MANDATORY)
 
 ### A. Automated Dependency Management
 
@@ -2275,50 +2296,7 @@ exe.root_module.addImport("zap", zap.module("zap"));
 
 ---
 
-## 12. Deployment Checklist
-
-### Agent-Generated Code Verification (MANDATORY)
-
-#### Build & Compilation
-- [ ] Code compiles: `zig build` returns exit code 0
-- [ ] Multi-platform build: `zig build -Dtarget=x86_64-linux` verified
-- [ ] Optimization: `zig build -Doptimize=ReleaseSafe` succeeds
-- [ ] Code formatted: `zig fmt --check .` passes
-
-#### Testing
-- [ ] All tests pass: `zig build test` returns exit code 0
-- [ ] Memory leaks: `std.testing.allocator` shows 0 leaks in tests
-- [ ] Edge cases: Integer overflows and null pointer checks verified in `ReleaseSafe`
-
-#### Security
-- [ ] Supply chain verified: `build.zig.zon` hashes match remote sources
-- [ ] Secrets check: 0 hardcoded secrets in `src/` or `build.zig`
-- [ ] Bounds checking: Verified active in development/staging builds
-
-#### Code Quality
-- [ ] No unused imports or variables
-- [ ] Small, focused structs and functions
-- [ ] Memory ownership is clear (who allocates, who frees)
-
-#### Documentation
-- [ ] All public APIs (`pub`) have doc comments (`///`)
-- [ ] Documentation builds: `zig build-lib -femit-docs` succeeds
-- [ ] Examples provided for complex `comptime` logic
-
-#### Architecture
-- [ ] Separation of concerns: logic in modules, I/O in main
-- [ ] Allocators passed explicitly (no global allocators)
-- [ ] Hexagonal architecture followed where applicable
-
-#### Agent Workflow Completed
-- [ ] Agent verified code builds successfully
-- [ ] Agent ran all tests and verified 0 leaks
-- [ ] Agent verified dependency hashes in `build.zig.zon`
-- [ ] Agent verified documentation and formatting
-
----
-
-## 13. Why This Configuration Works
+## 16. Why This Configuration Works
 
 **Explicit Allocators**:
 - Eliminates hidden memory allocations, making the code's resource usage predictable and preventing memory leaks in long-running systems.
@@ -2331,7 +2309,7 @@ exe.root_module.addImport("zap", zap.module("zap"));
 
 ---
 
-## 14. Quick Reference
+## 17. Quick Reference
 
 ### Common Commands
 

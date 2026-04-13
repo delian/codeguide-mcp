@@ -189,6 +189,203 @@ Higher similarity → More relevant result
 
 ---
 
+## 2A. TDD Protocol (Red-Green-Refactor)
+
+EVERY new feature or module MUST follow the Red-Green-Refactor cycle. No production code without a failing test first.
+
+### Workflow
+
+1. **RED** -- Write a failing test that defines the expected behavior.
+2. **GREEN** -- Write the minimum production code to make the test pass.
+3. **REFACTOR** -- Clean up while keeping tests green.
+
+### Concrete Example -- Testing Collection CRUD and Similarity Search
+
+**Step 1 -- RED (Python `pytest` with ChromaDB):**
+
+```python
+# tests/test_chroma_collection.py
+import pytest
+import chromadb
+
+@pytest.fixture
+def client():
+    """Ephemeral in-memory ChromaDB client for isolated tests."""
+    return chromadb.Client()
+
+@pytest.fixture
+def collection(client):
+    """Create a test collection with cosine distance."""
+    coll = client.create_collection(
+        name="test_docs",
+        metadata={"hnsw:space": "cosine"},
+    )
+    yield coll
+    client.delete_collection("test_docs")
+
+def test_add_and_get_documents(collection):
+    """Documents added to a collection are retrievable by ID."""
+    collection.add(
+        ids=["doc1", "doc2", "doc3"],
+        documents=["Python is great for ML", "Java is enterprise-ready", "Rust is memory-safe"],
+        metadatas=[{"lang": "python"}, {"lang": "java"}, {"lang": "rust"}],
+    )
+
+    result = collection.get(ids=["doc1", "doc3"])
+    assert len(result["ids"]) == 2
+    assert "doc1" in result["ids"]
+    assert "doc3" in result["ids"]
+
+def test_similarity_search_returns_relevant_docs(collection):
+    """Querying with a related phrase returns the most similar document first."""
+    collection.add(
+        ids=["ml", "web", "systems"],
+        documents=[
+            "Machine learning with neural networks and deep learning",
+            "Building REST APIs with web frameworks",
+            "Operating systems and kernel development",
+        ],
+    )
+
+    results = collection.query(
+        query_texts=["deep learning and AI models"],
+        n_results=2,
+    )
+    assert results["ids"][0][0] == "ml", "Most similar doc should be 'ml'"
+    assert len(results["ids"][0]) == 2
+
+def test_collection_count(collection):
+    """Collection count reflects the number of added documents."""
+    assert collection.count() == 0
+    collection.add(
+        ids=["a", "b"],
+        documents=["first doc", "second doc"],
+    )
+    assert collection.count() == 2
+
+def test_delete_document(collection):
+    """Deleted documents are no longer retrievable."""
+    collection.add(ids=["x"], documents=["to be deleted"])
+    assert collection.count() == 1
+
+    collection.delete(ids=["x"])
+    assert collection.count() == 0
+    result = collection.get(ids=["x"])
+    assert len(result["ids"]) == 0
+```
+
+**Step 2 -- GREEN:** Implement the service layer that wraps ChromaDB operations.
+
+```python
+# myapp/vector_store.py
+import chromadb
+
+class VectorStore:
+    def __init__(self, client: chromadb.Client, collection_name: str):
+        self.collection = client.get_or_create_collection(collection_name)
+
+    def add_documents(self, ids: list[str], texts: list[str], metadata: list[dict] | None = None):
+        self.collection.add(ids=ids, documents=texts, metadatas=metadata)
+
+    def search(self, query: str, top_k: int = 5) -> list[dict]:
+        results = self.collection.query(query_texts=[query], n_results=top_k)
+        return [{"id": id_, "document": doc} for id_, doc in zip(results["ids"][0], results["documents"][0])]
+
+    def delete(self, ids: list[str]):
+        self.collection.delete(ids=ids)
+```
+
+**Step 3 -- REFACTOR:**
+
+- Extract the `client` and `collection` fixtures into `conftest.py`.
+- Parameterize distance metric tests across `cosine`, `l2`, and `ip`.
+- Add assertion on distance scores to verify ordering.
+
+### TDD Rules for ChromaDB
+
+- Use `chromadb.Client()` (ephemeral in-memory) for unit tests -- no persistence needed.
+- Always clean up collections in fixture teardown.
+- Test similarity search with documents that have clear semantic differences.
+- Verify `count()` after every add/delete to catch silent failures.
+- Test metadata filtering in combination with similarity search.
+
+---
+
+## 2B. Bug Fix Protocol (Regression Testing)
+
+EVERY bug fix MUST include a regression test that fails before the fix and passes after.
+
+### Workflow
+
+1. **Reproduce** -- Write a test that triggers the exact bug.
+2. **Verify RED** -- Confirm the test fails on the current code.
+3. **Fix** -- Apply the minimal code change.
+4. **Verify GREEN** -- Confirm the test (and all others) pass.
+5. **Document** -- Reference the bug/ticket in the test docstring.
+
+### Concrete Example -- Metadata Filter Returns Wrong Results After Update
+
+**Bug report:** After updating a document's metadata, queries with the old metadata value still return the document because the application calls `add()` instead of `update()`.
+
+**Step 1 -- Regression test:**
+
+```python
+# tests/test_bug_metadata_stale.py
+import pytest
+import chromadb
+
+@pytest.fixture
+def collection():
+    client = chromadb.Client()
+    coll = client.create_collection("test_bug_meta")
+    yield coll
+    client.delete_collection("test_bug_meta")
+
+def test_updated_metadata_not_returned_by_old_filter(collection):
+    """Regression: BUG-8833 -- after metadata update, old filter values
+    must not match the updated document."""
+    collection.add(
+        ids=["report1"],
+        documents=["Q4 financial report"],
+        metadatas=[{"status": "draft"}],
+    )
+
+    # Update status from 'draft' to 'published'
+    collection.update(
+        ids=["report1"],
+        metadatas=[{"status": "published"}],
+    )
+
+    # Query with old filter -- must return zero results
+    results = collection.get(
+        where={"status": "draft"},
+    )
+    assert len(results["ids"]) == 0, \
+        "BUG-8833: Document with updated metadata still matched old filter"
+
+    # Query with new filter -- must return the document
+    results = collection.get(
+        where={"status": "published"},
+    )
+    assert len(results["ids"]) == 1
+    assert results["ids"][0] == "report1"
+```
+
+**Step 2 -- Verify the test fails** (application used `add()` which created a duplicate instead of updating).
+
+**Step 3 -- Fix** (use `collection.update()` instead of `collection.add()` in the application's update path).
+
+**Step 4 -- Verify GREEN** -- metadata filter returns correct results after update.
+
+### Regression Test Rules for ChromaDB
+
+- Name test files `test_bug_<description>.py` or `test_regression_<ticket>.py`.
+- Include the ticket/issue number in the docstring.
+- Regression tests are NEVER deleted.
+- Test both `get()` with `where` filters and `query()` with `where` filters after mutations.
+
+---
+
 ## 3. Installation and Setup
 
 ### Python Installation
@@ -1894,6 +2091,235 @@ print(rag_chat.chat("Can you give an example?"))  # Uses context from previous
 ---
 
 *[Continuing with sections 13-20 following the same comprehensive detail...]*
+
+---
+
+## 14. Security & Dependency Management (MANDATORY)
+
+### A. Client Library Vulnerability Scanning
+
+Chroma is consumed as a client library. Scan dependencies using the appropriate language tool:
+
+**Python (pip-audit):**
+```bash
+# Install pip-audit
+pip install pip-audit
+
+# Scan all installed packages including chromadb
+pip-audit
+
+# Scan with JSON output for CI
+pip-audit --format=json --output=audit-report.json
+```
+
+**JavaScript/TypeScript (npm audit):**
+```bash
+# Scan for vulnerabilities
+npm audit
+
+# Fix automatically where possible
+npm audit fix
+
+# Fail CI on high+ severity
+npm audit --audit-level=high
+```
+
+- Run scans in CI on every PR and at least weekly on the main branch
+- Keep `chromadb` and its transitive dependencies up to date
+
+### B. API Key Management
+
+- NEVER hardcode API keys (OpenAI, Cohere, HuggingFace) in source code
+- Use environment variables or a secrets manager:
+
+```python
+import os
+from chromadb.utils import embedding_functions
+
+# Load API key from environment - NEVER hardcode
+openai_key = os.environ["OPENAI_API_KEY"]
+
+embedding_fn = embedding_functions.OpenAIEmbeddingFunction(
+    api_key=openai_key,
+    model_name="text-embedding-3-small"
+)
+```
+
+```bash
+# .gitignore
+.env
+.env.*
+```
+
+- For Chroma server mode, authenticate API access with tokens:
+
+```python
+import chromadb
+
+client = chromadb.HttpClient(
+    host="chroma-server",
+    port=8000,
+    headers={"Authorization": f"Bearer {os.environ['CHROMA_API_TOKEN']}"}
+)
+```
+
+### C. Data Access Controls
+
+- In server/cloud mode, enforce authentication on all endpoints
+- Restrict collection access by application or user scope
+- Never expose the Chroma HTTP API to the public internet without authentication
+- Use network-level controls (VPC, firewall rules) to limit access to the Chroma server
+
+### D. Embedding Model Security
+
+- Pin embedding model versions to prevent silent changes in vector representations
+- Validate that input data does not contain prompt injection payloads before embedding
+- Monitor embedding API costs and set rate limits to prevent abuse
+- When using local models, verify checksums of downloaded model weights
+
+### E. Security Checklist
+
+- [ ] `pip-audit` or `npm audit` configured in CI
+- [ ] No API keys or tokens in source code or version control
+- [ ] Chroma server access authenticated and network-restricted
+- [ ] Embedding model versions pinned
+- [ ] `.env` files excluded from version control
+- [ ] Collection access scoped per application
+- [ ] Input data validated before embedding
+- [ ] Dependencies updated at least monthly
+
+---
+
+## 15. Deployment Checklist
+
+### Data Pipeline
+- [ ] **Embedding model pinned**: Model name and version locked in config (no `latest` tags)
+- [ ] **Chunking strategy validated**: Document splitting tested with representative data
+- [ ] **Metadata schema documented**: All metadata fields and types defined
+- [ ] **Ingestion pipeline tested**: End-to-end pipeline runs against staging data successfully
+- [ ] **Deduplication in place**: Duplicate document detection configured before embedding
+
+### Collection Configuration
+- [ ] **Distance metric selected**: Cosine, L2, or Inner Product chosen based on embedding model
+- [ ] **Collection naming conventions followed**: Consistent, descriptive collection names
+- [ ] **HNSW parameters tuned**: `ef_construction`, `M`, and `ef_search` set for workload
+- [ ] **Batch sizes configured**: Upsert and query batch sizes tested under load
+
+### Infrastructure
+- [ ] **Persistence configured**: Data directory set and backed up on schedule
+- [ ] **Server mode secured**: Authentication tokens set, network access restricted
+- [ ] **Resource limits set**: Memory and CPU limits defined for Chroma process
+- [ ] **Health checks configured**: Liveness and readiness probes in place
+- [ ] **Backup and restore tested**: Recovery procedure verified end-to-end
+
+### Testing
+- [ ] **Similarity search validated**: Query results verified against known-good matches
+- [ ] **Metadata filtering tested**: All filter operators tested with edge cases
+- [ ] **Performance benchmarks established**: Query latency and throughput baselines recorded
+- [ ] **RAG pipeline end-to-end tested**: Full retrieval-to-generation flow validated
+- [ ] **Regression tests exist**: All previous bugs have corresponding test cases
+
+### Security
+- [ ] **No API keys in source code**: All secrets loaded from environment or secrets manager
+- [ ] **Dependency audit passing**: `pip-audit` or `npm audit` clean in CI
+- [ ] **Network access restricted**: Chroma server not exposed to public internet
+- [ ] **Input validation enabled**: User-supplied text validated before embedding
+
+---
+
+## 16. Why This Configuration Works
+
+- **Embedding consistency eliminates silent failures**: Mandating the same model and configuration for indexing and querying prevents the subtle, hard-to-debug mismatch errors that occur when different embedding models produce vectors in incompatible spaces, which causes similarity search to return meaningless results.
+- **Metadata-first collection design enables efficient retrieval**: Designing collections and metadata schemas around query patterns rather than source data structure allows Chroma to filter before searching, dramatically reducing the vector comparison space and improving both latency and relevance.
+- **Pinned model versions ensure reproducibility**: Locking embedding model versions prevents silent changes in vector representations when models are updated, which would otherwise invalidate existing collections and require full re-embedding of all documents.
+- **Distance metric alignment with embedding models maximizes accuracy**: Matching the distance function (cosine, L2, inner product) to the one the embedding model was trained with ensures that similarity scores are meaningful and that nearest-neighbor results reflect true semantic proximity.
+- **Chunking strategy validation prevents garbage-in-garbage-out**: Testing document splitting with representative data catches problems like chunks that are too small (losing context) or too large (diluting relevance) before they corrupt the entire collection.
+
+---
+
+## 17. Quick Reference
+
+### Chroma Operations at a Glance
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                   CHROMA QUICK REFERENCE                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  CLIENT MODES                                                    │
+│  ────────────                                                    │
+│  In-Memory:    chromadb.Client()                                │
+│  Persistent:   chromadb.PersistentClient(path="./chroma_data") │
+│  Server:       chromadb.HttpClient(host="...", port=8000)      │
+│                                                                  │
+│  CORE OPERATIONS                                                 │
+│  ───────────────                                                 │
+│  Create:   client.create_collection(name, embedding_function)   │
+│  Get:      client.get_collection(name)                          │
+│  Add:      collection.add(ids, documents, metadatas)            │
+│  Query:    collection.query(query_texts, n_results)             │
+│  Update:   collection.update(ids, documents, metadatas)         │
+│  Delete:   collection.delete(ids)                               │
+│  Upsert:   collection.upsert(ids, documents, metadatas)        │
+│                                                                  │
+│  DISTANCE METRICS                                                │
+│  ────────────────                                                │
+│  cosine:  Normalized direction similarity (default)              │
+│  l2:      Euclidean distance (magnitude matters)                │
+│  ip:      Inner product (dot product similarity)                │
+│                                                                  │
+│  METADATA FILTER OPERATORS                                       │
+│  ─────────────────────────                                       │
+│  $eq, $ne       Equal / Not equal                               │
+│  $gt, $gte      Greater than / Greater or equal                 │
+│  $lt, $lte      Less than / Less or equal                       │
+│  $in, $nin      In list / Not in list                           │
+│  $and, $or      Logical combinators                             │
+│                                                                  │
+│  EMBEDDING FUNCTIONS                                             │
+│  ───────────────────                                             │
+│  Default:        all-MiniLM-L6-v2 (Sentence Transformers)       │
+│  OpenAI:         text-embedding-3-small / text-embedding-3-large│
+│  Cohere:         embed-english-v3.0                             │
+│  HuggingFace:    Any sentence-transformers model                │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Performance Tuning Quick Reference
+
+```
+HNSW PARAMETERS:
+  ef_construction:  Higher = better recall, slower build (default: 100)
+  M:                Higher = better recall, more memory (default: 16)
+  ef_search:        Higher = better recall, slower query (default: 10)
+
+BATCH SIZING:
+  Upsert:  500-1000 documents per batch (avoid >5000)
+  Query:   1-10 query texts per call (avoid >100)
+
+CHUNKING GUIDELINES:
+  Target:     200-500 tokens per chunk
+  Overlap:    10-20% of chunk size
+  Strategy:   Sentence-aware splitting preferred over fixed-length
+```
+
+### Common Patterns
+
+```
+RAG PIPELINE:
+  1. Chunk documents → 2. Embed chunks → 3. Store in collection
+  4. Query with user input → 5. Retrieve top-k → 6. Pass to LLM
+
+HYBRID SEARCH:
+  1. Metadata filter (narrow candidates)
+  2. Similarity search (rank by relevance)
+  3. Optional reranking (cross-encoder)
+
+COLLECTION MANAGEMENT:
+  One collection per: embedding model + domain + version
+  Naming: {domain}_{model}_{version} (e.g., "docs_minilm_v2")
+```
 
 ---
 

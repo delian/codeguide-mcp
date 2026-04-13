@@ -125,6 +125,160 @@ int main() {
 - No query language
 - Application manages concurrency
 
+---
+
+## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+
+### TDD Cycle
+
+```
+1. RED: Write a failing test first
+   ↓
+2. GREEN: Write minimal code to make it pass
+   ↓
+3. REFACTOR: Improve code while keeping tests green
+   ↓
+   Repeat
+```
+
+### Example TDD Workflow for LevelDB (Python with pytest and plyvel)
+
+```python
+# Step 1: RED - Write failing test first
+import pytest
+import plyvel
+import tempfile
+import shutil
+
+@pytest.fixture
+def tmp_db(tmp_path):
+    db_path = str(tmp_path / "test.ldb")
+    yield db_path
+    shutil.rmtree(db_path, ignore_errors=True)
+
+def test_put_and_get_key(tmp_db):
+    """Test storing and retrieving a key-value pair."""
+    store = LevelStore(tmp_db)
+    store.put(b"user:1001", b"Alice")
+    result = store.get(b"user:1001")
+    assert result == b"Alice"
+    store.close()
+
+# Run: pytest test_leveldb.py -v
+# FAILS - NameError: name 'LevelStore' is not defined
+
+# Step 2: GREEN - Write minimal implementation
+class LevelStore:
+    def __init__(self, path):
+        self.db = plyvel.DB(path, create_if_missing=True)
+
+    def put(self, key, value):
+        self.db.put(key, value)
+
+    def get(self, key):
+        return self.db.get(key)
+
+    def close(self):
+        self.db.close()
+
+# Run: pytest test_leveldb.py -v
+# PASSES
+
+# Step 3: REFACTOR - Add batch writes and prefix iteration
+class LevelStore:
+    def __init__(self, path):
+        self.db = plyvel.DB(path, create_if_missing=True)
+
+    def put(self, key, value):
+        self.db.put(key, value)
+
+    def get(self, key):
+        return self.db.get(key)
+
+    def batch_put(self, pairs):
+        with self.db.write_batch() as wb:
+            for key, value in pairs:
+                wb.put(key, value)
+
+    def iter_prefix(self, prefix):
+        results = []
+        with self.db.iterator(prefix=prefix) as it:
+            for key, value in it:
+                results.append((key, value))
+        return results
+
+    def close(self):
+        self.db.close()
+
+# Tests still pass
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow
+
+```
+1. Bug Reported/Discovered
+   ↓
+2. Write a test that REPRODUCES the bug (test will FAIL)
+   ↓
+3. Verify the test fails for the right reason
+   ↓
+4. Fix the bug (make the test pass)
+   ↓
+5. Verify the test now PASSES
+   ↓
+6. Document the bug in test comments
+```
+
+### Example Bug Fix
+
+```python
+# Bug: batch_put() silently ignores errors and partially writes data
+# when a None value is passed in the pairs list
+
+import pytest
+
+# Step 1: Write test that reproduces the bug
+def test_batch_put_rejects_none_values(tmp_db):
+    """Regression: batch_put() should raise ValueError if any value
+    is None, not silently write partial data."""
+    store = LevelStore(tmp_db)
+    with pytest.raises(ValueError, match="Value cannot be None"):
+        store.batch_put([
+            (b"key1", b"val1"),
+            (b"key2", None),       # Invalid
+            (b"key3", b"val3"),
+        ])
+    # Ensure no partial writes occurred
+    assert store.get(b"key1") is None
+    store.close()
+
+# FAILS - TypeError from plyvel, key1 is already written
+
+# Step 2: Fix the bug
+class LevelStore:
+    # ... existing code ...
+
+    def batch_put(self, pairs):
+        for key, value in pairs:
+            if value is None:
+                raise ValueError(f"Value cannot be None for key: {key}")
+        with self.db.write_batch() as wb:
+            for key, value in pairs:
+                wb.put(key, value)
+
+# PASSES - bug fixed, regression prevented
+```
+
+---
+
 ## 3. Installation and Setup
 
 ### Ubuntu/Debian Installation
@@ -2447,7 +2601,71 @@ leveldb::Options Balanced() {
 - [ ] Quarterly: Consider compaction if needed
 ```
 
-## 20. Resources and References
+## 20. Deployment Checklist
+
+### Agent-Generated Code Verification (MANDATORY)
+
+#### Build & Compilation
+- [ ] Code compiles/runs without errors
+- [ ] All imports/dependencies resolved (libleveldb, language bindings)
+- [ ] Code formatted per project standards
+
+#### Testing
+- [ ] All tests pass
+- [ ] Coverage meets minimum threshold (>80%)
+- [ ] Integration tests pass with embedded LevelDB lifecycle
+
+#### Security
+- [ ] Dependency scan: 0 HIGH/CRITICAL vulnerabilities
+- [ ] No hardcoded credentials or secrets
+- [ ] Database file paths use environment variables
+
+#### Agent Workflow Completed
+- [ ] Agent verified code builds successfully
+- [ ] Agent ran all tests and verified they pass
+- [ ] Agent verified documentation
+
+---
+
+## 21. Why This Configuration Works
+
+**LSM-Tree Architecture Optimized for Write-Heavy Workloads**: LevelDB's log-structured merge tree converts random writes into sequential I/O, achieving high write throughput that outperforms B-tree databases on append-heavy workloads.
+
+**Minimal Footprint for Embedded Use**: The library has zero external dependencies and compiles to a small binary, making it ideal for embedding in applications, browsers, and resource-constrained environments.
+
+**Sorted Key Storage Enables Efficient Range Scans**: Keys are stored in sorted order, allowing prefix-based iteration and range queries without secondary indexes, which simplifies schema design for hierarchical data.
+
+**Snapshot Isolation for Consistent Reads**: Point-in-time snapshots provide consistent read views without blocking writes, enabling safe concurrent access patterns in single-writer, multi-reader applications.
+
+---
+
+## 22. Quick Reference
+
+### Common Commands
+
+```bash
+# Compile a LevelDB application (C++)
+g++ -std=c++17 -O3 app.cpp -lleveldb -lpthread -o app
+
+# Run the built-in benchmark
+cd leveldb/build && ./db_bench
+
+# Inspect database with ldb tool (if available)
+ldb --db=/path/to/db scan
+
+# Dump database stats via ldb
+ldb --db=/path/to/db getproperty leveldb.stats
+
+# Repair a corrupted database (C++ API call)
+leveldb::RepairDB("/path/to/db", leveldb::Options())
+
+# Python (plyvel) - open and read
+python3 -c "import plyvel; db=plyvel.DB('/path/to/db'); print(list(db.iterator()))"
+```
+
+---
+
+## 23. Resources and References
 
 ### Official Documentation
 - **LevelDB GitHub**: https://github.com/google/leveldb

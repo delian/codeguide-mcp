@@ -2377,7 +2377,106 @@ private:
 
 ---
 
-## 9. Deployment Checklist
+## 9. Security & Dependency Management (MANDATORY)
+
+### A. Automated Dependency Management
+
+Use **Conan 2.x** or **vcpkg** for CUDA library dependency management:
+
+```bash
+# Conan 2.x: install dependencies from conanfile.txt/conanfile.py
+conan install . --output-folder=build --build=missing
+
+# Conan: list installed packages
+conan list "*"
+
+# Conan: update dependencies
+conan install . --output-folder=build --build=missing --update
+
+# vcpkg: install CUDA-related libraries
+vcpkg install cuda thrust cub
+
+# vcpkg: update all installed packages
+vcpkg upgrade --no-dry-run
+
+# CMake FetchContent: pin specific versions
+# (see Dependency File section below)
+```
+
+**Conan lockfiles** (`conan.lock`) ensure reproducible builds. Always commit lockfiles to version control.
+
+### B. Vulnerability Scanning & Security
+
+```bash
+# Conan 2.14+: audit dependencies for known vulnerabilities
+conan audit scan .
+
+# cppcheck: static analysis for C/C++/CUDA code
+cppcheck --enable=all --std=c++17 --suppress=missingInclude src/
+
+# clang-tidy: advanced static analysis and linting
+clang-tidy src/*.cu src/*.cpp -- -I/usr/local/cuda/include
+
+# Trivy: scan filesystem for vulnerabilities in vendored dependencies
+trivy fs --scanners vuln .
+
+# NVIDIA compute-sanitizer: detect memory errors in CUDA kernels
+compute-sanitizer --tool memcheck ./my_cuda_app
+compute-sanitizer --tool racecheck ./my_cuda_app
+```
+
+**Security best practices:**
+- **Monitor NVIDIA Security Bulletins** at https://www.nvidia.com/en-us/security/ for GPU driver and CUDA toolkit vulnerabilities
+- Pin CUDA toolkit version in CI/CD pipelines — mismatched driver/toolkit versions cause subtle failures
+- Validate all host-to-device and device-to-host memory transfers for buffer overflows
+- Use `CUDA_CHECK` macros on every CUDA API call to catch errors early
+- Never trust GPU-computed values without validation (GPU memory corruption is possible)
+- Use `compute-sanitizer` regularly to detect race conditions and out-of-bounds accesses
+- Audit third-party CUDA kernels before integrating — GPU code runs with hardware-level access
+- Keep GPU drivers updated to patch known security vulnerabilities
+
+### C. Dependency File
+
+```python
+# conanfile.py — Conan 2.x dependency file for CUDA projects
+from conan import ConanFile
+from conan.tools.cmake import cmake_layout
+
+class MyCudaProject(ConanFile):
+    name = "my-cuda-project"
+    version = "1.0.0"
+    settings = "os", "compiler", "build_type", "arch"
+    generators = "CMakeToolchain", "CMakeDeps"
+
+    def requirements(self):
+        self.requires("gtest/1.14.0")
+        self.requires("benchmark/1.8.3")
+        self.requires("fmt/10.2.1")
+        self.requires("spdlog/1.13.0")
+
+    def layout(self):
+        cmake_layout(self)
+```
+
+```cmake
+# CMakeLists.txt — Pin CUDA and dependency versions
+cmake_minimum_required(VERSION 3.25)
+project(MyCudaProject LANGUAGES CXX CUDA)
+
+set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CXX_STANDARD 17)
+
+# Pin minimum CUDA toolkit version
+find_package(CUDAToolkit 12.0 REQUIRED)
+
+# Use Conan-provided dependencies
+find_package(GTest REQUIRED)
+find_package(fmt REQUIRED)
+```
+
+---
+
+## 10. Deployment Checklist
 
 ### Agent-Generated CUDA Code Verification (MANDATORY)
 
@@ -2459,7 +2558,7 @@ private:
 
 ---
 
-## 10. Why This Configuration Works
+## 11. Why This Configuration Works
 
 **Performance-First Philosophy**: Modern CUDA development prioritizes:
 - **Verified Builds**: Agent verification ensures code compiles and runs before delivery, eliminating broken code and reducing debugging time.
@@ -2481,7 +2580,7 @@ private:
 
 ---
 
-## 11. Quick Reference
+## 12. Quick Reference
 
 ### Compilation Commands
 

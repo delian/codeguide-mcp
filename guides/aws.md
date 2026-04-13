@@ -57,6 +57,144 @@ Mandatory standards for building applications on Amazon Web Services. AWS CLI, C
 
 ---
 
+## 2A. TDD Protocol (MANDATORY)
+
+**CRITICAL: Follow the Red-Green-Refactor cycle for ALL infrastructure code.**
+
+### Red-Green-Refactor Cycle with AWS CDK Assertions
+
+```typescript
+// ═══════════════════════════════════════════════════════════════
+// STEP 1: RED - Write failing test first
+// ═══════════════════════════════════════════════════════════════
+
+// test/api-stack.test.ts
+import { Template, Match } from 'aws-cdk-lib/assertions';
+import * as cdk from 'aws-cdk-lib';
+import { ApiStack } from '../lib/api-stack';
+
+describe('ApiStack', () => {
+  let template: Template;
+
+  beforeEach(() => {
+    const app = new cdk.App();
+    const stack = new ApiStack(app, 'TestApiStack', {
+      env: { account: '123456789012', region: 'us-east-1' },
+    });
+    template = Template.fromStack(stack);
+  });
+
+  test('creates a Lambda function with correct runtime and memory', () => {
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Runtime: 'nodejs20.x',
+      MemorySize: 256,
+      Timeout: 30,
+    });
+  });
+
+  test('creates an API Gateway REST API', () => {
+    template.resourceCountIs('AWS::ApiGateway::RestApi', 1);
+  });
+
+  test('Lambda function has least-privilege IAM role', () => {
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Effect: 'Allow',
+            Action: Match.anyValue(),
+            Resource: Match.anyValue(),
+          }),
+        ]),
+      },
+    });
+  });
+});
+
+// Run: npx jest
+// ❌ FAILS - ApiStack doesn't exist yet
+
+// ═══════════════════════════════════════════════════════════════
+// STEP 2: GREEN - Write minimal implementation
+// ═══════════════════════════════════════════════════════════════
+
+// lib/api-stack.ts
+import * as cdk from 'aws-cdk-lib';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as apigateway from 'aws-cdk-lib/aws-apigateway';
+import { Construct } from 'constructs';
+
+export class ApiStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    super(scope, id, props);
+
+    const fn = new lambda.Function(this, 'ApiHandler', {
+      runtime: lambda.Runtime.NODEJS_20_X,
+      handler: 'index.handler',
+      code: lambda.Code.fromAsset('lambda'),
+      memorySize: 256,
+      timeout: cdk.Duration.seconds(30),
+    });
+
+    new apigateway.LambdaRestApi(this, 'ApiGateway', {
+      handler: fn,
+    });
+  }
+}
+
+// Run: npx jest
+// ✅ PASSES - all tests pass
+
+// ═══════════════════════════════════════════════════════════════
+// STEP 3: REFACTOR - Add monitoring, improve while tests stay green
+// ═══════════════════════════════════════════════════════════════
+```
+
+---
+
+## 2B. Bug Fix Protocol (MANDATORY)
+
+**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+
+### Bug Fix Workflow Example
+
+```typescript
+// ═══════════════════════════════════════════════════════════════
+// Bug Report #892: Lambda function missing DynamoDB read
+// permissions, causing AccessDeniedException in production
+// ═══════════════════════════════════════════════════════════════
+
+// STEP 1: Write test that reproduces the bug
+// test/api-stack.test.ts
+
+test('Lambda function has DynamoDB read permissions - Bug #892', () => {
+  // Bug: Lambda role was missing dynamodb:GetItem permission
+  // Discovered: 2026-03-10
+  // Root cause: Table grant was not applied to function role
+  template.hasResourceProperties('AWS::IAM::Policy', {
+    PolicyDocument: {
+      Statement: Match.arrayWith([
+        Match.objectLike({
+          Effect: 'Allow',
+          Action: Match.arrayWith(['dynamodb:GetItem', 'dynamodb:Query']),
+        }),
+      ]),
+    },
+  });
+});
+
+// Run: npx jest
+// ❌ FAILS - Lambda is missing DynamoDB permissions
+
+// STEP 2: Fix the bug
+// lib/api-stack.ts - Add table.grantReadData(fn) to the stack
+
+// Run: npx jest
+// ✅ PASSES - bug fixed, regression prevented forever
+```
+
+---
+
 ## 3. IAM and Security (MANDATORY)
 
 ### A. IAM Policies
@@ -1241,7 +1379,66 @@ expect(template.toJSON()).toMatchSnapshot();
 
 ---
 
-## 14. Deployment Checklist
+## 14. Security & Dependency Management (MANDATORY)
+
+### A. Infrastructure Security Scanning
+
+```bash
+# AWS Security Hub - centralized security findings
+aws securityhub get-findings --filters '{"SeverityLabel":[{"Value":"CRITICAL","Comparison":"EQUALS"}]}'
+
+# Amazon Inspector - automated vulnerability scanning for EC2, Lambda, ECR
+aws inspector2 list-findings --filter-criteria '{"findingStatus":[{"comparison":"EQUALS","value":"ACTIVE"}]}'
+
+# Amazon GuardDuty - threat detection
+aws guardduty list-findings --detector-id DETECTOR_ID --finding-criteria '{"Criterion":{"severity":{"Gte":7}}}'
+
+# IAM Access Analyzer - identify unintended resource access
+aws accessanalyzer list-findings --analyzer-arn ANALYZER_ARN
+
+# Prowler - open-source AWS security auditing
+prowler aws --severity critical high
+prowler aws --compliance cis_2.0_aws
+prowler aws --service s3 iam lambda
+```
+
+### B. Vulnerability Scanning
+
+```bash
+# IaC scanning with checkov
+checkov -d . --framework cloudformation
+checkov -d . --framework terraform
+checkov --file template.yaml --check CKV_AWS_18,CKV_AWS_21
+
+# IaC scanning with trivy
+trivy config .
+trivy config --severity HIGH,CRITICAL .
+
+# ECR image scanning (enabled per repository)
+aws ecr start-image-scan --repository-name my-repo --image-id imageTag=latest
+aws ecr describe-image-scan-findings --repository-name my-repo --image-id imageTag=latest
+```
+
+### C. Policy & Compliance
+
+```bash
+# AWS Config - compliance rules evaluation
+aws configservice get-compliance-details-by-config-rule --config-rule-name s3-bucket-public-read-prohibited
+aws configservice describe-compliance-by-resource --resource-type AWS::S3::Bucket
+
+# SCPs via AWS Organizations for account-level guardrails
+aws organizations list-policies --filter SERVICE_CONTROL_POLICY
+
+# Credential management - ALWAYS use Secrets Manager
+aws secretsmanager create-secret --name my-secret --secret-string '{"key":"value"}'
+aws secretsmanager get-secret-value --secret-id my-secret
+# Rotate secrets automatically with rotation Lambda functions
+aws secretsmanager rotate-secret --secret-id my-secret
+```
+
+---
+
+## 15. Deployment Checklist
 
 ### Security
 - [ ] Least privilege IAM policies with permission boundaries
@@ -1274,7 +1471,7 @@ expect(template.toJSON()).toMatchSnapshot();
 
 ---
 
-## 15. Quick Reference
+## 16. Quick Reference
 
 ```bash
 # AWS CLI
@@ -1299,6 +1496,30 @@ aws sqs send-message --queue-url URL --message-body '{"test": true}'
 aws events put-events --entries '[{"Source":"myapp","DetailType":"Test","Detail":"{}"}]'
 aws stepfunctions start-execution --state-machine-arn ARN --input '{"key":"value"}'
 ```
+
+---
+
+## 17. Why This Configuration Works
+
+1. **Multi-Account Strategy**: Isolating workloads across AWS accounts (dev, staging, prod) limits blast radius and simplifies IAM boundaries.
+
+2. **IAM Roles over Access Keys**: Using IAM roles with temporary credentials via STS eliminates long-lived secrets and reduces credential leakage risk.
+
+3. **VPC Design with Private Subnets**: Placing compute in private subnets with NAT gateways ensures workloads are not directly internet-accessible while still allowing outbound connectivity.
+
+4. **Infrastructure as Code with CDK/SAM**: Defining infrastructure in code enables reproducible environments, version-controlled changes, and automated rollbacks.
+
+5. **Event-Driven Architecture**: Leveraging SQS, EventBridge, and Step Functions decouples services, improves resilience, and scales each component independently.
+
+6. **Secrets Manager and SSM Parameter Store**: Centralizing secrets with automatic rotation eliminates hardcoded credentials and provides audit trails for access.
+
+7. **CloudWatch and X-Ray Integration**: Native observability gives correlated metrics, logs, and traces without third-party tooling overhead.
+
+8. **S3 Lifecycle Policies**: Automated tiering from Standard to Glacier reduces storage costs by up to 90% for infrequently accessed data.
+
+9. **Lambda with Provisioned Concurrency**: Combining serverless scaling with provisioned concurrency eliminates cold starts for latency-sensitive endpoints.
+
+10. **Security Hub and GuardDuty**: Automated threat detection and compliance checks provide continuous security posture assessment across all accounts.
 
 ---
 

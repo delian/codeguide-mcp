@@ -1397,7 +1397,85 @@ end
 
 ---
 
-## 12. Summary
+## 12. Security & Dependency Management (MANDATORY)
+
+### A. Automated Dependency Management
+
+```bash
+# Install a specific rock with pinned version
+luarocks install luasocket 3.1.0-1
+
+# List installed rocks and versions
+luarocks list
+
+# Show dependency tree for a rock
+luarocks show <rock>
+
+# Remove outdated or vulnerable rocks
+luarocks remove <rock>
+
+# Update a rock to latest version
+luarocks install <rock>
+```
+
+**LuaRocks does not have a native lockfile.** Pin exact versions in your `.rockspec` file for reproducibility.
+
+### B. Vulnerability Scanning & Security
+
+LuaRocks does not include a native audit command. Use third-party tools:
+
+```bash
+# Snyk: scan project for known vulnerabilities
+snyk test --all-projects
+
+# Trivy: filesystem scan for vulnerabilities in vendored dependencies
+trivy fs --scanners vuln .
+
+# Luacheck: static analysis for common security pitfalls
+luacheck src/ --no-unused --std max
+```
+
+**Security best practices:**
+- Pin exact versions in `.rockspec` files — LuaRocks resolves latest by default
+- Avoid `loadstring()` and `load()` with untrusted input (code injection risk)
+- Use `require()` with explicit paths, never dynamic module loading from user input
+- Sandbox untrusted Lua code by restricting the environment table
+- Validate all external input before passing to `os.execute()` or `io.popen()`
+- Prefer LuaJIT's FFI over `os.execute()` for system operations
+
+### C. Dependency File
+
+```lua
+-- myproject-1.0.0-1.rockspec
+package = "myproject"
+version = "1.0.0-1"
+source = {
+    url = "git+https://github.com/user/myproject.git",
+    tag = "v1.0.0"
+}
+description = {
+    summary = "My Lua project",
+    license = "MIT"
+}
+dependencies = {
+    "lua >= 5.1, < 5.5",
+    "luasocket == 3.1.0-1",       -- Pin exact versions
+    "lua-cjson == 2.1.0.14-1",
+    "luafilesystem == 1.8.0-1",
+    "busted == 2.2.0-1",          -- Test framework
+}
+build = {
+    type = "builtin",
+    modules = {
+        ["myproject.init"] = "src/init.lua",
+        ["myproject.core"] = "src/core.lua",
+    }
+}
+```
+
+---
+
+## 13. Summary
 
 **CRITICAL Requirements for All Lua Code:**
 
@@ -1427,7 +1505,7 @@ end
 
 ---
 
-## 13. Quick Reference
+## 14. Quick Reference
 
 ### Common Commands
 
@@ -1501,6 +1579,48 @@ globals = {"myapp"}
 ignore = {"611", "612"}
 max_line_length = 120
 ```
+
+---
+
+## 15. Deployment Checklist
+
+### Build & Syntax
+- [ ] Code parses: `luac -p *.lua` returns exit 0 for all files
+- [ ] Luacheck passes: `luacheck src/ test/` reports no errors
+- [ ] No global variable leaks (all variables declared `local`)
+- [ ] Correct Lua version targeted (5.1/5.4/LuaJIT)
+
+### Testing
+- [ ] All tests pass: `busted test/` returns exit 0
+- [ ] Code coverage at 80%+: `busted --coverage test/`
+- [ ] Edge cases tested (nil inputs, empty tables, large data)
+- [ ] Performance benchmarks pass for critical paths
+
+### Security
+- [ ] No `loadstring()` or `load()` on untrusted input
+- [ ] No `os.execute()` or `io.popen()` with unsanitized arguments
+- [ ] Dependencies pinned in rockspec
+- [ ] LuaRocks packages verified for known vulnerabilities
+
+### Agent Workflow
+- [ ] Agent-generated code was parsed with `luac -p` before delivery
+- [ ] Agent-generated code was tested with `busted`
+- [ ] LDoc documentation present for all public modules and functions
+- [ ] Code follows hexagonal architecture (ports and adapters)
+
+---
+
+## 16. Why This Configuration Works
+
+1. **Local-by-Default Variables**: Enforcing `local` declarations prevents accidental global namespace pollution, eliminates hard-to-trace bugs from variable shadowing, and improves performance since local variable access is faster in the Lua VM.
+
+2. **Hexagonal Architecture with Module Pattern**: Separating core logic from I/O adapters makes Lua modules independently testable and reusable across different host environments (game engines, embedded systems, web servers).
+
+3. **pcall/xpcall Error Handling**: Explicit protected calls with structured error returns prevent uncaught exceptions from crashing host applications, which is critical in embedded Lua environments where the runtime cannot simply exit.
+
+4. **Busted + Luacheck Toolchain**: Busted provides BDD-style testing with mocks and stubs, while Luacheck catches common pitfalls (unused variables, global leaks, type mismatches) before runtime. Together they catch the majority of Lua-specific bugs at development time.
+
+5. **Table Pre-allocation and Object Pooling**: Lua's garbage collector can cause latency spikes in real-time applications. Pre-allocating tables and reusing objects keeps memory allocation predictable and GC pauses minimal.
 
 ---
 
