@@ -1,1531 +1,310 @@
 # AWS Development Guidelines
-Mandatory standards for building applications on Amazon Web Services. AWS CLI, CloudFormation, CDK, Terraform, SAM, Serverless Framework.
+Mandatory standards for architecting on Amazon Web Services: right service for the job, least-privilege IAM, Well-Architected, cost-optimized, fully tagged, multi-account. AWS CLI v2, CloudFormation/CDK, SAM, IAM.
+
+---
+name: aws
+title: AWS Development Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: infra
+tools: [aws-cli@2, cloudformation, aws-cdk@2, sam-cli, iam]
+requires:
+  - secure-coding
+  - observability
+recommends:
+  - ci-cd
+  - terraform
+  - kubernetes
+  - dockerfile
+  - env-config
+provides:
+  - aws-services
+  - iam-least-privilege
+  - well-architected
+  - aws-cost-optimization
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide owns **AWS service selection, IAM least privilege, the Well-Architected pillars, cost optimization, tagging, and multi-account strategy**. It does not restate generic security, observability, IaC, container, or config rules — those are bound to their canonical owners below.
 
 ---
 
-**Agent Profile**: The AWS Expert
-**Role**: Senior Cloud Architect & AWS Solutions Architect
-**Objective**: Generate secure, scalable, and cost-effective AWS architectures following Well-Architected Framework principles.
-**Tools**: AWS CLI, CloudFormation, CDK, Terraform, SAM, Serverless Framework.
+## 0. Prerequisites & References
+
+Fetch and apply these **before** designing or provisioning AWS infrastructure. Their rules are assumed here and not repeated.
+
+> 📎 **REQUIRED — fetch & apply first:**
+> - [`secure-coding.md`](guides://secure-coding.md) — vulnerability scanning, supply chain, secrets, crypto policy. *(AWS binding: IAM least privilege, KMS for encryption, Secrets Manager, GuardDuty/Inspector/Security Hub/Access Analyzer.)*
+> - [`observability.md`](guides://observability.md) — metrics, tracing, SLO/SLI, alerting. *(AWS binding: CloudWatch metrics/alarms/Logs, X-Ray / OpenTelemetry via ADOT, CloudTrail audit.)*
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`terraform.md`](guides://terraform.md) — IaC workflow & policy *(AWS binding: `aws` provider, or native CloudFormation/CDK/SAM)*
+> - [`env-config.md`](guides://env-config.md) — configuration policy *(AWS binding: SSM Parameter Store + Secrets Manager)*
+> - [`dockerfile.md`](guides://dockerfile.md) — container build/security *(AWS binding: ECR, image scanning)*
+> - [`kubernetes.md`](guides://kubernetes.md) — K8s workloads *(AWS binding: EKS, IRSA / Pod Identity)*
+> - [`ci-cd.md`](guides://ci-cd.md) — pipeline stages, deployment strategies, rollback.
+
+> 📎 **SEE ALSO:** [`tdd.md`](guides://tdd.md) *(infra is test-first; CDK assertions / cfn-lint bind the cycle)* · [`gcp.md`](guides://gcp.md) · [`azure.md`](guides://azure.md) · [`microservices.md`](guides://microservices.md)
 
 ---
 
 ## 1. Core Philosophies: AWS-FIRST
 
-- **A**utomated: Infrastructure as Code for everything
-- **W**ell-Architected: Follow the five pillars
-- **S**ecure: Least privilege and defense in depth
+AWS-specific principles only. Security, observability, IaC, and config policy come from §0 — do not restate them here.
+
+- **A**utomate everything as code: no resource is created in the console; every account, role, and resource is defined in IaC (see `terraform.md`) and deployed via a pipeline (see `ci-cd.md`).
+- **W**ell-Architected: every design is justified against the six pillars (§3); trade-offs are recorded.
+- **S**coped identity: least privilege by default — scope every policy to specific actions, resources, and conditions; prefer roles with temporary STS credentials over long-lived keys.
+- **F**it the service to the workload: pick the managed service that removes the most undifferentiated heavy lifting (§4); do not self-host what AWS operates.
+- **I**solate blast radius: multi-account by environment/workload (§7); private subnets, VPC endpoints, and security groups locked down.
+- **R**ight-sized & tagged: every resource carries the mandatory tag set (§6) and is sized/purchased for cost (§5).
+- **T**raceable: CloudTrail in every account/region, CloudWatch + X-Ray on every workload (see `observability.md`).
+
+**Verified Architecture**: Agent-generated AWS infrastructure MUST pass every gate in §2 before delivery.
 
 ---
 
-## 2. Well-Architected Framework (MANDATORY)
+## 2. Requirements (MANDATORY, auditable)
 
-### A. The Five Pillars
+RFC-2119 keywords. IDs `AWS-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a shared rule cite its owner.
 
-```yaml
-# Operational Excellence
-- Automate operations with IaC
-- Make frequent, small, reversible changes
-- Refine procedures frequently
-- Anticipate and learn from failure
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| AWS-IAM-01 | Identity/resource policies MUST NOT use `"Action":"*"` with `"Resource":"*"`; scope to specific actions + ARNs | `checkov -d . `; IAM Access Analyzer policy validation | 0 wildcard-on-wildcard |
+| AWS-IAM-02 | Workloads MUST use IAM roles (STS), never embedded long-lived access keys (see `secure-coding.md`) | `aws iam list-access-keys`; grep IaC for `AKIA` | 0 static keys in workloads |
+| AWS-IAM-03 | Delegated/CI roles MUST carry a permission boundary | review / `checkov` | boundary attached |
+| AWS-SEC-01 | Data MUST be encrypted at rest (KMS) and in transit (TLS); S3 deny non-TLS (see `secure-coding.md`) | `checkov` / `trivy config .` | 0 high/critical |
+| AWS-SEC-02 | S3 buckets MUST block all public access unless explicitly justified | `aws s3control get-public-access-block`; `checkov` | all 4 flags true |
+| AWS-SEC-03 | Secrets MUST live in Secrets Manager / SSM SecureString, never plaintext (see `env-config.md`, `secure-coding.md`) | `git-secrets --scan`; grep | 0 plaintext secrets |
+| AWS-SEC-04 | IaC MUST pass a security scan with 0 high/critical (see `secure-coding.md`) | `checkov -d .` / `trivy config .` | 0 high/critical |
+| AWS-OBS-01 | CloudTrail MUST be enabled in all regions; logs immutable (see `observability.md`) | `aws cloudtrail describe-trails` | multi-region trail on |
+| AWS-OBS-02 | Workloads MUST emit metrics + traces and have alarms on error/latency/saturation (see `observability.md`) | review dashboards/alarms | alarms wired to SNS |
+| AWS-ARCH-01 | All infrastructure MUST be defined as code; no console-created resources (see `terraform.md`) | drift detection (`cdk diff` / `terraform plan` / CFN drift) | no drift |
+| AWS-ARCH-02 | Production workloads MUST be multi-AZ; async paths MUST have a DLQ | review / `checkov` | ≥2 AZ, DLQ present |
+| AWS-COST-01 | Every resource MUST carry the mandatory tag set (§6) | `aws resourcegroupstaggingapi get-resources`; AWS Config rule `required-tags` | 0 untagged |
+| AWS-COST-02 | Accounts MUST have a Budget + Cost Anomaly Detection alert | `aws budgets describe-budgets` | budget + anomaly monitor exist |
 
-# Security
-- Implement strong identity foundation
-- Enable traceability
-- Apply security at all layers
-- Automate security best practices
-- Protect data in transit and at rest
-
-# Reliability
-- Automatically recover from failure
-- Test recovery procedures
-- Scale horizontally
-- Stop guessing capacity
-
-# Performance Efficiency
-- Use serverless architectures
-- Go global in minutes
-- Use the right tool for the job
-- Experiment more often
-
-# Cost Optimization
-- Implement cloud financial management
-- Analyze and attribute expenditure
-- Use cost-effective resources
-- Optimize over time
-```
+> **Forbidden**: `iam:*`/`*:*` policies, root-account access keys, public S3 unless reviewed, secrets in env vars or templates, console-created ("ClickOps") resources, single-AZ production, or untagged resources.
 
 ---
 
-## 2A. TDD Protocol (MANDATORY)
+## 3. Well-Architected Framework
 
-**CRITICAL: Follow the Red-Green-Refactor cycle for ALL infrastructure code.**
+Every design is evaluated against the six pillars. This is the AWS lens on principles owned elsewhere — bind, don't restate.
 
-### Red-Green-Refactor Cycle with AWS CDK Assertions
+| Pillar | What AWS-specific decisions it drives | Bound owner |
+|--------|---------------------------------------|-------------|
+| **Operational Excellence** | IaC for all changes; small reversible deploys; runbooks; game days | `ci-cd.md`, `terraform.md` |
+| **Security** | IAM least privilege, KMS, GuardDuty/Security Hub/Inspector, SCPs, encryption everywhere | `secure-coding.md` |
+| **Reliability** | Multi-AZ, auto-scaling, health checks, DLQs, backups (RDS snapshots, DynamoDB PITR), tested recovery | `observability.md` |
+| **Performance Efficiency** | Right service & instance family (Graviton/ARM64), caching (CloudFront/ElastiCache), serverless-first | `performance.md` |
+| **Cost Optimization** | Right-sizing, Savings Plans/Spot, storage tiering, tagging-driven attribution (§5) | this guide |
+| **Sustainability** | Graviton, managed services, right-sizing, region choice | this guide |
 
-```typescript
-// ═══════════════════════════════════════════════════════════════
-// STEP 1: RED - Write failing test first
-// ═══════════════════════════════════════════════════════════════
-
-// test/api-stack.test.ts
-import { Template, Match } from 'aws-cdk-lib/assertions';
-import * as cdk from 'aws-cdk-lib';
-import { ApiStack } from '../lib/api-stack';
-
-describe('ApiStack', () => {
-  let template: Template;
-
-  beforeEach(() => {
-    const app = new cdk.App();
-    const stack = new ApiStack(app, 'TestApiStack', {
-      env: { account: '123456789012', region: 'us-east-1' },
-    });
-    template = Template.fromStack(stack);
-  });
-
-  test('creates a Lambda function with correct runtime and memory', () => {
-    template.hasResourceProperties('AWS::Lambda::Function', {
-      Runtime: 'nodejs20.x',
-      MemorySize: 256,
-      Timeout: 30,
-    });
-  });
-
-  test('creates an API Gateway REST API', () => {
-    template.resourceCountIs('AWS::ApiGateway::RestApi', 1);
-  });
-
-  test('Lambda function has least-privilege IAM role', () => {
-    template.hasResourceProperties('AWS::IAM::Policy', {
-      PolicyDocument: {
-        Statement: Match.arrayWith([
-          Match.objectLike({
-            Effect: 'Allow',
-            Action: Match.anyValue(),
-            Resource: Match.anyValue(),
-          }),
-        ]),
-      },
-    });
-  });
-});
-
-// Run: npx jest
-// ❌ FAILS - ApiStack doesn't exist yet
-
-// ═══════════════════════════════════════════════════════════════
-// STEP 2: GREEN - Write minimal implementation
-// ═══════════════════════════════════════════════════════════════
-
-// lib/api-stack.ts
-import * as cdk from 'aws-cdk-lib';
-import * as lambda from 'aws-cdk-lib/aws-lambda';
-import * as apigateway from 'aws-cdk-lib/aws-apigateway';
-import { Construct } from 'constructs';
-
-export class ApiStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
-    super(scope, id, props);
-
-    const fn = new lambda.Function(this, 'ApiHandler', {
-      runtime: lambda.Runtime.NODEJS_20_X,
-      handler: 'index.handler',
-      code: lambda.Code.fromAsset('lambda'),
-      memorySize: 256,
-      timeout: cdk.Duration.seconds(30),
-    });
-
-    new apigateway.LambdaRestApi(this, 'ApiGateway', {
-      handler: fn,
-    });
-  }
-}
-
-// Run: npx jest
-// ✅ PASSES - all tests pass
-
-// ═══════════════════════════════════════════════════════════════
-// STEP 3: REFACTOR - Add monitoring, improve while tests stay green
-// ═══════════════════════════════════════════════════════════════
-```
+Use the AWS Well-Architected Tool to run reviews; record material trade-offs as ADRs (see `adr.md`).
 
 ---
 
-## 2B. Bug Fix Protocol (MANDATORY)
+## 4. Core Services — When to Use Which
 
-**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+The heart of this guide: pick the service that removes the most undifferentiated work for the workload. Default **serverless/managed first**; move down the stack only when you need the control.
 
-### Bug Fix Workflow Example
+### A. Compute
 
-```typescript
-// ═══════════════════════════════════════════════════════════════
-// Bug Report #892: Lambda function missing DynamoDB read
-// permissions, causing AccessDeniedException in production
-// ═══════════════════════════════════════════════════════════════
+| Service | Use when | Avoid when |
+|---------|----------|-----------|
+| **Lambda** | Event-driven, spiky, short (<15 min) tasks; glue; APIs with variable load | Long-running, heavy CPU/GPU, sustained high throughput where cost flips |
+| **Fargate (ECS/EKS)** | Containers without node management; steady or bursty services | Need GPU/special kernels or per-second bin-packing economics |
+| **ECS on EC2** | Container orchestration, AWS-native control plane, cost control via reserved capacity | You need K8s API/ecosystem portability |
+| **EKS** | You require the Kubernetes API/ecosystem or multi-cloud portability (see `kubernetes.md`) | A simpler ECS/Fargate setup suffices — EKS adds operational overhead |
+| **EC2** | Full OS control, licensing, legacy lift-and-shift, GPU/HPC | A managed/serverless option fits — prefer it |
 
-// STEP 1: Write test that reproduces the bug
-// test/api-stack.test.ts
+Prefer **Graviton (ARM64)** across Lambda/Fargate/EC2/RDS for ~20% better price-performance. Use **Spot/Fargate Spot** for fault-tolerant, interruptible work.
 
-test('Lambda function has DynamoDB read permissions - Bug #892', () => {
-  // Bug: Lambda role was missing dynamodb:GetItem permission
-  // Discovered: 2026-03-10
-  // Root cause: Table grant was not applied to function role
-  template.hasResourceProperties('AWS::IAM::Policy', {
-    PolicyDocument: {
-      Statement: Match.arrayWith([
-        Match.objectLike({
-          Effect: 'Allow',
-          Action: Match.arrayWith(['dynamodb:GetItem', 'dynamodb:Query']),
-        }),
-      ]),
-    },
-  });
-});
+### B. Storage
 
-// Run: npx jest
-// ❌ FAILS - Lambda is missing DynamoDB permissions
+| Service | Use for |
+|---------|---------|
+| **S3** | Object storage, data lakes, static assets, backups; lifecycle to IA/Glacier; default to SSE-KMS, versioning, Block Public Access |
+| **EBS** | Block storage for a single EC2 instance (gp3 default; provisioned IOPS for databases) |
+| **EFS** | Shared POSIX file system across many instances/containers; lifecycle to IA |
+| **FSx** | Windows/Lustre/NetApp/OpenZFS workloads needing specific file semantics |
 
-// STEP 2: Fix the bug
-// lib/api-stack.ts - Add table.grantReadData(fn) to the stack
+### C. Databases
 
-// Run: npx jest
-// ✅ PASSES - bug fixed, regression prevented forever
-```
+| Service | Use for |
+|---------|---------|
+| **DynamoDB** | Serverless key-value/document, single-digit-ms at any scale, on-demand billing; single-table design; PITR + streams |
+| **Aurora (Serverless v2)** | Relational at scale, MySQL/Postgres-compatible, auto-scaling, multi-AZ |
+| **RDS** | Standard managed relational (Postgres/MySQL/etc.) where Aurora isn't needed |
+| **ElastiCache (Redis/Valkey/Memcached)** | Caching, sessions, rate limiting |
+| Purpose-built | Neptune (graph), OpenSearch (search/logs), Timestream (time-series), Keyspaces (Cassandra) — match the access pattern, don't force RDS |
+
+### D. Networking & Edge
+
+| Service | Use for |
+|---------|---------|
+| **VPC** | Network isolation; workloads in **private subnets**, NAT for egress, **VPC endpoints** (Gateway for S3/DynamoDB, Interface/PrivateLink for others) to keep traffic off the internet |
+| **ALB** | HTTP/HTTPS L7 routing, host/path rules, OIDC auth, target groups |
+| **NLB** | L4, ultra-low latency, static IPs, TCP/UDP, PrivateLink front |
+| **API Gateway** | Managed REST/HTTP/WebSocket APIs; HTTP API is cheaper/faster — use REST only for API keys, usage plans, request validation, WAF, or caching |
+| **CloudFront** | CDN, edge TLS, WAF attachment, S3/ALB origins, edge functions |
+| **Route 53** | DNS, health checks, latency/geo/weighted routing, failover |
+
+Front internet-facing apps with **WAF + Shield**; security groups are stateful allow-lists, NACLs are stateless subnet guards.
+
+### E. Messaging & Orchestration
+
+| Service | Use for | Not for |
+|---------|---------|---------|
+| **SQS** | Decoupling, work queues, buffering; always long-poll; pair every queue with a **DLQ** (FIFO for strict ordering/dedup) | Pub/sub fan-out, ordered streaming replay |
+| **SNS** | Pub/sub fan-out to many subscribers (SQS/Lambda/HTTP/email); filter policies | Durable retention/replay |
+| **EventBridge** | Event bus with rich pattern matching, schema registry, scheduler, SaaS/cross-account routing | Highest-throughput streaming (use Kinesis) |
+| **Kinesis / MSK** | High-volume ordered streaming, multiple consumers replaying the same data | Simple decoupling (SQS is simpler/cheaper) |
+| **Step Functions** | Orchestrating multi-step workflows with retries/catch/parallel; Standard for long/exactly-once, Express for high-volume short | Single-step glue (just call the service) |
+
+> Implementation code for these services (handlers, repositories, SDK calls) belongs in the **language guide** (e.g. `python.md`, `typescript.md`, `go.md`) using its boto3/SDK idioms — this guide names the service and its fit, not the code.
 
 ---
 
-## 3. IAM and Security (MANDATORY)
+## 5. Cost Optimization
 
-### A. IAM Policies
+This guide owns AWS cost discipline. Optimize structurally, then continuously.
+
+- **Attribute then optimize**: enforce tagging (§6) so Cost Explorer / CUR can split spend by team, env, and product. You cannot optimize what you cannot attribute.
+- **Right-size & right-purchase**: use Compute Optimizer; buy **Savings Plans** (Compute SP for flexibility) for steady baseline, **Spot** for interruptible, on-demand only for spiky remainder. Graviton/ARM64 for ~20% savings.
+- **Storage tiering**: S3 Lifecycle → Standard-IA → Glacier/Deep Archive, or **S3 Intelligent-Tiering** for unknown access patterns; delete incomplete multipart uploads and old object versions; gp3 over gp2 for EBS.
+- **Serverless economics**: DynamoDB on-demand vs provisioned (with auto-scaling) by traffic shape; Lambda memory right-sizing (more memory = more CPU, often cheaper per request); kill idle NAT gateways/EIPs/unattached EBS.
+- **Guardrails (AWS-COST-02)**: AWS Budgets with alerts + **Cost Anomaly Detection**; review the Cost Optimization Hub.
+
+---
+
+## 6. Tagging Strategy
+
+Tags drive cost attribution (§5), access control (ABAC), automation, and inventory. Define them once in IaC and enforce with AWS Config `required-tags` + Organizations **Tag Policies**.
+
+Mandatory tag set (AWS-COST-01):
+
+| Tag | Example | Purpose |
+|-----|---------|---------|
+| `Environment` | `prod` / `staging` / `dev` | env separation, cost split |
+| `Owner` | `team-payments` | accountability |
+| `CostCenter` | `CC-1042` | chargeback |
+| `Application` | `checkout-api` | grouping |
+| `ManagedBy` | `cdk` / `terraform` | drift / ClickOps detection |
+| `DataClassification` | `pii` / `internal` / `public` | security & compliance |
+
+Use a consistent case convention; apply tags at the stack/module level so every child resource inherits them.
+
+---
+
+## 7. Multi-Account & Organizations
+
+Isolate blast radius and simplify guardrails by separating workloads into accounts, not just VPCs.
+
+- **AWS Organizations + Control Tower**: a landing zone with OUs (e.g. `Security`, `Infrastructure`, `Workloads/Prod`, `Workloads/NonProd`, `Sandbox`). One account per workload × environment is the strong default.
+- **SCPs (Service Control Policies)**: org-level guardrails that cap maximum permissions — deny disabling CloudTrail/GuardDuty, deny non-approved regions, deny root access-key creation. SCPs bound IAM; they never grant.
+- **Identity**: centralize human access in **IAM Identity Center (SSO)** with permission sets federated to an IdP — no per-account IAM users. Cross-account access uses assumed roles.
+- **Centralized security & logging**: dedicated `Security` and `Log Archive` accounts aggregate CloudTrail, Config, GuardDuty, and Security Hub findings org-wide.
+- **Networking**: share connectivity via **Transit Gateway** / VPC sharing from a network account; resource sharing via RAM.
+
+---
+
+## 8. IAM Least Privilege
+
+This guide owns the AWS IAM least-privilege idiom; KMS/secrets/crypto *policy* is owned by [`secure-coding.md`](guides://secure-coding.md).
+
+- **Roles over users**: workloads assume roles for short-lived STS credentials (Lambda/ECS task roles, EC2 instance profiles, **EKS IRSA / Pod Identity**). Reserve IAM users only for break-glass; never for applications.
+- **Scope tightly (AWS-IAM-01)**: name explicit actions and resource ARNs; add `Condition` keys (e.g. `aws:SourceVpce`, `aws:RequestedRegion`, `aws:PrincipalTag`). Prefer customer-managed policies over `*FullAccess`.
+- **Permission boundaries (AWS-IAM-03)**: cap what delegated/CI-created roles can ever grant.
+- **Validate**: IAM Access Analyzer (policy validation + external-access findings) in CI; generate least-privilege policies from CloudTrail access activity.
 
 ```json
-// ✅ CORRECT: Least privilege policy
+// ✅ Least privilege: specific actions, specific ARN, conditioned
 {
   "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "AllowS3BucketAccess",
-      "Effect": "Allow",
-      "Action": [
-        "s3:GetObject",
-        "s3:PutObject",
-        "s3:DeleteObject"
-      ],
-      "Resource": [
-        "arn:aws:s3:::my-app-bucket/*"
-      ],
-      "Condition": {
-        "StringEquals": {
-          "s3:x-amz-acl": "bucket-owner-full-control"
-        }
-      }
-    },
-    {
-      "Sid": "AllowS3BucketList",
-      "Effect": "Allow",
-      "Action": [
-        "s3:ListBucket"
-      ],
-      "Resource": [
-        "arn:aws:s3:::my-app-bucket"
-      ]
-    }
-  ]
+  "Statement": [{
+    "Sid": "ReadAppObjects",
+    "Effect": "Allow",
+    "Action": ["s3:GetObject", "s3:PutObject"],
+    "Resource": "arn:aws:s3:::my-app-bucket/${aws:PrincipalTag/team}/*",
+    "Condition": { "Bool": { "aws:SecureTransport": "true" } }
+  }]
 }
-
-// ❌ WRONG: Overly permissive
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": "s3:*",
-      "Resource": "*"
-    }
-  ]
-}
+// ❌ Forbidden (AWS-IAM-01): {"Effect":"Allow","Action":"*","Resource":"*"}
 ```
 
-### B. IAM Roles for Services
-
-```yaml
-Resources:
-  LambdaExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub '${AWS::StackName}-lambda-role'
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal: { Service: lambda.amazonaws.com }
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: DynamoDBAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:Query]
-                Resource: [!GetAtt UsersTable.Arn, !Sub '${UsersTable.Arn}/index/*']
-```
-
-### C. Secrets Manager vs Parameter Store
-
-```yaml
-# Secrets Manager: credentials, API keys, tokens (supports auto-rotation)
-# Parameter Store: config values, feature flags, hierarchical settings (/app/prod/db/host)
-```
-
-```python
-import boto3, json
-from functools import lru_cache
-
-# Secrets Manager
-def get_secret(secret_name: str) -> dict:
-    client = boto3.client('secretsmanager')
-    response = client.get_secret_value(SecretId=secret_name)
-    return json.loads(response['SecretString'])
-
-# Parameter Store with caching
-ssm = boto3.client('ssm')
-
-@lru_cache(maxsize=32)
-def get_parameter(name: str, decrypt: bool = True) -> str:
-    """Cached parameter retrieval (cache cleared on cold start)."""
-    return ssm.get_parameter(Name=name, WithDecryption=decrypt)['Parameter']['Value']
-```
-
-### D. IAM Least-Privilege Patterns
-
-```json
-// ✅ Scope to specific resources + conditions
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": ["secretsmanager:GetSecretValue"],
-      "Resource": ["arn:aws:secretsmanager:us-east-1:123456789012:secret:prod/myapp/*"],
-      "Condition": { "StringEquals": { "aws:RequestedRegion": "us-east-1" } }
-    }
-  ]
-}
-```
-
-```yaml
-# Permission boundaries: guardrails for delegated role creation
-Resources:
-  DevBoundary:
-    Type: AWS::IAM::ManagedPolicy
-    Properties:
-      PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Action: ['lambda:*', 'dynamodb:*', 's3:*', 'logs:*', 'sqs:*']
-            Resource: '*'
-          - Effect: Deny
-            Action: ['iam:CreateUser', 'iam:CreateRole']
-            Resource: '*'
-```
+When using CDK/SAM, prefer **grant helpers** (`table.grantReadData(fn)`) which synthesize a scoped policy automatically instead of hand-writing `*`.
 
 ---
 
-## 4. Lambda Functions (MANDATORY)
+## 9. Infrastructure as Code
 
-### A. Function Structure
+All infrastructure is code (AWS-ARCH-01). The IaC *workflow, state, review, and policy-scanning* rules are owned by [`terraform.md`](guides://terraform.md) — do not restate them. AWS-native options:
 
-```python
-import json, os, boto3
-from aws_lambda_powertools import Logger, Tracer, Metrics
-from aws_lambda_powertools.utilities.typing import LambdaContext
+| Tool | Use when |
+|------|----------|
+| **Terraform / OpenTofu** | Multi-cloud, large module ecosystem, existing TF estate (see `terraform.md`) |
+| **AWS CDK (v2)** | Type-safe constructs in TS/Python; grant helpers; rich testing (`Template.fromStack` assertions) |
+| **CloudFormation** | Declarative, no extra toolchain; the substrate CDK/SAM compile to |
+| **SAM** | Serverless-focused (Lambda/API/Step Functions) with local emulation (`sam local`) |
 
-logger = Logger()
-tracer = Tracer()
-metrics = Metrics()
+Containers: build/scan per [`dockerfile.md`](guides://dockerfile.md), push to **ECR** with image scanning enabled. Config & secrets: SSM Parameter Store + Secrets Manager per [`env-config.md`](guides://env-config.md).
 
-# Initialize OUTSIDE handler for connection reuse across warm invocations
-dynamodb = boto3.resource('dynamodb')
-table = dynamodb.Table(os.environ['TABLE_NAME'])
+Infra is **test-first** (see `tdd.md`): assert resources/properties with CDK `Template`/`Match` or `cfn-lint`/`cfn-guard`, and snapshot-test to catch unintended drift. Scan every template with `checkov`/`trivy config` (AWS-SEC-04) in CI.
 
-@logger.inject_lambda_context
-@tracer.capture_lambda_handler
-@metrics.log_metrics(capture_cold_start_metric=True)
-def handler(event: dict, context: LambdaContext) -> dict:
-    try:
-        body = json.loads(event.get('body', '{}'))
-        result = process_request(body)
-        return {'statusCode': 200, 'headers': {'Content-Type': 'application/json'},
-                'body': json.dumps(result)}
-    except json.JSONDecodeError:
-        return error_response(400, 'Invalid JSON')
-    except Exception:
-        logger.exception("Unexpected error")
-        return error_response(500, 'Internal server error')
+---
 
-@tracer.capture_method
-def process_request(data: dict) -> dict:
-    table.put_item(Item={'pk': data['id'], 'sk': 'METADATA', 'data': data})
-    return {'id': data['id'], 'status': 'created'}
+## 10. Security & Observability Bindings
 
-def error_response(code: int, msg: str) -> dict:
-    return {'statusCode': code, 'headers': {'Content-Type': 'application/json'},
-            'body': json.dumps({'error': msg})}
-```
+Generic policy lives in the owners; these are the AWS service bindings.
 
-### B. Lambda Configuration (SAM)
+- **Security (see `secure-coding.md`)**: GuardDuty (threat detection), Security Hub (aggregated findings/standards), Inspector (EC2/Lambda/ECR CVE scanning), Config (compliance rules), Access Analyzer (unintended access), Macie (PII in S3). KMS for encryption keys; Secrets Manager with rotation. Run `prowler aws --severity critical high` for posture audits.
+- **Observability (see `observability.md`)**: CloudWatch metrics/alarms/Logs (+ Logs Insights), **X-Ray** or OpenTelemetry via ADOT for tracing, CloudTrail for the audit trail (AWS-OBS-01). Alarm on errors, p99 latency, saturation, and DLQ depth; route to SNS/PagerDuty. Embed correlation IDs to trace requests across services.
 
-```yaml
-AWSTemplateFormatVersion: '2010-09-09'
-Transform: AWS::Serverless-2016-10-31
+---
 
-Globals:
-  Function:
-    Runtime: python3.11
-    Timeout: 30
-    MemorySize: 256
-    Tracing: Active
-    Environment:
-      Variables:
-        LOG_LEVEL: INFO
-        POWERTOOLS_SERVICE_NAME: my-service
-
-Resources:
-  ProcessFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: !Sub '${AWS::StackName}-process'
-      Handler: lambda_function.handler
-      CodeUri: src/
-      Environment:
-        Variables:
-          TABLE_NAME: !Ref DataTable
-      Policies:
-        - DynamoDBCrudPolicy: { TableName: !Ref DataTable }
-      Events:
-        ApiEvent: { Type: Api, Properties: { Path: /process, Method: POST } }
-```
-
-### C. Cold Start Optimization
-
-```python
-# ✅ CORRECT: Initialize SDK clients and connections OUTSIDE the handler
-# These persist across warm invocations
-import boto3
-import os
-
-dynamodb = boto3.resource('dynamodb')
-table = dynamodb.Table(os.environ['TABLE_NAME'])
-s3_client = boto3.client('s3')
-
-def handler(event, context):
-    # Reuses existing connections on warm starts
-    table.get_item(Key={'pk': event['id'], 'sk': 'METADATA'})
-
-# ❌ WRONG: Creating clients inside handler
-def handler_bad(event, context):
-    dynamodb = boto3.resource('dynamodb')  # New connection every invocation
-    table = dynamodb.Table(os.environ['TABLE_NAME'])
-    table.get_item(Key={'pk': event['id'], 'sk': 'METADATA'})
-```
-
-```yaml
-# Cold start mitigation strategies:
-# 1. ARM64 architecture (faster cold starts, lower cost)
-# 2. Right-size memory (more memory = more CPU = faster init)
-# 3. SnapStart for Java (eliminates cold start)
-# 4. Keep deployment package small (use layers for deps)
-# 5. Avoid VPC unless required (adds cold start latency)
-Resources:
-  OptimizedFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Architectures: [arm64]
-      MemorySize: 512
-      CodeUri: src/
-```
-
-```python
-# Lazy initialization - only pay init cost when needed
-_heavy_client = None
-
-def get_heavy_client():
-    global _heavy_client
-    if _heavy_client is None:
-        _heavy_client = SomeHeavyClient()
-    return _heavy_client
-```
-
-### D. Lambda Layers for Shared Code
-
-```yaml
-Resources:
-  SharedUtilsLayer:
-    Type: AWS::Serverless::LayerVersion
-    Properties:
-      LayerName: !Sub '${AWS::StackName}-shared-utils'
-      ContentUri: layers/shared-utils/
-      CompatibleRuntimes: [python3.11, python3.12]
-      CompatibleArchitectures: [x86_64, arm64]
-      RetentionPolicy: Retain
-    Metadata:
-      BuildMethod: python3.11
-
-  # Reference layers in functions
-  MyFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: app.handler
-      CodeUri: src/
-      Layers:
-        - !Ref SharedUtilsLayer
-        # Or use the official Powertools managed layer:
-        # - arn:aws:lambda:us-east-1:017000801446:layer:AWSLambdaPowertoolsPythonV3:7
-```
+## 11. Quick Reference
 
 ```bash
-# Layer directory structure
-# Python: layers/shared-utils/python/shared/{__init__.py, models.py, utils.py}
-# Node.js: layers/shared-utils/nodejs/{node_modules/, package.json}
-```
-
-### E. Powertools for AWS Lambda
-
-```python
-# Powertools provides: structured logging, X-Ray tracing, custom metrics,
-# idempotency, batch processing, event handler routing, validation
-from aws_lambda_powertools import Logger, Tracer, Metrics
-from aws_lambda_powertools.event_handler import APIGatewayRestResolver
-from aws_lambda_powertools.utilities.idempotency import DynamoDBPersistenceLayer, idempotent
-from aws_lambda_powertools.utilities.batch import BatchProcessor, EventType, batch_processor
-
-logger = Logger(service="order-service")
-tracer = Tracer(service="order-service")
-metrics = Metrics(service="order-service", namespace="MyApp")
-
-# Idempotency: prevent duplicate processing on retries
-persistence = DynamoDBPersistenceLayer(table_name="IdempotencyTable")
-
-@idempotent(persistence_store=persistence)
-def process_payment(data: dict) -> dict:
-    return {"payment_id": "pay_123", "status": "completed"}
-
-# API routing
-app = APIGatewayRestResolver()
-
-@app.get("/orders/<order_id>")
-@tracer.capture_method
-def get_order(order_id: str):
-    return {"order": fetch_order(order_id)}
-
-@logger.inject_lambda_context
-@tracer.capture_lambda_handler
-@metrics.log_metrics(capture_cold_start_metric=True)
-def handler(event, context):
-    return app.resolve(event, context)
-```
-
-### F. Event Source Mapping Patterns
-
-```yaml
-Resources:
-  # SQS with partial batch failure reporting
-  OrderProcessor:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: processor.handler
-      CodeUri: src/
-      Timeout: 300  # Must be <= SQS visibility timeout
-      Events:
-        SQSEvent:
-          Type: SQS
-          Properties:
-            Queue: !GetAtt OrderQueue.Arn
-            BatchSize: 10
-            FunctionResponseTypes: [ReportBatchItemFailures]  # Only retry failed records
-            ScalingConfig: { MaximumConcurrency: 10 }
-
-  # DynamoDB Streams with event filtering (reduces Lambda invocations)
-  ChangeProcessor:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: changes.handler
-      CodeUri: src/
-      Events:
-        DDBStream:
-          Type: DynamoDB
-          Properties:
-            Stream: !GetAtt MainTable.StreamArn
-            StartingPosition: TRIM_HORIZON
-            BatchSize: 100
-            BisectBatchOnFunctionError: true
-            FilterCriteria:
-              Filters: [{ Pattern: '{"eventName": ["INSERT", "MODIFY"]}' }]
-```
-
-### G. Lambda Function URLs
-
-```yaml
-# Function URL - direct HTTPS endpoint without API Gateway
-# Use for: webhooks, simple APIs, internal service-to-service calls
-Resources:
-  WebhookFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: webhook.handler
-      CodeUri: src/
-      FunctionUrlConfig:
-        AuthType: NONE  # Public endpoint (use AWS_IAM for private)
-        Cors:
-          AllowOrigins: ['https://example.com']
-          AllowMethods: [POST]
-        InvokeMode: BUFFERED  # or RESPONSE_STREAM for streaming
-```
-
-### H. Provisioned Concurrency
-
-```yaml
-# Eliminate cold starts for latency-sensitive functions
-Resources:
-  CriticalFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: critical.handler
-      CodeUri: src/
-      AutoPublishAlias: live
-      ProvisionedConcurrencyConfig:
-        ProvisionedConcurrentExecutions: 10
-  # Auto-scale provisioned concurrency (5-50) at 70% utilization
-  ScalingTarget:
-    Type: AWS::ApplicationAutoScaling::ScalableTarget
-    Properties:
-      MaxCapacity: 50
-      MinCapacity: 5
-      ResourceId: !Sub 'function:${CriticalFunction}:live'
-      ScalableDimension: lambda:function:ProvisionedConcurrency
-      ServiceNamespace: lambda
-```
-
----
-
-## 5. DynamoDB (MANDATORY)
-
-### A. Table Design
-
-```python
-# Single-table design pattern
-"""
-Entity Types and Key Schema:
-- User:    PK=USER#<id>,       SK=METADATA
-- Order:   PK=USER#<user_id>,  SK=ORDER#<order_id>
-- Product: PK=PRODUCT#<id>,    SK=METADATA
-
-GSI1 (Inverted Index): GSI1PK=SK, GSI1SK=PK (query orders by order_id)
-GSI2 (Sparse Index):   GSI2PK=status, GSI2SK=created_at (query by status)
-"""
-import boto3
-from datetime import datetime
-
-class DynamoDBRepository:
-    def __init__(self, table_name: str):
-        self.table = boto3.resource('dynamodb').Table(table_name)
-
-    def create_user(self, user_id: str, email: str, name: str) -> dict:
-        item = {
-            'pk': f'USER#{user_id}', 'sk': 'METADATA',
-            'gsi1pk': f'EMAIL#{email}', 'gsi1sk': f'USER#{user_id}',
-            'entity_type': 'USER', 'email': email, 'name': name,
-            'created_at': datetime.utcnow().isoformat(),
-        }
-        self.table.put_item(Item=item, ConditionExpression='attribute_not_exists(pk)')
-        return item
-
-    def get_user(self, user_id: str) -> dict:
-        return self.table.get_item(Key={'pk': f'USER#{user_id}', 'sk': 'METADATA'}).get('Item')
-
-    def get_user_orders(self, user_id: str, limit: int = 20) -> list:
-        return self.table.query(
-            KeyConditionExpression='pk = :pk AND begins_with(sk, :prefix)',
-            ExpressionAttributeValues={':pk': f'USER#{user_id}', ':prefix': 'ORDER#'},
-            Limit=limit, ScanIndexForward=False,
-        ).get('Items', [])
-
-    def update_order_status(self, user_id: str, order_id: str, status: str) -> dict:
-        return self.table.update_item(
-            Key={'pk': f'USER#{user_id}', 'sk': f'ORDER#{order_id}'},
-            UpdateExpression='SET #s = :s, gsi2pk = :s, updated_at = :t',
-            ExpressionAttributeNames={'#s': 'status'},
-            ExpressionAttributeValues={':s': status, ':t': datetime.utcnow().isoformat()},
-            ReturnValues='ALL_NEW',
-        )['Attributes']
-```
-
-### B. Table CloudFormation
-
-```yaml
-Resources:
-  MainTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      TableName: !Sub '${AWS::StackName}-main'
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - { AttributeName: pk, AttributeType: S }
-        - { AttributeName: sk, AttributeType: S }
-        - { AttributeName: gsi1pk, AttributeType: S }
-        - { AttributeName: gsi1sk, AttributeType: S }
-        - { AttributeName: gsi2pk, AttributeType: S }
-        - { AttributeName: gsi2sk, AttributeType: S }
-      KeySchema:
-        - { AttributeName: pk, KeyType: HASH }
-        - { AttributeName: sk, KeyType: RANGE }
-      GlobalSecondaryIndexes:
-        - IndexName: gsi1
-          KeySchema:
-            - { AttributeName: gsi1pk, KeyType: HASH }
-            - { AttributeName: gsi1sk, KeyType: RANGE }
-          Projection: { ProjectionType: ALL }
-        - IndexName: gsi2
-          KeySchema:
-            - { AttributeName: gsi2pk, KeyType: HASH }
-            - { AttributeName: gsi2sk, KeyType: RANGE }
-          Projection: { ProjectionType: ALL }
-      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
-      SSESpecification: { SSEEnabled: true }
-      TimeToLiveSpecification: { AttributeName: ttl, Enabled: true }
-```
-
-### C. Transactions and Pagination
-
-```python
-import boto3
-client = boto3.client('dynamodb')
-
-def create_order_with_items(table_name, user_id, order_id, items, total):
-    """Transactional write: create order + line items atomically."""
-    transact_items = [{'Put': {'TableName': table_name, 'Item': {
-        'pk': {'S': f'USER#{user_id}'}, 'sk': {'S': f'ORDER#{order_id}'},
-        'gsi1pk': {'S': f'ORDER#{order_id}'}, 'gsi2pk': {'S': 'STATUS#pending'},
-        'total': {'N': str(total)},
-    }, 'ConditionExpression': 'attribute_not_exists(pk)'}}]
-    for idx, item in enumerate(items):
-        transact_items.append({'Put': {'TableName': table_name, 'Item': {
-            'pk': {'S': f'ORDER#{order_id}'}, 'sk': {'S': f'ITEM#{idx:04d}'},
-            'product_id': {'S': item['product_id']},
-        }}})
-    client.transact_write_items(TransactItems=transact_items)
-
-def paginated_query(table, pk, sk_prefix, limit=20, last_key=None):
-    kwargs = {
-        'KeyConditionExpression': 'pk = :pk AND begins_with(sk, :prefix)',
-        'ExpressionAttributeValues': {':pk': pk, ':prefix': sk_prefix},
-        'Limit': limit, 'ScanIndexForward': False,
-    }
-    if last_key:
-        kwargs['ExclusiveStartKey'] = last_key
-    resp = table.query(**kwargs)
-    return {'items': resp.get('Items', []), 'next_token': resp.get('LastEvaluatedKey')}
-```
-
----
-
-## 6. S3 (MANDATORY)
-
-### A. Bucket Configuration
-
-```yaml
-Resources:
-  DataBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: !Sub '${AWS::StackName}-data-${AWS::AccountId}'
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
-      VersioningConfiguration: { Status: Enabled }
-      LifecycleConfiguration:
-        Rules:
-          - Id: TransitionToIA
-            Status: Enabled
-            Transitions:
-              - { TransitionInDays: 90, StorageClass: STANDARD_IA }
-              - { TransitionInDays: 365, StorageClass: GLACIER }
-          - Id: DeleteOldVersions
-            Status: Enabled
-            NoncurrentVersionExpiration: { NoncurrentDays: 90 }
-
-  # Always enforce HTTPS
-  DataBucketPolicy:
-    Type: AWS::S3::BucketPolicy
-    Properties:
-      Bucket: !Ref DataBucket
-      PolicyDocument:
-        Statement:
-          - Sid: EnforceHTTPS
-            Effect: Deny
-            Principal: '*'
-            Action: 's3:*'
-            Resource: [!GetAtt DataBucket.Arn, !Sub '${DataBucket.Arn}/*']
-            Condition: { Bool: { 'aws:SecureTransport': 'false' } }
-```
-
-### B. S3 Operations
-
-```python
-import boto3
-
-s3 = boto3.client('s3')
-
-def upload_file(bucket: str, file_path: str, key: str) -> str:
-    s3.upload_file(file_path, bucket, key, ExtraArgs={'ServerSideEncryption': 'AES256'})
-    return f's3://{bucket}/{key}'
-
-def generate_presigned_url(bucket: str, key: str, expiration: int = 3600) -> str:
-    """Generate presigned URL for secure download."""
-    return s3.generate_presigned_url('get_object',
-        Params={'Bucket': bucket, 'Key': key}, ExpiresIn=expiration)
-
-def generate_presigned_post(bucket: str, key: str) -> dict:
-    """Generate presigned POST for direct browser upload (10MB max)."""
-    return s3.generate_presigned_post(bucket, key,
-        Conditions=[['content-length-range', 1, 10485760]], ExpiresIn=3600)
-```
-
-### C. S3 Event Notifications
-
-```yaml
-Resources:
-  # S3 event triggering Lambda (SAM)
-  ImageProcessor:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: image_processor.handler
-      CodeUri: src/
-      Timeout: 300
-      MemorySize: 1024
-      Policies:
-        - S3ReadPolicy: { BucketName: !Ref UploadBucket }
-        - S3CrudPolicy: { BucketName: !Ref ProcessedBucket }
-      Events:
-        S3Upload:
-          Type: S3
-          Properties:
-            Bucket: !Ref UploadBucket
-            Events: s3:ObjectCreated:*
-            Filter:
-              S3Key:
-                Rules:
-                  - { Name: prefix, Value: uploads/images/ }
-                  - { Name: suffix, Value: .jpg }
-  # Prefer EventBridge notifications for new projects:
-  # NotificationConfiguration: { EventBridgeConfiguration: { EventBridgeEnabled: true } }
-```
-
-```python
-# S3 event handler - note: URL-decode key (S3 encodes spaces as '+')
-import boto3, urllib.parse
-
-s3 = boto3.client('s3')
-
-def handler(event, context):
-    for record in event['Records']:
-        bucket = record['s3']['bucket']['name']
-        key = urllib.parse.unquote_plus(record['s3']['object']['key'])
-        body = s3.get_object(Bucket=bucket, Key=key)['Body'].read()
-        # ... process the file
-```
-
----
-
-## 7. API Gateway (MANDATORY)
-
-```yaml
-# REST API (v1) with Cognito auth, throttling, and access logging
-Resources:
-  Api:
-    Type: AWS::Serverless::Api
-    Properties:
-      StageName: !Ref Environment
-      TracingEnabled: true
-      AccessLogSetting:
-        DestinationArn: !GetAtt ApiAccessLogs.Arn
-        Format: '{"requestId":"$context.requestId","httpMethod":"$context.httpMethod","path":"$context.path","status":"$context.status","responseLatency":"$context.responseLatency"}'
-      MethodSettings:
-        - { HttpMethod: '*', ResourcePath: '/*', ThrottlingBurstLimit: 100, ThrottlingRateLimit: 50 }
-      Auth:
-        DefaultAuthorizer: CognitoAuthorizer
-        Authorizers:
-          CognitoAuthorizer: { UserPoolArn: !GetAtt UserPool.Arn }
-      Cors:
-        AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
-        AllowHeaders: "'Content-Type,Authorization'"
-        AllowOrigin: "'https://example.com'"
-
-  ApiAccessLogs:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub '/aws/apigateway/${AWS::StackName}'
-      RetentionInDays: 30
-```
-
-### HTTP API (v2) vs REST API (v1)
-
-```yaml
-# HTTP API (v2) - PREFERRED for most new projects
-# ~70% cheaper, lower latency, native JWT auth, simpler CORS
-# Use REST API (v1) only when you need: API keys, usage plans, WAF, caching,
-# request validation, or request/response transformation
-Resources:
-  HttpApi:
-    Type: AWS::Serverless::HttpApi
-    Properties:
-      StageName: !Ref Environment
-      CorsConfiguration:
-        AllowOrigins: ['https://example.com']
-        AllowMethods: [GET, POST, PUT, DELETE]
-        AllowHeaders: [Content-Type, Authorization]
-      Auth:
-        DefaultAuthorizer: JWTAuthorizer
-        Authorizers:
-          JWTAuthorizer:
-            JwtConfiguration:
-              issuer: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}'
-              audience: [!Ref UserPoolClient]
-
-  ApiFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: app.handler
-      CodeUri: src/
-      Events:
-        GetItems: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /items, Method: GET } }
-        CreateItem: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /items, Method: POST } }
-```
-
----
-
-## 8. ECS/Fargate (MANDATORY)
-
-```yaml
-Resources:
-  ECSCluster:
-    Type: AWS::ECS::Cluster
-    Properties:
-      ClusterName: !Sub '${AWS::StackName}-cluster'
-      CapacityProviders: [FARGATE, FARGATE_SPOT]
-      DefaultCapacityProviderStrategy:
-        - { CapacityProvider: FARGATE, Weight: 1 }
-        - { CapacityProvider: FARGATE_SPOT, Weight: 4 }  # 80% Spot savings
-      ClusterSettings:
-        - { Name: containerInsights, Value: enabled }
-
-  TaskDefinition:
-    Type: AWS::ECS::TaskDefinition
-    Properties:
-      Family: !Sub '${AWS::StackName}-app'
-      NetworkMode: awsvpc
-      RequiresCompatibilities: [FARGATE]
-      Cpu: '256'
-      Memory: '512'
-      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
-      TaskRoleArn: !GetAtt TaskRole.Arn
-      ContainerDefinitions:
-        - Name: app
-          Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepository}:latest'
-          Essential: true
-          PortMappings: [{ ContainerPort: 8080 }]
-          Secrets:
-            - { Name: DATABASE_URL, ValueFrom: !Ref DatabaseUrlSecret }
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group: !Ref LogGroup
-              awslogs-region: !Ref AWS::Region
-              awslogs-stream-prefix: app
-
-  Service:
-    Type: AWS::ECS::Service
-    Properties:
-      Cluster: !Ref ECSCluster
-      TaskDefinition: !Ref TaskDefinition
-      DesiredCount: 2
-      NetworkConfiguration:
-        AwsvpcConfiguration:
-          AssignPublicIp: DISABLED
-          SecurityGroups: [!Ref ServiceSecurityGroup]
-          Subnets: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
-      LoadBalancers:
-        - { ContainerName: app, ContainerPort: 8080, TargetGroupArn: !Ref TargetGroup }
-      DeploymentConfiguration: { MinimumHealthyPercent: 100, MaximumPercent: 200 }
-```
-
----
-
-## 9. CloudWatch and Monitoring (MANDATORY)
-
-```yaml
-Resources:
-  ErrorAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: !Sub '${AWS::StackName}-errors'
-      MetricName: Errors
-      Namespace: AWS/Lambda
-      Dimensions: [{ Name: FunctionName, Value: !Ref ProcessFunction }]
-      Statistic: Sum
-      Period: 300
-      EvaluationPeriods: 1
-      Threshold: 5
-      ComparisonOperator: GreaterThanThreshold
-      AlarmActions: [!Ref AlertTopic]
-
-  # Also create alarms for: DLQ depth, API Gateway 5xx, Lambda duration P99
-```
-
-### CloudWatch Logs Insights Queries
-
-```sql
--- Find Lambda cold starts and their duration
-fields @timestamp, @duration, @memorySize, @maxMemoryUsed
-| filter @message like /REPORT/ and @message like /Init Duration/
-| parse @message "Init Duration: * ms" as initDuration
-| sort initDuration desc | limit 50
-
--- Error pattern analysis (errors per hour)
-fields @timestamp, @message
-| filter @message like /ERROR/
-| stats count(*) as errorCount by bin(1h)
-| sort errorCount desc
-
--- P99 latency analysis for Lambda
-fields @duration | filter @type = "REPORT"
-| stats avg(@duration) as avg, pct(@duration, 50) as p50,
-        pct(@duration, 90) as p90, pct(@duration, 99) as p99
-  by bin(1h)
-
--- Search for correlation ID across services
-fields @timestamp, @message, @logStream
-| filter @message like /correlation-id-abc123/
-| sort @timestamp asc
-```
-
----
-
-## 10. SQS and SNS Patterns (MANDATORY)
-
-### A. SQS Queue Configuration
-
-```yaml
-Resources:
-  # Standard queue with dead-letter queue
-  OrderQueue:
-    Type: AWS::SQS::Queue
-    Properties:
-      QueueName: !Sub '${AWS::StackName}-orders'
-      VisibilityTimeout: 300    # 6x Lambda timeout
-      MessageRetentionPeriod: 1209600  # 14 days
-      ReceiveMessageWaitTimeSeconds: 20  # Long polling (always enable)
-      SqsManagedSseEnabled: true
-      RedrivePolicy:
-        deadLetterTargetArn: !GetAtt OrderDLQ.Arn
-        maxReceiveCount: 3
-
-  OrderDLQ:
-    Type: AWS::SQS::Queue
-    Properties:
-      QueueName: !Sub '${AWS::StackName}-orders-dlq'
-      MessageRetentionPeriod: 1209600
-
-  # FIFO queue for ordered processing
-  PaymentQueue:
-    Type: AWS::SQS::Queue
-    Properties:
-      QueueName: !Sub '${AWS::StackName}-payments.fifo'
-      FifoQueue: true
-      ContentBasedDeduplication: true
-      FifoThroughputLimit: perMessageGroupId  # High throughput mode
-      VisibilityTimeout: 300
-      RedrivePolicy:
-        deadLetterTargetArn: !GetAtt PaymentDLQ.Arn
-        maxReceiveCount: 3
-
-  PaymentDLQ:
-    Type: AWS::SQS::Queue
-    Properties:
-      QueueName: !Sub '${AWS::StackName}-payments-dlq.fifo'
-      FifoQueue: true
-```
-
-```python
-import boto3, json
-sqs = boto3.client('sqs')
-
-def send_fifo_message(queue_url, order):
-    return sqs.send_message(QueueUrl=queue_url, MessageBody=json.dumps(order),
-        MessageGroupId=order['user_id'],            # Per-user ordering
-        MessageDeduplicationId=order['order_id'])    # Prevent duplicates
-```
-
-### B. SNS Fan-Out Pattern
-
-```yaml
-Resources:
-  # SNS to SQS fan-out: one event triggers multiple consumers
-  OrderEventsTopic:
-    Type: AWS::SNS::Topic
-    Properties:
-      TopicName: !Sub '${AWS::StackName}-order-events'
-      KmsMasterKeyId: alias/aws/sns
-
-  # FilterPolicy: only receive matching events; omit for all events
-  InventorySubscription:
-    Type: AWS::SNS::Subscription
-    Properties:
-      TopicArn: !Ref OrderEventsTopic
-      Protocol: sqs
-      Endpoint: !GetAtt InventoryQueue.Arn
-      FilterPolicy: { event_type: [order_created, order_cancelled] }
-      RawMessageDelivery: true  # Skip SNS envelope wrapping
-```
-
----
-
-## 11. EventBridge (MANDATORY)
-
-### A. Event Bus and Rules
-
-```yaml
-Resources:
-  # Always use custom event bus (do not pollute the default bus)
-  AppEventBus:
-    Type: AWS::Events::EventBus
-    Properties:
-      Name: !Sub '${AWS::StackName}-events'
-
-  # Pattern-matching rule with numeric filter
-  OrderCreatedRule:
-    Type: AWS::Events::Rule
-    Properties:
-      EventBusName: !Ref AppEventBus
-      EventPattern:
-        source: ['myapp.orders']
-        detail-type: ['OrderCreated']
-        detail: { total: [{ numeric: ['>=', 100] }] }
-      Targets:
-        - { Id: ProcessOrder, Arn: !GetAtt HighValueOrderFunction.Arn }
-
-  # Scheduled rule
-  DailyCleanupRule:
-    Type: AWS::Events::Rule
-    Properties:
-      ScheduleExpression: 'cron(0 2 * * ? *)'
-      Targets: [{ Id: Cleanup, Arn: !GetAtt CleanupFunction.Arn }]
-```
-
-### B. Publishing Events
-
-```python
-import boto3, json
-eventbridge = boto3.client('events')
-
-def publish_event(bus_name, source, detail_type, detail):
-    resp = eventbridge.put_events(Entries=[{
-        'Source': source, 'DetailType': detail_type,
-        'Detail': json.dumps(detail), 'EventBusName': bus_name,
-    }])
-    if resp['FailedEntryCount'] > 0:
-        raise Exception(f"Failed: {resp['Entries']}")
-
-# publish_event('myapp-events', 'myapp.orders', 'OrderCreated', {'order_id': 'ord-123'})
-```
-
-### C. Archive and Cross-Account
-
-```yaml
-Resources:
-  # Archive for replay (disaster recovery, debugging)
-  EventArchive:
-    Type: AWS::Events::Archive
-    Properties:
-      ArchiveName: !Sub '${AWS::StackName}-archive'
-      SourceArn: !GetAtt AppEventBus.Arn
-      EventPattern: { source: [{ prefix: 'myapp.' }] }
-      RetentionDays: 90
-
-  # Cross-account event routing
-  CrossAccountPolicy:
-    Type: AWS::Events::EventBusPolicy
-    Properties:
-      EventBusName: !Ref AppEventBus
-      StatementId: AllowCrossAccount
-      Statement:
-        Effect: Allow
-        Principal: { AWS: !Sub 'arn:aws:iam::${TrustedAccountId}:root' }
-        Action: 'events:PutEvents'
-        Resource: !GetAtt AppEventBus.Arn
-```
-
----
-
-## 12. Step Functions (MANDATORY)
-
-### A. Standard vs Express Workflows
-
-```yaml
-# Standard Workflow: long-running (up to 1 year), exactly-once execution
-# Use for: order processing, ETL, human approval workflows
-# Pricing: per state transition
-
-# Express Workflow: short-lived (up to 5 min), at-least-once execution
-# Use for: high-volume event processing, streaming data, IoT ingestion
-# Pricing: per execution + duration
-```
-
-### B. Order Processing Workflow
-
-```yaml
-Resources:
-  OrderStateMachine:
-    Type: AWS::Serverless::StateMachine
-    Properties:
-      DefinitionUri: statemachine/order-processing.asl.json
-      Type: STANDARD
-      Tracing: { Enabled: true }
-      Logging:
-        Level: ALL
-        IncludeExecutionData: true
-        Destinations:
-          - CloudWatchLogsLogGroup: { LogGroupArn: !GetAtt SFNLogGroup.Arn }
-      Policies:
-        - LambdaInvokePolicy: { FunctionName: !Ref ValidateOrderFunction }
-        - LambdaInvokePolicy: { FunctionName: !Ref ProcessPaymentFunction }
-        - DynamoDBCrudPolicy: { TableName: !Ref OrdersTable }
-```
-
-```json
-// statemachine/order-processing.asl.json (key patterns)
-{
-  "StartAt": "ValidateOrder",
-  "States": {
-    "ValidateOrder": {
-      "Type": "Task", "Resource": "${ValidateOrderFunctionArn}", "Next": "IsInStock",
-      "Retry": [{ "ErrorEquals": ["ServiceUnavailable"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2.0 }],
-      "Catch": [{ "ErrorEquals": ["ValidationError"], "Next": "OrderFailed", "ResultPath": "$.error" }]
-    },
-    "IsInStock": {
-      "Type": "Choice",
-      "Choices": [{ "Variable": "$.inventory_count", "NumericGreaterThan": 0, "Next": "ProcessPayment" }],
-      "Default": "WaitForRestock"
-    },
-    "WaitForRestock": { "Type": "Wait", "Seconds": 300, "Next": "ValidateOrder" },
-    "ProcessPayment": {
-      "Type": "Task", "Resource": "${ProcessPaymentFunctionArn}", "Next": "ParallelFulfillment",
-      "Retry": [{ "ErrorEquals": ["PaymentGatewayTimeout"], "IntervalSeconds": 5, "MaxAttempts": 2 }],
-      "Catch": [{ "ErrorEquals": ["PaymentDeclined"], "Next": "OrderFailed" }]
-    },
-    "ParallelFulfillment": {
-      "Type": "Parallel", "Next": "OrderCompleted",
-      "Branches": [
-        { "StartAt": "Fulfill", "States": { "Fulfill": { "Type": "Task", "Resource": "${FulfillFunctionArn}", "End": true } } },
-        { "StartAt": "Notify", "States": { "Notify": { "Type": "Task", "Resource": "arn:aws:states:::sns:publish", "Parameters": { "TopicArn": "${TopicArn}", "Message.$": "$.order_id" }, "End": true } } }
-      ],
-      "Catch": [{ "ErrorEquals": ["States.ALL"], "Next": "OrderFailed" }]
-    },
-    "OrderCompleted": { "Type": "Succeed" },
-    "OrderFailed": { "Type": "Fail" }
-  }
-}
-```
-
-### C. Map State for Batch Processing
-
-```json
-// Process items in parallel with retries (max 10 concurrent)
-{ "Type": "Map", "ItemsPath": "$.items", "MaxConcurrency": 10,
-  "ItemProcessor": { "StartAt": "Process", "States": { "Process": {
-    "Type": "Task", "Resource": "${ProcessItemArn}", "End": true,
-    "Retry": [{ "ErrorEquals": ["States.TaskFailed"], "IntervalSeconds": 2, "MaxAttempts": 3 }]
-  }}}}
-```
-
----
-
-## 13. CDK Patterns (MANDATORY)
-
-### A. Construct Levels
-
-```typescript
-// L1 - CloudFormation resources (CfnXxx prefix) - avoid unless L2 is insufficient
-// L2 - Curated constructs with sensible defaults - PREFERRED for most use cases
-// L3 - Patterns combining multiple resources - highest abstraction
-
-// ✅ L2 construct: sensible defaults, type-safe, grant helpers
-const table = new dynamodb.Table(this, 'DataTable', {
-  partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
-  sortKey: { name: 'sk', type: dynamodb.AttributeType.STRING },
-  billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-  pointInTimeRecovery: true,
-  encryption: dynamodb.TableEncryption.AWS_MANAGED,
-  removalPolicy: cdk.RemovalPolicy.RETAIN,
-});
-```
-
-### B. Stack Organization
-
-```typescript
-// ✅ Separate stacks by lifecycle and team ownership
-const app = new cdk.App();
-const env = { account: '123456789012', region: 'us-east-1' };
-
-const networkStack = new NetworkStack(app, 'Network', { env });       // Rarely changes
-const dataStack = new DataStack(app, 'Data', { env, vpc: networkStack.vpc }); // Infrequent
-const appStack = new ApplicationStack(app, 'App', { env,              // Frequent
-  vpc: networkStack.vpc, table: dataStack.table });
-```
-
-```typescript
-// lib/application-stack.ts
-export class ApplicationStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props: ApplicationStackProps) {
-    super(scope, id, props);
-
-    const handler = new lambda.Function(this, 'ApiHandler', {
-      runtime: lambda.Runtime.PYTHON_3_12,
-      handler: 'app.handler',
-      code: lambda.Code.fromAsset('src/api'),
-      architecture: lambda.Architecture.ARM_64,
-      memorySize: 512,
-      timeout: cdk.Duration.seconds(30),
-      tracing: lambda.Tracing.ACTIVE,
-      environment: { TABLE_NAME: props.table.tableName },
-    });
-
-    props.table.grantReadWriteData(handler);  // CDK generates scoped IAM policy
-
-    const httpApi = new apigwv2.HttpApi(this, 'HttpApi', {
-      corsPreflight: { allowOrigins: ['https://example.com'], allowMethods: [apigwv2.CorsHttpMethod.ANY] },
-    });
-    httpApi.addRoutes({
-      path: '/items', methods: [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST],
-      integration: new apigwv2_integrations.HttpLambdaIntegration('Api', handler),
-    });
-  }
-}
-```
-
-### C. Environment-Specific Configuration
-
-```typescript
-// cdk.json context: { "environments": { "dev": {...}, "prod": {...} } }
-const envName = app.node.tryGetContext('env') || 'dev';
-const config = app.node.tryGetContext('environments')[envName];
-new ApplicationStack(app, `MyApp-${envName}`, {
-  env: { account: config.account, region: config.region }, config,
-});
-// Deploy: cdk deploy --context env=prod
-```
-
-### D. CDK Pipelines for CI/CD
-
-```typescript
-const pipeline = new CodePipeline(this, 'Pipeline', {
-  synth: new ShellStep('Synth', {
-    input: CodePipelineSource.gitHub('myorg/myrepo', 'main'),
-    commands: ['npm ci', 'npm run build', 'npm run test', 'npx cdk synth'],
-  }),
-  selfMutation: true,      // Pipeline updates itself
-  crossAccountKeys: true,  // Cross-account deployments
-});
-
-const staging = pipeline.addStage(new AppStage(this, 'Staging', { env: stagingEnv }));
-staging.addPost(new ShellStep('IntegTest', { commands: ['npm run test:integration'] }));
-
-const prod = pipeline.addStage(new AppStage(this, 'Prod', { env: prodEnv }));
-prod.addPre(new pipelines.ManualApprovalStep('PromoteToProd'));
-```
-
-### E. Testing CDK Constructs
-
-```typescript
-import { Template, Match } from 'aws-cdk-lib/assertions';
-
-const template = Template.fromStack(new ApplicationStack(app, 'Test', { config }));
-
-// Verify resource properties
-template.hasResourceProperties('AWS::Lambda::Function', {
-  Runtime: 'python3.12', MemorySize: 512, Architectures: ['arm64'],
-});
-
-// Ensure security: no public S3 buckets
-template.allResourcesProperties('AWS::S3::Bucket', {
-  PublicAccessBlockConfiguration: {
-    BlockPublicAcls: true, BlockPublicPolicy: true,
-    IgnorePublicAcls: true, RestrictPublicBuckets: true,
-  },
-});
-
-// Snapshot test: detect unintended infrastructure changes
-expect(template.toJSON()).toMatchSnapshot();
-```
-
----
-
-## 14. Security & Dependency Management (MANDATORY)
-
-### A. Infrastructure Security Scanning
-
-```bash
-# AWS Security Hub - centralized security findings
-aws securityhub get-findings --filters '{"SeverityLabel":[{"Value":"CRITICAL","Comparison":"EQUALS"}]}'
-
-# Amazon Inspector - automated vulnerability scanning for EC2, Lambda, ECR
-aws inspector2 list-findings --filter-criteria '{"findingStatus":[{"comparison":"EQUALS","value":"ACTIVE"}]}'
-
-# Amazon GuardDuty - threat detection
-aws guardduty list-findings --detector-id DETECTOR_ID --finding-criteria '{"Criterion":{"severity":{"Gte":7}}}'
-
-# IAM Access Analyzer - identify unintended resource access
-aws accessanalyzer list-findings --analyzer-arn ANALYZER_ARN
-
-# Prowler - open-source AWS security auditing
-prowler aws --severity critical high
-prowler aws --compliance cis_2.0_aws
-prowler aws --service s3 iam lambda
-```
-
-### B. Vulnerability Scanning
-
-```bash
-# IaC scanning with checkov
-checkov -d . --framework cloudformation
-checkov -d . --framework terraform
-checkov --file template.yaml --check CKV_AWS_18,CKV_AWS_21
-
-# IaC scanning with trivy
-trivy config .
-trivy config --severity HIGH,CRITICAL .
-
-# ECR image scanning (enabled per repository)
-aws ecr start-image-scan --repository-name my-repo --image-id imageTag=latest
-aws ecr describe-image-scan-findings --repository-name my-repo --image-id imageTag=latest
-```
-
-### C. Policy & Compliance
-
-```bash
-# AWS Config - compliance rules evaluation
-aws configservice get-compliance-details-by-config-rule --config-rule-name s3-bucket-public-read-prohibited
-aws configservice describe-compliance-by-resource --resource-type AWS::S3::Bucket
-
-# SCPs via AWS Organizations for account-level guardrails
-aws organizations list-policies --filter SERVICE_CONTROL_POLICY
-
-# Credential management - ALWAYS use Secrets Manager
-aws secretsmanager create-secret --name my-secret --secret-string '{"key":"value"}'
-aws secretsmanager get-secret-value --secret-id my-secret
-# Rotate secrets automatically with rotation Lambda functions
-aws secretsmanager rotate-secret --secret-id my-secret
-```
-
----
-
-## 15. Deployment Checklist
-
-### Security
-- [ ] Least privilege IAM policies with permission boundaries
-- [ ] Secrets in Secrets Manager; config in Parameter Store
-- [ ] Encryption at rest and in transit (TLS, S3 HTTPS enforcement)
-- [ ] VPC endpoints for private access; security groups locked down
-- [ ] IAM roles for services (never embed access keys)
-- [ ] CloudTrail enabled for API audit logging
-
-### Reliability
-- [ ] Multi-AZ deployment; auto-scaling configured
-- [ ] Backup and recovery tested (DynamoDB PITR, S3 versioning)
-- [ ] Dead letter queues on all async processing
-- [ ] Step Functions Catch/Retry for workflow error handling
-
-### Operations
-- [ ] CloudWatch alarms for errors, latency, and DLQ depth
-- [ ] X-Ray tracing enabled; Powertools configured
-- [ ] Logs Insights queries saved; log retention periods set
-
-### Cost
-- [ ] ARM64 architecture; right-sized Lambda memory
-- [ ] Spot/Fargate Spot for fault-tolerant workloads
-- [ ] S3 lifecycle policies; DynamoDB billing mode evaluated
-
-### Deployment
-- [ ] Infrastructure as Code for all resources
-- [ ] CI/CD pipeline with CDK snapshot tests
-- [ ] Stacks separated by lifecycle; env config via context/SSM
-
----
-
-## 16. Quick Reference
-
-```bash
-# AWS CLI
-aws s3 cp file.txt s3://bucket-name/
-aws lambda invoke --function-name my-func output.json
+# Identity & inventory
+aws sts get-caller-identity
+aws resourcegroupstaggingapi get-resources --tag-filters Key=Environment,Values=prod
+
+# IaC
+cdk diff && cdk deploy --context env=prod      # CDK
+sam build && sam deploy --guided               # SAM
+aws cloudformation detect-stack-drift --stack-name my-stack
+
+# Security & cost
+checkov -d .                                   # AWS-SEC-04
+prowler aws --severity critical high           # posture audit
+aws budgets describe-budgets --account-id <id>  # AWS-COST-02
+
+# Operate
 aws logs tail /aws/lambda/my-func --follow
-aws ssm get-parameter --name /my/param --with-decryption
-aws ecs update-service --cluster my-cluster --service my-service --force-new-deployment
-
-# SAM
-sam build && sam deploy --guided
-sam local invoke FunctionName
-sam logs -n FunctionName --tail
-
-# CDK
-cdk synth                         # Synthesize CloudFormation template
-cdk diff                          # Show pending changes
-cdk deploy --context env=prod     # Deploy with environment context
-
-# SQS / EventBridge / Step Functions
-aws sqs send-message --queue-url URL --message-body '{"test": true}'
-aws events put-events --entries '[{"Source":"myapp","DetailType":"Test","Detail":"{}"}]'
-aws stepfunctions start-execution --state-machine-arn ARN --input '{"key":"value"}'
+aws ssm get-parameter --name /app/prod/db/host --with-decryption
 ```
 
 ---
 
-## 17. Why This Configuration Works
+## 12. Deployment Checklist
 
-1. **Multi-Account Strategy**: Isolating workloads across AWS accounts (dev, staging, prod) limits blast radius and simplifies IAM boundaries.
+Generated from §2 — one box per requirement ID. No new requirements.
 
-2. **IAM Roles over Access Keys**: Using IAM roles with temporary credentials via STS eliminates long-lived secrets and reduces credential leakage risk.
-
-3. **VPC Design with Private Subnets**: Placing compute in private subnets with NAT gateways ensures workloads are not directly internet-accessible while still allowing outbound connectivity.
-
-4. **Infrastructure as Code with CDK/SAM**: Defining infrastructure in code enables reproducible environments, version-controlled changes, and automated rollbacks.
-
-5. **Event-Driven Architecture**: Leveraging SQS, EventBridge, and Step Functions decouples services, improves resilience, and scales each component independently.
-
-6. **Secrets Manager and SSM Parameter Store**: Centralizing secrets with automatic rotation eliminates hardcoded credentials and provides audit trails for access.
-
-7. **CloudWatch and X-Ray Integration**: Native observability gives correlated metrics, logs, and traces without third-party tooling overhead.
-
-8. **S3 Lifecycle Policies**: Automated tiering from Standard to Glacier reduces storage costs by up to 90% for infrequently accessed data.
-
-9. **Lambda with Provisioned Concurrency**: Combining serverless scaling with provisioned concurrency eliminates cold starts for latency-sensitive endpoints.
-
-10. **Security Hub and GuardDuty**: Automated threat detection and compliance checks provide continuous security posture assessment across all accounts.
+- [ ] AWS-IAM-01 — no wildcard action+resource; policies scoped to ARNs + conditions
+- [ ] AWS-IAM-02 — workloads use roles/STS, no static access keys
+- [ ] AWS-IAM-03 — permission boundaries on delegated/CI roles
+- [ ] AWS-SEC-01 — encryption at rest (KMS) and in transit (TLS); S3 deny non-TLS
+- [ ] AWS-SEC-02 — S3 Block Public Access on (all 4 flags)
+- [ ] AWS-SEC-03 — secrets in Secrets Manager / SSM SecureString, none plaintext
+- [ ] AWS-SEC-04 — IaC scan (checkov/trivy) 0 high/critical
+- [ ] AWS-OBS-01 — multi-region CloudTrail enabled
+- [ ] AWS-OBS-02 — metrics/traces emitted; alarms on error/latency/saturation/DLQ
+- [ ] AWS-ARCH-01 — all infra is code; no drift, no ClickOps
+- [ ] AWS-ARCH-02 — production multi-AZ; async paths have DLQs
+- [ ] AWS-COST-01 — mandatory tag set on every resource
+- [ ] AWS-COST-02 — Budgets + Cost Anomaly Detection configured
+- [ ] Agent validated against the six Well-Architected pillars (§3) and recorded trade-offs
 
 ---
-
-**Last Updated:** 2026-02-27
-**Version:** 2.0
-**Maintainer:** Cloud Team
-
-
-**End of AWS Development Guidelines**
+**End of AWS Guidelines**

@@ -1,1276 +1,464 @@
 # OpenAPI Specification Guidelines
-Mandatory standards for designing and documenting REST APIs using OpenAPI (formerly Swagger). OpenAPI 3.1, Swagger UI, Redoc, Stoplight, Spectral.
+Mandatory standards for contract-first API specs: structured documents, reusable components, rich examples, declared security, code generation, Spectral linting. OpenAPI 3.1.1, Spectral 6, Redocly CLI, oasdiff, openapi-generator.
+
+---
+name: openapi
+title: OpenAPI Specification Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: cross-cutting
+tools: [openapi@3.1.1, spectral@6, redocly-cli, oasdiff, openapi-generator]
+requires: []
+recommends:
+  - rest
+  - semver
+  - secure-coding
+  - oauth
+provides:
+  - openapi-spec
+  - contract-first
+  - schema-components
+  - spec-linting
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide owns the **OpenAPI document** — its structure, component reuse, examples, security-scheme declaration, code generation, and linting. The REST design the spec *describes* lives elsewhere.
 
 ---
 
-**Agent Profile**: The OpenAPI Expert
-**Role**: Senior API Designer & Documentation Specialist
-**Objective**: Generate comprehensive, accurate, and developer-friendly API specifications.
-**Tools**: OpenAPI 3.1, Swagger UI, Redoc, Stoplight, Spectral.
+## 0. Prerequisites & References
+
+This guide describes how to author the OpenAPI **document**. The API's *design* and its cross-cutting concerns are owned elsewhere — fetch those when the task touches them; do not redesign them here.
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`rest.md`](guides://rest.md) — REST resource design, status codes, pagination strategy, the error model. *(OpenAPI binding: the spec **documents** these decisions; it does not invent them.)*
+> - [`semver.md`](guides://semver.md) — versioning & breaking-change policy. *(Binding: `info.version` is the spec's SemVer; breaking changes are gated by `oasdiff`.)*
+> - [`secure-coding.md`](guides://secure-coding.md) — auth, secrets, transport, threat model. *(Binding: `securitySchemes` + `security` declare, never weaken, that policy.)*
+> - [`oauth.md`](guides://oauth.md) — OAuth 2.x / OIDC flows and scopes. *(Binding: `type: oauth2` scheme flows mirror the authorization server's real flows.)*
+
+> 📎 **SEE ALSO:** [`graphql.md`](guides://graphql.md) · [`grpc.md`](guides://grpc.md) · [`websocket.md`](guides://websocket.md) *(sibling API styles)* · [`ci-cd.md`](guides://ci-cd.md) *(where lint/diff gates run)* · [`zod.md`](guides://zod.md) *(schema generation in TS clients)*
 
 ---
 
 ## 1. Core Philosophies: OPENAPI-FIRST
 
-- **O**rganized: Logical structure and consistent naming
-- **P**recise: Accurate schemas with validation rules
-- **E**xamples: Rich examples for every endpoint
-- **N**avigable: Easy to browse and understand
-- **A**utomated: Enable code generation and testing
-- **P**roduction-ready: Versioned and maintained
-- **I**nteractive: Try-it-out functionality
+OpenAPI-document principles only. REST semantics, auth design, and versioning policy come from §0 — do **not** restate them here.
+
+- **O**ne source of truth: the spec is the **contract**. Server and client are generated or validated *against* it, never hand-drifted away from it (`provides: contract-first`).
+- **P**ortable structure: split large specs into `$ref`'d files; every reusable shape lives once in `components` and is referenced (`provides: schema-components`).
+- **E**xamples everywhere: every operation and schema carries realistic, schema-valid examples — they power try-it-out, mock servers, and contract tests.
+- **N**ormative & precise: schemas pin types, formats, bounds, and `required`; no untyped `object` blobs leak into the contract.
+- **A**utomatable: the spec drives codegen, mock servers, and CI gates; it MUST be machine-valid (parses + lints clean).
+- **P**inned & versioned: `info.version` follows SemVer (see `semver.md`); breaking changes are detected mechanically, never by eyeball.
+- **I**dentity & security declared: every security scheme the API enforces is declared and applied; nothing is implicit.
+
+**Verified Spec**: An agent-authored OpenAPI document MUST pass every gate in §2 before delivery.
 
 ---
 
-## 2. Document Structure (MANDATORY)
+## 2. Requirements (MANDATORY, auditable)
 
-### A. Basic Structure
+RFC-2119 keywords. IDs `OAPI-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a shared rule cite its owner.
+
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| OAPI-STRUCT-01 | Document MUST be valid OpenAPI 3.1.x | `redocly lint openapi.yaml` (or `spectral lint`) | 0 errors |
+| OAPI-LINT-01 | Spectral ruleset MUST pass clean | `spectral lint openapi.yaml --fail-severity=error` | exit 0 |
+| OAPI-LINT-02 | Every operation MUST have a unique camelCase `operationId`, `summary`, and `tags` | spectral rule (§8) | 0 errors |
+| OAPI-STRUCT-02 | Reusable shapes MUST live in `components` and be `$ref`'d (no inline duplication) | review / `spectral` `no-inline-schema` rule | no dup inline schemas |
+| OAPI-DOC-01 | Every operation, parameter, and schema field MUST have a `description` | spectral `*-description` rules | 0 errors |
+| OAPI-EX-01 | Every request body, response, and named schema MUST carry a schema-valid `example`/`examples` | `spectral` + `oas3-valid-media-example` | 0 invalid examples |
+| OAPI-SEC-01 | All enforced auth MUST be declared in `securitySchemes` and applied via `security` (see `secure-coding.md`, `oauth.md`) | review / spectral `oas3-operation-security-defined` | every non-public op secured |
+| OAPI-SEC-02 | Secret-bearing fields MUST be `writeOnly`; server-set fields `readOnly`; no secrets in examples (see `secure-coding.md`) | review / grep examples | no secret leakage |
+| OAPI-VER-01 | `info.version` MUST be SemVer and bumped per change class (see `semver.md`) | review / CI | matches change class |
+| OAPI-VER-02 | A change MUST NOT introduce a breaking diff without a major bump (see `semver.md`) | `oasdiff breaking old.yaml new.yaml` | no breaking unless major |
+| OAPI-GEN-01 | Generated server/client MUST regenerate cleanly from the current spec | `openapi-generator-cli generate ...` | exit 0, no drift |
+
+> **Forbidden**: hand-editing generated stubs instead of the spec; inlining a schema already in `components`; shipping an operation without `operationId`/security/examples; merging a breaking diff without a major version bump; placing real tokens, keys, or PII in examples.
+
+---
+
+## 3. Validation Protocol (contract-first loop)
+
+This guide owns the spec-as-test loop. Author/edit the document, then run — in order — and fix until every gate is green. The *why* of versioning and security lives in the §0 owners.
+
+```bash
+redocly lint openapi.yaml                                  # OAPI-STRUCT-01 (bundle-aware, follows $ref)
+spectral lint openapi.yaml --fail-severity=error           # OAPI-LINT-01/02, DOC-01, EX-01, SEC-01
+oasdiff breaking --fail-on ERR last-released.yaml openapi.yaml   # OAPI-VER-02 (run in CI vs the released spec)
+openapi-generator-cli generate -i openapi.yaml -g <target> -o build/gen   # OAPI-GEN-01
+```
+
+Contract-first workflow:
+
+1. **Design the spec first** — agree the contract before any implementation (this is the OpenAPI analogue of test-first; the lint/diff gates above *are* the failing→passing loop).
+2. **Generate** server stubs and client SDKs from the spec (§6). Implementation fills the stubs; it never redefines the contract.
+3. **Validate continuously** — run §3 in CI (see [`ci-cd.md`](guides://ci-cd.md)); a red gate blocks merge.
+
+---
+
+## 4. Document Structure
+
+The single entry document. `paths` *document* the REST design owned by [`rest.md`](guides://rest.md); this section shows the OpenAPI **encoding**, not the design rules.
 
 ```yaml
 # openapi.yaml
-openapi: 3.1.0
+openapi: 3.1.1
 
 info:
-  title: My API
-  version: 1.0.0
+  title: Orders API
+  version: 1.4.0                 # SemVer — see semver.md
+  summary: Manage customer orders and fulfilment.
   description: |
-    A comprehensive API for managing resources.
-
-    ## Authentication
-    All endpoints require a Bearer token in the Authorization header.
-
-    ## Rate Limiting
-    - 1000 requests per minute for authenticated users
-    - 100 requests per minute for unauthenticated users
-
-    ## Pagination
-    List endpoints support cursor-based pagination using `cursor` and `limit` parameters.
-  termsOfService: https://example.com/terms
-  contact:
-    name: API Support
-    email: api-support@example.com
-    url: https://example.com/support
-  license:
-    name: MIT
-    url: https://opensource.org/licenses/MIT
+    Long-form docs. Rate limiting, pagination, and idempotency
+    conventions are described in rest.md and summarised here.
+  contact: { name: API Support, email: api@example.com }
+  license: { name: Apache-2.0, identifier: Apache-2.0 }   # SPDX id (3.1)
 
 servers:
-  - url: https://api.example.com/v1
-    description: Production server
-  - url: https://staging-api.example.com/v1
-    description: Staging server
-  - url: http://localhost:3000/v1
-    description: Development server
+  - url: https://api.example.com/v1     # major version in path — see semver.md/rest.md
+    description: Production
 
 tags:
-  - name: Users
-    description: User management operations
   - name: Orders
-    description: Order processing operations
-  - name: Products
-    description: Product catalog operations
-
-paths:
-  # Path definitions..
-
-components:
-  # Reusable components..
+    description: Order lifecycle operations.
 
 security:
-  - BearerAuth: []
+  - bearerAuth: []                # default; operations may override (see §7)
+
+paths: {}                         # see §5
+components: {}                    # see §5–§7 — the reuse hub
+webhooks: {}                      # see §8 (3.1 native)
 ```
 
-### B. File Organization
+### File organization (split + bundle)
+
+Large specs split across files and are bundled for tooling that needs a single document:
 
 ```
 api/
-├── openapi.yaml              # Main entry point
-├── paths/
-│   ├── users.yaml            # /users endpoints
-│   ├── orders.yaml           # /orders endpoints
-│   └── products.yaml         # /products endpoints
+├── openapi.yaml              # entry: info, servers, tags, security, $ref-only paths/components
+├── paths/                    # one file per resource group
+│   └── orders.yaml
 ├── components/
-│   ├── schemas/
-│   │   ├── user.yaml
-│   │   ├── order.yaml
-│   │   └── common.yaml
+│   ├── schemas/              # the canonical shapes (OAPI-STRUCT-02)
 │   ├── parameters/
-│   │   └── common.yaml
 │   ├── responses/
-│   │   └── errors.yaml
 │   └── securitySchemes.yaml
 └── examples/
-    ├── users.yaml
-    └── orders.yaml
 ```
 
 ```yaml
-# Main openapi.yaml with $ref
-openapi: 3.1.0
-info:
-  title: My API
-  version: 1.0.0
-
+# openapi.yaml — references only; no inline definitions
 paths:
-  /users:
-    $ref: './paths/users.yaml#/users'
-  /users/{id}:
-    $ref: './paths/users.yaml#/users~1{id}'
   /orders:
     $ref: './paths/orders.yaml#/orders'
-
 components:
   schemas:
-    User:
-      $ref: './components/schemas/user.yaml'
+    Order: { $ref: './components/schemas/order.yaml' }
+```
+
+Bundle for single-file consumers: `redocly bundle openapi.yaml -o dist/openapi.yaml`.
+
+---
+
+## 5. Components: the reuse hub (`provides: schema-components`)
+
+Define each shape **once** under `components` and `$ref` it everywhere (OAPI-STRUCT-02). This is the core value of the format.
+
+### A. Object schemas — precise, bounded, with modifiers
+
+```yaml
+components:
+  schemas:
     Order:
-      $ref: './components/schemas/order.yaml'
-```
-
----
-
-## 2A. TDD Protocol (MANDATORY)
-
-**CRITICAL: Follow the Red-Green-Refactor cycle for ALL API specification changes.**
-
-### Red-Green-Refactor Cycle with Spectral Linting
-
-```yaml
-# ═══════════════════════════════════════════════════════════════
-# STEP 1: RED - Write failing Spectral rules first
-# ═══════════════════════════════════════════════════════════════
-
-# .spectral.yml - Custom linting rules
-extends: ["spectral:oas", "spectral:asyncapi"]
-
-rules:
-  operation-operationId:
-    severity: error
-    description: Every operation must have an operationId
-  operation-description:
-    severity: error
-    description: Every operation must have a description
-  path-params:
-    severity: error
-  oas3-valid-media-example:
-    severity: error
-  require-pagination:
-    severity: warn
-    description: List endpoints must support pagination
-    given: "$.paths[*].get"
-    then:
-      field: parameters
-      function: schema
-      functionOptions:
-        schema:
-          type: array
-          contains:
-            type: object
-            properties:
-              name:
-                enum: ["limit", "cursor", "page"]
-
-# Run: npx @stoplight/spectral-cli lint openapi.yaml
-# ❌ FAILS - spec is missing operationIds, descriptions, pagination
-```
-
-```bash
-# test/validate-spec.sh
-#!/bin/bash
-set -euo pipefail
-
-# Lint with Spectral
-npx @stoplight/spectral-cli lint openapi.yaml --fail-severity=error || {
-  echo "FAIL: Spectral linting errors found"
-  exit 1
-}
-
-# Validate schema is valid OpenAPI 3.1
-npx swagger-cli validate openapi.yaml || {
-  echo "FAIL: Invalid OpenAPI document"
-  exit 1
-}
-
-echo "PASS: OpenAPI specification is valid"
-
-# ═══════════════════════════════════════════════════════════════
-# STEP 2: GREEN - Fix spec to pass all Spectral rules
-# ═══════════════════════════════════════════════════════════════
-
-# Add operationIds, descriptions, and pagination parameters
-
-# Run: bash test/validate-spec.sh
-# ✅ PASSES - all rules satisfied
-
-# ═══════════════════════════════════════════════════════════════
-# STEP 3: REFACTOR - Improve examples, add more schemas, keep valid
-# ═══════════════════════════════════════════════════════════════
-```
-
----
-
-## 2B. Bug Fix Protocol (MANDATORY)
-
-**CRITICAL: Every spec bug MUST receive a validation test BEFORE fixing.**
-
-### Bug Fix Workflow Example
-
-```bash
-# ═══════════════════════════════════════════════════════════════
-# Bug Report #108: Breaking API change shipped because response
-# schema was modified without version bump
-# ═══════════════════════════════════════════════════════════════
-
-# STEP 1: Write test that detects breaking changes
-# test/detect-breaking-changes.sh
-
-#!/bin/bash
-set -euo pipefail
-
-# Compare current spec against the last released version
-npx openapi-diff \
-  https://api.example.com/v1/openapi.yaml \
-  openapi.yaml \
-  --fail-on-incompatible || {
-  echo "FAIL Bug #108: Breaking changes detected without version bump"
-  echo "Either bump the API version or make the change backward-compatible"
-  exit 1
-}
-
-echo "PASS: No breaking changes found"
-
-# Run: bash test/detect-breaking-changes.sh
-# ❌ FAILS - breaking change detected in response schema
-
-# STEP 2: Fix the bug - Revert schema change or bump API version
-
-# Run: bash test/detect-breaking-changes.sh
-# ✅ PASSES - spec is backward-compatible or properly versioned
-```
-
----
-
-## 3. Path Definitions (MANDATORY)
-
-### A. Resource Endpoints
-
-```yaml
-paths:
-  /users:
-    get:
-      operationId: listUsers
-      summary: List all users
-      description: |
-        Returns a paginated list of users.
-        Results are sorted by creation date in descending order.
-      tags:
-        - Users
-      parameters:
-        - $ref: '#/components/parameters/LimitParam'
-        - $ref: '#/components/parameters/CursorParam'
-        - name: status
-          in: query
-          description: Filter by user status
-          schema:
-            type: string
-            enum: [active, inactive, pending]
-        - name: role
-          in: query
-          description: Filter by user role
-          schema:
-            type: string
-            enum: [admin, user, guest]
-      responses:
-        '200':
-          description: List of users
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UserList'
-              examples:
-                default:
-                  $ref: '#/components/examples/UserListExample'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
-    post:
-      operationId: createUser
-      summary: Create a new user
-      description: Creates a new user account and sends a welcome email.
-      tags:
-        - Users
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateUserRequest'
-            examples:
-              basic:
-                summary: Basic user creation
-                value:
-                  email: user@example.com
-                  name: John Doe
-              withRole:
-                summary: User with admin role
-                value:
-                  email: admin@example.com
-                  name: Admin User
-                  role: admin
-      responses:
-        '201':
-          description: User created successfully
-          headers:
-            Location:
-              description: URL of the created user
-              schema:
-                type: string
-                format: uri
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/User'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '422':
-          $ref: '#/components/responses/ValidationError'
-
-  /users/{id}:
-    parameters:
-      - $ref: '#/components/parameters/UserIdParam'
-
-    get:
-      operationId: getUser
-      summary: Get a user by ID
-      tags:
-        - Users
-      responses:
-        '200':
-          description: User details
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/User'
-        '404':
-          $ref: '#/components/responses/NotFound'
-
-    patch:
-      operationId: updateUser
-      summary: Update a user
-      description: |
-        Partially updates a user. Only provided fields will be updated.
-      tags:
-        - Users
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UpdateUserRequest'
-      responses:
-        '200':
-          description: User updated
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/User'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
-          $ref: '#/components/responses/NotFound'
-
-    delete:
-      operationId: deleteUser
-      summary: Delete a user
-      description: |
-        Soft-deletes a user. The user data will be retained for 30 days
-        before permanent deletion.
-      tags:
-        - Users
-      responses:
-        '204':
-          description: User deleted successfully
-        '404':
-          $ref: '#/components/responses/NotFound'
-```
-
-### B. Nested Resources
-
-```yaml
-paths:
-  /users/{userId}/orders:
-    parameters:
-      - name: userId
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-
-    get:
-      operationId: listUserOrders
-      summary: List orders for a user
-      tags:
-        - Orders
-      parameters:
-        - $ref: '#/components/parameters/LimitParam'
-        - name: status
-          in: query
-          schema:
-            type: string
-            enum: [pending, processing, shipped, delivered, cancelled]
-      responses:
-        '200':
-          description: List of orders
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OrderList'
-
-  /users/{userId}/orders/{orderId}:
-    parameters:
-      - name: userId
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - name: orderId
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-
-    get:
-      operationId: getUserOrder
-      summary: Get a specific order for a user
-      tags:
-        - Orders
-      responses:
-        '200':
-          description: Order details
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Order'
-        '404':
-          $ref: '#/components/responses/NotFound'
-```
-
----
-
-## 4. Schema Definitions (MANDATORY)
-
-### A. Object Schemas
-
-```yaml
-components:
-  schemas:
-    User:
       type: object
-      description: Represents a user account
-      required:
-        - id
-        - email
-        - name
-        - createdAt
+      description: A customer order.
+      required: [id, customerId, status, total, createdAt]
       properties:
-        id:
-          type: string
-          format: uuid
-          description: Unique identifier
-          readOnly: true
-          example: '123e4567-e89b-12d3-a456-426614174000'
-        email:
-          type: string
-          format: email
-          description: User's email address
-          maxLength: 255
-          example: user@example.com
-        name:
-          type: string
-          description: User's display name
-          minLength: 1
-          maxLength: 100
-          example: John Doe
-        role:
-          type: string
-          description: User's role in the system
-          enum: [admin, user, guest]
-          default: user
-          example: user
-        status:
-          type: string
-          description: Account status
-          enum: [active, inactive, pending]
-          default: pending
-          example: active
-        avatarUrl:
-          type: string
-          format: uri
-          description: URL to user's avatar image
-          nullable: true
-          example: 'https://example.com/avatars/123.jpg'
-        metadata:
-          type: object
-          description: Additional user metadata
-          additionalProperties: true
-          example:
-            theme: dark
-            language: en
-        createdAt:
-          type: string
-          format: date-time
-          description: When the user was created
-          readOnly: true
-          example: '2024-01-15T10:30:00Z'
-        updatedAt:
-          type: string
-          format: date-time
-          description: When the user was last updated
-          readOnly: true
-          example: '2024-01-15T10:30:00Z'
-
-    CreateUserRequest:
-      type: object
-      description: Request body for creating a user
-      required:
-        - email
-        - name
-      properties:
-        email:
-          type: string
-          format: email
-          maxLength: 255
-        name:
-          type: string
-          minLength: 1
-          maxLength: 100
-        role:
-          type: string
-          enum: [admin, user, guest]
-          default: user
-        password:
-          type: string
-          format: password
-          minLength: 8
-          maxLength: 128
-          writeOnly: true
-
-    UpdateUserRequest:
-      type: object
-      description: Request body for updating a user
-      properties:
-        name:
-          type: string
-          minLength: 1
-          maxLength: 100
-        role:
-          type: string
-          enum: [admin, user, guest]
-        status:
-          type: string
-          enum: [active, inactive, pending]
-        avatarUrl:
-          type: string
-          format: uri
-          nullable: true
-      minProperties: 1
+        id:        { type: string, format: uuid, readOnly: true,
+                     examples: ['123e4567-e89b-12d3-a456-426614174000'] }
+        customerId:{ type: string, format: uuid }
+        status:    { type: string, enum: [pending, paid, shipped, delivered, cancelled],
+                     default: pending }
+        total:     { type: number, format: double, minimum: 0 }
+        couponCode:{ type: [string, 'null'], maxLength: 32 }   # 3.1: nullable via type array
+        createdAt: { type: string, format: date-time, readOnly: true }
+      additionalProperties: false
 ```
 
-### B. Collection Schemas
+3.1 notes: it is a strict superset of **JSON Schema 2020-12** — use `type: [T, 'null']` (not the removed `nullable: true`), `examples` arrays (not singular `example`) in schemas, and `$ref` siblings (`$ref` may now sit beside `description`).
+
+### B. Collection + pagination envelope
+
+The pagination *strategy* is owned by [`rest.md`](guides://rest.md); the spec encodes whatever it chose:
 
 ```yaml
-components:
-  schemas:
-    UserList:
+    OrderList:
       type: object
-      required:
-        - data
-        - pagination
+      required: [data, page]
       properties:
-        data:
-          type: array
-          items:
-            $ref: '#/components/schemas/User'
-        pagination:
-          $ref: '#/components/schemas/Pagination'
-
-    Pagination:
+        data: { type: array, items: { $ref: '#/components/schemas/Order' } }
+        page: { $ref: '#/components/schemas/Page' }
+    Page:
       type: object
-      required:
-        - total
-        - limit
-        - hasMore
+      required: [limit, hasMore]
       properties:
-        total:
-          type: integer
-          description: Total number of items
-          minimum: 0
-          example: 150
-        limit:
-          type: integer
-          description: Maximum items per page
-          minimum: 1
-          maximum: 100
-          example: 20
-        cursor:
-          type: string
-          description: Cursor for the current page
-          nullable: true
-          example: 'eyJpZCI6MTIzfQ'
-        nextCursor:
-          type: string
-          description: Cursor for the next page
-          nullable: true
-          example: 'eyJpZCI6MTQzfQ'
-        hasMore:
-          type: boolean
-          description: Whether more items exist
-          example: true
+        limit:      { type: integer, minimum: 1, maximum: 100, default: 20 }
+        nextCursor: { type: [string, 'null'] }
+        hasMore:    { type: boolean }
 ```
 
-### C. Polymorphic Schemas
+### C. Composition & polymorphism
+
+Use `allOf` for mixins, `oneOf`/`anyOf` for variants, and always pair a `oneOf` with a `discriminator` so codegen emits tagged unions:
 
 ```yaml
-components:
-  schemas:
     Notification:
       oneOf:
         - $ref: '#/components/schemas/EmailNotification'
-        - $ref: '#/components/schemas/SMSNotification'
-        - $ref: '#/components/schemas/PushNotification'
+        - $ref: '#/components/schemas/SmsNotification'
       discriminator:
-        propertyName: type
+        propertyName: channel
         mapping:
           email: '#/components/schemas/EmailNotification'
-          sms: '#/components/schemas/SMSNotification'
-          push: '#/components/schemas/PushNotification'
-
-    EmailNotification:
-      type: object
-      required:
-        - type
-        - to
-        - subject
-        - body
-      properties:
-        type:
-          type: string
-          enum: [email]
-        to:
-          type: string
-          format: email
-        subject:
-          type: string
-        body:
-          type: string
-
-    SMSNotification:
-      type: object
-      required:
-        - type
-        - phoneNumber
-        - message
-      properties:
-        type:
-          type: string
-          enum: [sms]
-        phoneNumber:
-          type: string
-          pattern: '^\+[1-9]\d{1,14}$'
-        message:
-          type: string
-          maxLength: 160
-
-    PushNotification:
-      type: object
-      required:
-        - type
-        - deviceToken
-        - title
-        - body
-      properties:
-        type:
-          type: string
-          enum: [push]
-        deviceToken:
-          type: string
-        title:
-          type: string
-        body:
-          type: string
+          sms:   '#/components/schemas/SmsNotification'
 ```
 
----
-
-## 5. Parameters (MANDATORY)
-
-### A. Reusable Parameters
+### D. Reusable parameters
 
 ```yaml
 components:
   parameters:
-    # Path parameters
-    UserIdParam:
-      name: id
+    OrderId:
+      name: orderId
       in: path
       required: true
-      description: User's unique identifier
-      schema:
-        type: string
-        format: uuid
-
-    # Query parameters
-    LimitParam:
+      description: Order identifier.
+      schema: { type: string, format: uuid }
+    Limit:
       name: limit
       in: query
-      description: Maximum number of items to return
-      schema:
-        type: integer
-        minimum: 1
-        maximum: 100
-        default: 20
-
-    CursorParam:
+      description: Max items per page.
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    Cursor:
       name: cursor
       in: query
-      description: Pagination cursor from previous response
-      schema:
-        type: string
-
-    SortParam:
-      name: sort
-      in: query
-      description: |
-        Sort order. Prefix with `-` for descending.
-        Example: `-createdAt` for newest first.
-      schema:
-        type: string
-      examples:
-        ascending:
-          value: createdAt
-          summary: Oldest first
-        descending:
-          value: -createdAt
-          summary: Newest first
-
-    FieldsParam:
-      name: fields
-      in: query
-      description: Comma-separated list of fields to include
-      schema:
-        type: string
-      example: id,name,email
-
-    # Header parameters
-    IdempotencyKeyHeader:
-      name: Idempotency-Key
-      in: header
-      description: Unique key for idempotent requests
-      schema:
-        type: string
-        format: uuid
+      description: Opaque pagination cursor from the previous response.
+      schema: { type: string }
 ```
 
-### B. Filter Parameters
+### E. Reusable responses & the error model
 
-```yaml
-components:
-  parameters:
-    DateRangeFilter:
-      name: createdAt
-      in: query
-      description: |
-        Filter by creation date. Supports operators:
-        - `gte:2024-01-01` - Greater than or equal
-        - `lte:2024-12-31` - Less than or equal
-        - `2024-01-01..2024-12-31` - Range
-      schema:
-        type: string
-      examples:
-        after:
-          value: 'gte:2024-01-01'
-          summary: Created on or after date
-        before:
-          value: 'lte:2024-12-31'
-          summary: Created on or before date
-        range:
-          value: '2024-01-01..2024-12-31'
-          summary: Created within date range
-```
-
----
-
-## 6. Responses (MANDATORY)
-
-### A. Success Responses
+The error **model** (shape, when each fires) is a REST design concern — own it in [`rest.md`](guides://rest.md); prefer **RFC 9457 `application/problem+json`**. OpenAPI just declares it once and references it:
 
 ```yaml
 components:
   responses:
-    Created:
-      description: Resource created successfully
-      headers:
-        Location:
-          description: URL of the created resource
-          schema:
-            type: string
-            format: uri
-
-    NoContent:
-      description: Request successful, no content returned
-
-    Accepted:
-      description: Request accepted for processing
-      content:
-        application/json:
-          schema:
-            type: object
-            properties:
-              jobId:
-                type: string
-                description: ID to track the async operation
-              status:
-                type: string
-                enum: [pending, processing]
-              statusUrl:
-                type: string
-                format: uri
-                description: URL to check operation status
-```
-
-### B. Error Responses
-
-```yaml
-components:
-  schemas:
-    Error:
-      type: object
-      required:
-        - code
-        - message
-      properties:
-        code:
-          type: string
-          description: Machine-readable error code
-          example: VALIDATION_ERROR
-        message:
-          type: string
-          description: Human-readable error message
-          example: Invalid request parameters
-        details:
-          type: array
-          description: Additional error details
-          items:
-            type: object
-            properties:
-              field:
-                type: string
-                example: email
-              message:
-                type: string
-                example: Must be a valid email address
-              code:
-                type: string
-                example: INVALID_FORMAT
-        requestId:
-          type: string
-          description: Request ID for support reference
-          example: req_abc123
-
-  responses:
-    BadRequest:
-      description: Invalid request
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
-          example:
-            code: BAD_REQUEST
-            message: Invalid request format
-            requestId: req_abc123
-
-    Unauthorized:
-      description: Authentication required
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
-          example:
-            code: UNAUTHORIZED
-            message: Authentication required
-            requestId: req_abc123
-      headers:
-        WWW-Authenticate:
-          schema:
-            type: string
-          example: Bearer realm="api"
-
-    Forbidden:
-      description: Insufficient permissions
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
-          example:
-            code: FORBIDDEN
-            message: You do not have permission to perform this action
-            requestId: req_abc123
-
     NotFound:
-      description: Resource not found
+      description: Resource not found.
       content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
-          example:
-            code: NOT_FOUND
-            message: The requested resource was not found
-            requestId: req_abc123
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: 'about:blank', title: Not Found, status: 404,
+                     detail: 'Order ord_456 does not exist' }
+  schemas:
+    Problem:                       # RFC 9457
+      type: object
+      required: [type, title, status]
+      properties:
+        type:   { type: string, format: uri }
+        title:  { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string, format: uri }
+```
 
-    Conflict:
-      description: Resource conflict
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
-          example:
-            code: CONFLICT
-            message: A user with this email already exists
-            requestId: req_abc123
+### F. Operation skeleton (ties it together)
 
-    ValidationError:
-      description: Validation failed
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
-          example:
-            code: VALIDATION_ERROR
-            message: Validation failed
-            details:
-              - field: email
-                message: Must be a valid email address
-                code: INVALID_FORMAT
-              - field: name
-                message: Required field
-                code: REQUIRED
-            requestId: req_abc123
-
-    TooManyRequests:
-      description: Rate limit exceeded
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
-          example:
-            code: RATE_LIMITED
-            message: Too many requests. Please try again later.
-            requestId: req_abc123
-      headers:
-        X-RateLimit-Limit:
-          schema:
-            type: integer
-          description: Request limit per window
-        X-RateLimit-Remaining:
-          schema:
-            type: integer
-          description: Remaining requests in window
-        X-RateLimit-Reset:
-          schema:
-            type: integer
-          description: Unix timestamp when the limit resets
-        Retry-After:
-          schema:
-            type: integer
-          description: Seconds to wait before retrying
-
-    InternalError:
-      description: Internal server error
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
-          example:
-            code: INTERNAL_ERROR
-            message: An unexpected error occurred
-            requestId: req_abc123
+```yaml
+paths:
+  /orders/{orderId}:
+    parameters: [ { $ref: '#/components/parameters/OrderId' } ]
+    get:
+      operationId: getOrder        # unique, camelCase (OAPI-LINT-02)
+      summary: Get an order
+      description: Returns a single order by id.
+      tags: [Orders]
+      responses:
+        '200':
+          description: The order.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+              examples:
+                default: { $ref: '#/components/examples/OrderExample' }
+        '404': { $ref: '#/components/responses/NotFound' }
 ```
 
 ---
 
-## 7. Security Schemes (MANDATORY)
+## 6. Code generation (`provides: contract-first`)
+
+The spec is the source; generated artefacts are build output (never hand-edited — OAPI-GEN-01).
+
+```bash
+# Client SDK / server stubs
+openapi-generator-cli generate -i openapi.yaml -g typescript-fetch -o build/client
+openapi-generator-cli generate -i openapi.yaml -g go-server       -o build/server
+
+# Mock server straight from the spec (drives consumer dev before the API exists)
+prism mock openapi.yaml
+
+# Type-only generation for TS consumers
+npx openapi-typescript openapi.yaml -o src/api-types.ts
+```
+
+Rules:
+- Generated code lives in a build/ output dir and is git-ignored (or committed only as a reviewed artefact); regeneration MUST be reproducible in CI.
+- Implementation extends generated stubs via hooks/interfaces — it never forks the contract.
+- When the spec changes, regenerate; a non-empty `git diff` on hand-written code that *should* be generated is a defect.
+- For TS request/response validation derived from the contract, generate Zod schemas (see [`zod.md`](guides://zod.md)).
+
+---
+
+## 7. Security schemes — declare, don't design (`provides`)
+
+The auth **policy** is owned by [`secure-coding.md`](guides://secure-coding.md); the **flows/scopes** by [`oauth.md`](guides://oauth.md). OpenAPI's job is to *declare* exactly what the API enforces and *apply* it (OAPI-SEC-01). Declaring a weaker scheme than the API enforces is a defect.
 
 ```yaml
 components:
   securitySchemes:
-    BearerAuth:
+    bearerAuth:                    # JWT bearer
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: |
-        JWT token authentication. Include the token in the Authorization header:
-        ```
-        Authorization: Bearer <token>
-        ```
-
-    ApiKeyAuth:
+    apiKeyAuth:
       type: apiKey
       in: header
       name: X-API-Key
-      description: API key for server-to-server communication
-
-    OAuth2:
+    oidc:                          # prefer OpenID Connect discovery when available
+      type: openIdConnect
+      openIdConnectUrl: https://auth.example.com/.well-known/openid-configuration
+    oauth2:                        # flows MUST mirror the real authorization server — see oauth.md
       type: oauth2
-      description: OAuth 2.0 authentication
       flows:
         authorizationCode:
           authorizationUrl: https://auth.example.com/oauth/authorize
-          tokenUrl: https://auth.example.com/oauth/token
-          refreshUrl: https://auth.example.com/oauth/refresh
+          tokenUrl:         https://auth.example.com/oauth/token
           scopes:
-            read:users: Read user information
-            write:users: Create and modify users
-            read:orders: Read order information
+            read:orders: Read orders
             write:orders: Create and modify orders
-        clientCredentials:
-          tokenUrl: https://auth.example.com/oauth/token
-          scopes:
-            admin: Full administrative access
 
-# Apply security globally
-security:
-  - BearerAuth: []
+security:                          # global default
+  - bearerAuth: []
 
-# Override for specific endpoints
 paths:
-  /public/status:
+  /public/health:
     get:
-      security: []  # No auth required
-      # ..
-
-  /admin/users:
+      security: []                 # explicit opt-out for public ops
+  /admin/orders:
     get:
       security:
-        - OAuth2: [read:users, admin]
-      # ..
+        - oauth2: [read:orders]    # scope-gated (AND across schemes, OR across list items)
 ```
+
+Mark secret-bearing request fields `writeOnly` and server-set fields `readOnly`; never put real credentials, tokens, or PII in examples (OAPI-SEC-02).
 
 ---
 
-## 8. Webhooks (OpenAPI 3.1)
+## 8. Webhooks & callbacks (3.1)
+
+3.1 makes outbound events first-class via top-level `webhooks` (provider-initiated, no fixed URL) — distinct from per-operation `callbacks` (tied to a prior request).
 
 ```yaml
 webhooks:
-  orderCreated:
+  orderShipped:
     post:
-      summary: Order created webhook
-      description: Triggered when a new order is created
-      operationId: orderCreatedWebhook
-      tags:
-        - Webhooks
+      operationId: orderShippedWebhook
+      summary: Sent when an order ships.
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/WebhookPayload'
-            example:
-              id: evt_123
-              type: order.created
-              timestamp: '2024-01-15T10:30:00Z'
-              data:
-                orderId: ord_456
-                customerId: cust_789
-                total: 99.99
+            schema: { $ref: '#/components/schemas/Event' }
       responses:
-        '200':
-          description: Webhook processed successfully
-        '400':
-          description: Invalid payload
-
-components:
-  schemas:
-    WebhookPayload:
-      type: object
-      required:
-        - id
-        - type
-        - timestamp
-        - data
-      properties:
-        id:
-          type: string
-          description: Unique event identifier
-        type:
-          type: string
-          description: Event type
-          enum:
-            - order.created
-            - order.updated
-            - order.cancelled
-            - user.created
-            - user.updated
-        timestamp:
-          type: string
-          format: date-time
-        data:
-          type: object
-          description: Event-specific data
+        '200': { description: Acknowledged. }
 ```
+
+Document the signature header consumers must verify (binding to [`secure-coding.md`](guides://secure-coding.md)).
 
 ---
 
-## 9. Validation with Spectral
+## 9. Linting with Spectral (`provides: spec-linting`)
+
+A committed, extended ruleset is the enforcement engine for §2. Start from `spectral:oas` and add project rules:
 
 ```yaml
 # .spectral.yaml
-extends: spectral:oas
+extends: [[spectral:oas, all]]
 rules:
-  # Naming conventions
-  operation-operationId-camelCase:
+  operation-operationId: error           # OAPI-LINT-02
+  operation-operationId-unique: error
+  operation-tag-defined: error
+  operation-description: error           # OAPI-DOC-01
+  oas3-valid-media-type-example: error   # OAPI-EX-01
+  oas3-operation-security-defined: error # OAPI-SEC-01
+
+  operation-id-camel-case:
+    description: operationId must be camelCase.
     severity: error
-    given: "$.paths[*][*]"
-    then:
-      field: operationId
-      function: casing
-      functionOptions:
-        type: camel
+    given: "$.paths[*][get,put,post,delete,patch]"
+    then: { field: operationId, function: casing, functionOptions: { type: camel } }
 
-  # Require descriptions
-  operation-description:
-    severity: warn
-    given: "$.paths[*][*]"
-    then:
-      field: description
-      function: truthy
-
-  # Require examples
-  schema-examples:
+  schema-must-have-example:
+    description: Named component schemas must carry an example.
     severity: warn
     given: "$.components.schemas[*]"
-    then:
-      - field: example
-        function: truthy
-
-  # Error response format
-  error-response-format:
-    severity: error
-    given: "$.paths[*][*].responses[?(@property >= 400)]"
-    then:
-      field: content.application/json.schema.$ref
-      function: pattern
-      functionOptions:
-        match: "#/components/schemas/Error"
+    then: { field: examples, function: defined }
 ```
 
----
-
-## 10. Deployment Checklist
-
-### Documentation Quality
-- [ ] All endpoints have descriptions
-- [ ] All parameters documented
-- [ ] Examples for all schemas
-- [ ] Error responses documented
-
-### Schema Completeness
-- [ ] Required fields marked
-- [ ] Validation rules defined
-- [ ] Formats specified (email, uri, etc.)
-- [ ] Enums documented
-
-### Security
-- [ ] Authentication schemes defined
-- [ ] Security applied to endpoints
-- [ ] Sensitive fields marked writeOnly
-
-### Versioning
-- [ ] Version in info.version
-- [ ] Breaking changes documented
-- [ ] Deprecation notices added
+Run `spectral lint openapi.yaml --fail-severity=error` locally and in CI (see [`ci-cd.md`](guides://ci-cd.md)).
 
 ---
 
-## 11. Quick Reference
+## 10. Quick Reference
+
+```bash
+redocly lint openapi.yaml                            # OAPI-STRUCT-01: structural validity
+redocly bundle openapi.yaml -o dist/openapi.yaml     # single-file bundle for tooling
+spectral lint openapi.yaml --fail-severity=error     # OAPI-LINT/DOC/EX/SEC gates
+oasdiff breaking --fail-on ERR old.yaml new.yaml      # OAPI-VER-02: breaking-change gate
+openapi-generator-cli generate -i openapi.yaml -g <target> -o build/   # OAPI-GEN-01
+prism mock openapi.yaml                              # spin a mock server from the contract
+redocly preview-docs openapi.yaml                    # rendered docs preview
+```
 
 ```yaml
-# Common types
-type: string
-type: integer
-type: number
-type: boolean
-type: array
-type: object
-
-# String formats
-format: date          # 2024-01-15
-format: date-time     # 2024-01-15T10:30:00Z
-format: email
-format: uri
-format: uuid
-format: password
-
-# Validation
-minLength: 1
-maxLength: 255
-minimum: 0
-maximum: 100
-pattern: '^[a-z]+$'
-enum: [a, b, c]
-
-# Object validation
-required: [field1, field2]
-additionalProperties: false
-minProperties: 1
-
-# Array validation
-minItems: 1
-maxItems: 100
-uniqueItems: true
-
-# Modifiers
-readOnly: true
-writeOnly: true
-nullable: true
-deprecated: true
+# 3.1 cheat-sheet
+type: [string, 'null']    # nullable (replaces nullable: true)
+examples: ['v']           # schema examples are an array in 3.1
+const: fixed              # single-value constraint
+format: uuid|email|uri|date-time|date|password
+readOnly: true            # server-set; writeOnly: true for secrets-in
+$ref: '#/components/...'  # may now have sibling keywords
 ```
 
 ---
 
-## 12. Why This Configuration Works
+## 11. Deployment Checklist
 
-1. **Design-First Approach**: Writing the OpenAPI spec before implementation aligns frontend and backend teams on the contract, catching design issues before any code is written.
+Generated from §2 — one box per requirement ID.
 
-2. **Reusable Component Schemas**: Defining schemas in `components/schemas` and referencing them with `$ref` eliminates duplication and ensures consistent data structures across endpoints.
-
-3. **Rich Examples on Every Endpoint**: Concrete request/response examples enable instant "try it out" testing in Swagger UI and serve as living documentation that never goes stale.
-
-4. **Spectral Linting Rules**: Automated style enforcement catches inconsistent naming, missing descriptions, and schema violations in CI before specs are merged.
-
-5. **Semantic Versioning with URL Paths**: Including the major version in the URL (`/v1/`, `/v2/`) allows breaking changes without disrupting existing consumers.
-
-6. **Standardized Error Responses**: Consistent error schemas with `type`, `title`, `status`, and `detail` fields (RFC 7807) enable clients to build generic error handling.
-
-7. **Security Scheme Declarations**: Explicit security definitions document authentication requirements and enable code generators to produce clients with built-in auth support.
-
-8. **Pagination with Cursor-Based Patterns**: Cursor pagination in the spec prevents offset-based performance degradation and provides stable page boundaries during concurrent writes.
-
-9. **Code Generation from Spec**: Generating server stubs and client SDKs from the OpenAPI spec guarantees implementation matches the contract and reduces hand-written boilerplate.
-
-10. **Webhook Definitions (OpenAPI 3.1)**: Documenting webhooks alongside REST endpoints gives consumers a complete integration picture in a single specification file.
+- [ ] OAPI-STRUCT-01 — valid OpenAPI 3.1.x (`redocly lint` clean)
+- [ ] OAPI-STRUCT-02 — reusable shapes in `components`, no inline duplication
+- [ ] OAPI-LINT-01/02 — Spectral clean; every op has unique camelCase `operationId`, summary, tags
+- [ ] OAPI-DOC-01 — every operation/parameter/field described
+- [ ] OAPI-EX-01 — schema-valid examples on bodies, responses, named schemas
+- [ ] OAPI-SEC-01 — all enforced auth declared and applied (see `secure-coding.md`, `oauth.md`)
+- [ ] OAPI-SEC-02 — `writeOnly`/`readOnly` set; no secrets/PII in examples
+- [ ] OAPI-VER-01/02 — `info.version` SemVer-correct; no unbumped breaking diff (`oasdiff`)
+- [ ] OAPI-GEN-01 — server/client regenerate cleanly from the spec
+- [ ] Agent ran every §3 command and documented any fixes
 
 ---
-
-**Last Updated:** 2026-01-31
-**Version:** 1.0
-**Maintainer:** API Team
-
-
 **End of OpenAPI Specification Guidelines**

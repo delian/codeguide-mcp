@@ -1,1319 +1,310 @@
 # Ruby Development Guidelines
+Mandatory coding standards for Ruby: idiomatic, readable, test-covered, type-checked. Ruby 3.3+, Bundler, RSpec/Minitest, RuboCop, Sorbet/RBS, bundler-audit.
 
-Mandatory standards for Ruby development, following community conventions and best practices. Ruby 3.3+, Rails 8+, RuboCop, RSpec, Bundler.
+---
+name: ruby
+title: Ruby Development Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: language
+tools: [ruby@3.3, bundler, rspec, minitest, rubocop, sorbet, rbs, bundler-audit]
+requires:
+  - tdd
+  - secure-coding
+  - error-handling
+recommends:
+  - hexagonal
+  - designpatterns
+  - comments
+  - semver
+provides:
+  - idiomatic-ruby
+  - blocks-procs
+  - modules-mixins
+  - ruby-typing
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide covers only what is unique to Ruby (the language and its toolchain — framework specifics such as Rails are out of scope).
 
 ---
 
-**Agent Profile**: The Ruby Expert
-**Role**: Senior Ruby Developer & Rails Architect
-**Objective**: Generate elegant, maintainable, and performant Ruby code following the Ruby Way.
-**Tools**: Ruby 3.3+, Rails 8+, RuboCop, RSpec, Bundler.
+## 0. Prerequisites & References
+
+Fetch and apply these **before** generating Ruby code. Their rules are assumed below and not repeated.
+
+> 📎 **REQUIRED — fetch & apply first:**
+> - [`tdd.md`](guides://tdd.md) — test-first, Red-Green-Refactor, regression-test-before-fix, coverage. *(Ruby binding: runner is `bundle exec rspec`; coverage via SimpleCov.)*
+> - [`secure-coding.md`](guides://secure-coding.md) — supply chain, secrets, CVE policy. *(Ruby binding: `bundle-audit`, and `brakeman` for Rails apps.)*
+> - [`error-handling.md`](guides://error-handling.md) — error strategy & propagation. *(Ruby binding: exception hierarchies; rescue `StandardError`, never bare.)*
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`hexagonal.md`](guides://hexagonal.md) — layering, ports/adapters, dependency inversion.
+> - [`designpatterns.md`](guides://designpatterns.md) — GoF & friends; show only the Ruby binding.
+> - [`comments.md`](guides://comments.md) — doc policy *(binding: YARD/RDoc tags on public API)*
+> - [`semver.md`](guides://semver.md) — gem version policy.
+
+> 📎 **SEE ALSO:** [`rails.md`](guides://rails.md) *(the Rails framework builds on this guide)* · [`code-review.md`](guides://code-review.md) · [`ci-cd.md`](guides://ci-cd.md) · [`pre-commit.md`](guides://pre-commit.md)
 
 ---
 
 ## 1. Core Philosophies: RUBY-FIRST
 
-- **R**eadable: Code should read like well-written prose
-- **U**niform: Follow community conventions consistently
-- **B**alanced: Embrace Ruby's flexibility without abuse
-- **Y**ielding: Use blocks and iterators idiomatically
+Ruby-specific principles only. TDD, security, error handling, and architecture come from §0.
+
+- **R**eadable: code reads like prose — expressive names, guard clauses, no clever density; let RuboCop arbitrate style.
+- **U**niform: follow the community style guide enforced by `rubocop`; one canonical way, no per-file dialects.
+- **B**locks first: iterate with `map`/`select`/`reduce` and blocks/procs/lambdas — never hand-rolled index loops.
+- **Y**ield to duck typing: depend on messages an object responds to, not its class; compose behaviour with modules/mixins.
+- **F**rozen by default: `# frozen_string_literal: true` in every file; `freeze` shared constants; prefer immutable value objects.
+- **I**ntentional metaprogramming: `define_method`/`method_missing` only when it removes real duplication — and only with `respond_to_missing?`.
+- **R**eal types: annotate public APIs with Sorbet `sig` or RBS and gate them with a type checker, not the linter.
+
+**Verified Code**: Agent-generated Ruby MUST pass every gate in §2 before delivery.
 
 ---
 
-## 2. Style Conventions (MANDATORY)
+## 2. Requirements (MANDATORY, auditable)
 
-### A. Naming
+RFC-2119 keywords. IDs `RB-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a shared rule cite its owner.
 
-```ruby
-# Classes and Modules: CamelCase
-class UserAccount
-end
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| RB-TST-01 | Every feature MUST be test-first (see `tdd.md`) | `bundle exec rspec` | exit 0, 0 pending |
+| RB-TST-02 | Each bug MUST get a regression test before the fix (see `tdd.md`) | `bundle exec rspec` | failing→passing |
+| RB-TST-03 | Business-logic coverage MUST meet the project gate | `COVERAGE=1 bundle exec rspec` (SimpleCov) | ≥ threshold |
+| RB-FMT-01 | Code MUST be formatted to the style guide | `bundle exec rubocop` | no offenses |
+| RB-LINT-01 | Linter MUST pass clean (incl. `rubocop-performance`) | `bundle exec rubocop` | exit 0 |
+| RB-TYP-01 | Public APIs MUST be typed (Sorbet `sig` or RBS) | `bundle exec srb tc` / `steep check` | exit 0 |
+| RB-DOC-01 | Public modules/classes/methods MUST be documented (see `comments.md`) | `yard stats --list-undoc` | 0 undocumented |
+| RB-SEC-01 | 0 known CVEs in gems (see `secure-coding.md`) | `bundle exec bundle-audit check --update` | 0 advisories |
+| RB-SEC-02 | No `eval`/`send` on untrusted input; no bare `rescue` (see `secure-coding.md`) | `bundle exec rubocop` (Security cops) | exit 0 |
+| RB-DEP-01 | `Gemfile.lock` committed & in sync | `bundle install && git diff --exit-code Gemfile.lock` | no diff |
+| RB-FREEZE-01 | Every file MUST declare `# frozen_string_literal: true` | `bundle exec rubocop` (`Style/FrozenStringLiteralComment`) | exit 0 |
 
-module Authentication
-  module Strategies
-  end
-end
-
-# Methods and variables: snake_case
-def calculate_total_price
-  item_count = 10
-  unit_price = 5.99
-  item_count * unit_price
-end
-
-# Constants: SCREAMING_SNAKE_CASE
-MAX_RETRY_COUNT = 3
-DEFAULT_TIMEOUT = 30
-
-# Predicate methods: end with ?
-def valid?
-  errors.empty?
-end
-
-def admin?
-  role == 'admin'
-end
-
-# Dangerous methods: end with !
-def save!
-  raise RecordInvalid unless valid?
-  persist
-end
-
-def normalize!
-  self.name = name.strip.downcase
-  self
-end
-
-# Symbols for identifiers
-status = :pending
-options = { format: :json, compress: true }
-```
-
-### B. Formatting
-
-```ruby
-# Two-space indentation (MANDATORY)
-class User
-  def initialize(name)
-    @name = name
-  end
-end
-
-# Spaces around operators
-total = price * quantity + tax
-result = condition ? value_a : value_b
-
-# No spaces inside brackets
-array = [1, 2, 3]
-hash = { key: 'value' }
-method_call(arg1, arg2)
-
-# Multi-line method chains
-result = users
-  .select(&:active?)
-  .map(&:email)
-  .uniq
-  .sort
-
-# Multi-line hashes and arrays
-config = {
-  host: 'localhost',
-  port: 3000,
-  ssl: true
-}
-
-items = [
-  'first',
-  'second',
-  'third'
-]
-
-# Heredocs for multi-line strings
-query = <<~SQL
-  SELECT users.*, COUNT(orders.id) as order_count
-  FROM users
-  LEFT JOIN orders ON orders.user_id = users.id
-  GROUP BY users.id
-SQL
-```
+> **Forbidden**: shipping implementation before its test (violates `tdd.md`), fixing a bug without a regression test first, bare `rescue` (catches `Exception`), `rescue Exception`, mutating method arguments in place, metaprogramming without `respond_to_missing?`, or `bundle install --no-deployment` skipping the lockfile.
 
 ---
 
-## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+## 3. Verification Protocol
 
-**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
-
-### TDD Cycle
-
-```
-1. RED: Write a failing test first
-   ↓
-2. GREEN: Write minimal code to make it pass
-   ↓
-3. REFACTOR: Improve code while keeping tests green
-   ↓
-   Repeat
-```
-
-### Example TDD Workflow for Ruby
-
-```ruby
-# Step 1: RED - Write failing test first
-# spec/validators/email_validator_spec.rb
-require 'rails_helper'
-
-RSpec.describe EmailValidator do
-  describe '.validate' do
-    it 'returns the email for a valid address' do
-      result = EmailValidator.validate('user@example.com')
-
-      expect(result).to be_success
-      expect(result.value).to eq('user@example.com')
-    end
-
-    it 'returns an error for an email without @' do
-      result = EmailValidator.validate('invalid-email')
-
-      expect(result).to be_failure
-      expect(result.error).to eq(:invalid_format)
-    end
-
-    it 'returns an error for an empty string' do
-      result = EmailValidator.validate('')
-
-      expect(result).to be_failure
-      expect(result.error).to eq(:invalid_format)
-    end
-  end
-end
-
-# Run: bundle exec rspec spec/validators/email_validator_spec.rb
-# FAILS - EmailValidator class does not exist
-
-# Step 2: GREEN - Write minimal implementation
-# app/validators/email_validator.rb
-class EmailValidator
-  Result = Struct.new(:value, :error, :success?, keyword_init: true)
-
-  def self.validate(email)
-    if email.include?('@')
-      Result.new(value: email, success?: true)
-    else
-      Result.new(error: :invalid_format, success?: false)
-    end
-  end
-end
-
-# Run: bundle exec rspec spec/validators/email_validator_spec.rb
-# PASSES - all tests pass
-
-# Step 3: REFACTOR - Improve with regex and downcase
-# app/validators/email_validator.rb
-class EmailValidator
-  EMAIL_REGEX = /\A[^\s@]+@[^\s@]+\.[^\s@]+\z/
-
-  Result = Struct.new(:value, :error, :success?, keyword_init: true)
-
-  def self.validate(email)
-    if email.match?(EMAIL_REGEX)
-      Result.new(value: email.downcase, success?: true)
-    else
-      Result.new(error: :invalid_format, success?: false)
-    end
-  end
-end
-# Tests still pass
-```
-
----
-
-## 2B. Bug Fix Protocol (MANDATORY)
-
-**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
-
-### Bug Fix Workflow
-
-```
-1. Bug Reported/Discovered
-   ↓
-2. Write a test that REPRODUCES the bug (test will FAIL)
-   ↓
-3. Verify the test fails for the right reason
-   ↓
-4. Fix the bug (make the test pass)
-   ↓
-5. Verify the test now PASSES
-   ↓
-6. Document the bug in test comments (include bug ID)
-   ↓
-7. Deploy with confidence (regression prevented)
-```
-
-### Example Bug Fix
-
-```ruby
-# Bug Report #1042: EmailValidator accepts emails with spaces like "user @example.com"
-
-# Step 1-2: Write test that reproduces the bug
-# spec/validators/email_validator_spec.rb
-RSpec.describe EmailValidator do
-  describe '.validate' do
-    # Regression test for Bug #1042
-    it 'rejects emails containing spaces' do
-      expect(EmailValidator.validate('user @example.com')).to be_failure
-      expect(EmailValidator.validate(' user@example.com')).to be_failure
-      expect(EmailValidator.validate('user@example.com ')).to be_failure
-    end
-  end
-end
-
-# Run: bundle exec rspec spec/validators/email_validator_spec.rb
-# FAILS - validate returns success for emails with spaces
-
-# Step 3: Fix the bug
-class EmailValidator
-  EMAIL_REGEX = /\A[^\s@]+@[^\s@]+\.[^\s@]+\z/
-
-  def self.validate(email)
-    if email != email.strip
-      Result.new(error: :invalid_format, success?: false)
-    elsif email.match?(EMAIL_REGEX)
-      Result.new(value: email.downcase, success?: true)
-    else
-      Result.new(error: :invalid_format, success?: false)
-    end
-  end
-end
-
-# Run: bundle exec rspec spec/validators/email_validator_spec.rb
-# PASSES - bug fixed, regression prevented
-```
-
-### Prohibited Practices for Bug Fixes
-
-**NEVER:**
-- Fix a bug without adding a regression test first
-- Write implementation before writing tests (violates TDD)
-- Skip the Red-Green-Refactor cycle
-- Commit code with failing tests
-- Remove tests to make code pass
-- Use `skip` or `pending` to bypass failing tests instead of fixing them
-
----
-
-## 3. Idiomatic Ruby (MANDATORY)
-
-### A. Blocks and Iterators
-
-```ruby
-# ✅ CORRECT: Use each, map, select, etc.
-names = users.map(&:name)
-active_users = users.select(&:active?)
-total = prices.sum
-found = items.find { |item| item.id == target_id }
-
-# ❌ WRONG: Manual iteration
-names = []
-users.each do |user|
-  names << user.name  # Use map instead
-end
-
-# ✅ CORRECT: Block shorthand for single method calls
-users.map(&:name)
-users.select(&:active?)
-users.reject(&:deleted?)
-
-# ✅ CORRECT: each_with_index and each_with_object
-items.each_with_index do |item, index|
-  puts "#{index}: #{item}"
-end
-
-totals = orders.each_with_object({}) do |order, hash|
-  hash[order.customer_id] ||= 0
-  hash[order.customer_id] += order.total
-end
-
-# ✅ CORRECT: Use reduce/inject appropriately
-sum = numbers.reduce(0, :+)
-product = numbers.reduce(1, :*)
-
-result = items.reduce({}) do |acc, item|
-  acc.merge(item.key => item.value)
-end
-```
-
-### B. Conditional Expressions
-
-```ruby
-# ✅ CORRECT: Trailing conditionals for single expressions
-return if invalid?
-raise ArgumentError, "Invalid input" unless valid_input?(input)
-log_warning(message) if debug_mode?
-
-# ✅ CORRECT: Guard clauses
-def process(data)
-  return if data.nil?
-  return if data.empty?
-
-  # Main processing logic
-  transform(data)
-end
-
-# ✅ CORRECT: case expressions
-def status_color(status)
-  case status
-  when :success then 'green'
-  when :warning then 'yellow'
-  when :error   then 'red'
-  else 'gray'
-  end
-end
-
-# ✅ CORRECT: Pattern matching (Ruby 3+)
-def process_response(response)
-  case response
-  in { status: 200, body: }
-    parse_success(body)
-  in { status: 404 }
-    handle_not_found
-  in { status: 500, error: message }
-    log_error(message)
-  else
-    handle_unknown
-  end
-end
-
-# ✅ CORRECT: Ternary for simple conditionals
-status = active? ? 'active' : 'inactive'
-
-# ❌ WRONG: Nested ternary
-result = a ? (b ? x : y) : z  # Use if/else instead
-```
-
-### C. Default Values and Options
-
-```ruby
-# ✅ CORRECT: Default parameter values
-def greet(name, greeting = 'Hello')
-  "#{greeting}, #{name}!"
-end
-
-# ✅ CORRECT: Keyword arguments with defaults
-def create_user(name:, email:, role: 'user', active: true)
-  User.new(name: name, email: email, role: role, active: active)
-end
-
-# ✅ CORRECT: Options hash for many optional params
-def configure(options = {})
-  @host = options.fetch(:host, 'localhost')
-  @port = options.fetch(:port, 3000)
-  @ssl = options.fetch(:ssl, false)
-end
-
-# ✅ CORRECT: Double splat for passing options
-def wrapper(**options)
-  inner_method(**options, extra: true)
-end
-
-# ✅ CORRECT: Safe navigation operator
-user&.profile&.avatar_url
-```
-
----
-
-## 4. Classes and Modules (MANDATORY)
-
-### A. Class Structure
-
-```ruby
-class User
-  # Includes and extends first
-  include Comparable
-  extend ClassMethods
-
-  # Constants
-  ROLES = %w[admin moderator user guest].freeze
-
-  # Attribute accessors
-  attr_reader :id, :created_at
-  attr_accessor :name, :email
-
-  # Class methods
-  class << self
-    def find(id)
-      # ..
-    end
-
-    def all
-      # ..
-    end
-  end
-
-  # Constructor
-  def initialize(id:, name:, email:)
-    @id = id
-    @name = name
-    @email = email
-    @created_at = Time.current
-  end
-
-  # Public instance methods
-  def full_name
-    "#{first_name} #{last_name}"
-  end
-
-  def admin?
-    role == 'admin'
-  end
-
-  # Comparable implementation
-  def <=>(other)
-    name <=> other.name
-  end
-
-  private
-
-  # Private methods
-  def validate_email
-    raise InvalidEmail unless email.include?('@')
-  end
-
-  def normalize_name
-    name.strip.titleize
-  end
-end
-```
-
-### B. Modules for Composition
-
-```ruby
-# Namespace module
-module Authentication
-  class Token
-    # ..
-  end
-
-  class Session
-    # ..
-  end
-end
-
-# Mixin module
-module Timestampable
-  def self.included(base)
-    base.extend(ClassMethods)
-  end
-
-  module ClassMethods
-    def timestamped_attributes
-      [:created_at, :updated_at]
-    end
-  end
-
-  def touch
-    @updated_at = Time.current
-  end
-
-  def created_at
-    @created_at ||= Time.current
-  end
-end
-
-# Concern (Rails-style)
-module Searchable
-  extend ActiveSupport::Concern
-
-  included do
-    scope :search, ->(query) { where('name LIKE ?', "%#{query}%") }
-  end
-
-  class_methods do
-    def searchable_fields
-      [:name, :description]
-    end
-  end
-
-  def matches?(query)
-    searchable_fields.any? do |field|
-      send(field).to_s.downcase.include?(query.downcase)
-    end
-  end
-end
-```
-
----
-
-## 5. Error Handling (MANDATORY)
-
-### A. Custom Exceptions
-
-```ruby
-# Define exception hierarchy
-module MyApp
-  class Error < StandardError; end
-
-  class ValidationError < Error
-    attr_reader :field, :code
-
-    def initialize(message, field: nil, code: nil)
-      @field = field
-      @code = code
-      super(message)
-    end
-  end
-
-  class NotFoundError < Error
-    attr_reader :resource, :id
-
-    def initialize(resource, id)
-      @resource = resource
-      @id = id
-      super("#{resource} with id '#{id}' not found")
-    end
-  end
-
-  class AuthenticationError < Error; end
-  class AuthorizationError < Error; end
-end
-
-# Use custom exceptions
-def find_user!(id)
-  User.find(id) or raise MyApp::NotFoundError.new('User', id)
-end
-```
-
-### B. Rescue Patterns
-
-```ruby
-# ✅ CORRECT: Specific rescue clauses
-def process_payment(order)
-  gateway.charge(order.total)
-rescue PaymentGateway::CardDeclined => e
-  order.mark_payment_failed!
-  notify_customer(order, e.message)
-  false
-rescue PaymentGateway::NetworkError => e
-  Rails.logger.error("Payment network error: #{e.message}")
-  retry_later(order)
-  false
-rescue StandardError => e
-  Rails.logger.error("Unexpected payment error: #{e.message}")
-  Rails.logger.error(e.backtrace.join("\n"))
-  raise
-end
-
-# ✅ CORRECT: Ensure for cleanup
-def with_temp_file
-  file = Tempfile.new('process')
-  yield file
-ensure
-  file&.close
-  file&.unlink
-end
-
-# ✅ CORRECT: Retry with limit
-def fetch_with_retry(url, max_attempts: 3)
-  attempts = 0
-  begin
-    attempts += 1
-    http_get(url)
-  rescue NetworkError => e
-    raise if attempts >= max_attempts
-    sleep(2 ** attempts)
-    retry
-  end
-end
-
-# ❌ WRONG: Bare rescue (catches Exception)
-begin
-  risky_operation
-rescue  # Catches everything including Interrupt, SystemExit
-  handle_error
-end
-
-# ✅ CORRECT: Rescue StandardError explicitly
-begin
-  risky_operation
-rescue StandardError => e
-  handle_error(e)
-end
-```
-
----
-
-## 6. Collections (MANDATORY)
-
-### A. Arrays
-
-```ruby
-# Creation
-numbers = [1, 2, 3, 4, 5]
-words = %w[apple banana cherry]  # Word array
-symbols = %i[one two three]       # Symbol array
-
-# Transformation
-doubled = numbers.map { |n| n * 2 }
-evens = numbers.select(&:even?)
-odds = numbers.reject(&:even?)
-first_even = numbers.find(&:even?)
-
-# Aggregation
-sum = numbers.sum
-max = numbers.max
-min = numbers.min
-average = numbers.sum.to_f / numbers.size
-
-# Grouping
-grouped = users.group_by(&:role)
-# => { 'admin' => [...], 'user' => [...] }
-
-indexed = users.index_by(&:id)
-# => { 1 => user1, 2 => user2 }
-
-# Flattening and combining
-nested = [[1, 2], [3, 4]]
-flat = nested.flatten  # [1, 2, 3, 4]
-
-combined = [1, 2] + [3, 4]  # [1, 2, 3, 4]
-unique = (array1 + array2).uniq
-
-# Checking
-numbers.include?(3)      # true
-numbers.any?(&:even?)    # true
-numbers.all?(&:positive?) # true
-numbers.none?(&:negative?) # true
-```
-
-### B. Hashes
-
-```ruby
-# Creation
-user = { name: 'Alice', email: 'alice@example.com' }
-config = { 'host' => 'localhost', 'port' => 3000 }
-
-# Access
-name = user[:name]
-port = config['port']
-role = user.fetch(:role, 'guest')  # With default
-role = user.fetch(:role) { calculate_default_role }  # With block
-
-# Transformation
-emails = users_hash.values.map { |u| u[:email] }
-keys = hash.keys.map(&:to_s)
-symbolized = hash.transform_keys(&:to_sym)
-doubled = numbers_hash.transform_values { |v| v * 2 }
-
-# Merging
-defaults = { timeout: 30, retries: 3 }
-options = { timeout: 60 }
-final = defaults.merge(options)  # { timeout: 60, retries: 3 }
-
-# Deep merge (Rails)
-deep_config = base_config.deep_merge(overrides)
-
-# Slicing and filtering
-subset = user.slice(:name, :email)
-filtered = hash.select { |k, v| v.present? }
-without = hash.except(:password, :token)
-
-# Safe navigation with dig
-value = response.dig(:data, :user, :profile, :name)
-```
-
----
-
-## 7. Testing with RSpec (MANDATORY)
-
-### A. Test Structure
-
-```ruby
-# spec/models/user_spec.rb
-require 'rails_helper'
-
-RSpec.describe User, type: :model do
-  # Subject and let blocks
-  subject(:user) { build(:user, attributes) }
-
-  let(:attributes) { { name: 'Alice', email: 'alice@example.com' } }
-
-  describe 'validations' do
-    it { is_expected.to validate_presence_of(:name) }
-    it { is_expected.to validate_presence_of(:email) }
-    it { is_expected.to validate_uniqueness_of(:email).case_insensitive }
-
-    context 'when email format is invalid' do
-      let(:attributes) { super().merge(email: 'invalid') }
-
-      it 'is not valid' do
-        expect(user).not_to be_valid
-        expect(user.errors[:email]).to include('is invalid')
-      end
-    end
-  end
-
-  describe 'associations' do
-    it { is_expected.to have_many(:posts).dependent(:destroy) }
-    it { is_expected.to belong_to(:organization).optional }
-  end
-
-  describe '#full_name' do
-    let(:attributes) { { first_name: 'Alice', last_name: 'Smith' } }
-
-    it 'returns first and last name combined' do
-      expect(user.full_name).to eq('Alice Smith')
-    end
-
-    context 'when last name is blank' do
-      let(:attributes) { super().merge(last_name: '') }
-
-      it 'returns only the first name' do
-        expect(user.full_name).to eq('Alice')
-      end
-    end
-  end
-
-  describe '#admin?' do
-    context 'when user has admin role' do
-      let(:attributes) { super().merge(role: 'admin') }
-
-      it 'returns true' do
-        expect(user).to be_admin
-      end
-    end
-
-    context 'when user has regular role' do
-      let(:attributes) { super().merge(role: 'user') }
-
-      it 'returns false' do
-        expect(user).not_to be_admin
-      end
-    end
-  end
-end
-```
-
-### B. Service Tests
-
-```ruby
-# spec/services/payment_processor_spec.rb
-RSpec.describe PaymentProcessor do
-  subject(:processor) { described_class.new(gateway: gateway) }
-
-  let(:gateway) { instance_double(PaymentGateway) }
-  let(:order) { create(:order, total: 100.00) }
-
-  describe '#process' do
-    context 'when payment succeeds' do
-      before do
-        allow(gateway).to receive(:charge)
-          .with(100.00)
-          .and_return(PaymentResult.new(success: true, transaction_id: 'tx_123'))
-      end
-
-      it 'returns success result' do
-        result = processor.process(order)
-
-        expect(result).to be_success
-        expect(result.transaction_id).to eq('tx_123')
-      end
-
-      it 'updates order status' do
-        processor.process(order)
-
-        expect(order.reload.status).to eq('paid')
-      end
-    end
-
-    context 'when payment fails' do
-      before do
-        allow(gateway).to receive(:charge)
-          .and_raise(PaymentGateway::CardDeclined.new('Insufficient funds'))
-      end
-
-      it 'returns failure result' do
-        result = processor.process(order)
-
-        expect(result).to be_failure
-        expect(result.error_message).to eq('Insufficient funds')
-      end
-
-      it 'does not change order status' do
-        expect { processor.process(order) }
-          .not_to change { order.reload.status }
-      end
-    end
-  end
-end
-```
-
-### C. Request Specs
-
-```ruby
-# spec/requests/api/users_spec.rb
-RSpec.describe 'Users API', type: :request do
-  let(:headers) { { 'Authorization' => "Bearer #{token}" } }
-  let(:token) { create(:api_token).value }
-
-  describe 'GET /api/users' do
-    let!(:users) { create_list(:user, 3) }
-
-    it 'returns all users' do
-      get '/api/users', headers: headers
-
-      expect(response).to have_http_status(:ok)
-      expect(json_response['users'].size).to eq(3)
-    end
-
-    context 'without authentication' do
-      let(:headers) { {} }
-
-      it 'returns unauthorized' do
-        get '/api/users', headers: headers
-
-        expect(response).to have_http_status(:unauthorized)
-      end
-    end
-  end
-
-  describe 'POST /api/users' do
-    let(:valid_params) do
-      {
-        user: {
-          name: 'New User',
-          email: 'new@example.com'
-        }
-      }
-    end
-
-    it 'creates a new user' do
-      expect {
-        post '/api/users', params: valid_params, headers: headers
-      }.to change(User, :count).by(1)
-
-      expect(response).to have_http_status(:created)
-      expect(json_response['user']['email']).to eq('new@example.com')
-    end
-
-    context 'with invalid params' do
-      let(:invalid_params) { { user: { name: '' } } }
-
-      it 'returns validation errors' do
-        post '/api/users', params: invalid_params, headers: headers
-
-        expect(response).to have_http_status(:unprocessable_entity)
-        expect(json_response['errors']).to include('Name can\'t be blank')
-      end
-    end
-  end
-
-  def json_response
-    JSON.parse(response.body)
-  end
-end
-```
-
----
-
-## 8. Rails Best Practices (MANDATORY)
-
-### A. Controllers
-
-```ruby
-class Api::UsersController < ApplicationController
-  before_action :authenticate!
-  before_action :set_user, only: [:show, :update, :destroy]
-
-  def index
-    @users = User.active.includes(:profile).page(params[:page])
-    render json: UserSerializer.new(@users)
-  end
-
-  def show
-    render json: UserSerializer.new(@user)
-  end
-
-  def create
-    @user = User.new(user_params)
-
-    if @user.save
-      render json: UserSerializer.new(@user), status: :created
-    else
-      render json: { errors: @user.errors.full_messages }, status: :unprocessable_entity
-    end
-  end
-
-  def update
-    if @user.update(user_params)
-      render json: UserSerializer.new(@user)
-    else
-      render json: { errors: @user.errors.full_messages }, status: :unprocessable_entity
-    end
-  end
-
-  def destroy
-    @user.destroy
-    head :no_content
-  end
-
-  private
-
-  def set_user
-    @user = User.find(params[:id])
-  end
-
-  def user_params
-    params.require(:user).permit(:name, :email, :role)
-  end
-end
-```
-
-### B. Models
-
-```ruby
-class User < ApplicationRecord
-  # Includes
-  include Searchable
-
-  # Enums
-  enum :status, { pending: 0, active: 1, suspended: 2 }
-  enum :role, { user: 0, moderator: 1, admin: 2 }
-
-  # Associations
-  belongs_to :organization, optional: true
-  has_many :posts, dependent: :destroy
-  has_many :comments, dependent: :destroy
-  has_one :profile, dependent: :destroy
-
-  # Validations
-  validates :name, presence: true, length: { maximum: 100 }
-  validates :email, presence: true, uniqueness: { case_sensitive: false },
-                    format: { with: URI::MailTo::EMAIL_REGEXP }
-
-  # Scopes
-  scope :active, -> { where(status: :active) }
-  scope :created_after, ->(date) { where('created_at > ?', date) }
-  scope :with_posts, -> { joins(:posts).distinct }
-  scope :by_name, -> { order(:name) }
-
-  # Callbacks
-  before_validation :normalize_email
-  after_create :send_welcome_email
-
-  # Class methods
-  def self.find_by_credentials(email:, password:)
-    user = find_by(email: email.downcase)
-    user&.authenticate(password) ? user : nil
-  end
-
-  # Instance methods
-  def admin?
-    role == 'admin'
-  end
-
-  def display_name
-    name.presence || email.split('@').first
-  end
-
-  private
-
-  def normalize_email
-    self.email = email&.strip&.downcase
-  end
-
-  def send_welcome_email
-    UserMailer.welcome(self).deliver_later
-  end
-end
-```
-
-### C. Service Objects
-
-```ruby
-# app/services/order_processor.rb
-class OrderProcessor
-  include ActiveModel::Model
-
-  attr_reader :order, :result
-
-  def initialize(order)
-    @order = order
-  end
-
-  def call
-    ActiveRecord::Base.transaction do
-      validate_inventory!
-      reserve_items!
-      process_payment!
-      create_shipment!
-      send_confirmation!
-
-      @result = Result.success(order: order)
-    end
-  rescue InsufficientInventory => e
-    @result = Result.failure(error: e.message, code: :inventory_error)
-  rescue PaymentFailed => e
-    @result = Result.failure(error: e.message, code: :payment_error)
-  rescue StandardError => e
-    Rails.logger.error("Order processing failed: #{e.message}")
-    @result = Result.failure(error: 'An unexpected error occurred', code: :internal_error)
-  end
-
-  private
-
-  def validate_inventory!
-    order.items.each do |item|
-      available = InventoryService.available_quantity(item.product_id)
-      raise InsufficientInventory, item.product_id if available < item.quantity
-    end
-  end
-
-  def reserve_items!
-    order.items.each do |item|
-      InventoryService.reserve(item.product_id, item.quantity)
-    end
-  end
-
-  def process_payment!
-    result = PaymentGateway.charge(
-      amount: order.total,
-      customer_id: order.customer.payment_id
-    )
-    raise PaymentFailed, result.error_message unless result.success?
-
-    order.update!(payment_id: result.transaction_id, status: :paid)
-  end
-
-  def create_shipment!
-    ShipmentService.create(order: order)
-  end
-
-  def send_confirmation!
-    OrderMailer.confirmation(order).deliver_later
-  end
-
-  # Result object
-  class Result
-    attr_reader :order, :error, :code
-
-    def initialize(success:, order: nil, error: nil, code: nil)
-      @success = success
-      @order = order
-      @error = error
-      @code = code
-    end
-
-    def self.success(order:)
-      new(success: true, order: order)
-    end
-
-    def self.failure(error:, code:)
-      new(success: false, error: error, code: code)
-    end
-
-    def success?
-      @success
-    end
-
-    def failure?
-      !success?
-    end
-  end
-end
-```
-
----
-
-## 9. Performance (MANDATORY)
-
-### A. Database Optimization
-
-```ruby
-# ❌ WRONG: N+1 queries
-users = User.all
-users.each do |user|
-  puts user.posts.count  # Query for each user
-end
-
-# ✅ CORRECT: Eager loading
-users = User.includes(:posts).all
-users.each do |user|
-  puts user.posts.size  # No extra queries
-end
-
-# ✅ CORRECT: Counter cache
-# migration
-add_column :users, :posts_count, :integer, default: 0
-
-# model
-class Post < ApplicationRecord
-  belongs_to :user, counter_cache: true
-end
-
-# ✅ CORRECT: Select only needed columns
-User.select(:id, :name, :email).where(active: true)
-
-# ✅ CORRECT: Batch processing
-User.find_each(batch_size: 1000) do |user|
-  process(user)
-end
-
-# ✅ CORRECT: Pluck for single column
-emails = User.where(active: true).pluck(:email)
-```
-
-### B. Caching
-
-```ruby
-# Fragment caching
-<% cache @product do %>
-  <%= render @product %>
-<% end %>
-
-# Low-level caching
-def expensive_calculation
-  Rails.cache.fetch("calculation:#{id}", expires_in: 1.hour) do
-    perform_expensive_calculation
-  end
-end
-
-# Conditional caching
-def stats
-  return @stats if defined?(@stats)
-
-  @stats = Rails.cache.fetch(cache_key, expires_in: 15.minutes) do
-    calculate_stats
-  end
-end
-
-# Russian doll caching
-<% cache [@product, @product.updated_at] do %>
-  <% @product.variants.each do |variant| %>
-    <% cache variant do %>
-      <%= render variant %>
-    <% end %>
-  <% end %>
-<% end %>
-```
-
----
-
-## 10. Security & Dependency Management (MANDATORY)
-
-### A. Automated Dependency Management
-
-**Use Bundler to manage and lock dependencies:**
+Run, in order, before presenting code. Fix → re-run until every gate is green.
 
 ```bash
-# Install dependencies from Gemfile
-bundle install
-
-# Add a new dependency
-bundle add gem_name
-
-# Update dependencies
-bundle update
-bundle outdated
-
-# Verify dependency integrity
-bundle-audit check
+bundle install                              # RB-DEP-01 (lockfile in sync)
+bundle exec rubocop                         # RB-FMT-01 / RB-LINT-01 / RB-SEC-02 / RB-FREEZE-01
+bundle exec srb tc                          # RB-TYP-01  (or: steep check for RBS)
+bundle exec rspec                           # RB-TST-01/02 (SimpleCov gates RB-TST-03)
+bundle exec bundle-audit check --update     # RB-SEC-01
+yard stats --list-undoc                     # RB-DOC-01
 ```
 
-### B. Vulnerability Scanning & Security
+The *why* behind each gate lives in its §0 owner; do not re-derive it here.
 
-**Mandatory security checks for ALL Ruby projects:**
+---
 
-1. **Vulnerability Scan**:
-   ```bash
-   # Scan for known vulnerabilities
-   bundle-audit check --update
-   ```
-   - Agents MUST fix all HIGH/CRITICAL vulnerabilities before delivery.
+## 4. Project Structure
 
-2. **Supply Chain Audit**:
-   - Verify `Gemfile.lock` integrity
-   - Audit licenses for compliance
+Idiomatic gem/library layout. Architectural principles (dependency direction, ports/adapters, acyclic deps) are owned by [`hexagonal.md`](guides://hexagonal.md); below is only their Ruby mapping.
 
-### C. Dependency File
+```
+project/
+├── lib/<gem>/            # source; require entry at lib/<gem>.rb
+│   ├── domain/           # pure business logic — no IO/framework deps
+│   ├── adapters/         # db/http/cli implementations of ports
+│   └── version.rb        # VERSION constant (see semver.md)
+├── sig/                  # RBS type signatures (if using RBS)
+├── spec/                 # RSpec, mirrors lib/ (see tdd.md)
+├── Gemfile / *.gemspec   # dependency + gem manifest
+├── Gemfile.lock          # committed lockfile (RB-DEP-01)
+├── .rubocop.yml          # lint/format config
+└── README.md
+```
+
+- Namespace everything under one top-level module; one class/module per file, path matching the constant.
+- Group by domain/feature, not by type. Keep modules small and single-responsibility.
+
+---
+
+## 5. Ruby Specifics
+
+The unique value of this guide.
+
+### A. Idiomatic naming & predicates
+`CamelCase` for classes/modules, `snake_case` for methods/variables, `SCREAMING_SNAKE_CASE` for constants. Predicates end in `?`, mutating/dangerous variants in `!` (and a `!` method implies a non-`!` pair exists).
 
 ```ruby
-# Gemfile
-source 'https://rubygems.org'
+# frozen_string_literal: true
 
-ruby '~> 3.3'
+ROLES = %w[admin moderator user].freeze   # freeze shared constants
 
-gem 'rails', '~> 8.0'
-gem 'pg', '~> 1.5'
-gem 'puma', '~> 6.4'
+def admin? = role == :admin               # endless method (3.0+), predicate
+def normalize! = (self.name = name.strip.downcase; self)
+```
 
-group :development, :test do
-  gem 'rspec-rails', '~> 6.1'
-  gem 'rubocop', '~> 1.60', require: false
-  gem 'bundler-audit', require: false
+### B. Blocks, procs & lambdas
+Iterate with blocks; reach for `each_with_object`, `reduce`, `group_by`, `tally`, `filter_map`. Know the proc/lambda distinction: lambdas check arity and `return` locally; procs don't.
+
+```ruby
+names    = users.map(&:name)                 # symbol-to-proc
+active   = users.select(&:active?)
+totals   = orders.each_with_object(Hash.new(0)) { |o, h| h[o.customer_id] += o.total }
+present  = rows.filter_map { |r| r.email if r.active? }   # map + compact in one pass
+counts   = words.tally                       # {"a"=>3, ...}
+
+doubler  = ->(x) { x * 2 }                   # lambda: strict arity, local return
+adder    = proc { |a, b| (a || 0) + (b || 0) } # proc: lenient arity
+```
+
+> Footgun: `return` inside a bare `proc` returns from the *enclosing method*. Use a lambda when you need a local return.
+
+### C. Modules & mixins (composition over inheritance)
+Use modules for namespacing and for sharing behaviour. Prefer composition; reserve inheritance for true is-a. The canonical mixin pattern hooks `included` to add class methods:
+
+```ruby
+module Timestampable
+  def self.included(base) = base.extend(ClassMethods)
+
+  module ClassMethods
+    def timestamped = @timestamped = true
+  end
+
+  def touch = @updated_at = Time.now
+end
+
+class Document
+  include Timestampable
+  timestamped
+end
+```
+
+Use `prepend` to wrap a method (decorator), `extend` to add class-level behaviour. For design-pattern bindings (Decorator, Strategy, Observer) reference [`designpatterns.md`](guides://designpatterns.md) — Ruby usually expresses them with blocks/modules rather than class hierarchies.
+
+### D. Duck typing & pattern matching
+Depend on behaviour, not class: ask `respond_to?` or just send the message. Use `case/in` pattern matching (3.0+) for structured data instead of nested conditionals.
+
+```ruby
+case response
+in { status: 200, body: }          then parse(body)
+in { status: 404 }                 then not_found
+in { status: 500, error: String => msg } then log(msg)
+else                                    handle_unknown
+end
+```
+
+### E. Immutability & frozen strings
+Put `# frozen_string_literal: true` atop every file (RB-FREEZE-01). `freeze` constants and config. Model values as immutable records with `Data.define` (3.2+) instead of mutable `Struct`/`OpenStruct`.
+
+```ruby
+Point = Data.define(:x, :y) do
+  def +(other) = with(x: x + other.x, y: y + other.y)   # returns a new instance
+end
+
+p = Point.new(x: 1, y: 2)
+p.frozen?  # => true
+```
+
+> Avoid `OpenStruct` (slow, defeats typing) and in-place mutation of arguments; return new objects.
+
+### F. Metaprogramming — sparingly
+`define_method`, `method_missing`, and `Module#refine` are powerful but obscure intent and break tooling/typing. Use only to eliminate real duplication, keep it local, and **always** pair `method_missing` with `respond_to_missing?`.
+
+```ruby
+class Settings
+  def initialize(data) = @data = data
+
+  def method_missing(name, *) = @data.fetch(name) { super }
+  def respond_to_missing?(name, include_private = false) = @data.key?(name) || super
+end
+```
+
+> Prefer a plain method or `Data`/`Struct` over metaprogramming whenever the static version is no longer than the dynamic one.
+
+### G. Exceptions — Ruby binding
+Strategy (when to raise vs. return, propagation, wrapping) is owned by [`error-handling.md`](guides://error-handling.md). Ruby specifics: define one namespaced base `< StandardError` and subclass it; rescue the **narrowest** type; never bare-`rescue` (that catches `Exception`, including `Interrupt`/`SignalException`).
+
+```ruby
+module MyGem
+  Error            = Class.new(StandardError)
+  ValidationError  = Class.new(Error)
+  NotFoundError    = Class.new(Error)
+end
+
+def charge(order)
+  gateway.charge(order.total)
+rescue Gateway::CardDeclined => e          # specific first
+  order.declined!(e.message)
+rescue Gateway::NetworkError
+  retry_later(order)
+rescue StandardError => e                  # explicit, never bare
+  logger.error(e.full_message)
+  raise MyGem::Error, "charge failed"      # wrap, preserve cause
+ensure
+  gateway.close
+end
+```
+
+### H. Typing — Sorbet / RBS binding
+Annotate public APIs and gate with a checker (RB-TYP-01), not RuboCop. Two ecosystems: **Sorbet** (inline `sig` + `srb tc`) or **RBS** (`.rbs` files in `sig/` + `steep check`). Pick one per project.
+
+```ruby
+# typed: strict
+extend T::Sig
+
+sig { params(name: String, age: Integer).returns(String) }
+def greet(name, age) = "#{name} (#{age})"
+```
+
+```rbs
+# sig/greeter.rbs  (RBS alternative)
+class Greeter
+  def greet: (String name, Integer age) -> String
 end
 ```
 
 ---
 
-## 11. Deployment Checklist
+## 6. Tooling & Dependencies
 
-### Code Quality
-- [ ] RuboCop passes with no offenses
-- [ ] All specs passing
-- [ ] No binding.pry or debugger statements
-- [ ] No puts or p debugging output
+Security/supply-chain *policy* → [`secure-coding.md`](guides://secure-coding.md); versioning → [`semver.md`](guides://semver.md). Ruby binding via Bundler:
 
-### Security
-- [ ] Strong parameters used
-- [ ] SQL injection prevented (parameterized queries)
-- [ ] Mass assignment protected
-- [ ] Secrets in credentials, not code
+```bash
+bundle install                          # install from Gemfile.lock (reproducible)
+bundle add <gem>                        # add dep (updates Gemfile.lock)
+bundle update <gem>                     # update one gem to latest resolvable
+bundle outdated                         # list updatable gems
+bundle exec bundle-audit check --update # RB-SEC-01: CVE scan against deps
+```
 
-### Performance
-- [ ] N+1 queries eliminated
-- [ ] Appropriate indexes in place
-- [ ] Caching implemented
-- [ ] Background jobs for slow operations
-
-### Database
-- [ ] Migrations are reversible
-- [ ] Foreign keys defined
-- [ ] Indexes on foreign keys
-- [ ] Data migrations separate from schema
+Commit `Gemfile.lock`. Constrain direct gems with pessimistic `~>` (e.g. `gem "puma", "~> 6.4"`); let Bundler resolve the graph. Pin `ruby "~> 3.3"` in the Gemfile.
 
 ---
 
-## 12. Quick Reference
+## 7. Quick Reference
 
-```ruby
-# String methods
-str.strip           # Remove whitespace
-str.downcase        # Lowercase
-str.present?        # Not nil or empty (Rails)
-str.blank?          # Nil or empty (Rails)
-
-# Array methods
-arr.map { }         # Transform
-arr.select { }      # Filter
-arr.reject { }      # Inverse filter
-arr.find { }        # First match
-arr.compact         # Remove nils
-arr.flatten         # Flatten nested
-arr.uniq            # Remove duplicates
-
-# Hash methods
-hash.fetch(:key, default)
-hash.dig(:a, :b, :c)
-hash.slice(:key1, :key2)
-hash.except(:key)
-hash.merge(other)
-
-# Rails helpers
-Time.current        # Use instead of Time.now
-Date.current        # Use instead of Date.today
-n.days.ago          # Time calculation
-n.hours.from_now    # Time calculation
+```bash
+bundle install                          # setup
+bundle exec rspec                       # test
+bundle exec rubocop -a                  # lint + autocorrect
+bundle exec srb tc                      # type check (or: steep check)
+bundle exec bundle-audit check --update # CVE scan
+ruby -Ilib -e 'require "<gem>"'         # smoke-load
 ```
 
 ---
 
-## 13. Why This Configuration Works
+## 8. Deployment Checklist
 
-1. **RuboCop as a Living Style Guide**: RuboCop enforces community conventions automatically, eliminating style debates in code review and ensuring every file follows the same naming, formatting, and structural patterns. Auto-correction fixes the majority of offenses without developer intervention.
+Generated from §2 — one box per requirement ID.
 
-2. **RSpec with Factories over Fixtures**: Using FactoryBot factories instead of YAML fixtures makes test data explicit, composable, and traceable. Combined with `let` blocks and `subject`, tests read like specifications and clearly document expected behavior.
-
-3. **Service Objects for Business Logic**: Extracting complex operations into service objects with a standard `call` interface keeps controllers thin, models focused on persistence, and business rules independently testable without loading the full Rails stack.
-
-4. **Eager Loading to Eliminate N+1 Queries**: Mandatory use of `includes`, `preload`, and `eager_load` prevents the most common Rails performance problem. Combined with Bullet gem detection in development, N+1 queries are caught before they reach production.
-
-5. **Bundler with bundle-audit for Supply Chain Security**: Locking all gem versions in `Gemfile.lock` ensures reproducible builds, while `bundle-audit` scans for known CVEs in dependencies. This catches vulnerable gems before deployment rather than after a security incident.
+- [ ] RB-FMT-01 / RB-LINT-01 — `rubocop` clean, no offenses
+- [ ] RB-TYP-01 — Sorbet/RBS type check clean (not the linter)
+- [ ] RB-TST-01/02/03 — specs pass, bugs have regression tests, coverage ≥ gate
+- [ ] RB-DOC-01 — public API documented, `yard stats` 0 undocumented
+- [ ] RB-SEC-01 — `bundle-audit` 0 advisories
+- [ ] RB-SEC-02 — no unsafe `eval`/`send`, no bare rescue
+- [ ] RB-DEP-01 — `Gemfile.lock` in sync & committed
+- [ ] RB-FREEZE-01 — every file has `# frozen_string_literal: true`
+- [ ] Agent ran every §3 command and documented any fixes
 
 ---
-
-**Last Updated:** 2026-01-31
-**Version:** 1.0
-**Maintainer:** Ruby Team
-
-
-**End of Ruby Development Guidelines**
+**End of Ruby Guidelines**

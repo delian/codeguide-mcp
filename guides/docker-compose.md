@@ -1,3316 +1,368 @@
 # Docker Compose Guidelines
-Mandatory coding style and practices for creation of docker-compose files. Compose Specification (V2), Docker Engine 27.x+, YAML 1.2 Standards, Trivy/Grype.
+Mandatory standards for Docker Compose stacks: modern Compose Spec, isolated networks, healthchecked dependencies, secrets, reproducible dev/prod parity. Docker Compose v2, Compose Specification, Docker Engine 27+.
 
 ---
-Agent Profile: The Orchestration Architect
-Role: Senior DevOps Engineer & Container Orchestration Specialist
-Objective: Generate production-ready, maintainable, and highly optimized docker-compose configurations.
-Tools: Compose Specification (V2), Docker Engine 27.x+, YAML 1.2 Standards, Trivy/Grype.
-
-## 1. Core Philosophies
-The agent must adhere to the "SEVEN PILLARS" standard for every docker-compose.yml generated:
-
-**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
-**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
-**Security-First**: Mandatory vulnerability scanning, dependency auditing, and supply chain integrity checks for all services.
-**Declarative**: Define desired state, not imperative commands.
-**Reproducible**: Same compose file = same environment (dev/staging/prod parity).
-**Maintainable**: Clear structure, comments, version control friendly.
-**Modular**: Separate components in individual files, composed with `include`.
-**Hexagonal**: Layer separation (domain, application, infrastructure) reflected in compose structure.
-
-**Verified Code**: Agent-generated docker-compose files MUST pass `docker compose config` and security scans before delivery.
-
+name: docker-compose
+title: Docker Compose Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: infra
+tools: [docker-compose@v2, compose-spec, docker-engine@27, trivy, dclint]
+requires:
+  - secure-coding
+recommends:
+  - dockerfile
+  - kubernetes
+  - env-config
+  - ci-cd
+  - observability
+provides:
+  - compose-spec
+  - compose-profiles
+  - local-dev-stacks
+  - compose-healthchecks
 ---
 
-## 2. Agent Code Generation Requirements (MANDATORY)
-
-### A. Verification Protocol
-
-**CRITICAL: Agents MUST verify that all generated docker-compose files are valid and secure before presenting them to the user.**
-
-#### Pre-Delivery Checklist
-
-**Before delivering ANY docker-compose code, the agent MUST:**
-
-1. **Configuration Check**:
-   ```bash
-   # Validate compose file syntax and consistency
-   docker compose config --quiet
-   # Exit code MUST be 0
-   ```
-
-2. **Security & Dependency Verification (MANDATORY)**:
-   ```bash
-   # Scan all referenced images for vulnerabilities
-   # (Requires images to be built or available)
-   trivy config .
-   ```
-   - **MUST** have 0 HIGH or CRITICAL security misconfigurations.
-   - All images MUST be pinned by version or digest.
-
-3. **Network & Isolation Verification**:
-   - Verify that internal networks are marked `internal: true`.
-   - Ensure no services use the host network unless explicitly required.
-
-4. **Runtime Verification**:
-   - All services MUST have a defined `healthcheck`.
-   - Verify that `depends_on` conditions match healthcheck availability.
-
-#### Error Correction Process
-
-If verification fails:
-
-1. **Identify the error**: Read the full `docker compose config` or Trivy error message.
-2. **Fix the root cause**:
-   - Syntax error? Correct the YAML indentation or keys.
-   - Security issue? Add `read_only: true` or `cap_drop: [ALL]`.
-3. **Re-verify**: Run `config` and security scans again.
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide covers only what is unique to Docker Compose — multi-container composition, networking, healthchecked startup, and local dev stacks.
 
 ---
 
-## 2A. Hexagonal Architecture & Modular Composition (MANDATORY)
+## 0. Prerequisites & References
 
-### A. Architecture Principles
+Fetch and apply these **before** generating Compose files. Their rules are assumed below and not repeated.
 
-Docker Compose configurations MUST follow hexagonal (ports & adapters) architecture:
+> 📎 **REQUIRED — fetch & apply first:**
+> - [`secure-coding.md`](guides://secure-coding.md) — container security, supply chain, secrets, CVE policy. *(Compose binding: per-service runtime hardening in §6, image/CVE scanning with `trivy`.)*
 
-- **Domain Layer**: Core business services (APIs, workers, schedulers)
-- **Infrastructure Layer**: External dependencies (databases, caches, message queues)
-- **Adapters Layer**: Gateways, proxies, load balancers, API gateways
-- **Observability Layer**: Monitoring, logging, tracing services
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`dockerfile.md`](guides://dockerfile.md) — how the images are **built** (base image, multi-stage, non-root `USER`, `HEALTHCHECK`). Compose **runs** images; it does not build them well. Do not restate Dockerfile rules here.
+> - [`kubernetes.md`](guides://kubernetes.md) — production orchestration. Compose is for local/single-host; see §10 for when to graduate.
+> - [`env-config.md`](guides://env-config.md) — config layering, env separation, secret sourcing. *(Compose binding: `.env`, `env_file`, `environment`, `secrets`.)*
+> - [`ci-cd.md`](guides://ci-cd.md) — pipeline-driven build/scan/up. *(Compose binding: `docker-compose.ci.yml`.)*
+> - [`observability.md`](guides://observability.md) — metrics/tracing/log policy for the monitoring services a stack runs.
 
-### B. Modular File Structure
+> 📎 **SEE ALSO:** [`microservices.md`](guides://microservices.md) · [`make.md`](guides://make.md)
 
-**CRITICAL: Each architectural layer MUST be in a separate compose file, combined using `include`.**
+---
 
-```
-project/
-├── docker-compose.yml           # Main entry point (uses include)
-├── compose/
-│   ├── domain/
-│   │   ├── api-services.yml      # Core API services
-│   │   ├── worker-services.yml   # Background workers
-│   │   └── scheduler-services.yml # Cron/scheduled jobs
-│   ├── infrastructure/
-│   │   ├── databases.yml         # PostgreSQL, MongoDB, etc.
-│   │   ├── caches.yml            # Redis, Memcached
-│   │   ├── messaging.yml         # RabbitMQ, Kafka, NATS
-│   │   └── storage.yml           # MinIO, S3-compatible storage
-│   ├── adapters/
-│   │   ├── gateway.yml           # API Gateway (Traefik, Kong)
-│   │   ├── proxy.yml             # Reverse proxy (Nginx)
-│   │   └── auth.yml              # Auth service (Keycloak, Auth0)
-│   ├── observability/
-│   │   ├── monitoring.yml        # Prometheus, Grafana
-│   │   ├── logging.yml           # Loki, Elasticsearch
-│   │   └── tracing.yml           # Jaeger, Tempo
-│   └── shared/
-│       ├── networks.yml          # Shared network definitions
-│       ├── volumes.yml           # Shared volume definitions
-│       └── secrets.yml           # Shared secrets
-├── docker-compose.dev.yml       # Development overrides
-├── docker-compose.prod.yml      # Production overrides
-└── .env
+## 1. Core Philosophies: COMPOSE-FIRST
+
+Compose-specific principles only. Security and config policy come from §0.
+
+- **C**ompose Spec, not legacy: the **top-level `version:` key is obsolete and MUST be omitted** (Compose v2 ignores it and warns). The schema is the Compose Specification.
+- **O**ne command, whole stack: a developer clones, runs one `docker compose up`, and gets a working environment. Reproducibility is the product.
+- **M**inimal blast radius: every service joins only the networks it needs; backend networks are `internal: true`. Default-deny connectivity.
+- **P**arity by override: one base file describes the topology; thin override files specialize dev vs prod. No copy-pasted near-duplicate stacks.
+- **O**rdered by readiness, not by luck: dependents wait on `condition: service_healthy`, never on `sleep`.
+- **S**tateless config: images are pinned and immutable; all variation comes from env/secrets injected at run time (see `env-config.md`).
+- **E**phemeral, not production: Compose targets local dev and single-host; multi-node production graduates to Kubernetes (§10).
+
+**Verified Code**: Agent-generated Compose files MUST pass every gate in §2 before delivery.
+
+---
+
+## 2. Requirements (MANDATORY, auditable)
+
+RFC-2119 keywords. IDs `DC-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a shared rule cite its owner.
+
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| DC-FMT-01 | File MUST parse & merge cleanly | `docker compose config --quiet` | exit 0 |
+| DC-LINT-01 | File MUST lint clean (2-space YAML, no anti-patterns) | `dclint docker-compose.yml` | exit 0 |
+| DC-VER-01 | Top-level `version:` key MUST NOT be present | `! grep -E '^version:' docker-compose*.yml` | no match |
+| DC-IMG-01 | Images MUST be pinned (tag, digest in prod); never `:latest` | `! docker compose config \| grep -E 'image:.*:latest\|image:[^@:]+$'` | no match |
+| DC-SEC-01 | 0 high/critical misconfigs (see `secure-coding.md`) | `trivy config .` | 0 high/critical |
+| DC-SEC-02 | No hardcoded secrets in compose/.env (see `secure-coding.md`) | secret scan / review | 0 secrets |
+| DC-SEC-03 | Each service hardened: non-root, `read_only`, `no-new-privileges`, `cap_drop: [ALL]`, `privileged` absent (see `secure-coding.md`) | review / `docker compose config` | all present |
+| DC-NET-01 | Backend/datastore networks MUST be `internal: true`; no `network_mode: host` | `docker compose config` | isolated |
+| DC-HLTH-01 | Every depended-upon service MUST define a `healthcheck` | `docker compose config` | present |
+| DC-DEP-01 | `depends_on` MUST use `condition:` (not the short list form) | `docker compose config` | conditions set |
+| DC-RES-01 | Every service MUST set memory (and pid) limits | `docker compose config` | limits present |
+| DC-CFG-01 | Config via env/secrets, not baked in (see `env-config.md`) | review / grep | no literals |
+| DC-TST-01 | Stack MUST come up healthy (smoke test) | `docker compose up -d --wait` | exit 0 |
+
+> **Forbidden**: a top-level `version:` key; `:latest` or unpinned images; `privileged: true`; `network_mode: host` for app services; database `ports:` published to the host in prod; plaintext passwords in `environment:`; `depends_on` short-form when the dependency needs to be *ready* (only *started*).
+
+---
+
+## 3. Verification Protocol
+
+Run, in order, before presenting a stack. Fix → re-run until every gate is green.
+
+```bash
+docker compose config --quiet            # DC-FMT-01  (validate + merge)
+dclint docker-compose.yml                # DC-LINT-01 (zavoloklom/dclint)
+trivy config .                           # DC-SEC-01  (misconfig scan)
+docker compose config | grep -E 'image:' # DC-IMG-01  (eyeball pins / digests)
+docker compose up -d --wait              # DC-TST-01  (all services reach healthy)
+docker compose down -v                   # clean up
 ```
 
-### C. Using `include` Directive
+`--wait` blocks until every service with a healthcheck is healthy and exits non-zero if any fails — the canonical stack smoke test. The *why* behind security/config gates lives in their §0 owners.
 
-The main `docker-compose.yml` uses `include` to compose modular files:
+---
+
+## 4. File Structure & Top-Level Keys
+
+A Compose file is a map of six top-level keys. There is **no `version:` key** in the modern spec.
 
 ```yaml
-# docker-compose.yml - Main composition file
-name: myapp-stack
-
-# Include modular compose files
-include:
-  # Shared resources (must be first)
-  - compose/shared/networks.yml
-  - compose/shared/volumes.yml
-  - compose/shared/secrets.yml
-  
-  # Infrastructure layer (databases, queues, caches)
-  - compose/infrastructure/databases.yml
-  - compose/infrastructure/caches.yml
-  - compose/infrastructure/messaging.yml
-  
-  # Domain layer (core business services)
-  - compose/domain/api-services.yml
-  - compose/domain/worker-services.yml
-  
-  # Adapters layer (gateways, proxies)
-  - compose/adapters/gateway.yml
-  - compose/adapters/proxy.yml
-  
-  # Observability layer (optional for production)
-  - path: compose/observability/monitoring.yml
-    env_file: .env.monitoring
-  - path: compose/observability/logging.yml
-    env_file: .env.logging
-
-# Global defaults (optional)
-services:
-  x-common-logging: &default-logging
-    driver: json-file
-    options:
-      max-size: "10m"
-      max-file: "3"
+name: myapp                 # project name (namespaces containers/networks/volumes)
+services:                   # the containers
+networks:                   # custom networks (never rely on the default bridge)
+volumes:                    # named persistent volumes
+configs:                    # non-secret config files mounted into containers
+secrets:                    # sensitive files mounted at /run/secrets/<name>
 ```
 
-### D. Modular File Examples
+Recommended **service key order** (readability, not enforced): `image`/`build` → `depends_on` → `env_file`/`environment` → `ports`/`expose` → `volumes` → `networks` → `healthcheck` → `restart` → `deploy` (resources) → security keys (`user`, `read_only`, `cap_drop`, `security_opt`) → `labels` → `command`.
 
-#### 1. Infrastructure Layer - Databases
+- **File names**: `docker-compose.yml` (base) and `docker-compose.override.yml` (auto-merged for local dev). Named overrides (`docker-compose.prod.yml`) are opt-in via `-f` (§7).
+- **Split large stacks** with the top-level `include:` key — each included file is a complete Compose file merged into the project. Use it to separate concerns (e.g. `infra.yml`, `app.yml`), **not** to impose an architecture: layering/ports-and-adapters policy is owned by the architecture guides, not by Compose.
+
+---
+
+## 5. Networking, Healthchecks & Startup Order
+
+The two features that make Compose more than "run N containers": a private DNS-resolved network and readiness-gated startup.
+
+### A. Networks — service discovery & isolation
+Every service on the same network reaches the others by **service name** as hostname (`postgres:5432`). Put services on the minimum set of networks; isolate datastores.
 
 ```yaml
-# compose/infrastructure/databases.yml
-name: infrastructure-databases
-
 services:
-  postgres:
-    image: postgres:16.1-alpine3.19
-    restart: unless-stopped
-    environment:
-      - POSTGRES_DB=${DB_NAME}
-      - POSTGRES_USER=${DB_USER}
-      - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-      - ./init-db:/docker-entrypoint-initdb.d:ro
-    networks:
-      - database
-    secrets:
-      - db_password
+  frontend: { networks: [public, backend] }   # talks to internet + api
+  api:      { networks: [backend, data] }      # talks to frontend-facing + db
+  db:       { networks: [data] }               # reachable only from api
+
+networks:
+  public:   { driver: bridge }
+  backend:  { driver: bridge }
+  data:     { driver: bridge, internal: true } # DC-NET-01: no egress, no host exposure
+```
+- `expose:` advertises a port to the network only; `ports:` publishes to the host. Datastores use `expose` (or nothing) — never publish `5432` to the host in prod (DC-NET-01).
+- `internal: true` removes the gateway: containers on it have **no internet access** and cannot be reached from the host.
+
+### B. Healthchecks — define readiness
+A service is "healthy" only when its `healthcheck` passes. Prefer an in-image `HEALTHCHECK` (owned by [`dockerfile.md`](guides://dockerfile.md)); override per-deployment in Compose when the image lacks one.
+
+```yaml
+services:
+  db:
+    image: postgres:17.2-alpine3.21
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s
-    deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 4G
-        reservations:
-          cpus: '1.0'
-          memory: 1G
-    labels:
-      com.example.layer: "infrastructure"
-      com.example.component: "database"
+      start_period: 30s        # grace window before failures count
 ```
+Common probes: Postgres `pg_isready`; Redis `redis-cli ping`; HTTP `curl -f http://localhost:PORT/health` (or `wget --spider`); MongoDB `mongosh --eval "db.adminCommand('ping')"`; RabbitMQ `rabbitmq-diagnostics -q ping`.
 
-#### 2. Infrastructure Layer - Caches
+### C. depends_on — readiness-gated startup
+Short-form `depends_on: [db]` waits only for the container to **start**, not to be **ready** — the #1 cause of "connection refused" on boot. Use the long form with a condition (DC-DEP-01):
 
 ```yaml
-# compose/infrastructure/caches.yml
-name: infrastructure-caches
-
 services:
-  redis:
-    image: redis:7.2-alpine3.19
-    restart: unless-stopped
-    command: >
-      redis-server
-      --requirepass ${REDIS_PASSWORD}
-      --maxmemory 512mb
-      --maxmemory-policy allkeys-lru
-    volumes:
-      - redis-data:/data
-    networks:
-      - cache
-      - backend
-    healthcheck:
-      test: ["CMD", "redis-cli", "--pass", "${REDIS_PASSWORD}", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 768M
-    labels:
-      com.example.layer: "infrastructure"
-      com.example.component: "cache"
+  api:
+    depends_on:
+      db:        { condition: service_healthy }              # waits for healthcheck
+      migrate:   { condition: service_completed_successfully } # one-shot init job
+      cache:     { condition: service_started }              # ready-ness not needed
 ```
+The app SHOULD still implement connection retry — `depends_on` orders startup, it is not a substitute for resilient clients (see `error-handling.md`).
 
-#### 3. Domain Layer - API Services
+---
+
+## 6. Configuration, Secrets & Runtime Hardening
+
+### A. Config & secrets injection
+Config layering and env separation are owned by [`env-config.md`](guides://env-config.md); secret policy by [`secure-coding.md`](guides://secure-coding.md). Compose binding:
+
+- **`.env`** (next to the compose file) interpolates `${VAR}` **in the file itself** — for image tags, ports, paths. Not injected into containers.
+- **`env_file:` / `environment:`** inject variables **into the container**. Use `${VAR:-default}` for safe defaults.
+- **`secrets:`** mount sensitive files at `/run/secrets/<name>` — never pass passwords via `environment` (DC-SEC-02). Most official images accept a `*_FILE` variant.
 
 ```yaml
-# compose/domain/api-services.yml
-name: domain-api
-
 services:
-  user-service:
-    image: mycompany/user-service:${USER_SERVICE_VERSION}
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    env_file:
-      - .env
+  api:
+    image: registry.example.com/api:1.4.2
+    env_file: [.env]                       # non-secret, in-container config
     environment:
-      - SERVICE_NAME=user-service
-      - PORT=3001
-      - DB_HOST=postgres
-      - CACHE_HOST=redis
-    expose:
-      - "3001"
-    networks:
-      - backend
-      - database
-      - cache
-    secrets:
-      - db_password
-      - jwt_secret
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-    deploy:
-      replicas: 2
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 1G
-    labels:
-      com.example.layer: "domain"
-      com.example.component: "api"
-      com.example.service: "user-service"
-
-  order-service:
-    image: mycompany/order-service:${ORDER_SERVICE_VERSION}
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    env_file:
-      - .env
-    environment:
-      - SERVICE_NAME=order-service
-      - PORT=3002
-      - DB_HOST=postgres
-      - CACHE_HOST=redis
-    expose:
-      - "3002"
-    networks:
-      - backend
-      - database
-      - cache
-    secrets:
-      - db_password
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-    deploy:
-      replicas: 2
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 1G
-    labels:
-      com.example.layer: "domain"
-      com.example.component: "api"
-      com.example.service: "order-service"
-```
-
-#### 4. Domain Layer - Workers
-
-```yaml
-# compose/domain/worker-services.yml
-name: domain-workers
-
-services:
-  email-worker:
-    image: mycompany/email-worker:${WORKER_VERSION}
-    restart: unless-stopped
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    env_file:
-      - .env
-    environment:
-      - WORKER_TYPE=email
-      - QUEUE_HOST=rabbitmq
-    networks:
-      - backend
-      - messaging
-    secrets:
-      - smtp_credentials
-    deploy:
-      replicas: 3
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512M
-    labels:
-      com.example.layer: "domain"
-      com.example.component: "worker"
-      com.example.worker-type: "email"
-
-  notification-worker:
-    image: mycompany/notification-worker:${WORKER_VERSION}
-    restart: unless-stopped
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    env_file:
-      - .env
-    environment:
-      - WORKER_TYPE=notification
-      - QUEUE_HOST=rabbitmq
-    networks:
-      - backend
-      - messaging
-    deploy:
-      replicas: 2
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512M
-    labels:
-      com.example.layer: "domain"
-      com.example.component: "worker"
-      com.example.worker-type: "notification"
-```
-
-#### 5. Adapters Layer - Gateway
-
-```yaml
-# compose/adapters/gateway.yml
-name: adapters-gateway
-
-services:
-  traefik:
-    image: traefik:v3.0
-    restart: unless-stopped
-    command:
-      - --api.dashboard=true
-      - --providers.docker=true
-      - --providers.docker.exposedbydefault=false
-      - --entrypoints.web.address=:80
-      - --entrypoints.websecure.address=:443
-      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}
-      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
-      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
-      - --metrics.prometheus=true
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - traefik-certs:/letsencrypt
-    networks:
-      - public
-      - backend
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 512M
-    labels:
-      com.example.layer: "adapter"
-      com.example.component: "gateway"
-      # Traefik dashboard
-      traefik.enable: "true"
-      traefik.http.routers.dashboard.rule: "Host(`traefik.${DOMAIN}`)"
-      traefik.http.routers.dashboard.service: "api@internal"
-```
-
-#### 6. Shared - Networks
-
-```yaml
-# compose/shared/networks.yml
-name: shared-networks
-
-networks:
-  # Public-facing network
-  public:
-    driver: bridge
-    driver_opts:
-      com.docker.network.bridge.name: app-public
-    labels:
-      com.example.layer: "adapter"
-  
-  # Backend services network
-  backend:
-    driver: bridge
-    internal: false
-    labels:
-      com.example.layer: "domain"
-  
-  # Database network (isolated)
-  database:
-    driver: bridge
-    internal: true
-    labels:
-      com.example.layer: "infrastructure"
-      com.example.isolated: "true"
-  
-  # Cache network
-  cache:
-    driver: bridge
-    internal: false
-    labels:
-      com.example.layer: "infrastructure"
-  
-  # Messaging network
-  messaging:
-    driver: bridge
-    internal: true
-    labels:
-      com.example.layer: "infrastructure"
-  
-  # Monitoring network
-  monitoring:
-    driver: bridge
-    labels:
-      com.example.layer: "observability"
-```
-
-#### 7. Shared - Volumes
-
-```yaml
-# compose/shared/volumes.yml
-name: shared-volumes
-
-volumes:
-  # Database volumes
-  postgres-data:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: /mnt/data/postgres
-    labels:
-      com.example.layer: "infrastructure"
-      com.example.component: "database"
-  
-  # Cache volumes
-  redis-data:
-    driver: local
-    labels:
-      com.example.layer: "infrastructure"
-      com.example.component: "cache"
-  
-  # Gateway volumes
-  traefik-certs:
-    driver: local
-    labels:
-      com.example.layer: "adapter"
-      com.example.component: "gateway"
-  
-  # Monitoring volumes
-  prometheus-data:
-    driver: local
-    labels:
-      com.example.layer: "observability"
-  
-  grafana-data:
-    driver: local
-    labels:
-      com.example.layer: "observability"
-```
-
-#### 8. Shared - Secrets
-
-```yaml
-# compose/shared/secrets.yml
-name: shared-secrets
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DB_PASSWORD_FILE: /run/secrets/db_password   # *_FILE pattern, not the value
+    secrets: [db_password]
 
 secrets:
   db_password:
-    file: ./secrets/db_password.txt
-  
-  jwt_secret:
-    file: ./secrets/jwt_secret.txt
-  
-  smtp_credentials:
-    file: ./secrets/smtp_credentials.txt
-  
+    file: ./secrets/db_password.txt        # git-ignored; or `environment: VAULT_...`
   api_key:
-    external: true
-    name: production_api_key
+    external: true                          # provided by the orchestrator / swarm
 ```
+Commit `.env.example`, never real `.env`/`secrets/*`. For production secret stores (Vault, cloud SM), source values per [`secure-coding.md`](guides://secure-coding.md).
 
-### E. Environment-Specific Composition
-
-Use environment-specific files that also leverage modular structure:
+### B. Per-service runtime hardening (DC-SEC-03)
+Image hardening (distroless/scratch, non-root `USER`) is owned by [`dockerfile.md`](guides://dockerfile.md); **runtime** hardening is Compose's job. Apply this baseline to every service:
 
 ```yaml
-# docker-compose.dev.yml - Development overrides
-include:
-  - compose/shared/networks.yml
-  - compose/shared/volumes.yml
-  - compose/infrastructure/databases.yml
-  - compose/infrastructure/caches.yml
-  - compose/domain/api-services.yml
-  # Note: No observability layer in dev
-
 services:
-  # Override user-service for development
-  user-service:
-    build:
-      context: ./services/user-service
-      dockerfile: Dockerfile.dev
-    volumes:
-      - ./services/user-service:/app:cached
-      - /app/node_modules
-    environment:
-      - NODE_ENV=development
-      - DEBUG=app:*
-    ports:
-      - "3001:3001"
-      - "9229:9229"  # Debugger
-```
-
-```yaml
-# docker-compose.prod.yml - Production overrides
-include:
-  - compose/shared/networks.yml
-  - compose/shared/volumes.yml
-  - compose/shared/secrets.yml
-  - compose/infrastructure/databases.yml
-  - compose/infrastructure/caches.yml
-  - compose/infrastructure/messaging.yml
-  - compose/domain/api-services.yml
-  - compose/domain/worker-services.yml
-  - compose/adapters/gateway.yml
-  - compose/observability/monitoring.yml
-  - compose/observability/tracing.yml
-
-services:
-  # Production-specific overrides
-  user-service:
-    image: mycompany/user-service:${USER_SERVICE_VERSION}@sha256:${USER_SERVICE_DIGEST}
+  api:
+    user: "10001:10001"          # non-root at runtime
+    read_only: true              # immutable root filesystem
+    cap_drop: [ALL]              # drop every Linux capability...
+    # cap_add: [NET_BIND_SERVICE] # ...re-add only if binding port <1024 (justify it)
+    security_opt:
+      - no-new-privileges:true   # block setuid escalation
+    tmpfs:
+      - /tmp:size=64M,mode=1777  # the only writable path it needs
     deploy:
-      replicas: 4
       resources:
-        limits:
-          cpus: '2.0'
-          memory: 2G
+        limits:   { cpus: "1.0", memory: 512M, pids: 200 }  # DC-RES-01: cap blast radius
+        reservations: { memory: 128M }
+```
+`privileged: true`, `network_mode: host`, `pid: host`, and mounting `/var/run/docker.sock` are forbidden for application services (DC-SEC-03; see `secure-coding.md`). Use a YAML anchor to apply the baseline DRY-ly:
+
+```yaml
+x-hardened: &hardened
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+services:
+  api: { <<: *hardened, image: ... }
+```
+
+---
+
+## 7. Override Files & Dev vs Prod Parity
+
+One base topology; thin overrides specialize per environment. Compose **deep-merges** files in `-f` order (later wins; lists for `ports`/`environment` are appended).
+
+- `docker-compose.yml` — the canonical, production-shaped topology.
+- `docker-compose.override.yml` — **auto-loaded** by `docker compose up`; the local-dev delta (builds, bind mounts, published ports, debug env).
+- `docker-compose.prod.yml` — opt-in: digest-pinned images, replicas, `restart: always`, no host ports.
+
+```bash
+docker compose up -d                                          # base + override.yml (dev)
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d   # explicit prod
+```
+
+```yaml
+# docker-compose.override.yml — DEV ONLY (live code, debug ports, build from source)
+services:
+  api:
+    build: { context: ./api, target: dev }   # build locally instead of pulling
+    ports: ["8000:8000", "9229:9229"]         # publish + debugger
+    environment: { LOG_LEVEL: debug }
+    develop:
+      watch:                                  # §8 hot-reload
+        - { action: sync, path: ./api/src, target: /app/src }
+        - { action: rebuild, path: ./api/package.json }
+```
+```yaml
+# docker-compose.prod.yml — opt-in production deltas
+services:
+  api:
+    image: registry.example.com/api@sha256:abc123...   # immutable digest (DC-IMG-01)
     restart: always
+    deploy: { replicas: 3 }
 ```
 
-### F. Commands for Modular Composition
+For multi-environment overrides, prefer this base+override pattern over divergent full files — it keeps dev and prod in parity (one source of truth for the topology).
 
-```bash
-# Development (limited layers)
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+---
 
-# Production (all layers)
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+## 8. Watch Mode (`docker compose watch`)
 
-# Only infrastructure layer
-docker compose -f compose/infrastructure/databases.yml up -d
+`develop.watch` replaces ad-hoc bind-mount-plus-polling for inner-loop dev. `docker compose watch` monitors host paths and reacts without a manual rebuild:
 
-# Specific service layers
-docker compose -f docker-compose.yml up postgres redis user-service
-
-# Validate entire composition
-docker compose config
-
-# View merged configuration
-docker compose config --no-interpolate > merged-compose.yml
-```
-
-### G. Benefits of Modular Hexagonal Approach
-
-1. **Layer Isolation**: Infrastructure changes don't affect domain services
-2. **Independent Scaling**: Scale only the layers that need it
-3. **Team Ownership**: Different teams own different compose files
-4. **Environment Flexibility**: Include only needed layers per environment
-5. **Testing Simplicity**: Test each layer independently
-6. **Deployment Control**: Deploy layers in correct dependency order
-7. **Maintenance**: Smaller, focused files are easier to understand and modify
-8. **Reusability**: Share infrastructure layer across multiple projects
-
-### H. Mandatory Labels for Layers
-
-All services MUST include layer identification labels:
+- `action: sync` — copy changed files into the running container (for interpreted/HMR stacks). Fastest; no restart.
+- `action: sync+restart` — sync, then restart the container (config files, non-HMR servers).
+- `action: rebuild` — rebuild the image and recreate (dependency/lockfile changes).
+- `ignore:` — skip `node_modules`, build output, etc.
 
 ```yaml
-labels:
-  com.example.layer: "domain|infrastructure|adapter|observability"
-  com.example.component: "api|worker|database|cache|gateway|etc"
-  com.example.service: "service-name"
-```
-
-## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
-
-**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new Docker Compose configurations.**
-
-### TDD Cycle for Docker Compose
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                    TDD CYCLE FOR DOCKER COMPOSE                     │
-└─────────────────────────────────────────────────────────────────────┘
-
-    ┌──────────────────────┐
-    │      1. RED          │
-    │  Write failing test  │
-    │  (service won't      │
-    │   start/connect)     │
-    └──────────┬───────────┘
-               │
-               ▼
-    ┌──────────────────────┐
-    │      2. GREEN        │
-    │  Write minimal       │
-    │  compose config to   │
-    │  make test pass      │
-    └──────────┬───────────┘
-               │
-               ▼
-    ┌──────────────────────┐
-    │    3. REFACTOR       │
-    │  Add health checks,  │
-    │  resource limits,    │
-    │  security hardening  │
-    └──────────┬───────────┘
-               │
-               ▼
-          [Repeat]
-```
-
-### Example TDD Workflow for Docker Compose
-
-**Scenario: Adding a new PostgreSQL service with health checks**
-
-#### Step 1: RED - Write Failing Test First
-
-```bash
-#!/bin/bash
-# tests/test_postgres_service.sh
-# Test that PostgreSQL service is healthy and accepting connections
-
-set -e
-
-echo "Testing PostgreSQL service health..."
-
-# Test 1: Service exists in compose config
-docker compose config --services | grep -q "postgres" || {
-    echo "FAIL: postgres service not found in compose config"
-    exit 1
-}
-
-# Test 2: Service starts and becomes healthy
-docker compose up -d postgres
-sleep 5
-
-# Test 3: Health check passes
-HEALTH=$(docker inspect --format='{{.State.Health.Status}}' $(docker compose ps -q postgres) 2>/dev/null || echo "no-healthcheck")
-if [ "$HEALTH" != "healthy" ]; then
-    echo "FAIL: postgres health check not passing (status: $HEALTH)"
-    docker compose down
-    exit 1
-fi
-
-# Test 4: Can connect and run query
-docker compose exec -T postgres pg_isready -U appuser -d appdb || {
-    echo "FAIL: Cannot connect to PostgreSQL"
-    docker compose down
-    exit 1
-}
-
-# Test 5: Resource limits are set
-MEMORY_LIMIT=$(docker compose config | grep -A 20 "postgres:" | grep -A 5 "limits:" | grep "memory:" | head -1)
-if [ -z "$MEMORY_LIMIT" ]; then
-    echo "FAIL: No memory limit set for postgres"
-    docker compose down
-    exit 1
-fi
-
-echo "PASS: All PostgreSQL service tests passed"
-docker compose down
-```
-
-```bash
-# Run the test - it will FAIL because service doesn't exist yet
-./tests/test_postgres_service.sh
-# Output: FAIL: postgres service not found in compose config
-```
-
-#### Step 2: GREEN - Write Minimal Configuration
-
-```yaml
-# compose/infrastructure/databases.yml
-name: infrastructure-databases
-
-services:
-  postgres:
-    image: postgres:16.1-alpine3.19
-    environment:
-      - POSTGRES_DB=appdb
-      - POSTGRES_USER=appuser
-      - POSTGRES_PASSWORD=${DB_PASSWORD}
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U appuser -d appdb"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-    networks:
-      - database
-
-networks:
-  database:
-    driver: bridge
-```
-
-```bash
-# Run the test again - it should PASS now
-./tests/test_postgres_service.sh
-# Output: PASS: All PostgreSQL service tests passed
-```
-
-#### Step 3: REFACTOR - Add Production-Ready Features
-
-```yaml
-# compose/infrastructure/databases.yml (refactored)
-name: infrastructure-databases
-
-services:
-  postgres:
-    image: postgres:16.1-alpine3.19
-    restart: unless-stopped
-    environment:
-      - POSTGRES_DB=${DB_NAME:-appdb}
-      - POSTGRES_USER=${DB_USER:-appuser}
-      - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
-      - POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=en_US.UTF-8
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-      - ./init-db:/docker-entrypoint-initdb.d:ro
-    networks:
-      - database
-    secrets:
-      - db_password
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-appuser} -d ${DB_NAME:-appdb}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 4G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
-    security_opt:
-      - no-new-privileges:true
-    labels:
-      com.example.layer: "infrastructure"
-      com.example.component: "database"
-      com.example.service: "postgres"
-
-volumes:
-  postgres-data:
-    driver: local
-
-networks:
-  database:
-    driver: bridge
-    internal: true
-
-secrets:
-  db_password:
-    file: ./secrets/db_password.txt
-```
-
-```bash
-# Run tests again - they should still PASS
-./tests/test_postgres_service.sh
-# Output: PASS: All PostgreSQL service tests passed
-
-# Run full validation
-docker compose config --quiet && echo "✅ Configuration valid"
-```
-
-### Visual TDD Step-by-Step Example
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  ITERATION 1: Basic Service                                         │
-├─────────────────────────────────────────────────────────────────────┤
-│  RED:    Test "service exists" → FAILS (no postgres service)        │
-│  GREEN:  Add minimal postgres service → PASSES                      │
-│  REFACTOR: Add restart policy → Tests still PASS                    │
-└─────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  ITERATION 2: Health Checks                                         │
-├─────────────────────────────────────────────────────────────────────┤
-│  RED:    Test "health check passes" → FAILS (no healthcheck)        │
-│  GREEN:  Add healthcheck config → PASSES                            │
-│  REFACTOR: Tune intervals, add start_period → Tests still PASS      │
-└─────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  ITERATION 3: Security                                              │
-├─────────────────────────────────────────────────────────────────────┤
-│  RED:    Test "secrets not in environment" → FAILS (plain text)     │
-│  GREEN:  Use POSTGRES_PASSWORD_FILE with secrets → PASSES           │
-│  REFACTOR: Add security_opt, internal network → Tests still PASS    │
-└─────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  ITERATION 4: Resource Management                                   │
-├─────────────────────────────────────────────────────────────────────┤
-│  RED:    Test "resource limits set" → FAILS (no limits)             │
-│  GREEN:  Add deploy.resources.limits → PASSES                       │
-│  REFACTOR: Add reservations, tune values → Tests still PASS         │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-### TDD Test Categories for Docker Compose
-
-| Test Category | What to Test | Example Test |
-|---------------|--------------|--------------|
-| **Service Existence** | Service defined in config | `docker compose config --services \| grep service-name` |
-| **Health Checks** | Service reaches healthy state | `docker inspect --format='{{.State.Health.Status}}'` |
-| **Network Connectivity** | Services can communicate | `docker compose exec svc1 ping svc2` |
-| **Volume Persistence** | Data survives restarts | Write data → restart → verify data exists |
-| **Secret Management** | Secrets mounted correctly | `docker compose exec svc cat /run/secrets/name` |
-| **Resource Limits** | Limits applied | `docker stats --no-stream` |
-| **Dependencies** | Startup order correct | Verify dependent services wait for healthy deps |
-
-## 2B. Bug Fix Protocol (MANDATORY)
-
-**CRITICAL: Every Docker Compose bug MUST receive a regression test BEFORE fixing.**
-
-### Bug Fix Workflow
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                 BUG FIX WORKFLOW FOR DOCKER COMPOSE                 │
-└─────────────────────────────────────────────────────────────────────┘
-
-    ┌──────────────────────┐
-    │  1. BUG REPORTED     │
-    │  Service fails to    │
-    │  start/connect       │
-    └──────────┬───────────┘
-               │
-               ▼
-    ┌──────────────────────┐
-    │  2. WRITE TEST       │
-    │  Create test that    │
-    │  REPRODUCES the bug  │
-    │  (test will FAIL)    │
-    └──────────┬───────────┘
-               │
-               ▼
-    ┌──────────────────────┐
-    │  3. VERIFY FAILURE   │
-    │  Confirm test fails  │
-    │  for the RIGHT       │
-    │  reason              │
-    └──────────┬───────────┘
-               │
-               ▼
-    ┌──────────────────────┐
-    │  4. FIX THE BUG      │
-    │  Modify compose      │
-    │  configuration       │
-    └──────────┬───────────┘
-               │
-               ▼
-    ┌──────────────────────┐
-    │  5. VERIFY FIX       │
-    │  Test now PASSES     │
-    │  All other tests     │
-    │  still pass          │
-    └──────────┬───────────┘
-               │
-               ▼
-    ┌──────────────────────┐
-    │  6. DOCUMENT         │
-    │  Add bug ID to test  │
-    │  Update changelog    │
-    └──────────────────────┘
-```
-
-### Example Bug Fix: Redis Connection Timeout Issue
-
-**Bug Report #DC-142**: Backend service intermittently fails to connect to Redis on startup.
-
-#### Step 1-2: Write Test That Reproduces the Bug
-
-```bash
-#!/bin/bash
-# tests/regression/test_dc142_redis_connection.sh
-# Bug #DC-142: Backend fails to connect to Redis on startup
-# Regression test to ensure backend waits for Redis to be healthy
-
-set -e
-
-echo "Regression Test DC-142: Redis Connection on Startup"
-
-# Clean state
-docker compose down -v 2>/dev/null || true
-
-# Start only Redis first
-docker compose up -d redis
-echo "Waiting for Redis to start..."
-sleep 2
-
-# Now start backend
-docker compose up -d backend
-
-# Wait for backend to attempt connection
-sleep 10
-
-# Check if backend is healthy (should have connected to Redis)
-BACKEND_STATUS=$(docker compose ps backend --format json | jq -r '.[0].Health // "unknown"')
-
-if [ "$BACKEND_STATUS" != "healthy" ]; then
-    echo "FAIL: Backend not healthy (status: $BACKEND_STATUS)"
-    echo "Logs:"
-    docker compose logs backend | tail -20
-    docker compose down -v
-    exit 1
-fi
-
-# Verify backend can actually communicate with Redis
-docker compose exec -T backend redis-cli -h redis ping | grep -q "PONG" || {
-    echo "FAIL: Backend cannot ping Redis"
-    docker compose down -v
-    exit 1
-}
-
-echo "PASS: Bug DC-142 regression test passed"
-docker compose down -v
-```
-
-```bash
-# Run the test - it FAILS because backend doesn't wait for Redis
-./tests/regression/test_dc142_redis_connection.sh
-# Output: FAIL: Backend not healthy (status: starting)
-# Logs: Error: ECONNREFUSED 172.18.0.2:6379
-```
-
-#### Step 3: Verify Test Fails for the Right Reason
-
-```bash
-# The test fails because:
-# 1. Backend starts before Redis is healthy
-# 2. Backend's Redis connection attempt fails
-# 3. Backend enters unhealthy state
-
-# Check the logs confirm this
-docker compose logs backend 2>&1 | grep -E "(ECONNREFUSED|Connection refused|Redis)"
-# Output: Error: connect ECONNREFUSED 172.18.0.2:6379
-```
-
-#### Step 4: Fix the Bug
-
-**Before (buggy configuration):**
-```yaml
-# compose/domain/api-services.yml
-services:
-  backend:
-    image: mycompany/backend:1.0
-    depends_on:
-      - redis  # ❌ Only waits for container to start, not for Redis to be ready
-    environment:
-      - REDIS_HOST=redis
-```
-
-**After (fixed configuration):**
-```yaml
-# compose/domain/api-services.yml
-services:
-  backend:
-    image: mycompany/backend:1.0
-    depends_on:
-      redis:
-        condition: service_healthy  # ✅ Waits for Redis health check to pass
-    environment:
-      - REDIS_HOST=redis
-      - REDIS_CONNECT_TIMEOUT=30
-      - REDIS_RETRY_ATTEMPTS=5
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
-  redis:
-    image: redis:7.2-alpine3.19
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]  # ✅ Redis health check required
-      interval: 5s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
-```
-
-#### Step 5: Verify the Fix
-
-```bash
-# Run the regression test again - it should PASS now
-./tests/regression/test_dc142_redis_connection.sh
-# Output: PASS: Bug DC-142 regression test passed
-
-# Run all other tests to ensure no regressions
-./tests/run_all_tests.sh
-# Output: All 15 tests passed
-```
-
-#### Step 6: Document the Bug Fix
-
-```yaml
-# compose/domain/api-services.yml
-services:
-  backend:
-    image: mycompany/backend:1.0
-    # FIX: Bug #DC-142 - Backend must wait for Redis health check
-    # Before: depends_on: [redis] (only waited for container start)
-    # After: depends_on with service_healthy condition
-    # Regression test: tests/regression/test_dc142_redis_connection.sh
-    depends_on:
-      redis:
-        condition: service_healthy
-```
-
-### Common Docker Compose Bugs and Regression Tests
-
-| Bug Type | Symptom | Regression Test Strategy |
-|----------|---------|-------------------------|
-| **Startup Order** | Service A can't connect to Service B | Test that A becomes healthy after B |
-| **Health Check Failure** | Service never becomes healthy | Test health endpoint directly, verify timeout values |
-| **Volume Mount Issues** | Data not persisted or permission denied | Write data, restart, verify data exists |
-| **Network Isolation** | Services can reach unintended networks | Test connectivity matrix between services |
-| **Resource Exhaustion** | Container OOM killed | Monitor memory usage under load |
-| **Secret Access** | App can't read secrets | Test secret file exists and is readable |
-| **Environment Variable** | Wrong config applied | Test environment variable values in container |
-| **Port Conflicts** | Multiple services on same port | Test all exposed ports are accessible |
-
-### Regression Test Script Template
-
-```bash
-#!/bin/bash
-# tests/regression/test_[BUG_ID]_[description].sh
-# Bug #[BUG_ID]: [Brief description of the bug]
-#
-# Root Cause: [What caused the bug]
-# Fix: [How it was fixed]
-# Date Fixed: [YYYY-MM-DD]
-
-set -e
-
-BUG_ID="[BUG_ID]"
-echo "Regression Test ${BUG_ID}: [Description]"
-
-# Setup: Clean state
-docker compose down -v 2>/dev/null || true
-
-# Reproduce the scenario that triggered the bug
-docker compose up -d [services]
-
-# Wait for services
-sleep [appropriate_time]
-
-# Test that the bug is fixed
-# [Specific test commands]
-
-if [ [failure_condition] ]; then
-    echo "FAIL: Bug ${BUG_ID} regression - [failure description]"
-    docker compose logs [relevant_service]
-    docker compose down -v
-    exit 1
-fi
-
-# Additional verification
-# [More test commands]
-
-echo "PASS: Bug ${BUG_ID} regression test passed"
-docker compose down -v
-exit 0
-```
-
-## 3. Mandatory Structure Requirements
-
-### A. File Format & Versioning
-* **File Name**: Use `docker-compose.yml` (preferred) or `docker-compose.yaml`.
-
-* **Compose Spec**: Use modern Compose Specification format (no legacy `version:` field for Compose V2).
-
-* **YAML Style**: Use 2-space indentation, no tabs. Always use explicit quotes for strings containing special characters.
-
-```yaml
-# ✅ CORRECT - Modern Compose Spec (no version field needed)
-name: myapp-stack
-
 services:
   web:
-    image: nginx:1.25-alpine
-    
-# ❌ WRONG - Legacy version format
-version: '3.8'
-services:
-  web:
-    image: nginx:1.25-alpine
+    build: ./web
+    develop:
+      watch:
+        - { action: sync, path: ./web/src, target: /app/src, ignore: [node_modules/] }
+        - { action: sync+restart, path: ./web/nginx.conf, target: /etc/nginx/nginx.conf }
+        - { action: rebuild, path: ./web/package.json }
 ```
+Run with `docker compose watch`. This supersedes the old `CHOKIDAR_USEPOLLING` / anonymous-volume tricks for most stacks.
 
-### B. Top-Level Organization
-Structure files in this exact order:
+---
 
-1. `name:` - Stack name (optional but recommended)
-2. `services:` - Container definitions
-3. `networks:` - Custom network definitions
-4. `volumes:` - Named volume definitions
-5. `configs:` - Configuration file definitions
-6. `secrets:` - Secrets definitions
+## 9. Profiles & Optional Services
 
-### C. Service Definition Order
-Within each service, follow this property order:
-
-1. `image:` or `build:`
-2. `container_name:` (use sparingly)
-3. `hostname:`
-4. `depends_on:` (with health checks)
-5. `environment:` or `env_file:`
-6. `ports:` (external:internal)
-7. `expose:` (internal only)
-8. `volumes:`
-9. `networks:`
-10. `healthcheck:`
-11. `restart:` policy
-12. `deploy:` (resources, replicas)
-13. `security_opt:`, `cap_add:`, `cap_drop:`
-14. `labels:`
-15. `command:` or `entrypoint:`
-
-## 3B. Mandatory Best Practices
-
-### A. Image Management
-* **Pin Versions**: NEVER use `:latest`. Always use specific semantic versions.
-
-```yaml
-# ✅ CORRECT
-services:
-  db:
-    image: postgres:16.1-alpine3.19
-    
-# ❌ WRONG
-services:
-  db:
-    image: postgres:latest
-```
-
-* **Digests for Production**: Pin critical services by SHA256 digest.
+`profiles:` keep optional services (debug tools, seeders, observability) out of the default `up` until explicitly enabled — one file, many footprints.
 
 ```yaml
 services:
-  api:
-    image: myapp:v2.3.1@sha256:abcd1234..
-```
-
-### B. Environment Variables & Secrets
-* **NEVER** hardcode secrets in compose files.
-
-* **Use `.env` files** for non-sensitive configuration.
-
-* **Use Docker Secrets** for sensitive data (passwords, tokens, keys).
-
-```yaml
-# ✅ CORRECT - Using environment variables
-services:
-  app:
-    env_file:
-      - .env
-      - .env.local
-    environment:
-      - NODE_ENV=production
-      - LOG_LEVEL=${LOG_LEVEL:-info}
-    secrets:
-      - db_password
-      - api_key
-
-secrets:
-  db_password:
-    file: ./secrets/db_password.txt
-  api_key:
-    external: true
-    
-# ❌ WRONG - Hardcoded secrets
-services:
-  app:
-    environment:
-      - DB_PASSWORD=super_secret_123
-```
-
-### C. Health Checks & Dependencies
-* **Always define health checks** for services that others depend on.
-
-* **Use `depends_on` with conditions** to ensure proper startup order.
-
-```yaml
-services:
-  backend:
-    image: myapp:1.0.0
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_started
-        
-  db:
-    image: postgres:16.1-alpine
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-```
-
-### D. Networking
-* **Always use custom networks** instead of default bridge.
-
-* **Use network aliases** for service discovery.
-
-* **Isolate services** into multiple networks based on trust boundaries.
-
-```yaml
-services:
-  frontend:
-    image: nginx:1.25-alpine
-    networks:
-      - public
-      - backend
-      
-  api:
-    image: myapi:1.0
-    networks:
-      - backend
-      - database
-      
-  db:
-    image: postgres:16.1-alpine
-    networks:
-      - database  # Only accessible to api, not frontend
-
-networks:
-  public:
-    driver: bridge
-  backend:
-    driver: bridge
-    internal: false
-  database:
-    driver: bridge
-    internal: true  # No external access
-```
-
-### E. Volume Management
-* **Use named volumes** for persistent data.
-
-* **Use bind mounts** only for development.
-
-* **Always specify mount options** for security.
-
-```yaml
-services:
-  app:
-    volumes:
-      # Named volume (production)
-      - app-data:/var/lib/app:rw
-      # Bind mount (development only)
-      - ./src:/app/src:ro
-      # tmpfs for temporary data
-      - type: tmpfs
-        target: /tmp
-        tmpfs:
-          size: 100M
-          
-volumes:
-  app-data:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: /mnt/data/app
-```
-
-### F. Resource Constraints
-* **Always set resource limits** to prevent resource exhaustion.
-
-* **Use `deploy` section** for resource reservations and limits.
-
-```yaml
-services:
-  api:
-    image: myapi:1.0
-    deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
-        window: 120s
-```
-
-### G. Security Hardening (MANDATORY)
-
-**CRITICAL: Container security is non-negotiable. ALL services MUST follow these requirements unless explicitly approved for exceptions.**
-
-> **Cross-Reference**: For Dockerfile security (FROM scratch, distroless, COPY --link), see the [Dockerfile Guidelines](dockerfile_style.md) Section D.
-
-#### Security Requirements Summary (MANDATORY CHECKLIST)
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    DOCKER COMPOSE SECURITY REQUIREMENTS                     │
-├─────────────────────────────────────────────────────────────────────────────┤
-│ REQUIREMENT                          │ PRIORITY  │ ENFORCEMENT              │
-├──────────────────────────────────────┼───────────┼──────────────────────────┤
-│ user: "UID:GID" (non-root)           │ MANDATORY │ Block if missing         │
-│ read_only: true                      │ MANDATORY │ Block if missing         │
-│ security_opt: no-new-privileges:true │ MANDATORY │ Block if missing         │
-│ cap_drop: ALL                        │ MANDATORY │ Block if missing         │
-│ cap_add: (only if REQUIRED)          │ MINIMAL   │ Requires justification   │
-│ privileged: false (default)          │ MANDATORY │ Block if true            │
-│ tmpfs for writable paths             │ MANDATORY │ Minimal size, mode 1777  │
-│ Resource limits (cpu, memory, pids)  │ MANDATORY │ Block if missing         │
-│ Network isolation (internal: true)   │ MANDATORY │ For backend services     │
-│ Secrets via Docker secrets           │ MANDATORY │ No env var passwords     │
-│ Image pinned by digest (@sha256:)    │ MANDATORY │ For production           │
-│ Health checks defined                │ MANDATORY │ Block if missing         │
-└──────────────────────────────────────┴───────────┴──────────────────────────┘
-```
-
-#### Security Principle: Defense in Depth
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         CONTAINER SECURITY LAYERS                           │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  LAYER 1: IMAGE SECURITY (Dockerfile)                                      │
-│  ├─► FROM scratch / distroless (minimal attack surface)                    │
-│  ├─► Non-root USER in Dockerfile                                           │
-│  ├─► No shells, no package managers                                        │
-│  └─► Security scanned (Trivy/Grype)                                        │
-│                                                                             │
-│  LAYER 2: RUNTIME SECURITY (docker-compose)                                │
-│  ├─► read_only: true (immutable filesystem)                                │
-│  ├─► cap_drop: ALL (no Linux capabilities)                                 │
-│  ├─► security_opt: no-new-privileges:true                                  │
-│  ├─► user: "UID:GID" (non-root at runtime)                                 │
-│  └─► Resource limits (prevent DoS)                                         │
-│                                                                             │
-│  LAYER 3: NETWORK SECURITY                                                 │
-│  ├─► internal: true for backend networks                                   │
-│  ├─► Service isolation (multiple networks)                                 │
-│  └─► No host network mode                                                  │
-│                                                                             │
-│  LAYER 4: SECRETS MANAGEMENT                                               │
-│  ├─► Docker secrets (not env vars)                                         │
-│  ├─► External secret stores (Vault, AWS SM)                                │
-│  └─► No secrets in compose files                                           │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-#### 1. Non-Root Containers (MANDATORY)
-
-```yaml
-# ✅ CORRECT - Run as non-root user
-services:
-  app:
-    image: myapp:1.0
-    user: "1001:1001"  # Specific UID:GID
-
-  # Using named user from image
-  node-app:
-    image: node:20-alpine
-    user: "node"  # Built-in non-root user
-
-  # Distroless images
-  go-app:
-    image: gcr.io/distroless/static-debian12
-    user: "65534:65534"  # nobody user
-
-# ❌ WRONG - Running as root (DEFAULT IS ROOT!)
-services:
-  app:
-    image: myapp:1.0
-    # Missing user: directive = runs as root
-```
-
-#### 2. Read-Only Root Filesystem (MANDATORY)
-
-```yaml
-# ✅ CORRECT - Read-only with necessary writable mounts
-services:
-  app:
-    image: myapp:1.0
-    read_only: true
-    tmpfs:
-      - /tmp:size=100M,mode=1777
-      - /var/run:size=10M
-    volumes:
-      # Only mount what's needed as writable
-      - app-data:/app/data:rw
-      - type: tmpfs
-        target: /app/cache
-        tmpfs:
-          size: 50M
-
-  # Stateless service - fully read-only
-  api:
-    image: myapi:1.0
-    read_only: true
-    tmpfs:
-      - /tmp
-
-# ❌ WRONG - Writable filesystem (attack surface)
-services:
-  app:
-    image: myapp:1.0
-    # Missing read_only: true
-```
-
-#### 3. Drop ALL Capabilities (MANDATORY)
-
-```yaml
-# ✅ CORRECT - Drop all, add only what's needed
-services:
-  app:
-    image: myapp:1.0
-    cap_drop:
-      - ALL
-    # Only add back specific capabilities if REQUIRED
-    # cap_add:
-    #   - NET_BIND_SERVICE  # Only for ports < 1024
-
-  # Web server needing port 80
-  nginx:
-    image: nginx:1.25-alpine
-    cap_drop:
-      - ALL
-    cap_add:
-      - NET_BIND_SERVICE  # Required for port 80/443
-      - CHOWN             # Required for nginx user switching
-      - SETGID
-      - SETUID
-
-# ❌ WRONG - Default capabilities (too permissive)
-services:
-  app:
-    image: myapp:1.0
-    # Missing cap_drop: ALL
-```
-
-**Capability Reference (only add if absolutely required):**
-
-| Capability | Use Case | Risk Level |
-|-----------|----------|------------|
-| `NET_BIND_SERVICE` | Bind to ports < 1024 | Low |
-| `CHOWN` | Change file ownership | Medium |
-| `SETUID/SETGID` | Change process UID/GID | Medium |
-| `DAC_OVERRIDE` | Bypass file permissions | HIGH |
-| `SYS_ADMIN` | Various admin operations | CRITICAL |
-| `NET_ADMIN` | Network configuration | HIGH |
-| `SYS_PTRACE` | Debug processes | CRITICAL |
-
-#### 4. No New Privileges (MANDATORY)
-
-```yaml
-# ✅ CORRECT - Prevent privilege escalation
-services:
-  app:
-    image: myapp:1.0
-    security_opt:
-      - no-new-privileges:true
-
-# ❌ WRONG - Missing no-new-privileges
-services:
-  app:
-    image: myapp:1.0
-    # Allows SUID binaries to escalate privileges
-```
-
-#### 5. Never Use Privileged Mode (MANDATORY - NO EXCEPTIONS)
-
-```yaml
-# ❌ ABSOLUTELY FORBIDDEN - Privileged mode
-services:
-  app:
-    image: myapp:1.0
-    privileged: true  # NEVER USE THIS
-
-# ❌ FORBIDDEN - SYS_ADMIN capability (equivalent to privileged)
-services:
-  app:
-    image: myapp:1.0
-    cap_add:
-      - SYS_ADMIN  # NEVER ADD THIS
-```
-
-**If you think you need privileged mode, you're probably wrong. Alternatives:**
-- Need to access host devices? Use `devices:` directive
-- Need specific capabilities? Add only those specific capabilities
-- Need to run Docker-in-Docker? Use Docker socket mount (still risky)
-
-#### 6. Seccomp Profiles (RECOMMENDED)
-
-```yaml
-# ✅ CORRECT - Use default seccomp profile (blocks dangerous syscalls)
-services:
-  app:
-    image: myapp:1.0
-    security_opt:
-      - no-new-privileges:true
-      - seccomp:unconfined  # Only for debugging, never in production!
-
-  # Use custom seccomp profile for stricter security
-  secure-app:
-    image: myapp:1.0
-    security_opt:
-      - no-new-privileges:true
-      - seccomp:/path/to/seccomp-profile.json
-```
-
-#### 7. AppArmor/SELinux (RECOMMENDED)
-
-```yaml
-# ✅ CORRECT - Use AppArmor profile
-services:
-  app:
-    image: myapp:1.0
-    security_opt:
-      - no-new-privileges:true
-      - apparmor:docker-default
-
-  # Custom AppArmor profile
-  secure-app:
-    image: myapp:1.0
-    security_opt:
-      - apparmor:my-custom-profile
-
-# ✅ CORRECT - SELinux labels (RHEL/CentOS)
-services:
-  app:
-    image: myapp:1.0
-    security_opt:
-      - label:type:container_t
-```
-
-#### 8. Complete Security Template (MANDATORY)
-
-**Every service MUST include these security settings as baseline:**
-
-```yaml
-services:
-  # SECURITY BASELINE TEMPLATE - Copy for every service
-  secure-service:
-    image: myapp:1.0@sha256:abc123...  # Pin by digest
-
-    # === MANDATORY SECURITY SETTINGS ===
-    user: "1001:1001"                    # Non-root user
-    read_only: true                      # Read-only filesystem
-    security_opt:
-      - no-new-privileges:true           # Prevent privilege escalation
-    cap_drop:
-      - ALL                              # Drop all capabilities
-    # cap_add:                           # Add ONLY if required
-    #   - NET_BIND_SERVICE
-
-    # === WRITABLE DIRECTORIES (minimal) ===
-    tmpfs:
-      - /tmp:size=100M,mode=1777
-      - /var/run:size=10M
-
-    # === RESOURCE LIMITS (prevent DoS) ===
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 512M
-          pids: 100                       # Prevent fork bombs
-        reservations:
-          cpus: '0.25'
-          memory: 128M
-
-    # === NETWORK ISOLATION ===
-    networks:
-      - internal-only
-
-    # === HEALTH CHECK ===
-    healthcheck:
-      test: ["CMD", "/healthcheck"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-
-    # === LOGGING LIMITS ===
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-```
-
-#### 9. Database Security Template
-
-```yaml
-services:
-  postgres:
-    image: postgres:16.1-alpine3.19
-    user: "999:999"  # postgres user
-    read_only: true
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN
-      - SETGID
-      - SETUID
-      - DAC_READ_SEARCH  # Required for postgres
-    tmpfs:
-      - /tmp:size=100M
-      - /run/postgresql:size=10M
-    volumes:
-      - postgres-data:/var/lib/postgresql/data:rw
-    environment:
-      - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
-    secrets:
-      - db_password
-    networks:
-      - database
-    deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 2G
-
-  redis:
-    image: redis:7.2-alpine3.19
-    user: "999:999"
-    read_only: true
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    tmpfs:
-      - /tmp
-    volumes:
-      - redis-data:/data:rw
-    networks:
-      - cache
-```
-
-#### 10. Security Verification Checklist
-
-**Agents MUST verify these before presenting docker-compose files:**
-
-```bash
-# Check for privileged containers
-grep -r "privileged:" docker-compose*.yml
-
-# Check for missing user directive
-docker compose config | grep -A5 "services:" | grep -v "user:"
-
-# Check for missing read_only
-docker compose config | grep -B5 -A10 "services:" | grep -v "read_only: true"
-
-# Check for missing cap_drop
-docker compose config | grep -B5 -A10 "services:" | grep -v "cap_drop:"
-
-# Lint with docker-compose-linter
-docker run --rm -v $(pwd):/app zavoloklom/docker-compose-linter
-```
-
-#### 11. Security Anti-Patterns (FORBIDDEN)
-
-```yaml
-# ❌ FORBIDDEN - All of these are security violations
-
-services:
-  insecure-app:
-    image: myapp:latest              # Unpinned version
-    privileged: true                 # Full host access
-    # No user: directive             # Runs as root
-    # No read_only: true             # Writable filesystem
-    # No cap_drop: ALL               # All capabilities
-    # No security_opt                # Can escalate privileges
-    volumes:
-      - /:/host                      # Host root access
-      - /var/run/docker.sock:/var/run/docker.sock  # Docker socket
-    network_mode: host               # Host network
-    pid: host                        # Host PID namespace
-    ipc: host                        # Host IPC namespace
-    environment:
-      - PASSWORD=secret123           # Hardcoded secret
-```
-
-#### 12. Image Requirements for Docker Compose (MANDATORY)
-
-**All images referenced in docker-compose MUST follow the Dockerfile security guidelines:**
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    IMAGE REQUIREMENTS FOR COMPOSE SERVICES                  │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  COMPILED LANGUAGES (Go, Rust, C/C++, .NET self-contained):                 │
-│  └─► MUST use FROM scratch in Dockerfile                                    │
-│  └─► Target image size: 5-20MB                                              │
-│  └─► No shell, no package manager in final image                            │
-│                                                                             │
-│  INTERPRETED LANGUAGES (Python, Node.js, Java):                             │
-│  └─► MUST use Google Distroless base images                                 │
-│  └─► gcr.io/distroless/python3-debian12                                     │
-│  └─► gcr.io/distroless/nodejs20-debian12                                    │
-│  └─► gcr.io/distroless/java21-debian12                                      │
-│  └─► Target image size: 50-100MB                                            │
-│                                                                             │
-│  INFRASTRUCTURE SERVICES (databases, caches):                               │
-│  └─► MUST use Alpine variants (-alpine suffix)                              │
-│  └─► postgres:16-alpine, redis:7-alpine, etc.                               │
-│  └─► Target image size: <100MB                                              │
-│                                                                             │
-│  NEVER ACCEPTABLE:                                                          │
-│  └─► Full Debian/Ubuntu images (python:3.12, node:20)                       │
-│  └─► Images with :latest tag                                                │
-│  └─► Images > 500MB for application services                                │
-│  └─► Images without digest pinning in production                            │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-**Example - Correct Image Selection:**
-
-```yaml
-services:
-  # ✅ Go service - FROM scratch image
-  api:
-    image: mycompany/api:v1.2.3@sha256:abc123...  # ~15MB image
-    # Built with: FROM scratch in Dockerfile
-
-  # ✅ Python service - Distroless image
-  ml-service:
-    image: mycompany/ml:v2.0.0@sha256:def456...  # ~80MB image
-    # Built with: FROM gcr.io/distroless/python3-debian12
-
-  # ✅ Node.js service - Distroless image
-  web:
-    image: mycompany/web:v3.1.0@sha256:ghi789...  # ~70MB image
-    # Built with: FROM gcr.io/distroless/nodejs20-debian12
-
-  # ✅ PostgreSQL - Alpine variant
-  db:
-    image: postgres:16.2-alpine3.19@sha256:xyz...  # ~80MB image
-
-  # ❌ WRONG - Full images
-  bad-service:
-    image: python:3.12  # 1GB+ image, runs as root, has shell
-```
-
-## 4. Gold Standard Examples
-
-### Example 1: Full-Stack Web Application (Production)
-
-```yaml
-name: webapp-production
-
-services:
-  # Frontend - Nginx serving static files
-  frontend:
-    image: nginx:1.25-alpine@sha256:a5127daff3d6f4606be3100a252419bfa84fd6ee5cd74d0feaca1a5068f97dcf
-    container_name: webapp-frontend
-    restart: unless-stopped
-    depends_on:
-      backend:
-        condition: service_healthy
-    environment:
-      - NGINX_HOST=${DOMAIN:-localhost}
-      - NGINX_PORT=80
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
-      - static-content:/usr/share/nginx/html:ro
-    networks:
-      - public
-      - backend
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 512M
-        reservations:
-          cpus: '0.25'
-          memory: 128M
-    labels:
-      com.example.description: "Frontend web server"
-      com.example.department: "engineering"
-
-  # Backend API
-  backend:
-    image: mycompany/api:2.5.1
-    restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    env_file:
-      - .env
-      - .env.production
-    environment:
-      - NODE_ENV=production
-      - PORT=3000
-      - DB_HOST=db
-      - REDIS_HOST=redis
-    expose:
-      - "3000"
-    volumes:
-      - ./uploads:/app/uploads:rw
-      - type: tmpfs
-        target: /app/tmp
-        tmpfs:
-          size: 256M
-    networks:
-      - backend
-      - database
-    secrets:
-      - db_password
-      - jwt_secret
-      - api_key
-    healthcheck:
-      test: ["CMD", "node", "healthcheck.js"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 45s
-    deploy:
-      replicas: 2
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
-    user: "1001:1001"
-    read_only: true
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    labels:
-      com.example.description: "Backend API service"
-
-  # PostgreSQL Database
-  db:
-    image: postgres:16.1-alpine3.19
-    restart: unless-stopped
-    environment:
-      - POSTGRES_DB=${DB_NAME}
-      - POSTGRES_USER=${DB_USER}
-      - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
-      - POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=en_US.UTF-8
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-      - ./init-db:/docker-entrypoint-initdb.d:ro
-    networks:
-      - database
-    secrets:
-      - db_password
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 4G
-        reservations:
-          cpus: '1.0'
-          memory: 1G
-    security_opt:
-      - no-new-privileges:true
-    labels:
-      com.example.description: "PostgreSQL database"
-
-  # Redis Cache
-  redis:
-    image: redis:7.2-alpine3.19
-    restart: unless-stopped
-    command: >
-      redis-server
-      --requirepass ${REDIS_PASSWORD}
-      --maxmemory 512mb
-      --maxmemory-policy allkeys-lru
-      --save 60 1000
-      --appendonly yes
-    volumes:
-      - redis-data:/data
-    networks:
-      - database
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 768M
-        reservations:
-          cpus: '0.1'
-          memory: 256M
-    security_opt:
-      - no-new-privileges:true
-    labels:
-      com.example.description: "Redis cache"
-
-networks:
-  public:
-    driver: bridge
-    driver_opts:
-      com.docker.network.bridge.name: webapp-public
-  backend:
-    driver: bridge
-    internal: false
-  database:
-    driver: bridge
-    internal: true  # Database network has no internet access
-
-volumes:
-  postgres-data:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: /mnt/data/postgres
-  redis-data:
-    driver: local
-  static-content:
-    driver: local
-
-secrets:
-  db_password:
-    file: ./secrets/db_password.txt
-  jwt_secret:
-    file: ./secrets/jwt_secret.txt
-  api_key:
-    external: true
-    name: production_api_key
-```
-
-### Example 2: Development Environment (with Live Reload)
-
-```yaml
-name: webapp-dev
-
-services:
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile.dev
-      target: development
-    volumes:
-      - ./frontend/src:/app/src:ro
-      - ./frontend/public:/app/public:ro
-      - node_modules:/app/node_modules
-    ports:
-      - "3000:3000"
-      - "3001:3001"  # Vite HMR
-    environment:
-      - NODE_ENV=development
-      - VITE_API_URL=http://localhost:8000
-      - CHOKIDAR_USEPOLLING=true  # For file watching in Docker
-    networks:
-      - dev
-    command: npm run dev
-
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.dev
-    volumes:
-      - ./backend:/app:cached
-      - /app/node_modules  # Anonymous volume to prevent overwriting
-    ports:
-      - "8000:8000"
-      - "9229:9229"  # Node.js debugger
-    environment:
-      - NODE_ENV=development
-      - DEBUG=app:*
-      - DB_HOST=db
-    env_file:
-      - .env.development
-    networks:
-      - dev
-    depends_on:
-      - db
-    command: npm run dev
-
-  db:
-    image: postgres:16.1-alpine
-    environment:
-      - POSTGRES_DB=devdb
-      - POSTGRES_USER=devuser
-      - POSTGRES_PASSWORD=devpass
-    ports:
-      - "5432:5432"  # Exposed for local development tools
-    volumes:
-      - postgres-dev-data:/var/lib/postgresql/data
-    networks:
-      - dev
-
-networks:
-  dev:
-    driver: bridge
-
-volumes:
-  postgres-dev-data:
-  node_modules:
-```
-
-### Example 3: Microservices with Observability
-
-```yaml
-name: microservices-stack
-
-services:
-  # API Gateway
-  gateway:
-    image: traefik:v3.0
-    command:
-      - --api.insecure=true
-      - --providers.docker=true
-      - --providers.docker.exposedbydefault=false
-      - --entrypoints.web.address=:80
-      - --entrypoints.websecure.address=:443
-      - --metrics.prometheus=true
-    ports:
-      - "80:80"
-      - "443:443"
-      - "8080:8080"  # Traefik dashboard
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    networks:
-      - public
-      - services
-    labels:
-      com.example.description: "API Gateway"
-
-  # User Service
-  user-service:
-    image: mycompany/user-service:1.2.3
-    restart: unless-stopped
-    environment:
-      - SERVICE_NAME=user-service
-      - JAEGER_AGENT_HOST=jaeger
-      - PROMETHEUS_PORT=9090
-    networks:
-      - services
-      - database
-    depends_on:
-      db:
-        condition: service_healthy
-    labels:
-      traefik.enable: "true"
-      traefik.http.routers.users.rule: "PathPrefix(`/api/users`)"
-      com.example.service: "user-service"
-
-  # Order Service
-  order-service:
-    image: mycompany/order-service:1.2.3
-    restart: unless-stopped
-    environment:
-      - SERVICE_NAME=order-service
-      - JAEGER_AGENT_HOST=jaeger
-      - KAFKA_BROKERS=kafka:9092
-    networks:
-      - services
-      - database
-      - messaging
-    depends_on:
-      - kafka
-      - db
-    labels:
-      traefik.enable: "true"
-      traefik.http.routers.orders.rule: "PathPrefix(`/api/orders`)"
-
-  # Database
-  db:
-    image: postgres:16.1-alpine
-    environment:
-      - POSTGRES_USER=microservices
-      - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
-      - POSTGRES_DB=microservices
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    networks:
-      - database
-    secrets:
-      - db_password
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # Message Queue
-  kafka:
-    image: confluentinc/cp-kafka:7.5.3
-    environment:
-      - KAFKA_BROKER_ID=1
-      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
-      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
-      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
-    networks:
-      - messaging
-    depends_on:
-      - zookeeper
-
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.5.3
-    environment:
-      - ZOOKEEPER_CLIENT_PORT=2181
-      - ZOOKEEPER_TICK_TIME=2000
-    networks:
-      - messaging
-
-  # Observability Stack
-  prometheus:
-    image: prom/prometheus:v2.48.0
-    command:
-      - --config.file=/etc/prometheus/prometheus.yml
-      - --storage.tsdb.path=/prometheus
-      - --web.console.libraries=/usr/share/prometheus/console_libraries
-      - --web.console.templates=/usr/share/prometheus/consoles
-    volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus-data:/prometheus
-    ports:
-      - "9090:9090"
-    networks:
-      - services
-      - monitoring
-
-  grafana:
-    image: grafana/grafana:10.2.2
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD__FILE=/run/secrets/grafana_password
-      - GF_INSTALL_PLUGINS=grafana-piechart-panel
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
-    ports:
-      - "3001:3000"
-    networks:
-      - monitoring
-    secrets:
-      - grafana_password
-    depends_on:
-      - prometheus
-
+  app:    { image: myapp:1.4.2 }                 # no profile → always starts
   jaeger:
-    image: jaegertracing/all-in-one:1.52
-    environment:
-      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
-      - COLLECTOR_OTLP_ENABLED=true
-    ports:
-      - "16686:16686"  # Jaeger UI
-      - "14268:14268"  # HTTP collector
-    networks:
-      - services
-      - monitoring
-
-networks:
-  public:
-    driver: bridge
-  services:
-    driver: bridge
-  database:
-    driver: bridge
-    internal: true
-  messaging:
-    driver: bridge
-  monitoring:
-    driver: bridge
-
-volumes:
-  postgres-data:
-  prometheus-data:
-  grafana-data:
-
-secrets:
-  db_password:
-    file: ./secrets/db_password.txt
-  grafana_password:
-    file: ./secrets/grafana_password.txt
+    image: jaegertracing/all-in-one:1.62.0
+    profiles: [observability]                    # only with the profile
+  seed:
+    image: myapp-seeder:1.4.2
+    profiles: [tools]
 ```
+```bash
+docker compose up -d                              # app only
+docker compose --profile observability up -d      # app + jaeger
+COMPOSE_PROFILES=tools,observability docker compose up -d
+```
+Run the observability profile's services per [`observability.md`](guides://observability.md); keep it off by default in dev to save resources.
 
-## 5. Environment-Specific Overrides
+---
 
-Use multiple compose files with the `-f` flag for different environments:
+## 10. When to Graduate to Kubernetes
+
+Compose is excellent for local dev, CI, demos, and small single-host deployments. **Stop stretching it** and adopt [`kubernetes.md`](guides://kubernetes.md) when you need any of:
+
+- Multi-node scheduling / horizontal scale beyond one host (Compose `deploy.replicas` runs only on the local engine or Swarm).
+- Self-healing, rolling updates, and automated rollback as first-class primitives.
+- Declarative autoscaling (HPA), ingress, service mesh, or per-pod secrets from a cluster store.
+- Zero-downtime deploys and multi-team RBAC on shared infrastructure.
+
+Keep the Compose file for the inner dev loop even after adopting Kubernetes; do **not** treat `docker compose up` on a single VM as a production HA strategy.
+
+---
+
+## 11. Quick Reference
 
 ```bash
-# Development
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up
-
-# Staging
-docker compose -f docker-compose.yml -f docker-compose.staging.yml up
-
-# Production
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up
-```
-
-**Base file: `docker-compose.yml`** (shared configuration)
-
-**Override file: `docker-compose.prod.yml`**
-```yaml
-services:
-  api:
-    image: myapp:${VERSION}
-    deploy:
-      replicas: 4
-      resources:
-        limits:
-          cpus: '4.0'
-          memory: 4G
-    restart: always
-```
-
-## 6. Essential Companion Files
-
-### `.env` Template
-```bash
-# Application
-NODE_ENV=production
-LOG_LEVEL=info
-DOMAIN=example.com
-
-# Database
-DB_NAME=myapp
-DB_USER=appuser
-DB_PORT=5432
-
-# Redis
-REDIS_PASSWORD=change_this_in_env_file
-
-# Versions
-APP_VERSION=1.2.3
-POSTGRES_VERSION=16.1-alpine3.19
-```
-
-### `.dockerignore`
-```
-# Version control
-.git
-.gitignore
-.github
-
-# Dependencies
-node_modules
-venv
-__pycache__
-
-# Development
-.env.local
-.env.development
-*.log
-.vscode
-.idea
-
-# Testing
-coverage
-.pytest_cache
-
-# Build artifacts
-dist
-build
-*.pyc
-```
-
-### `Makefile` for Common Operations
-```makefile
-.PHONY: help up down logs ps restart clean
-
-help:
-	@echo "Available commands:"
-	@echo "  make up       - Start all services"
-	@echo "  make down     - Stop all services"
-	@echo "  make logs     - View logs"
-	@echo "  make restart  - Restart services"
-	@echo "  make clean    - Remove all containers, volumes, and networks"
-
-up:
-	docker compose up -d
-
-down:
-	docker compose down
-
-logs:
-	docker compose logs -f
-
-ps:
-	docker compose ps
-
-restart:
-	docker compose restart
-
-clean:
-	docker compose down -v --remove-orphans
-	docker system prune -f
-```
-
-## 7. Validation & Testing
-
-### Pre-Deployment Checklist
-
-#### Modular Architecture (MANDATORY)
-- [ ] **Separate compose files per layer** (domain, infrastructure, adapters, observability)
-- [ ] **Main docker-compose.yml uses `include`** to compose modular files
-- [ ] **Layer labels present** on all services (`com.example.layer`)
-- [ ] **Component labels present** on all services (`com.example.component`)
-- [ ] **Directory structure follows hexagonal pattern** (`compose/domain/`, `compose/infrastructure/`, etc.)
-- [ ] **Shared resources in dedicated files** (networks.yml, volumes.yml, secrets.yml)
-- [ ] **Environment overrides are modular** (dev/staging/prod files also use include)
-
-#### Security & Configuration
-- [ ] All images have specific version tags (no `:latest`)
-- [ ] Secrets use `secrets:` or external secret management
-- [ ] Health checks defined for all critical services
-- [ ] Resource limits set for all services
-- [ ] Networks properly isolated (internal networks for databases)
-- [ ] Volumes use named volumes (not bind mounts) in production
-- [ ] All services run as non-root users
-- [ ] `depends_on` uses health check conditions
-- [ ] Restart policies configured appropriately
-- [ ] Labels added for documentation and filtering
-
-#### Hexagonal Architecture Verification
-- [ ] **Infrastructure layer isolated** (databases, caches, messaging in separate networks)
-- [ ] **Domain services don't expose ports** directly (use expose, not ports)
-- [ ] **Adapters handle external traffic** (gateways, proxies with public network)
-- [ ] **Observability layer is optional** (can be excluded from dev environment)
-- [ ] **Dependencies flow inward** (domain depends on infrastructure, not vice versa)
-
-### Validation Commands
-
-```bash
-# Validate main compose file with all includes
-docker compose config
-
-# Validate and view final merged configuration
-docker compose config --quiet && echo "✅ Valid"
-
-# View merged configuration without interpolation (for debugging)
-docker compose config --no-interpolate
-
-# Check for configuration issues with image digests
-docker compose config --resolve-image-digests
-
-# Validate specific modular file
-docker compose -f compose/infrastructure/databases.yml config
-
-# List all services from merged composition
-docker compose config --services
-
-# List all networks from merged composition
-docker compose config --volumes
-
-# Dry-run to check all images are accessible
-docker compose pull --dry-run
-
-# Validate modular structure (check that files exist)
-test -f docker-compose.yml && \
-test -d compose/infrastructure && \
-test -d compose/domain && \
-test -d compose/adapters && \
-test -d compose/shared && \
-echo "✅ Modular structure valid" || \
-echo "❌ Missing required directories"
-
-# Verify all services have layer labels
-docker compose config --format json | \
-jq -r '.services | to_entries[] | select(.value.labels["com.example.layer"] == null) | .key' | \
-(grep . && echo "❌ Services missing layer labels" || echo "✅ All services have layer labels")
-```
-
-## 8. Interaction Protocol
-
-**User Input:** "Create a docker-compose setup for a Django app with PostgreSQL and Redis."
-
-**Agent Response Strategy:**
-
-1. **Analyze Context**: Django = Python web framework, needs WSGI server, static files, database migrations.
-
-2. **Design Architecture**: Identify layers:
-   - Infrastructure: PostgreSQL, Redis
-   - Domain: Django API/WSGI service, worker processes
-   - Adapters: Nginx reverse proxy
-   - Observability: (optional) Prometheus, logging
-
-3. **Create Modular Structure**: 
-   - `compose/infrastructure/databases.yml` (PostgreSQL)
-   - `compose/infrastructure/caches.yml` (Redis)
-   - `compose/domain/api-services.yml` (Django/Gunicorn)
-   - `compose/adapters/proxy.yml` (Nginx)
-   - `compose/shared/networks.yml`, `volumes.yml`, `secrets.yml`
-   - Main `docker-compose.yml` with `include` directives
-
-4. **Apply Best Practices**: Security hardening, health checks, proper networking, resource limits.
-
-5. **Environment Separation**: Provide environment-specific overrides (dev/staging/prod) that also use modular includes.
-
-6. **Review Against Six Pillars**: 
-   - Declarative ✓
-   - Reproducible ✓ (pinned versions)
-   - Secure ✓ (secrets, non-root, isolated networks)
-   - Maintainable ✓ (clear structure, comments)
-   - Modular ✓ (separate files per layer, include composition)
-   - Hexagonal ✓ (infrastructure/domain/adapter separation)
-
-7. **Output**: Return modular compose files + directory structure + .env template + brief explanation of design decisions.
-
-## 9. Common Anti-Patterns to AVOID
-
-### ❌ WRONG: Using `container_name` everywhere
-```yaml
-services:
-  api-1:
-    container_name: my-api-1  # Prevents scaling
-    image: myapi:1.0
-```
-
-### ✅ CORRECT: Let Docker Compose generate names (or use deploy.replicas)
-```yaml
-services:
-  api:
-    image: myapi:1.0
-    deploy:
-      replicas: 3  # Now you can scale
-```
-
-### ❌ WRONG: Building images in production compose
-```yaml
-services:
-  app:
-    build: .  # Should be pre-built image
-```
-
-### ✅ CORRECT: Use pre-built, tagged images
-```yaml
-services:
-  app:
-    image: registry.company.com/app:v1.2.3
-```
-
-### ❌ WRONG: Exposing unnecessary ports
-```yaml
-services:
-  db:
-    ports:
-      - "5432:5432"  # Database exposed to host
-```
-
-### ✅ CORRECT: Use internal networking only
-```yaml
-services:
-  db:
-    expose:
-      - "5432"  # Only accessible to other services
-    networks:
-      - database
-```
-
-### ❌ WRONG: No resource limits
-```yaml
-services:
-  app:
-    image: myapp:1.0
-    # No limits = can consume all host resources
-```
-
-### ✅ CORRECT: Always set limits
-```yaml
-services:
-  app:
-    image: myapp:1.0
-    deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 2G
-```
-
-## 10. Advanced Patterns
-
-### A. Using Profiles for Optional Services
-```yaml
-services:
-  app:
-    image: myapp:1.0
-    
-  debug-tools:
-    image: nicolaka/netshoot
-    profiles:
-      - debug
-    command: sleep infinity
-
-# Run normally: docker compose up
-# Run with debug: docker compose --profile debug up
-```
-
-### B. Extension Fields (DRY principle)
-```yaml
-x-common-healthcheck: &common-healthcheck
-  interval: 10s
-  timeout: 5s
-  retries: 3
-  start_period: 30s
-
-x-logging: &default-logging
-  driver: json-file
-  options:
-    max-size: "10m"
-    max-file: "3"
-
-services:
-  app:
-    image: myapp:1.0
-    healthcheck:
-      <<: *common-healthcheck
-      test: ["CMD", "curl", "-f", "http://localhost/health"]
-    logging: *default-logging
-```
-
-### C. CI/CD Integration
-```yaml
-# docker-compose.ci.yml
-services:
-  test:
-    build:
-      context: .
-      target: test
-    environment:
-      - CI=true
-    command: npm test
-    
-  integration-tests:
-    build: .
-    depends_on:
-      db-test:
-        condition: service_healthy
-    command: npm run test:integration
-    
-  db-test:
-    image: postgres:16-alpine
-    environment:
-      - POSTGRES_DB=testdb
-      - POSTGRES_USER=test
-      - POSTGRES_PASSWORD=test
-    tmpfs:
-      - /var/lib/postgresql/data  # Fast, ephemeral storage for tests
-```
-
-## 11. Performance Optimization
-
-### A. Build Cache Optimization
-```yaml
-services:
-  app:
-    build:
-      context: .
-      cache_from:
-        - myapp:latest
-        - myapp:${GIT_BRANCH}
-      args:
-        BUILDKIT_INLINE_CACHE: 1
-```
-
-### B. Parallel Service Startup
-```yaml
-# Use healthchecks instead of sleep delays
-services:
-  app:
-    depends_on:
-      db:
-        condition: service_healthy  # Better than sleep 10
-```
-
-### C. Volume Performance (Development)
-```yaml
-services:
-  app:
-    volumes:
-      - ./src:/app/src:cached  # Optimize for Mac/Windows
-      # Options: consistent, cached, delegated
-```
-
-## 12. Security & Dependency Management (MANDATORY)
-
-### A. Automated Dependency Management
-
-**Use Docker's native image management and central registry features:**
-
-```bash
-# Pull latest versions of all images
-docker compose pull
-
-# Check for updates and security patches
-docker compose pull --quiet && docker compose up -d
-```
-
-- **Lockfiles**: Use Docker image digests (`@sha256:...`) in production compose files for absolute immutability.
-- **Dependency Auditing**: Regularly run `trivy config` on your compose files to detect misconfigurations.
-
-### B. Vulnerability Scanning & Security
-
-**Mandatory security checks for ALL Docker Compose stacks:**
-
-1. **Vulnerability Scan**:
-   ```bash
-   # Scan all images in the stack
-   trivy image --severity HIGH,CRITICAL <image_name>
-   ```
-   - Agents MUST ensure base images are free of HIGH/CRITICAL vulnerabilities.
-
-2. **Supply Chain Audit**:
-   - Verify image signatures if using Docker Content Trust.
-   - Audit `volumes` and `bind mounts` for least-privilege access (use `:ro` by default).
-
-### C. Dependency File
-
-```yaml
-# Example shared/secrets.yml
-secrets:
-  db_password:
-    file: ./secrets/db_password.txt
-  jwt_secret:
-    external: true
+docker compose up -d --wait          # start, block until healthy (smoke test)
+docker compose watch                 # inner-loop dev with file sync/rebuild
+docker compose --profile X up -d     # include profiled services
+docker compose config                # render merged, interpolated config
+docker compose ps / logs -f / top    # status / logs / processes
+docker compose exec api sh           # shell into a running service
+docker compose run --rm api <cmd>    # one-off task container
+docker compose pull                  # refresh pinned images
+docker compose down -v               # stop + remove volumes (DESTRUCTIVE)
 ```
 
 ---
 
-## 13. Documentation Requirements
+## 12. Deployment Checklist
 
-Every docker-compose.yml MUST include:
+Generated from §2 — one box per requirement ID.
 
-1. **Inline Comments**: Explain non-obvious configurations
-2. **README.md**: Document environment variables, secrets setup, and deployment steps
-3. **Diagram**: Optional but recommended for complex microservices
-
-```yaml
-services:
-  # Frontend: Serves static assets and proxies API requests
-  # Security: Runs as nginx user (non-root)
-  # Performance: Uses Alpine for minimal size (10MB vs 140MB)
-  frontend:
-    image: nginx:1.25-alpine
-    # ... configuration ..
-```
-
----
-
-## 14. Deployment Checklist
-
-### Agent-Generated Code Verification (MANDATORY)
-
-#### Build & Compilation
-- [ ] Config is valid: `docker compose config` returns exit code 0
-- [ ] All images pinned by version or digest (no :latest)
-- [ ] Multi-stage Dockerfiles used for all custom services
-- [ ] Environment variables properly defaulted in `.env.example`
-
-#### Testing
-- [ ] All services start: `docker compose up -d` works
-- [ ] Health checks pass: All services reach "healthy" status
-- [ ] Connectivity verified: Services can communicate on private networks
-
-#### Security
-- [ ] Dependency scan passes: 0 HIGH/CRITICAL vulnerabilities
-- [ ] Supply chain verified: Images pinned and digests matched
-- [ ] Secrets check: 0 hardcoded secrets in compose or .env files
-- [ ] Static analysis: `read_only: true` and `cap_drop: [ALL]` applied to all services
-
-#### Code Quality
-- [ ] No unused networks or volumes
-- [ ] Hexagonal architecture followed (modular files)
-- [ ] Labels used for layer and service identification
-
-#### Documentation
-- [ ] All public ports documented
-- [ ] Dependencies between services clearly defined
-- [ ] Resource limits (CPU/Memory) set for all services
-
-#### Agent Workflow Completed
-- [ ] Agent verified config compiles/builds successfully
-- [ ] Agent ran all tests and verified they pass
-- [ ] Agent ran security scans and verified 0 high vulnerabilities
-- [ ] Agent documented any fixes made during verification
+- [ ] DC-FMT-01 — `docker compose config --quiet` exit 0
+- [ ] DC-LINT-01 — `dclint` clean
+- [ ] DC-VER-01 — no top-level `version:` key
+- [ ] DC-IMG-01 — images pinned (digest in prod), no `:latest`
+- [ ] DC-SEC-01/02 — `trivy config` clean, no hardcoded secrets
+- [ ] DC-SEC-03 — every service: non-root, `read_only`, `no-new-privileges`, `cap_drop: [ALL]`, no `privileged`
+- [ ] DC-NET-01 — backend/data networks `internal: true`, no host networking
+- [ ] DC-HLTH-01 — depended-upon services have healthchecks
+- [ ] DC-DEP-01 — `depends_on` uses `condition:`
+- [ ] DC-RES-01 — memory/pid limits on every service
+- [ ] DC-CFG-01 — config via env/secrets, none baked in
+- [ ] DC-TST-01 — `docker compose up -d --wait` brings the stack up healthy
+- [ ] Agent ran every §3 command and documented any fixes
 
 ---
-
-## 15. Why This Configuration Standard Works
-
-1. **Compose Specification Format**: Modern Docker Compose v2 uses the Compose Specification, making `version:` field obsolete and improving forward compatibility.
-
-2. **Health Check Dependencies**: Using `condition: service_healthy` prevents race conditions and eliminates the need for retry logic in application code.
-
-3. **Network Isolation**: Internal networks for databases prevent accidental exposure while allowing service-to-service communication.
-
-4. **Resource Constraints**: Prevents noisy neighbor problems and ensures predictable performance in production.
-
-5. **Secrets Management**: Using `secrets:` with external files or Docker Swarm secrets keeps sensitive data out of version control and environment variables.
-
-6. **Extension Fields**: YAML anchors and extensions reduce duplication and make configs more maintainable.
-
-7. **Environment Overrides**: Multiple compose files allow reusing base configuration across dev/staging/prod while customizing as needed.
-
-8. **Modular Composition with `include`**: Breaking compose configurations into separate files per architectural layer provides:
-   - **Team Autonomy**: Different teams can own and modify their layers independently without conflicts
-   - **Selective Deployment**: Deploy only the layers needed for specific environments (e.g., skip observability in dev)
-   - **Easier Testing**: Test each layer in isolation before integration
-   - **Reduced Complexity**: Smaller, focused files are easier to understand, review, and maintain
-   - **Reusability**: Share common infrastructure layers across multiple projects
-   - **Version Control**: Clearer git history and easier code reviews with focused file changes
-
-9. **Immutability via Digests**: Using image digests ensures that the exact same code is deployed in every environment, preventing "stealth" updates from upstream image maintainers.
-
-10. **Hexagonal Architecture**: Mapping docker-compose structure to hexagonal architecture principles ensures:
-   - **Clear Boundaries**: Infrastructure (databases, caches) isolated from domain logic (APIs, workers)
-   - **Dependency Direction**: Domain services depend on infrastructure, never the reverse
-   - **Port Isolation**: Domain services use `expose` (internal), adapters use `ports` (external)
-   - **Network Segmentation**: Each layer has appropriate network access (database network is internal-only)
-   - **Independent Scaling**: Scale domain services without affecting infrastructure capacity
-   - **Technology Flexibility**: Swap infrastructure components (e.g., PostgreSQL → MySQL) without touching domain services
-   - **Security by Design**: Adapters act as security boundaries, domain core never exposed directly
-
----
-
-## 16. Quick Reference
-
-### Common Commands
-
-```bash
-# ═══════════════════════════════════════════════════════════════════
-# DOCKER COMPOSE COMMON COMMANDS
-# ═══════════════════════════════════════════════════════════════════
-
-# ─────────────────────────────────────────────────────────────────────
-# STARTING & STOPPING
-# ─────────────────────────────────────────────────────────────────────
-
-# Start all services in detached mode
-docker compose up -d
-
-# Start specific services only
-docker compose up -d postgres redis backend
-
-# Start with build (rebuild images first)
-docker compose up -d --build
-
-# Start with fresh containers (remove orphans)
-docker compose up -d --remove-orphans
-
-# Stop all services (keeps volumes)
-docker compose down
-
-# Stop and remove volumes (DESTRUCTIVE)
-docker compose down -v
-
-# Stop and remove everything including images
-docker compose down -v --rmi all
-
-# Restart all services
-docker compose restart
-
-# Restart specific service
-docker compose restart backend
-
-# ─────────────────────────────────────────────────────────────────────
-# BUILDING IMAGES
-# ─────────────────────────────────────────────────────────────────────
-
-# Build all services
-docker compose build
-
-# Build specific service
-docker compose build backend
-
-# Build without cache (fresh build)
-docker compose build --no-cache
-
-# Build with parallel workers
-docker compose build --parallel
-
-# Pull latest images
-docker compose pull
-
-# ─────────────────────────────────────────────────────────────────────
-# VIEWING LOGS
-# ─────────────────────────────────────────────────────────────────────
-
-# View logs for all services (follow mode)
-docker compose logs -f
-
-# View logs for specific service
-docker compose logs -f backend
-
-# View last 100 lines
-docker compose logs --tail=100
-
-# View logs with timestamps
-docker compose logs -f -t
-
-# View logs since specific time
-docker compose logs --since="2024-01-01T00:00:00"
-
-# ─────────────────────────────────────────────────────────────────────
-# EXECUTING COMMANDS
-# ─────────────────────────────────────────────────────────────────────
-
-# Execute command in running container
-docker compose exec backend sh
-
-# Execute command as specific user
-docker compose exec -u root backend sh
-
-# Execute non-interactive command
-docker compose exec -T backend npm test
-
-# Run one-off command in new container
-docker compose run --rm backend npm test
-
-# ─────────────────────────────────────────────────────────────────────
-# STATUS & INSPECTION
-# ─────────────────────────────────────────────────────────────────────
-
-# List running services
-docker compose ps
-
-# List all services (including stopped)
-docker compose ps -a
-
-# View service resource usage
-docker compose top
-
-# View configuration
-docker compose config
-
-# Validate configuration
-docker compose config --quiet && echo "✅ Valid"
-
-# List services defined
-docker compose config --services
-
-# List volumes defined
-docker compose config --volumes
-
-# ─────────────────────────────────────────────────────────────────────
-# SCALING & UPDATES
-# ─────────────────────────────────────────────────────────────────────
-
-# Scale service to multiple instances
-docker compose up -d --scale backend=3
-
-# Update single service (no downtime for others)
-docker compose up -d --no-deps backend
-
-# Force recreate containers
-docker compose up -d --force-recreate
-
-# ─────────────────────────────────────────────────────────────────────
-# ENVIRONMENT-SPECIFIC
-# ─────────────────────────────────────────────────────────────────────
-
-# Use specific compose file
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-
-# Use specific env file
-docker compose --env-file .env.production up -d
-
-# Use specific project name
-docker compose -p myproject up -d
-
-# Use profile
-docker compose --profile debug up -d
-```
-
-### Docker Compose Patterns Cheat Sheet
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                  DOCKER COMPOSE PATTERNS CHEAT SHEET                │
-└─────────────────────────────────────────────────────────────────────┘
-
-╔═══════════════════════════════════════════════════════════════════╗
-║ HEALTH CHECK PATTERNS                                              ║
-╠═══════════════════════════════════════════════════════════════════╣
-║                                                                    ║
-║ PostgreSQL:                                                        ║
-║   healthcheck:                                                     ║
-║     test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]               ║
-║     interval: 10s                                                  ║
-║     timeout: 5s                                                    ║
-║     retries: 5                                                     ║
-║     start_period: 30s                                              ║
-║                                                                    ║
-║ Redis:                                                             ║
-║   healthcheck:                                                     ║
-║     test: ["CMD", "redis-cli", "ping"]                            ║
-║     interval: 10s                                                  ║
-║     timeout: 3s                                                    ║
-║     retries: 3                                                     ║
-║                                                                    ║
-║ HTTP Service:                                                      ║
-║   healthcheck:                                                     ║
-║     test: ["CMD", "curl", "-f", "http://localhost:3000/health"]   ║
-║     interval: 15s                                                  ║
-║     timeout: 5s                                                    ║
-║     retries: 3                                                     ║
-║                                                                    ║
-║ MongoDB:                                                           ║
-║   healthcheck:                                                     ║
-║     test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"] ║
-║     interval: 10s                                                  ║
-║     timeout: 5s                                                    ║
-║     retries: 5                                                     ║
-║                                                                    ║
-║ RabbitMQ:                                                          ║
-║   healthcheck:                                                     ║
-║     test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]           ║
-║     interval: 30s                                                  ║
-║     timeout: 10s                                                   ║
-║     retries: 3                                                     ║
-╚═══════════════════════════════════════════════════════════════════╝
-
-╔═══════════════════════════════════════════════════════════════════╗
-║ DEPENDENCY PATTERNS                                                ║
-╠═══════════════════════════════════════════════════════════════════╣
-║                                                                    ║
-║ Wait for healthy (RECOMMENDED):                                    ║
-║   depends_on:                                                      ║
-║     db:                                                            ║
-║       condition: service_healthy                                   ║
-║                                                                    ║
-║ Wait for started only:                                             ║
-║   depends_on:                                                      ║
-║     db:                                                            ║
-║       condition: service_started                                   ║
-║                                                                    ║
-║ Wait for completed (init containers):                              ║
-║   depends_on:                                                      ║
-║     migration:                                                     ║
-║       condition: service_completed_successfully                    ║
-╚═══════════════════════════════════════════════════════════════════╝
-
-╔═══════════════════════════════════════════════════════════════════╗
-║ NETWORK PATTERNS                                                   ║
-╠═══════════════════════════════════════════════════════════════════╣
-║                                                                    ║
-║ Public network (exposed to host):                                  ║
-║   networks:                                                        ║
-║     public:                                                        ║
-║       driver: bridge                                               ║
-║                                                                    ║
-║ Internal network (isolated, no internet):                          ║
-║   networks:                                                        ║
-║     database:                                                      ║
-║       driver: bridge                                               ║
-║       internal: true                                               ║
-║                                                                    ║
-║ Service network assignment:                                        ║
-║   frontend:                                                        ║
-║     networks: [public, backend]      # Can reach both              ║
-║   api:                                                             ║
-║     networks: [backend, database]    # Backend + DB access         ║
-║   db:                                                              ║
-║     networks: [database]             # Isolated, API only          ║
-╚═══════════════════════════════════════════════════════════════════╝
-
-╔═══════════════════════════════════════════════════════════════════╗
-║ VOLUME PATTERNS                                                    ║
-╠═══════════════════════════════════════════════════════════════════╣
-║                                                                    ║
-║ Named volume (production):                                         ║
-║   volumes:                                                         ║
-║     - postgres-data:/var/lib/postgresql/data                       ║
-║                                                                    ║
-║ Bind mount (development):                                          ║
-║   volumes:                                                         ║
-║     - ./src:/app/src:ro                                           ║
-║                                                                    ║
-║ tmpfs (ephemeral/fast):                                            ║
-║   volumes:                                                         ║
-║     - type: tmpfs                                                  ║
-║       target: /tmp                                                 ║
-║       tmpfs:                                                       ║
-║         size: 100M                                                 ║
-║                                                                    ║
-║ Read-only mount:                                                   ║
-║   volumes:                                                         ║
-║     - ./config:/etc/app/config:ro                                  ║
-╚═══════════════════════════════════════════════════════════════════╝
-
-╔═══════════════════════════════════════════════════════════════════╗
-║ SECRETS PATTERNS                                                   ║
-╠═══════════════════════════════════════════════════════════════════╣
-║                                                                    ║
-║ File-based secret:                                                 ║
-║   secrets:                                                         ║
-║     db_password:                                                   ║
-║       file: ./secrets/db_password.txt                              ║
-║                                                                    ║
-║ External secret (Docker Swarm):                                    ║
-║   secrets:                                                         ║
-║     api_key:                                                       ║
-║       external: true                                               ║
-║       name: production_api_key                                     ║
-║                                                                    ║
-║ Using in service:                                                  ║
-║   services:                                                        ║
-║     db:                                                            ║
-║       environment:                                                 ║
-║         POSTGRES_PASSWORD_FILE: /run/secrets/db_password           ║
-║       secrets:                                                     ║
-║         - db_password                                              ║
-╚═══════════════════════════════════════════════════════════════════╝
-
-╔═══════════════════════════════════════════════════════════════════╗
-║ RESOURCE LIMITS PATTERN                                            ║
-╠═══════════════════════════════════════════════════════════════════╣
-║                                                                    ║
-║ deploy:                                                            ║
-║   resources:                                                       ║
-║     limits:           # Maximum resources                          ║
-║       cpus: '2.0'     # Max 2 CPU cores                           ║
-║       memory: 2G      # Max 2GB RAM                                ║
-║     reservations:     # Guaranteed resources                       ║
-║       cpus: '0.5'     # Reserved 0.5 CPU cores                    ║
-║       memory: 512M    # Reserved 512MB RAM                         ║
-╚═══════════════════════════════════════════════════════════════════╝
-
-╔═══════════════════════════════════════════════════════════════════╗
-║ SECURITY HARDENING PATTERN                                         ║
-╠═══════════════════════════════════════════════════════════════════╣
-║                                                                    ║
-║ services:                                                          ║
-║   app:                                                             ║
-║     user: "1001:1001"                  # Non-root user             ║
-║     read_only: true                    # Read-only filesystem      ║
-║     security_opt:                                                  ║
-║       - no-new-privileges:true         # Prevent privilege esc     ║
-║     cap_drop:                                                      ║
-║       - ALL                            # Drop all capabilities     ║
-║     cap_add:                                                       ║
-║       - NET_BIND_SERVICE               # Add only what's needed    ║
-║     tmpfs:                                                         ║
-║       - /tmp                           # Writable temp directory   ║
-╚═══════════════════════════════════════════════════════════════════╝
-
-╔═══════════════════════════════════════════════════════════════════╗
-║ EXTENSION FIELDS (DRY PATTERN)                                     ║
-╠═══════════════════════════════════════════════════════════════════╣
-║                                                                    ║
-║ # Define reusable configurations                                   ║
-║ x-common-healthcheck: &common-healthcheck                          ║
-║   interval: 10s                                                    ║
-║   timeout: 5s                                                      ║
-║   retries: 3                                                       ║
-║   start_period: 30s                                                ║
-║                                                                    ║
-║ x-logging: &default-logging                                        ║
-║   driver: json-file                                                ║
-║   options:                                                         ║
-║     max-size: "10m"                                                ║
-║     max-file: "3"                                                  ║
-║                                                                    ║
-║ x-security: &security                                              ║
-║   read_only: true                                                  ║
-║   user: "1001:1001"                                                ║
-║   cap_drop: [ALL]                                                  ║
-║   security_opt: [no-new-privileges:true]                           ║
-║                                                                    ║
-║ # Use in services                                                  ║
-║ services:                                                          ║
-║   app:                                                             ║
-║     <<: *security                                                  ║
-║     healthcheck:                                                   ║
-║       <<: *common-healthcheck                                      ║
-║       test: ["CMD", "curl", "-f", "http://localhost/health"]       ║
-║     logging: *default-logging                                      ║
-╚═══════════════════════════════════════════════════════════════════╝
-```
-
-### Project Structure
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│               RECOMMENDED PROJECT STRUCTURE                          │
-└─────────────────────────────────────────────────────────────────────┘
-
-project/
-├── docker-compose.yml              # Main entry point (uses include)
-├── docker-compose.dev.yml          # Development overrides
-├── docker-compose.prod.yml         # Production overrides
-├── docker-compose.test.yml         # Testing configuration
-│
-├── compose/                        # Modular compose files
-│   ├── domain/                     # Core business services
-│   │   ├── api-services.yml        # REST/GraphQL APIs
-│   │   ├── worker-services.yml     # Background workers
-│   │   └── scheduler-services.yml  # Cron jobs
-│   │
-│   ├── infrastructure/             # External dependencies
-│   │   ├── databases.yml           # PostgreSQL, MongoDB, etc.
-│   │   ├── caches.yml              # Redis, Memcached
-│   │   ├── messaging.yml           # RabbitMQ, Kafka
-│   │   └── storage.yml             # MinIO, S3
-│   │
-│   ├── adapters/                   # Gateways & proxies
-│   │   ├── gateway.yml             # Traefik, Kong
-│   │   ├── proxy.yml               # Nginx
-│   │   └── auth.yml                # Keycloak
-│   │
-│   ├── observability/              # Monitoring stack
-│   │   ├── monitoring.yml          # Prometheus, Grafana
-│   │   ├── logging.yml             # Loki, ELK
-│   │   └── tracing.yml             # Jaeger, Tempo
-│   │
-│   └── shared/                     # Shared resources
-│       ├── networks.yml            # Network definitions
-│       ├── volumes.yml             # Volume definitions
-│       └── secrets.yml             # Secrets definitions
-│
-├── services/                       # Service source code
-│   ├── api/
-│   │   ├── Dockerfile
-│   │   ├── Dockerfile.dev
-│   │   └── src/
-│   └── worker/
-│       ├── Dockerfile
-│       └── src/
-│
-├── config/                         # Configuration files
-│   ├── nginx/
-│   │   └── nginx.conf
-│   ├── prometheus/
-│   │   └── prometheus.yml
-│   └── grafana/
-│       └── dashboards/
-│
-├── scripts/                        # Automation scripts
-│   ├── init-db/                    # Database init scripts
-│   │   └── 01-schema.sql
-│   └── healthcheck/                # Custom health check scripts
-│       └── check-api.sh
-│
-├── secrets/                        # Secret files (git-ignored)
-│   ├── db_password.txt
-│   ├── jwt_secret.txt
-│   └── api_key.txt
-│
-├── tests/                          # Docker Compose tests
-│   ├── test_services.sh            # Service tests
-│   ├── test_networks.sh            # Network tests
-│   └── regression/                 # Regression tests
-│       └── test_dc142_redis.sh
-│
-├── .env                            # Default environment variables
-├── .env.example                    # Example env file (committed)
-├── .env.development                # Development overrides
-├── .env.production                 # Production overrides
-├── .dockerignore                   # Docker build exclusions
-├── Makefile                        # Build automation
-└── README.md                       # Documentation
-
-# ─────────────────────────────────────────────────────────────────────
-# LAYER RESPONSIBILITIES
-# ─────────────────────────────────────────────────────────────────────
-
-DOMAIN LAYER (compose/domain/)
-  └── Core business services that implement application logic
-      - APIs, workers, schedulers
-      - Use 'expose:' (not 'ports:')
-      - Connect to 'backend' network
-
-INFRASTRUCTURE LAYER (compose/infrastructure/)
-  └── External dependencies that domain services use
-      - Databases, caches, message queues
-      - Use 'internal: true' networks
-      - Health checks MANDATORY
-
-ADAPTERS LAYER (compose/adapters/)
-  └── Entry points that route external traffic
-      - Reverse proxies, API gateways
-      - Use 'ports:' for external access
-      - Connect to 'public' network
-
-OBSERVABILITY LAYER (compose/observability/)
-  └── Monitoring, logging, and tracing
-      - Prometheus, Grafana, Jaeger
-      - Optional in development
-      - Connect to all service networks
-```
-
----
-
-## References & Further Reading
-
-- [Compose Specification](https://docs.docker.com/compose/compose-file/)
-- [Docker Compose `include` directive](https://docs.docker.com/compose/compose-file/14-include/)
-- [Docker Compose Best Practices](https://docs.docker.com/develop/dev-best-practices/)
-- [12-Factor App Methodology](https://12factor.net/)
-- [Hexagonal Architecture (Ports & Adapters)](https://alistair.cockburn.us/hexagonal-architecture/)
-- [OWASP Docker Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Docker_Security_Cheat_Sheet.html)
-
-
 **End of Docker Compose Guidelines**

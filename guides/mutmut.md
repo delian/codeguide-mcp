@@ -1,231 +1,198 @@
-# Python Mutation Testing (mutmut) Development Guidelines
-Mandatory coding standards and development practices for mutation testing in Python using mutmut. High-quality test suites, iterative improvement, logic-focused validation. Python 3.13+, uv, pytest, mutmut, coverage.
+# Mutation Testing with mutmut Guidelines
+Mandatory standards for mutation testing Python code with mutmut: prove assertion strength, kill survivors, gate on mutation score. Python 3.13+, uv, pytest, mutmut 3.x, coverage.
+
+---
+name: mutmut
+title: Mutation Testing with mutmut Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: cross-cutting
+tools: [mutmut@3, python@3.13, uv, pytest, coverage]
+requires: []
+recommends:
+  - tdd
+  - python
+provides:
+  - mutation-testing
+  - mutation-score
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide canonically owns **mutation testing** — others reference it instead of re-explaining survivors, scores, or kill workflow.
 
 ---
 
-**Agent Profile**: The Python Mutation Testing Expert
-**Role**: Senior Software Engineer & Quality Assurance Specialist
-**Objective**: Generate high-quality Python code with a "mutation-proof" test suite.
-**Tools**: Python 3.13+, uv, pytest, mutmut, coverage
+## 0. Prerequisites & References
+
+mutmut measures *test-suite quality*; it presupposes a test-first workflow and a Python toolchain.
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`tdd.md`](guides://tdd.md) — test-first, Red-Green-Refactor, and **coverage**. Coverage proves a line *ran*; mutation testing proves an assertion would *fail* if the line were wrong. mutmut is how you verify the test quality that `tdd.md` demands.
+> - [`python.md`](guides://python.md) — the language binding: `uv`, `pytest`, `pyproject.toml`, project layout. All commands here run via `uv run`.
+
+> 📎 **SEE ALSO:** [`ci-cd.md`](guides://ci-cd.md) — pipeline gating · [`performance.md`](guides://performance.md) — keeping the test suite fast enough to mutate.
+
+This guide does **not** own coverage, test-first discipline, or the Python toolchain — it owns only what is unique to mutation testing.
 
 ---
 
 ## 1. Core Philosophies: MUTATION-FIRST
 
-The agent must adhere to the **MUTATION-FIRST** principles for every Python implementation:
+Mutation-testing-specific principles only. Test-first and coverage policy come from §0.
 
-**Mutation Testing (MT)**: ALWAYS run mutation tests to verify that your test suite is actually effective, not just covering lines.
-**Kill the Mutant**: A surviving mutant is a bug in your test suite (or code). Every surviving mutant MUST be analyzed and addressed.
-**Iterative Refinement**: Use mutation results to drive the creation of more robust test cases that handle edge cases and boundary conditions.
+- **M**utants are test-suite bugs: a *surviving* mutant means a code change went undetected — the fault is in your assertions, not (usually) the code.
+- **U**v-powered: every command runs via `uv run` (binding: `python.md`).
+- **T**argeted runs: mutate specific modules and use coverage data to keep the feedback loop fast.
+- **A**nalyze every survivor: each survivor is read, then either killed by a new test or documented as equivalent — never ignored.
+- **T**est logic, not boilerplate: spend mutation budget on algorithms and business rules, not getters/glue.
+- **E**quivalent mutants are explained: a mutant that cannot change observable behavior is documented or refactored away — not silenced to inflate the score.
 
-- **M**aximize detection: Aim for a mutation score > 80% for business logic.
-- **U**v-powered: All commands MUST be run via `uv run`.
-- **T**argeted mutation: Mutate specific modules or paths to keep feedback loops fast.
-- **A**nalyze survivors: Manually inspect every surviving mutant to understand the "why".
-- **T**est logic, not boilerplate: Focus mutation efforts on complex logic and algorithms.
-- **E**quivalent mutants: Identify and document mutants that are functionally equivalent to the original code.
-
-**Verified Code**: Agent-generated code MUST pass `mutmut` checks with an acceptable mutation score before being considered "production-ready".
+**Verified Code**: code is "mutation-proof" only when it meets the §2 score gates with every non-equivalent survivor killed.
 
 ---
 
-## 2. Agent Code Generation Requirements (MANDATORY)
+## 2. Requirements (MANDATORY, auditable)
 
-### A. Verification Protocol
+RFC-2119 keywords. IDs `MUT-<TOPIC>-<NN>`. Each row has a binary gate.
 
-**CRITICAL: Agents MUST verify the effectiveness of generated tests using `mutmut` before delivery.**
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| MUT-TST-01 | The test suite MUST be green before any mutation run (see `tdd.md`) | `uv run pytest` | exit 0, 0 skips |
+| MUT-RUN-01 | Mutation testing MUST run on changed business logic | `uv run mutmut run` | completes, results recorded |
+| MUT-SCORE-01 | Core logic/algorithms MUST reach ≥ 90% mutation score | `uv run mutmut results` (see §4.C) | ≥ 90% on core modules |
+| MUT-SCORE-02 | Total project mutation score MUST be ≥ 80% | `uv run mutmut results` | ≥ 80% |
+| MUT-SURV-01 | Every surviving mutant MUST be killed or documented as equivalent | `uv run mutmut results` + review | no undocumented survivors |
+| MUT-PRAGMA-01 | `# pragma: no mutate` MUST be limited to the allowed cases in §3.B | `grep -rn "pragma: no mutate"` + review | each occurrence justified |
+| MUT-CI-01 | CI MUST fail when the mutation-score gate is not met (see `ci-cd.md`) | CI run on mutation job | red below threshold |
 
-#### Pre-Delivery Checklist
-
-**Before delivering ANY Python code with tests, the agent MUST:**
-
-1. **Verify Test Suite passes**:
-   ```bash
-   uv run pytest
-   # Exit code MUST be 0
-   ```
-
-2. **Run Mutation Testing**:
-   ```bash
-   # Run mutation testing on the specific module
-   uv run mutmut run --paths-to-mutate src/module.py --use-coverage
-   ```
-   - **MUST** achieve a Mutation Score > 80% for core logic.
-   - **MUST** analyze surviving mutants using `uv run mutmut results`.
-
-3. **Kill Surviving Mutants**:
-   ```bash
-   # Show a specific surviving mutant
-   uv run mutmut show <id>
-   # Apply it to see the failure
-   uv run mutmut apply <id>
-   ```
-   - Add a test case that fails when the mutant is applied.
-   - Revert mutation (`git checkout .`) and verify the new test passes.
-
-4. **Security & Dependency Verification**:
-   ```bash
-   uv run bandit -r .
-   uv run safety check
-   ```
-
-#### Error Correction Process
-
-If mutation testing reveals gaps (surviving mutants):
-
-1. **Identify the Gap**: Use `mutmut show <id>` to see the exact change that wasn't caught.
-2. **Write a Failing Test**: Create a test case that specifically targets the logic changed by the mutant.
-3. **Verify "Killed"**: Run `mutmut run` again to confirm the mutant is now killed.
-4. **Refactor**: If the mutant is "unkillable" but represents dead code, remove the code.
-
-### B. Agent Workflow Example
-
-**Complete `mutmut` workflow:**
-
-1. **Generate Code & Initial Tests**:
-   ```python
-   # src/math_utils.py
-   def is_adult(age: int) -> bool:
-       return age >= 18
-   ```
-
-2. **Run Initial Mutation**:
-   ```bash
-   uv run mutmut run --paths-to-mutate src/math_utils.py
-   # Result: 1 mutant survived (age > 18)
-   ```
-
-3. **Analyze Survivor**:
-   ```bash
-   uv run mutmut show 1
-   # Mutant: - return age >= 18
-   # Mutant: + return age > 18
-   ```
-
-4. **Add Boundary Test**:
-   ```python
-   # tests/test_math_utils.py
-   def test_is_adult_boundary():
-       assert is_adult(18) is True  # This kills the 'age > 18' mutant
-   ```
-
-5. **Verify Success**:
-   ```bash
-   uv run mutmut run
-   # ✓ All mutants killed
-   ```
-
-### C. Prohibited Practices
-
-**NEVER deliver Python code that:**
-- [ ] Has a mutation score of 0% (indicates no tests or totally ineffective tests)
-- [ ] Ignores surviving mutants in critical business logic
-- [ ] Uses `pragma: no mutate` to hide poor testing instead of addressing it
-- [ ] Fails to run mutation tests after a major refactor
+> **Forbidden**: shipping with a 0% mutation score, ignoring survivors in business logic, using `# pragma: no mutate` to hide a missing test, or skipping a mutation run after a logic refactor.
 
 ---
 
-## 3. Project Structure & Configuration (MANDATORY)
+## 3. Configuration & Scope
 
-### A. Configuration in `pyproject.toml`
+### A. Configure in `pyproject.toml`
 
-**MANDATORY: Use `pyproject.toml` for `mutmut` configuration:**
+Single config source (binding: `python.md`):
 
 ```toml
 [tool.mutmut]
 paths_to_mutate = ["src/"]
-tests_dir = ["tests/"]
-backup = false
-runner = "python -m pytest -x" # -x stops on first failure for speed
-mutate_only_covered_lines = true
-# Optional: Exclude files that don't need mutation
-do_not_mutate = ["src/__init__.py", "src/generated/*.py"]
+tests_dir = "tests/"
+runner = "uv run pytest -x"      # -x: stop on first kill → faster feedback
+# mutmut 3.x discovers coverage automatically; keep tests fast (see performance.md)
 ```
 
-### B. Ignoring Specific Lines
+### B. `# pragma: no mutate` — allowed cases only (MUT-PRAGMA-01)
 
-Use `# pragma: no mutate` only for:
-- Logging statements
-- Complex error handling that is impossible to trigger in unit tests
-- Version strings or boilerplate metadata
+Use it ONLY where a mutant is genuinely untestable or noise — never to mask a missing assertion:
 
 ```python
-VERSION = "1.0.0"  # pragma: no mutate
-logger.debug("Starting process...")  # pragma: no mutate
+VERSION = "1.0.0"                       # pragma: no mutate  — metadata, no logic
+logger.debug("starting process")        # pragma: no mutate  — logging, not behavior
 ```
+
+Allowed: version/metadata strings, log statements, defensive branches impossible to trigger in unit tests. Everything else: write the test.
 
 ---
 
-## 4. Mutation Testing Best Practices (MANDATORY)
+## 4. Reading & Acting on Results (owned)
 
-### A. Performance Optimization
+### A. The kill workflow
 
-Mutation testing is slow. Follow these rules to keep it efficient:
+A surviving mutant is a missing test. Drive it to green:
 
-1. **Use Coverage**: Always run with `--use-coverage` to avoid mutating dead code.
-2. **Narrow Scope**: Run on specific files during development:
+```bash
+uv run mutmut run                 # run mutations (MUT-RUN-01)
+uv run mutmut results             # list survivors with IDs
+uv run mutmut show <id>           # see the exact source change that survived
+```
+
+For each survivor:
+1. **Read** `mutmut show <id>` — understand which logic changed and was not caught.
+2. **Write a failing test** that asserts the behavior the mutant broke (Red, per `tdd.md`).
+3. **Re-run** `uv run mutmut run` and confirm the mutant is now killed.
+
+Typical example: `return age >= 18` survives mutation to `return age > 18` because no test exercises the boundary. The fix is a boundary assertion (`assert is_adult(18) is True`), not more coverage — the line was already covered.
+
+### B. Equivalent mutants (the hard case)
+
+An *equivalent* mutant changes the source but cannot change observable behavior, so no test can kill it. Do not let it drag the score down:
+
+- **Prefer to refactor it away.** An equivalent mutant often signals redundant or unclear code — e.g. `if x > 0` ⇄ `if x >= 1` for integers. Pick the canonical form and the ambiguity disappears.
+- **If the code must stay**, document why the mutant is equivalent (comment or test note) so reviewers and CI accounting treat it as expected, not as an unaddressed survivor.
+
+Equivalent mutants are the reason a 100% score is not always achievable or worth chasing — judge by §4.C targets, not perfection.
+
+### C. Mutation score targets
+
+Mutation score = killed ÷ (total − equivalent). Targets by component:
+
+| Component | Target mutation score |
+|----------------|-----------------------|
+| Core logic / algorithms | 90% – 100% |
+| API handlers / adapters | 70% – 80% |
+| CLI / UI layer | 50% – 70% |
+| Total project | ≥ 80% |
+
+Gate the numbers that matter (MUT-SCORE-01/02): hold core logic to ≥ 90% even if peripheral layers pull the headline number around.
+
+---
+
+## 5. Performance & Scope Control (owned)
+
+Mutation testing is inherently slow — it re-runs the suite once per mutant. Keep the loop usable:
+
+1. **Lean on coverage**: mutmut skips mutating lines no test covers, so a covered, fast suite is the biggest lever.
+2. **Narrow scope during development** — mutate only what you changed:
    ```bash
    uv run mutmut run --paths-to-mutate src/logic.py
    ```
-3. **Parallel Execution**: Use the default parallel runner on Linux/macOS.
-4. **Fast Runner**: Ensure your tests are fast. Mock external API calls and databases.
-
-### B. Handling Equivalent Mutants
-
-If a mutant survives but the code behavior is identical:
-1. **Refactor**: Often an equivalent mutant indicates redundant code.
-   - Example: `if x > 0: return True` mutated to `if x >= 1: return True` (for integers).
-   - Fix: Use the more standard or clearer form.
-2. **Document**: If the code is necessary, add a comment explaining why the mutant is equivalent.
-
-### C. Mutation Score Targets
-
-| Component Type | Target Mutation Score |
-|----------------|-----------------------|
-| Core Logic / Algorithms | 90% - 100% |
-| API Handlers / Adapters | 70% - 80% |
-| CLI / UI Layer | 50% - 70% |
-| Total Project | > 80% |
+3. **Keep tests fast**: mock external APIs and databases so each suite run is milliseconds, not seconds (see `performance.md`).
+4. **Full sweep in CI, targeted runs locally**: developers mutate the module they touched; CI mutates the whole `paths_to_mutate` set.
 
 ---
 
-## 5. Quick Reference
+## 6. CI Integration (owned)
 
-### Common Commands
-
-```bash
-# Initialize and run all mutations
-uv run mutmut run
-
-# Run on specific path
-uv run mutmut run --paths-to-mutate src/core/
-
-# Show summary of results
-uv run mutmut results
-
-# Show diff for a specific mutant
-uv run mutmut show <id>
-
-# Apply mutant to source code (for debugging)
-uv run mutmut apply <id>
-
-# Generate HTML report
-uv run mutmut html
-
-# Export to JUnit XML for CI
-uv run mutmut junitxml --output-file=mutation-report.xml
-```
-
-### CI/CD Workflow Example
+Pipeline mechanics and stage policy are owned by [`ci-cd.md`](guides://ci-cd.md); the mutation-specific binding:
 
 ```yaml
-- name: Run Mutation Tests
+- name: Mutation testing
   run: |
-    uv run mutmut run --paths-to-mutate src/ --use-coverage
-    uv run mutmut results
-    # Fail if mutation score is too low (requires custom script or --check if available)
+    uv run pytest                 # MUT-TST-01: suite must be green first
+    uv run mutmut run             # MUT-RUN-01
+    uv run mutmut results         # survivors + score
+    uv run mutmut junit > mutation.xml   # publish to CI test reporting
+```
+
+Fail the job below the §4.C threshold (MUT-CI-01). mutmut exits non-zero when mutants survive; for a numeric score gate, parse `mutmut results` in a small wrapper script and exit non-zero under target. Publish `mutmut html` as a build artifact for survivor triage.
+
+---
+
+## 7. Quick Reference
+
+```bash
+uv run mutmut run                              # run mutation testing
+uv run mutmut run --paths-to-mutate src/core/  # narrow scope
+uv run mutmut results                          # summary + survivor IDs
+uv run mutmut show <id>                         # diff for one mutant
+uv run mutmut html                              # HTML survivor report
+uv run mutmut junit > mutation.xml             # JUnit XML for CI
 ```
 
 ---
 
-**End of Python Mutation Testing (mutmut) Guidelines**
+## 8. Deployment Checklist
+
+Generated from §2 — one box per requirement ID. No new requirements here.
+
+- [ ] MUT-TST-01 — test suite green before mutating
+- [ ] MUT-RUN-01 — mutation run completed on changed logic
+- [ ] MUT-SCORE-01 — core logic ≥ 90% mutation score
+- [ ] MUT-SCORE-02 — total project ≥ 80% mutation score
+- [ ] MUT-SURV-01 — every survivor killed or documented equivalent
+- [ ] MUT-PRAGMA-01 — every `# pragma: no mutate` justified per §3.B
+- [ ] MUT-CI-01 — CI fails below the score gate
+
+---
+**End of Mutation Testing with mutmut Guidelines**

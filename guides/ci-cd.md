@@ -1,1062 +1,222 @@
 # CI/CD Pipeline Guidelines
-Mandatory standards for implementing continuous integration and continuous deployment pipelines. GitHub Actions, GitLab CI, Jenkins, CircleCI, ArgoCD, Flux.
+Provider-agnostic standards for continuous integration and delivery: pipeline stages, quality gates, artifact management, deployment strategies (blue-green/canary/rolling), and rollback.
+
+---
+name: ci-cd
+title: CI/CD Pipeline Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: cross-cutting
+tools: []
+requires: []
+recommends:
+  - git
+  - tdd
+  - secure-coding
+  - semver
+  - observability
+  - pre-commit
+provides:
+  - pipeline-stages
+  - quality-gates
+  - deployment-strategies
+  - rollback
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide owns the **pipeline-agnostic** principles of CI/CD. Platform syntax (GitHub Actions, GitLab CI, Jenkins, Azure DevOps) lives in the provider guides; this guide states the principle once and points there for the YAML.
 
 ---
 
-**Agent Profile**: The CI/CD Expert
-**Role**: Senior DevOps Engineer & Release Manager
-**Objective**: Generate reliable, fast, and secure CI/CD pipelines that enable rapid and safe deployments.
-**Tools**: GitHub Actions, GitLab CI, Jenkins, CircleCI, ArgoCD, Flux.
+## 0. Prerequisites & References
+
+This guide defines *what* a pipeline must do and *how* changes flow to production. The concerns below define rules that pipeline stages enforce — fetch them when the task touches them.
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`git.md`](guides://git.md) — branching/trigger model the pipeline reacts to (push, PR, tag).
+> - [`tdd.md`](guides://tdd.md) — test-first, coverage; the pipeline only *gates* on these, it does not define them.
+> - [`secure-coding.md`](guides://secure-coding.md) — SAST/DAST/SCA, secrets, supply chain; the pipeline runs these scans as gates.
+> - [`semver.md`](guides://semver.md) — release/tag versioning that drives artifact tags and release stages.
+> - [`observability.md`](guides://observability.md) — deploy/DORA metrics, canary signal sources, alerting.
+> - [`pre-commit.md`](guides://pre-commit.md) — the same gates run locally before push (shift-left).
+
+> 📎 **SEE ALSO (platform syntax — pick the one you use):**
+> - [`github.md`](guides://github.md) · [`gitlab.md`](guides://gitlab.md) · [`jenkins.md`](guides://jenkins.md) · [`azuredevops.md`](guides://azuredevops.md)
+> - [`dockerfile.md`](guides://dockerfile.md) · [`kubernetes.md`](guides://kubernetes.md) · [`terraform.md`](guides://terraform.md) — artifact/build and deploy targets.
+> - [`feature-flags.md`](guides://feature-flags.md) — decouple deploy from release. [`mlops.md`](guides://mlops.md) — CI/CD for models. [`e2e-testing.md`](guides://e2e-testing.md) — post-deploy verification.
 
 ---
 
 ## 1. Core Philosophies: CICD-FIRST
 
-- **C**ontinuous: Every commit triggers the pipeline
-- **I**ncremental: Small, frequent deployments
-- **C**onsistent: Same process for all environments
-- **D**ependable: Automated testing and rollback
+CI/CD-specific principles only. Test policy, security policy, and versioning come from §0.
 
-### Mandatory Security & Secret Handling
+- **C**ontinuous: every push to a tracked branch runs the full pipeline; `main`/trunk is always releasable. No long-lived broken builds.
+- **I**dentical artifact: **build once, promote the same artifact** through every environment. Never rebuild per environment — that breaks reproducibility. Environment differences are injected as config (see `env-config.md`), not baked into the binary.
+- **C**onsistent: the same pipeline definition and the same gates apply to every environment; staging differs from prod only in scale and config.
+- **D**ecoupled deploy from release: deploying code and exposing a feature are separate acts — ship dark, flip a flag (see `feature-flags.md`).
+- **F**ast feedback: fail fast, run cheap gates first, parallelize the rest; keep PR feedback under ~10 minutes so developers stay in flow.
+- **A**utomated & reversible: every deploy is automated, observable, and has a tested, automated rollback. Manual production steps are forbidden.
+- **P**ipeline-as-code: pipeline definitions are version-controlled, reviewed (see `code-review.md`), and reproducible — never click-configured in a UI.
 
-- **No secrets** stored in pipelines, code, or transported to agents.
-- Prefer **secretless authentication** (managed identities, IAM roles, service accounts, OIDC/workload identity).
-- If secretless auth is not possible, secrets **must** be stored in a vault/secret store and retrieved at runtime based on the environment.
-- Never hardcode or echo secrets; avoid passing secrets via CLI arguments.
-
----
-
-## 2. Pipeline Structure (MANDATORY)
-
-- Requirements are **platform-agnostic** (apply to any CI/CD system) and **language-agnostic** (apply to any stack).
-
-### A. Standard Stages
-
-```yaml
-# .github/workflows/ci-cd.yml
-name: CI/CD Pipeline
-
-on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main]
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-jobs:
-  # Stage 1: Build and Lint
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Type check
-        run: npm run typecheck
-
-      - name: Build
-        run: npm run build
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: build
-          path: dist/
-          retention-days: 1
-
-  # Stage 2: Test
-  test:
-    needs: build
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        shard: [1, 2, 3, 4]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run tests
-        run: npm test -- --shard=${{ matrix.shard }}/4
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@v4
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-
-  # Stage 3: Security Scan
-  security:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Run Snyk security scan
-        uses: snyk/actions/node@master
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
-      - name: Run SAST scan
-        uses: github/codeql-action/analyze@v3
-
-  # Stage 4: Deploy to Staging
-  deploy-staging:
-    needs: [test, security]
-    if: github.ref == 'refs/heads/develop'
-    runs-on: ubuntu-latest
-    environment: staging
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: build
-          path: dist/
-
-      - name: Deploy to staging
-        run: ./scripts/deploy.sh staging
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-
-  # Stage 5: Integration Tests
-  integration-tests:
-    needs: deploy-staging
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Run integration tests
-        run: npm run test:integration
-        env:
-          API_URL: https://staging-api.example.com
-
-  # Stage 6: Deploy to Production
-  deploy-production:
-    needs: [test, security]
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    environment: production
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: build
-          path: dist/
-
-      - name: Deploy to production
-        run: ./scripts/deploy.sh production
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-
-      - name: Notify deployment
-        uses: slackapi/slack-github-action@v1
-        with:
-          payload: |
-            {
-              "text": "Deployed ${{ github.sha }} to production"
-            }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
-```
-
-### B. GitLab CI Example
-
-```yaml
-# .gitlab-ci.yml
-stages:
-  - build
-  - test
-  - security
-  - deploy-staging
-  - integration
-  - deploy-production
-
-variables:
-  DOCKER_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
-
-# Build Stage
-build:
-  stage: build
-  image: node:20-alpine
-  script:
-    - npm ci
-    - npm run build
-  artifacts:
-    paths:
-      - dist/
-    expire_in: 1 day
-  cache:
-    key: ${CI_COMMIT_REF_SLUG}
-    paths:
-      - node_modules/
-
-# Test Stage
-test:
-  stage: test
-  image: node:20-alpine
-  needs: [build]
-  parallel: 4
-  script:
-    - npm ci
-    - npm test -- --shard=$CI_NODE_INDEX/$CI_NODE_TOTAL
-  coverage: '/Lines\s*:\s*(\d+\.?\d*)%/'
-  artifacts:
-    reports:
-      junit: junit.xml
-      coverage_report:
-        coverage_format: cobertura
-        path: coverage/cobertura-coverage.xml
-
-# Security Stage
-security:
-  stage: security
-  needs: [build]
-  image:
-    name: snyk/snyk:node
-    entrypoint: [""]
-  script:
-    - snyk test
-    - snyk monitor
-  allow_failure: true
-
-sast:
-  stage: security
-  needs: [build]
-
-# Deploy to Staging
-deploy-staging:
-  stage: deploy-staging
-  needs: [test, security]
-  image: alpine:latest
-  script:
-    - ./scripts/deploy.sh staging
-  environment:
-    name: staging
-    url: https://staging.example.com
-  only:
-    - develop
-
-# Integration Tests
-integration:
-  stage: integration
-  needs: [deploy-staging]
-  script:
-    - npm run test:integration
-  only:
-    - develop
-
-# Deploy to Production
-deploy-production:
-  stage: deploy-production
-  needs: [test, security]
-  script:
-    - ./scripts/deploy.sh production
-  environment:
-    name: production
-    url: https://example.com
-  when: manual
-  only:
-    - main
-```
+**Verified Code**: a pipeline change MUST pass every gate in §2 and its definition MUST lint clean before delivery.
 
 ---
 
-## 2A. TDD Protocol (MANDATORY)
+## 2. Requirements (MANDATORY, auditable)
 
-**CRITICAL: Follow the Red-Green-Refactor cycle for ALL pipeline definitions.**
+RFC-2119 keywords. IDs `CICD-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a shared rule cite its owner. "Verify" methods are provider-agnostic — bind them to your platform's CLI/lint via the §0 SEE ALSO guides.
 
-### Red-Green-Refactor Cycle with Pipeline Linting and Validation
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| CICD-STRUCT-01 | Pipeline MUST be defined as version-controlled code, reviewed before merge | file in repo + review (see `code-review.md`) | no UI-only config |
+| CICD-STRUCT-02 | Pipeline definition MUST lint clean | platform linter (`actionlint`/`gitlab-ci-lint`/`jenkins-lint`) | exit 0 |
+| CICD-STRUCT-03 | Every job MUST set an explicit timeout | grep for timeout on each job | no job without timeout |
+| CICD-GATE-01 | Deploy jobs MUST depend on (`needs`) all test & security jobs | inspect job dependency graph | no deploy without test+security upstream |
+| CICD-GATE-02 | A failing gate MUST block the pipeline (no `allow_failure` on required gates) | inspect job config | required gates non-bypassable |
+| CICD-GATE-03 | Tests MUST pass before deploy (gate only; policy in `tdd.md`) | pipeline run | test stage green, 0 skips |
+| CICD-GATE-04 | Coverage gate MUST be enforced in CI (threshold owned by `tdd.md`) | coverage step exit code | meets project threshold |
+| CICD-SEC-01 | SAST + dependency/SCA scan MUST run and block on high/critical (see `secure-coding.md`) | scan step exit code | 0 high/critical |
+| CICD-SEC-02 | Built container/artifact images MUST be vulnerability-scanned (see `secure-coding.md`) | image scan (e.g. Trivy/Grype) | 0 high/critical |
+| CICD-SEC-03 | Pipelines MUST use secretless auth (OIDC/workload identity) or a vault; no plaintext secrets in config/logs (see `secure-coding.md`) | review + secret scan | no embedded/echoed secrets |
+| CICD-SEC-04 | Jobs MUST run with least-privilege, scoped tokens | review job permissions | minimal scopes only |
+| CICD-ART-01 | The SAME artifact MUST be promoted across environments (build once) | artifact digest equal staging→prod | identical digest |
+| CICD-ART-02 | Artifacts MUST be immutable and uniquely versioned (see `semver.md`) | tag = semver/commit SHA | no mutable/overwritten tags |
+| CICD-DEP-01 | Production deploy MUST use a controlled strategy (blue-green/canary/rolling), not in-place restart | inspect deploy job | named strategy present |
+| CICD-DEP-02 | Production environment MUST require approval and/or wait timer | environment protection rules | gated promotion |
+| CICD-ROLL-01 | An automated rollback MUST exist and be exercised | rollback job + drill record | rollback returns to last-good |
+| CICD-ROLL-02 | Deploys MUST gate on a health/smoke check; failure auto-rolls-back | post-deploy check + `on failure` rollback | unhealthy → reverted |
+| CICD-OBS-01 | Deploy events & DORA metrics MUST be emitted (see `observability.md`) | metrics/notification step | event recorded per deploy |
 
-```yaml
-# ═══════════════════════════════════════════════════════════════
-# STEP 1: RED - Write failing validation test first
-# ═══════════════════════════════════════════════════════════════
-
-# test/validate-pipeline.sh
-#!/bin/bash
-set -euo pipefail
-
-echo "Validating GitHub Actions workflow syntax..."
-for workflow in .github/workflows/*.yml; do
-  # Validate YAML syntax
-  python3 -c "import yaml; yaml.safe_load(open('$workflow'))" || {
-    echo "FAIL: Invalid YAML in $workflow"
-    exit 1
-  }
-done
-
-# Validate with actionlint
-actionlint .github/workflows/ci-cd.yml || {
-  echo "FAIL: actionlint found errors"
-  exit 1
-}
-
-# Custom validation: ensure all jobs have timeout
-python3 - <<'PYTHON'
-import yaml, sys
-
-with open('.github/workflows/ci-cd.yml') as f:
-    config = yaml.safe_load(f)
-
-for job_name, job in config.get('jobs', {}).items():
-    if 'timeout-minutes' not in job:
-        print(f"FAIL: Job '{job_name}' missing timeout-minutes")
-        sys.exit(1)
-
-print("PASS: All jobs have timeout-minutes set")
-PYTHON
-
-# Custom validation: ensure security scanning stage exists
-python3 - <<'PYTHON'
-import yaml, sys
-
-with open('.github/workflows/ci-cd.yml') as f:
-    config = yaml.safe_load(f)
-
-jobs = config.get('jobs', {})
-has_security = any('security' in name.lower() or 'scan' in name.lower()
-                    for name in jobs)
-if not has_security:
-    print("FAIL: Pipeline must include a security scanning job")
-    sys.exit(1)
-
-print("PASS: Security scanning job found")
-PYTHON
-
-# Run: bash test/validate-pipeline.sh
-# ❌ FAILS - pipeline definition incomplete
-
-# ═══════════════════════════════════════════════════════════════
-# STEP 2: GREEN - Write minimal pipeline to pass validation
-# ═══════════════════════════════════════════════════════════════
-
-# Add timeout-minutes and security-scan job to ci-cd.yml
-
-# Run: bash test/validate-pipeline.sh
-# ✅ PASSES - all validations pass
-
-# ═══════════════════════════════════════════════════════════════
-# STEP 3: REFACTOR - Optimize caching, parallelism, keep valid
-# ═══════════════════════════════════════════════════════════════
-```
+> **Forbidden**: deploying an artifact different from the one tested (CICD-ART-01); a deploy job with no test/security upstream; `allow_failure: true` on a required security/test gate; long-lived cloud credentials in CI variables; manual, undocumented production steps; mutable image tags reused across releases.
 
 ---
 
-## 2B. Bug Fix Protocol (MANDATORY)
+## 3. Pipeline Stages (owned)
 
-**CRITICAL: Every pipeline bug MUST receive a validation test BEFORE fixing.**
+A canonical pipeline is a directed acyclic graph of stages, ordered cheapest-and-fastest first so failures surface early. The *policy* enforced by each gate lives in its §0 owner; this guide owns the **shape and ordering**.
 
-### Bug Fix Workflow Example
+| # | Stage | Purpose | Gate (see §2) | Owner of the rule |
+|---|-------|---------|---------------|-------------------|
+| 1 | **Validate** | Lint, format, type-check, pipeline-lint | CICD-STRUCT-02 | language guide / `pre-commit.md` |
+| 2 | **Build** | Compile/package **once**; emit the artifact | CICD-ART-01/02 | `dockerfile.md`, language guide |
+| 3 | **Test** | Unit + integration (parallel/sharded) | CICD-GATE-03/04 | `tdd.md` |
+| 4 | **Security scan** | SAST, SCA/dependency audit, image scan, secret scan | CICD-SEC-01/02/03 | `secure-coding.md` |
+| 5 | **Publish** | Push immutable artifact to registry | CICD-ART-02 | `semver.md` |
+| 6 | **Deploy staging** | Promote the published artifact | CICD-ART-01 | `env-config.md` |
+| 7 | **Verify** | Smoke/E2E/DAST against staging | CICD-ROLL-02 | `e2e-testing.md` |
+| 8 | **Deploy production** | Approved, strategy-based rollout | CICD-DEP-01/02 | this guide §5 |
+| 9 | **Observe** | Emit deploy event + DORA metrics; watch alerts | CICD-OBS-01 | `observability.md` |
 
-```bash
-# ═══════════════════════════════════════════════════════════════
-# Bug Report #501: Deploy job runs even when tests fail because
-# needs dependency was missing
-# ═══════════════════════════════════════════════════════════════
+Ordering principles:
+- **Cheap before expensive**: lint (seconds) before unit tests (minutes) before E2E (tens of minutes). Don't pay for an E2E run a lint would have caught.
+- **Fail fast on PRs, full gauntlet on merge**: PR pipelines run validate→test→security for tight feedback; merge/tag pipelines add publish→deploy→verify.
+- **Parallelize independent work**: test sharding and independent scans run concurrently; `needs`/`depends_on` expresses only real data dependencies.
+- **Build once, promote**: stages 6–8 download the stage-5 artifact by digest; they never rebuild.
+- **Trigger model** (push / PR / tag / scheduled / manual dispatch) follows the branching strategy in [`git.md`](guides://git.md).
 
-# STEP 1: Write test that reproduces the bug
-# test/validate-pipeline.sh (add to validation)
-
-echo "Checking deploy job depends on test job - Bug #501..."
-python3 - <<'PYTHON'
-import yaml, sys
-
-with open('.github/workflows/ci-cd.yml') as f:
-    config = yaml.safe_load(f)
-
-deploy_job = config.get('jobs', {}).get('deploy', {})
-needs = deploy_job.get('needs', [])
-if isinstance(needs, str):
-    needs = [needs]
-
-if 'test' not in needs:
-    print("FAIL Bug #501: deploy job MUST depend on test job")
-    sys.exit(1)
-
-print("PASS: deploy job correctly depends on test job")
-PYTHON
-
-# Run: bash test/validate-pipeline.sh
-# ❌ FAILS - deploy job missing "needs: test"
-
-# STEP 2: Fix the bug - Add needs: [build, test] to deploy job
-
-# Run: bash test/validate-pipeline.sh
-# ✅ PASSES - bug fixed, regression prevented forever
-```
+> Platform YAML for these stages: [`github.md`](guides://github.md), [`gitlab.md`](guides://gitlab.md), [`jenkins.md`](guides://jenkins.md), [`azuredevops.md`](guides://azuredevops.md). Don't hand-write provider syntax here — bind these stages to the provider's job/stage primitives.
 
 ---
 
-## 3. Testing in CI (MANDATORY)
+## 4. Quality Gates (owned)
 
-### A. Test Matrix
+A **gate** is a binary pass/fail check that halts promotion. A gate is only meaningful if it is **non-bypassable** (CICD-GATE-02) and **upstream of deploy** (CICD-GATE-01).
 
-```yaml
-jobs:
-  test:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        node: [18, 20, 22]
-        exclude:
-          - os: macos-latest
-            node: 18
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
+Design rules:
+- **Binary, not advisory.** A gate that warns is not a gate. `allow_failure`/`continue-on-error` is permitted only for genuinely informational steps, never for test/security gates.
+- **Cite the owner, don't redefine.** The coverage threshold belongs to `tdd.md`; the CVE severity bar belongs to `secure-coding.md`. The pipeline imports those thresholds — it does not invent new ones here.
+- **Shift left.** The same gates run locally via [`pre-commit.md`](guides://pre-commit.md) so failures are caught before push; CI is the authoritative re-run, not the first run.
+- **One source of truth.** A gate command (e.g. `pytest --cov`) is defined once and called identically locally and in CI; divergence causes "passes locally, fails in CI".
+- **Required vs. optional checks.** Mark gate jobs as *required status checks* on the protected branch so merges are mechanically blocked; non-gate jobs stay optional.
 
-      - name: Setup Node.js ${{ matrix.node }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ matrix.node }}
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run tests
-        run: npm test
-```
-
-### B. Database Testing
-
-```yaml
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
-      redis:
-        image: redis:7
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 6379:6379
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Run migrations
-        run: npm run db:migrate
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test
-
-      - name: Run tests
-        run: npm test
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test
-          REDIS_URL: redis://localhost:6379
-```
-
-### C. E2E Testing
-
-```yaml
-jobs:
-  e2e:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Install Playwright
-        run: npx playwright install --with-deps
-
-      - name: Build application
-        run: npm run build
-
-      - name: Start application
-        run: npm run start &
-        env:
-          NODE_ENV: test
-
-      - name: Wait for application
-        run: npx wait-on http://localhost:3000
-
-      - name: Run E2E tests
-        run: npm run test:e2e
-
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-report
-          path: playwright-report/
-          retention-days: 30
-```
+Standard gate set (each maps to a §2 ID): pipeline-lint → format/lint/type → unit+integration tests → coverage → SAST → dependency/SCA → image scan → secret scan → post-deploy smoke. Add domain gates (a11y, performance budgets, license compliance) by extending §2, never by loosening an existing gate.
 
 ---
 
-## 4. Docker Builds (MANDATORY)
+## 5. Deployment Strategies (owned)
 
-### A. Multi-Stage Build
+Choose a strategy by risk and infrastructure. **Every** strategy MUST pair with a health gate (CICD-ROLL-02) and an automated rollback (CICD-ROLL-01). Concrete orchestrator manifests live in [`kubernetes.md`](guides://kubernetes.md) / [`terraform.md`](guides://terraform.md); the strategy *semantics* are owned here.
 
-```dockerfile
-# Dockerfile
-# Stage 1: Dependencies
-FROM node:20-alpine AS deps
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
+### A. Rolling
+Replace instances in batches, keeping the service available. Configure surge/unavailable so capacity never drops below SLA, and gate each batch on a readiness probe before proceeding.
+- **Use when**: stateless services, backward-compatible changes.
+- **Pros**: no extra capacity; simple. **Cons**: mixed versions serve traffic mid-rollout (requires N/N-1 compatibility); slower to fully revert.
+- **Rollback**: roll the deployment back to the previous revision (`undo`), batch by batch.
 
-# Stage 2: Build
-FROM node:20-alpine AS build
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY . .
-RUN npm run build
+### B. Blue-Green
+Stand up a full **green** environment alongside live **blue**, run smoke tests against green, then switch the router/load-balancer atomically. Keep blue warm for instant fallback.
+- **Use when**: you need instant, atomic cutover and instant rollback; can afford 2× capacity briefly.
+- **Pros**: zero mixed-version window; rollback is a single traffic switch back to blue. **Cons**: double capacity; DB/schema must be compatible across both.
+- **Rollback (CICD-ROLL-01)**: re-point the router to blue; no redeploy needed.
 
-# Stage 3: Production
-FROM node:20-alpine AS production
-WORKDIR /app
+### C. Canary
+Route a small percentage (e.g. 1–10%) of traffic to the new version, **watch real metrics** (error rate, latency, saturation — sourced per `observability.md`) for a bake period, then progressively promote or auto-abort.
+- **Use when**: high-traffic, high-risk changes where real-user signal is the best test.
+- **Pros**: smallest blast radius; data-driven promotion. **Cons**: needs traffic-splitting (service mesh/ingress) and solid metrics; slowest rollout.
+- **Rollback**: shift the canary's traffic weight to 0 and remove the canary; the analysis gate triggers this automatically on threshold breach.
 
-# Security: Don't run as root
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S nodejs -u 1001
-
-# Copy only necessary files
-COPY --from=deps --chown=nodejs:nodejs /app/node_modules ./node_modules
-COPY --from=build --chown=nodejs:nodejs /app/dist ./dist
-COPY --from=build --chown=nodejs:nodejs /app/package.json ./
-
-USER nodejs
-EXPOSE 3000
-ENV NODE_ENV=production
-
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
-
-CMD ["node", "dist/index.js"]
-```
-
-### B. Docker Build Pipeline
-
-```yaml
-jobs:
-  build-image:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=sha,prefix=
-            type=ref,event=branch
-            type=semver,pattern={{version}}
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
-
-      - name: Build and push
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          platforms: linux/amd64,linux/arm64
-
-      - name: Scan image
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ghcr.io/${{ github.repository }}:${{ github.sha }}
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-
-      - name: Upload scan results
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: 'trivy-results.sarif'
-```
+### Cross-cutting deployment rules
+- **Decouple deploy from release** with [`feature-flags.md`](guides://feature-flags.md): ship the artifact dark, then ramp exposure independently of the rollout.
+- **Backward-compatible schema migrations** (expand/contract): deploy code that tolerates both old and new schema before destructive migration, so any strategy can roll back without data loss.
+- **Production promotion is gated** by approval/wait timers (CICD-DEP-02) configured as environment protection rules.
 
 ---
 
-## 5. Deployment Strategies (MANDATORY)
+## 6. Artifact Management (owned)
 
-### A. Blue-Green Deployment
+The artifact (container image, package, binary, bundle) is the unit promoted through the pipeline.
 
-```yaml
-# deploy-blue-green.yml
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Deploy to green environment
-        run: |
-          aws ecs update-service \
-            --cluster production \
-            --service app-green \
-            --task-definition app:${{ github.sha }}
-
-      - name: Wait for deployment
-        run: |
-          aws ecs wait services-stable \
-            --cluster production \
-            --services app-green
-
-      - name: Run smoke tests
-        run: ./scripts/smoke-test.sh https://green.example.com
-
-      - name: Switch traffic to green
-        run: |
-          aws elbv2 modify-listener \
-            --listener-arn ${{ secrets.ALB_LISTENER_ARN }} \
-            --default-actions Type=forward,TargetGroupArn=${{ secrets.GREEN_TG_ARN }}
-
-      - name: Verify production
-        run: ./scripts/smoke-test.sh https://example.com
-
-      - name: Rollback on failure
-        if: failure()
-        run: |
-          aws elbv2 modify-listener \
-            --listener-arn ${{ secrets.ALB_LISTENER_ARN }} \
-            --default-actions Type=forward,TargetGroupArn=${{ secrets.BLUE_TG_ARN }}
-```
-
-### B. Canary Deployment
-
-```yaml
-# deploy-canary.yml
-jobs:
-  deploy-canary:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Deploy canary (10% traffic)
-        run: |
-          kubectl apply -f k8s/canary.yaml
-          kubectl set image deployment/app-canary app=myimage:${{ github.sha }}
-
-      - name: Wait for canary
-        run: kubectl rollout status deployment/app-canary
-
-      - name: Monitor canary metrics
-        run: |
-          # Check error rate for 10 minutes
-          ./scripts/monitor-canary.sh --duration 600 --threshold 0.01
-
-      - name: Promote to production
-        if: success()
-        run: |
-          kubectl set image deployment/app app=myimage:${{ github.sha }}
-          kubectl rollout status deployment/app
-
-      - name: Rollback canary on failure
-        if: failure()
-        run: kubectl rollout undo deployment/app-canary
-```
-
-### C. Rolling Deployment
-
-```yaml
-# Kubernetes rolling update
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: app
-spec:
-  replicas: 4
-  strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
-  selector:
-    matchLabels:
-      app: myapp
-  template:
-    metadata:
-      labels:
-        app: myapp
-    spec:
-      containers:
-        - name: app
-          image: myimage:latest
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8080
-            initialDelaySeconds: 5
-            periodSeconds: 5
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8080
-            initialDelaySeconds: 15
-            periodSeconds: 10
-```
+- **Build once (CICD-ART-01).** Stage 2 produces the artifact; every later environment pulls *that* artifact by content digest. Rebuilding per environment is forbidden — it invalidates the tested→deployed guarantee.
+- **Immutable & uniquely versioned (CICD-ART-02).** Tag by commit SHA and/or semver (see `semver.md`); never overwrite or reuse a tag. `latest` is a convenience pointer, never a deployment target.
+- **Provenance & integrity.** Sign artifacts and generate an SBOM; verify signature before deploy (policy: `secure-coding.md`). Record which commit produced which artifact for auditability.
+- **Retention.** Keep released artifacts per the retention/compliance policy; expire ephemeral PR-build artifacts quickly to control storage.
+- **Cache, don't conflate.** Dependency/build caches speed builds but are NOT artifacts — a cache miss must never change the produced artifact.
 
 ---
 
-## 6. Environment Management (MANDATORY)
+## 7. Rollback (owned)
 
-### A. GitHub Environments
+Rollback is a **first-class, automated, tested** capability — not an emergency improvisation.
 
-```yaml
-jobs:
-  deploy-staging:
-    environment:
-      name: staging
-      url: https://staging.example.com
-    runs-on: ubuntu-latest
-    steps:
-      - name: Deploy
-        run: ./deploy.sh
-        env:
-          API_KEY: ${{ secrets.STAGING_API_KEY }}
-
-  deploy-production:
-    needs: deploy-staging
-    environment:
-      name: production
-      url: https://example.com
-    runs-on: ubuntu-latest
-    steps:
-      - name: Deploy
-        run: ./deploy.sh
-        env:
-          API_KEY: ${{ secrets.PRODUCTION_API_KEY }}
-```
-
-### B. Environment Variables
-
-```yaml
-# Use repository secrets for sensitive data
-# Use environment variables for configuration
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    env:
-      # Non-sensitive configuration
-      NODE_ENV: production
-      LOG_LEVEL: info
-    steps:
-      - name: Deploy
-        run: ./deploy.sh
-        env:
-          # Sensitive data from secrets
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          API_KEY: ${{ secrets.API_KEY }}
-```
+- **Automated (CICD-ROLL-01).** A single action (job/command) returns production to the last-known-good artifact. No manual surgery.
+- **Health-gated (CICD-ROLL-02).** Post-deploy smoke/health checks run automatically; on failure the pipeline triggers rollback (`on: failure`) without human latency.
+- **Tested.** Exercise rollback in staging and in periodic game-days; an untested rollback is a liability. Record the drill (CICD-ROLL-01 gate).
+- **Strategy-native** (§5): blue-green → re-point router to blue; canary → set new-version weight to 0; rolling → revert to the previous revision.
+- **Forward-fix vs. rollback.** Prefer rollback to restore service fast; fix forward only when rollback is impossible (e.g. an already-applied irreversible migration — which is why migrations must be expand/contract, §5).
+- **Data safety.** Because the same artifact and backward-compatible schema are used (§5/§6), rollback does not lose or corrupt data.
 
 ---
 
-## 7. Security Scanning (MANDATORY)
+## 8. Quick Reference
 
-### A. Dependency Scanning
-
-```yaml
-jobs:
-  dependency-scan:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      # NPM audit
-      - name: Run npm audit
-        run: npm audit --audit-level=high
-
-      # Snyk scan
-      - name: Run Snyk
-        uses: snyk/actions/node@master
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        with:
-          args: --severity-threshold=high
-
-      # Dependabot alerts
-      - name: Check Dependabot alerts
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const alerts = await github.rest.dependabot.listAlertsForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'open',
-              severity: 'critical,high'
-            });
-            if (alerts.data.length > 0) {
-              core.setFailed(`Found ${alerts.data.length} critical/high Dependabot alerts`);
-            }
+```text
+PR pipeline:     validate → test → security            (fast feedback, <~10 min)
+Merge/tag:       …→ build(once) → publish → deploy-staging → verify → deploy-prod → observe
+Promote rule:    pull artifact by DIGEST; never rebuild
+Gate rule:       binary, non-bypassable, upstream of deploy
+Deploy rule:     blue-green | canary | rolling  + health gate + auto-rollback
+Secrets:         OIDC/workload identity or vault; never plaintext in config/logs
+Release:         deploy ≠ release — flip a feature flag
 ```
 
-### B. SAST/DAST
-
-```yaml
-jobs:
-  sast:
-    runs-on: ubuntu-latest
-    permissions:
-      security-events: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
-        with:
-          languages: javascript
-
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
-
-  dast:
-    needs: deploy-staging
-    runs-on: ubuntu-latest
-    steps:
-      - name: OWASP ZAP Scan
-        uses: zaproxy/action-full-scan@v0.10.0
-        with:
-          target: 'https://staging.example.com'
-          rules_file_name: '.zap/rules.tsv'
-```
-
----
-
-## 8. Monitoring and Notifications (MANDATORY)
-
-### A. Deployment Notifications
-
-```yaml
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Deploy
-        id: deploy
-        run: ./deploy.sh
-
-      - name: Notify success
-        if: success()
-        uses: slackapi/slack-github-action@v1
-        with:
-          payload: |
-            {
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "✅ *Deployment Successful*\n*Repo:* ${{ github.repository }}\n*Branch:* ${{ github.ref_name }}\n*Commit:* ${{ github.sha }}"
-                  }
-                }
-              ]
-            }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
-
-      - name: Notify failure
-        if: failure()
-        uses: slackapi/slack-github-action@v1
-        with:
-          payload: |
-            {
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "❌ *Deployment Failed*\n*Repo:* ${{ github.repository }}\n*Branch:* ${{ github.ref_name }}\n*Commit:* ${{ github.sha }}\n*Workflow:* ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-                  }
-                }
-              ]
-            }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
-```
-
-### B. Metrics Collection
-
-```yaml
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Record deployment start
-        run: |
-          curl -X POST "${{ secrets.METRICS_ENDPOINT }}/deployments" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "repo": "${{ github.repository }}",
-              "sha": "${{ github.sha }}",
-              "environment": "production",
-              "status": "started"
-            }'
-
-      - name: Deploy
-        run: ./deploy.sh
-
-      - name: Record deployment result
-        if: always()
-        run: |
-          curl -X POST "${{ secrets.METRICS_ENDPOINT }}/deployments" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "repo": "${{ github.repository }}",
-              "sha": "${{ github.sha }}",
-              "environment": "production",
-              "status": "${{ job.status }}"
-            }'
-```
+Provider syntax: `github.md` · `gitlab.md` · `jenkins.md` · `azuredevops.md`.
 
 ---
 
 ## 9. Deployment Checklist
 
-### Pipeline Quality
-- [ ] All tests pass before deploy
-- [ ] Security scans integrated
-- [ ] Build artifacts cached
-- [ ] Parallel jobs where possible
+Generated from §2 — one box per requirement ID. No new requirements here.
 
-### Deployment Safety
-- [ ] Environment approvals configured
-- [ ] Rollback mechanism tested
-- [ ] Health checks implemented
-- [ ] Canary/blue-green strategy
-
-### Security
-- [ ] Secrets properly managed
-- [ ] Least privilege permissions
-- [ ] Image scanning enabled
-- [ ] Dependency updates automated
-
-### Monitoring
-- [ ] Deployment notifications
-- [ ] Metrics collection
-- [ ] Error alerting
-- [ ] Audit logging
+- [ ] CICD-STRUCT-01/02/03 — pipeline is reviewed code, lints clean, every job has a timeout
+- [ ] CICD-GATE-01/02 — deploy depends on test+security; required gates are non-bypassable
+- [ ] CICD-GATE-03/04 — tests pass with 0 skips; coverage gate enforced (see `tdd.md`)
+- [ ] CICD-SEC-01/02 — SAST/SCA and image scan block on high/critical (see `secure-coding.md`)
+- [ ] CICD-SEC-03/04 — secretless auth/vault, no leaked secrets, least-privilege tokens
+- [ ] CICD-ART-01/02 — identical artifact promoted; immutable, uniquely versioned (see `semver.md`)
+- [ ] CICD-DEP-01/02 — controlled deploy strategy; production approval/wait timer
+- [ ] CICD-ROLL-01/02 — automated, tested rollback; health-gated with auto-revert
+- [ ] CICD-OBS-01 — deploy events & DORA metrics emitted (see `observability.md`)
+- [ ] Bound every stage/gate to the chosen platform via the §0 SEE ALSO guide
 
 ---
-
-## 10. Quick Reference
-
-```yaml
-# Common GitHub Actions triggers
-on:
-  push:
-    branches: [main]
-    paths: ['src/**']
-  pull_request:
-    branches: [main]
-  schedule:
-    - cron: '0 2 * * *'
-  workflow_dispatch:
-  release:
-    types: [published]
-
-# Useful actions
-actions/checkout@v4
-actions/setup-node@v4
-actions/upload-artifact@v4
-actions/download-artifact@v4
-docker/build-push-action@v5
-aws-actions/configure-aws-credentials@v4
-
-# Job dependencies
-needs: [build, test]
-
-# Conditions
-if: github.ref == 'refs/heads/main'
-if: success()
-if: failure()
-if: always()
-```
-
----
-
-## 11. Why This Configuration Works
-
-1. **Concurrency Control**: Canceling in-progress runs on the same branch prevents wasted compute and conflicting deployments from stale commits.
-
-2. **Artifact Passing between Stages**: Building once and passing artifacts via upload/download ensures identical binaries are tested and deployed, eliminating "works on CI" inconsistencies.
-
-3. **Parallel Test Sharding**: Splitting test suites across matrix shards reduces feedback time linearly while maintaining full coverage.
-
-4. **Environment-Based Approvals**: GitHub/GitLab environments with required reviewers and wait timers prevent unauthorized production deployments.
-
-5. **Security Scanning in Pipeline**: Running SAST, dependency scans, and container image scans as required pipeline stages catches vulnerabilities before they reach production.
-
-6. **Blue-Green and Canary Strategies**: Gradual traffic shifting with automated rollback on failure metrics limits blast radius to a fraction of users.
-
-7. **Secretless Authentication**: Using OIDC/Workload Identity for cloud provider access eliminates long-lived credentials stored in CI variables.
-
-8. **Deployment Notifications**: Slack/Teams notifications on deploy success and failure ensure the team has immediate visibility into production changes.
-
-9. **Multi-Stage Docker Builds**: Separating build and runtime stages produces minimal production images without build tools, reducing attack surface and pull times.
-
-10. **Pipeline as Code**: Defining pipelines in version-controlled YAML ensures changes are reviewed, auditable, and reproducible across environments.
-
----
-
-**Last Updated:** 2026-01-31
-**Version:** 1.0
-**Maintainer:** DevOps Team
-
-
 **End of CI/CD Pipeline Guidelines**

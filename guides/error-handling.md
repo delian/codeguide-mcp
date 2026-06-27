@@ -1,1310 +1,222 @@
 # Error Handling Guidelines
-Mandatory standards for error handling, exception management, and failure recovery across all programming languages. Language-specific error handling, Result types, Circuit breakers, Retry libraries.
+Canonical, language-agnostic strategy for failure: error vs exception models, Result/Either types, propagation vs recovery, retries/timeouts/circuit-breakers, fail-fast, error taxonomies, and user-facing vs internal errors.
+
+---
+name: error-handling
+title: Error Handling Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: cross-cutting
+tools: [language-agnostic]
+requires: []
+recommends:
+  - logging
+  - observability
+  - secure-coding
+  - tdd
+provides:
+  - error-taxonomy
+  - retry-timeout-policy
+  - result-types
+  - fail-fast
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): this is the **canonical owner** of error-handling strategy. Language guides bind these rules to their syntax; they MUST NOT restate them. Adjacent concerns (logging, metrics, secrets, testing) are referenced, not duplicated.
 
 ---
 
-**Agent Profile**: The Resilience Engineer
-**Role**: Senior Software Engineer & Reliability Specialist
-**Objective**: Generate robust, fault-tolerant code with clear error handling and graceful degradation.
-**Tools**: Language-specific error handling, Result types, Circuit breakers, Retry libraries.
+## 0. Prerequisites & References
+
+This guide owns the **failure model**. It deliberately stops at the boundary of four neighbours and references them instead of repeating their rules.
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`logging.md`](guides://logging.md) — **how** to record errors (structured fields, levels, correlation IDs). This guide decides *which level* an error class maps to; `logging.md` owns the emit mechanics.
+> - [`observability.md`](guides://observability.md) — error **metrics, traces, alerting** (error-rate SLOs, span status, exemplars). This guide names the signals; `observability.md` owns their export.
+> - [`secure-coding.md`](guides://secure-coding.md) — **not leaking sensitive data** in errors (PII, secrets, stack traces, internal topology). This guide mandates the user/internal split; `secure-coding.md` owns the data-classification rules it enforces.
+> - [`tdd.md`](guides://tdd.md) — **testing error paths** and the regression-test-before-fix workflow. This guide requires error paths be tested; `tdd.md` owns the Red-Green-Refactor mechanics.
+
+> 📎 **SEE ALSO:** [`rest.md`](guides://rest.md) · [`grpc.md`](guides://grpc.md) · [`graphql.md`](guides://graphql.md) — protocol-level error/status mapping. [`microservices.md`](guides://microservices.md) — cross-service failure propagation. [`parallelism.md`](guides://parallelism.md) — cancellation & timeout semantics under concurrency.
 
 ---
 
 ## 1. Core Philosophies: ERROR-FIRST
 
-The agent must adhere to the **ERROR-FIRST** principles:
+Cross-cutting failure principles. Language idioms (Go `error`, Rust `Result`, Python exceptions, TS unions) are *bindings* of these — they belong in the language guide, not here.
 
-- **E**xplicit: Make errors visible and explicit, not hidden
-- **R**ecoverable: Provide recovery paths where possible
-- **R**ich Context: Include context for debugging
-- **O**bservable: Log errors appropriately for monitoring
-- **R**eportable: Users get helpful, safe error messages
+- **E**xplicit: Failure modes are part of the API contract — encoded in the type signature (Result/Either, checked return, typed exception), never hidden behind a sentinel `null`, a swallowed `catch`, or a magic `-1`.
+- **R**ecoverable-vs-not: Every error is classified once as *recoverable* (handle/retry/degrade) or *unrecoverable* (fail fast, alert) — see §2's taxonomy. The class, not the call site, decides the response.
+- **R**ich context: Errors carry a stable machine code, a human message, and a preserved cause chain. Context is *added* on the way up (wrapping), never *replaced* (which destroys the root cause).
+- **O**bservable: Every error is countable and traceable. This guide assigns levels/signals; emission is delegated to [`logging.md`](guides://logging.md) and [`observability.md`](guides://observability.md).
+- **R**eportable safely: Users get an actionable, non-technical message + a correlation ID; internals (stack traces, queries, topology, PII) stay server-side per [`secure-coding.md`](guides://secure-coding.md).
 
----
-
-## 2. Error Types Classification (MANDATORY)
-
-### A. Error Categories
-
-```
-RECOVERABLE ERRORS (Handle gracefully)
-├── User Errors
-│   ├── Invalid input
-│   ├── Missing required fields
-│   └── Business rule violations
-├── Expected Failures
-│   ├── Resource not found
-│   ├── Duplicate entries
-│   └── Permission denied
-└── Transient Errors
-    ├── Network timeouts
-    ├── Service unavailable
-    └── Rate limiting
-
-UNRECOVERABLE ERRORS (Fail fast, log, alert)
-├── Programming Errors
-│   ├── Null pointer exceptions
-│   ├── Type errors
-│   └── Assertion failures
-├── Configuration Errors
-│   ├── Missing required config
-│   ├── Invalid credentials
-│   └── Malformed configuration
-└── System Failures
-    ├── Out of memory
-    ├── Disk full
-    └── Hardware failures
-```
-
-### B. Error Response Strategy
-
-```python
-# Define how to handle each category
-
-ERROR_STRATEGY = {
-    # Recoverable - User errors
-    "validation_error": {
-        "log_level": "INFO",
-        "user_message": "Please correct the following errors",
-        "include_details": True,
-        "retry": False,
-    },
-
-    # Recoverable - Expected failures
-    "not_found": {
-        "log_level": "INFO",
-        "user_message": "Resource not found",
-        "include_details": False,
-        "retry": False,
-    },
-
-    # Recoverable - Transient
-    "service_unavailable": {
-        "log_level": "WARN",
-        "user_message": "Service temporarily unavailable. Please try again.",
-        "include_details": False,
-        "retry": True,
-        "max_retries": 3,
-    },
-
-    # Unrecoverable
-    "internal_error": {
-        "log_level": "ERROR",
-        "user_message": "An unexpected error occurred",
-        "include_details": False,  # Never expose internal details
-        "retry": False,
-        "alert": True,
-    },
-}
-```
+**Verified Code**: Agent-generated code MUST satisfy every gate in §2 before delivery.
 
 ---
 
-## 3. Exception Hierarchy (MANDATORY)
+## 2. Requirements (MANDATORY, auditable)
 
-### A. Custom Exception Design
+RFC-2119 keywords. IDs `ERR-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a neighbouring concern cite its owner. Topics: `TAX` taxonomy, `MODEL` error/exception model, `CTX` context/wrapping, `RES` resilience (retry/timeout/breaker), `FAIL` fail-fast, `MSG` user-facing, `LOG`/`OBS`/`SEC`/`TST` delegated.
 
-```python
-# Python exception hierarchy
-class AppError(Exception):
-    """Base exception for all application errors."""
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| ERR-TAX-01 | Every error MUST be classified *recoverable* or *unrecoverable*, and into a stable category (user / not-found / conflict / auth / transient / programming / config / system) with a stable machine code | code review / error-catalog doc | every error type maps to one category + code |
+| ERR-TAX-02 | A single typed error hierarchy (or error enum) per service MUST exist; ad-hoc `throw "string"` / untyped maps MUST NOT be used | grep for raw string/`Error()`/`panic` without type | no untyped raises in domain code |
+| ERR-MODEL-01 | Expected, domain-level failures (not-found, validation, conflict) SHOULD be modelled as values (Result/Either/`(T, error)`), not exceptions, in the language's idiom (binding: language guide) | review | domain APIs return typed failures |
+| ERR-MODEL-02 | Exceptions/panics MUST be reserved for *unexpected* or *unrecoverable* conditions; control flow MUST NOT depend on catching exceptions for the happy-path branch | review | no exceptions-as-control-flow |
+| ERR-MODEL-03 | `catch`/`except`/`recover` MUST be specific; a catch-all MUST re-raise or convert — never silently swallow (no empty `catch {}`, no bare `except:`) | lint (e.g. ruff `BLE`, eslint `no-empty`) / review | 0 silent swallows |
+| ERR-CTX-01 | Errors MUST preserve the original cause when wrapped (`raise … from e`, `%w`, `cause:`); the chain MUST be reconstructable | review / test asserts `__cause__`/`errors.Is` | root cause recoverable |
+| ERR-CTX-02 | `try`/error-scope blocks MUST be narrow — one fallible operation per block — so the failing step is unambiguous | review | no whole-function try blocks |
+| ERR-RES-01 | Every outbound call to an external dependency (network/DB/queue) MUST have an explicit timeout; unbounded waits MUST NOT ship | grep for client calls without timeout/deadline | 100% have timeout |
+| ERR-RES-02 | Retries MUST be applied ONLY to transient errors, MUST be bounded, and MUST use exponential backoff **with jitter**; non-idempotent operations MUST NOT be retried without an idempotency key | review / config | bounded + jitter + idempotent-only |
+| ERR-RES-03 | Calls to a failure-prone external dependency MUST be protected by a circuit breaker (or equivalent bulkhead) so a downstream outage cannot exhaust callers | review / resilience config | breaker present on critical deps |
+| ERR-RES-04 | Degraded paths (fallback/cache/partial response) SHOULD be defined for non-critical dependencies so their failure does not fail the whole request | review | non-critical failures isolated |
+| ERR-FAIL-01 | Unrecoverable startup/config errors MUST fail fast at boot (validate config/secrets on startup) rather than failing lazily mid-request | startup smoke test | bad config → no boot |
+| ERR-FAIL-02 | Programming errors (invariant/assertion violations) MUST NOT be caught-and-continued; they surface, alert, and (where safe) crash-restart | review | no swallowed invariant breaks |
+| ERR-MSG-01 | User-facing messages MUST be actionable and free of internal detail; each error response MUST carry a correlation/request ID; validation errors MUST include field-level detail | response inspection / contract test | safe message + ID |
+| ERR-MSG-02 | Every service MUST have a centralized top-level handler mapping error categories → protocol status (e.g. HTTP 4xx/5xx, gRPC codes) so no raw exception escapes the boundary (binding: `rest.md`/`grpc.md`/`graphql.md`) | integration test hitting error paths | no unmapped 500/leak |
+| ERR-LOG-01 | Every error MUST be logged exactly once, at the level its category dictates (user/expected → INFO, transient/auth → WARN, unexpected/system → ERROR), via structured logging (owner: `logging.md`) | log inspection / review | correct level, no double-log |
+| ERR-OBS-01 | Errors MUST be counted by category and surfaced on traces (span status/error attribute) for SLO/alerting (owner: `observability.md`) | metrics/trace check | error metric + span status present |
+| ERR-SEC-01 | Stack traces, secrets, PII, SQL, and internal topology MUST NOT appear in any user-facing response (owner: `secure-coding.md`) | response scan / review | 0 sensitive leaks |
+| ERR-TST-01 | Error/recovery paths (incl. retry exhaustion, breaker-open, timeout, fallback) MUST be covered by tests; each bug fix MUST add a failing regression test BEFORE the fix (owner: `tdd.md`) | test suite + coverage | error paths covered, exit 0 |
 
-    def __init__(self, message: str, code: str = None, details: dict = None):
-        super().__init__(message)
-        self.message = message
-        self.code = code or self.__class__.__name__
-        self.details = details or {}
-
-    def to_dict(self):
-        return {
-            "error": self.code,
-            "message": self.message,
-            "details": self.details,
-        }
-
-
-# User/Input errors (400)
-class ValidationError(AppError):
-    """Invalid input from user."""
-    pass
-
-
-class InvalidFieldError(ValidationError):
-    """Specific field validation error."""
-
-    def __init__(self, field: str, message: str):
-        super().__init__(message, details={"field": field})
-        self.field = field
-
-
-# Authentication/Authorization errors (401, 403)
-class AuthenticationError(AppError):
-    """User is not authenticated."""
-    pass
-
-
-class AuthorizationError(AppError):
-    """User is not authorized for this action."""
-    pass
-
-
-# Not found errors (404)
-class NotFoundError(AppError):
-    """Resource not found."""
-
-    def __init__(self, resource: str, identifier: str):
-        super().__init__(
-            f"{resource} not found",
-            details={"resource": resource, "id": identifier}
-        )
-
-
-# Conflict errors (409)
-class ConflictError(AppError):
-    """Resource conflict (duplicate, version mismatch)."""
-    pass
-
-
-# External service errors
-class ExternalServiceError(AppError):
-    """Error from external service."""
-
-    def __init__(self, service: str, message: str, original_error: Exception = None):
-        super().__init__(message, details={"service": service})
-        self.service = service
-        self.original_error = original_error
-
-
-# Transient errors (retry possible)
-class TransientError(AppError):
-    """Temporary error that may succeed on retry."""
-
-    def __init__(self, message: str, retry_after: int = None):
-        super().__init__(message)
-        self.retry_after = retry_after
-```
-
-### B. TypeScript Error Classes
-
-```typescript
-// TypeScript error hierarchy
-export abstract class AppError extends Error {
-  abstract readonly code: string;
-  abstract readonly statusCode: number;
-  readonly details: Record<string, unknown>;
-  readonly isOperational: boolean = true;
-
-  constructor(message: string, details: Record<string, unknown> = {}) {
-    super(message);
-    this.name = this.constructor.name;
-    this.details = details;
-    Error.captureStackTrace(this, this.constructor);
-  }
-
-  toJSON() {
-    return {
-      error: this.code,
-      message: this.message,
-      details: this.details,
-    };
-  }
-}
-
-// Validation errors
-export class ValidationError extends AppError {
-  readonly code = 'VALIDATION_ERROR';
-  readonly statusCode = 400;
-}
-
-export class InvalidFieldError extends ValidationError {
-  constructor(field: string, message: string) {
-    super(message, { field });
-  }
-}
-
-// Not found
-export class NotFoundError extends AppError {
-  readonly code = 'NOT_FOUND';
-  readonly statusCode = 404;
-
-  constructor(resource: string, id: string) {
-    super(`${resource} not found`, { resource, id });
-  }
-}
-
-// Authentication
-export class AuthenticationError extends AppError {
-  readonly code = 'UNAUTHENTICATED';
-  readonly statusCode = 401;
-}
-
-// Authorization
-export class AuthorizationError extends AppError {
-  readonly code = 'FORBIDDEN';
-  readonly statusCode = 403;
-}
-
-// External service
-export class ExternalServiceError extends AppError {
-  readonly code = 'EXTERNAL_SERVICE_ERROR';
-  readonly statusCode = 502;
-
-  constructor(service: string, message: string) {
-    super(message, { service });
-  }
-}
-```
+> **Forbidden**: silently swallowing exceptions; catching `Exception`/`Throwable`/bare-`except` then ignoring; using exceptions as happy-path control flow; retrying non-idempotent operations or non-transient errors; retries without a cap, backoff, or jitter; unbounded I/O without a timeout; leaking stack traces/PII/secrets to users; logging the same error at multiple layers; fixing a bug without a regression test first (violates `tdd.md`).
 
 ---
 
-## 4. Result Type Pattern
+## 3. Error Taxonomy (the model this guide owns)
 
-### A. Result Type (Recommended for Go, Rust, Functional)
+Classify once; the class drives level, retry, status, and alert. This replaces per-call-site decisions.
 
-```typescript
-// TypeScript Result type
-type Result<T, E = Error> =
-  | { ok: true; value: T }
-  | { ok: false; error: E };
+```
+RECOVERABLE — handle, possibly retry, degrade gracefully
+├── User errors          → reject with actionable message   (4xx, INFO)
+│     validation · missing field · business-rule violation
+├── Expected failures    → typed value result               (4xx, INFO)
+│     not-found · duplicate/conflict · permission-denied
+└── Transient errors     → retry w/ backoff+jitter, then breaker (5xx/503, WARN)
+      timeout · service-unavailable · rate-limited · network blip
 
-function Ok<T>(value: T): Result<T, never> {
-  return { ok: true, value };
-}
-
-function Err<E>(error: E): Result<never, E> {
-  return { ok: false, error };
-}
-
-// Usage
-function divide(a: number, b: number): Result<number, string> {
-  if (b === 0) {
-    return Err('Division by zero');
-  }
-  return Ok(a / b);
-}
-
-const result = divide(10, 2);
-if (result.ok) {
-  console.log(result.value); // 5
-} else {
-  console.error(result.error);
-}
-
-// Chaining results
-function parseNumber(input: string): Result<number, string> {
-  const num = parseInt(input, 10);
-  if (isNaN(num)) {
-    return Err(`Invalid number: ${input}`);
-  }
-  return Ok(num);
-}
-
-function calculateDiscount(
-  priceStr: string,
-  discountStr: string
-): Result<number, string> {
-  const priceResult = parseNumber(priceStr);
-  if (!priceResult.ok) return priceResult;
-
-  const discountResult = parseNumber(discountStr);
-  if (!discountResult.ok) return discountResult;
-
-  const price = priceResult.value;
-  const discount = discountResult.value;
-
-  if (discount > 100) {
-    return Err('Discount cannot exceed 100%');
-  }
-
-  return Ok(price * (1 - discount / 100));
-}
+UNRECOVERABLE — fail fast, alert, do NOT retry
+├── Programming errors   → surface + crash/restart          (500, ERROR + alert)
+│     null/None deref · type error · broken invariant/assertion
+├── Configuration errors → fail at boot (ERR-FAIL-01)        (boot failure, ERROR)
+│     missing/invalid config · bad credentials · malformed settings
+└── System failures      → fail fast + alert                (500/503, ERROR + alert)
+      OOM · disk full · hardware/host loss
 ```
 
-### B. Go Error Handling
+**Category → response matrix** (the single source of truth each language/protocol guide binds to):
 
-```go
-// Go idiomatic error handling
-package main
+| Category | Recoverable | Retry | Log level (→`logging.md`) | Typical HTTP / gRPC | User detail |
+|---|---|---|---|---|---|
+| Validation / user | yes | no | INFO | 400 / INVALID_ARGUMENT | field-level detail |
+| Authentication | yes | no | WARN | 401 / UNAUTHENTICATED | "log in to continue" |
+| Authorization | yes | no | WARN | 403 / PERMISSION_DENIED | "not permitted" |
+| Not-found | yes | no | INFO | 404 / NOT_FOUND | generic, no detail |
+| Conflict / duplicate | yes | no | INFO | 409 / ALREADY_EXISTS | generic |
+| Rate-limited | yes | yes (respect `Retry-After`) | WARN | 429 / RESOURCE_EXHAUSTED | "try again later" |
+| Transient / dependency down | yes | yes (backoff+jitter, then breaker) | WARN | 503 / UNAVAILABLE | "temporarily unavailable" |
+| Programming / invariant | no | no | ERROR + alert | 500 / INTERNAL | generic + correlation ID |
+| Config / system | no | no | ERROR + alert | 500 / 503 | generic + correlation ID |
 
-import (
-    "errors"
-    "fmt"
-)
-
-// Custom error types
-type ValidationError struct {
-    Field   string
-    Message string
-}
-
-func (e *ValidationError) Error() string {
-    return fmt.Sprintf("validation error on %s: %s", e.Field, e.Message)
-}
-
-type NotFoundError struct {
-    Resource string
-    ID       string
-}
-
-func (e *NotFoundError) Error() string {
-    return fmt.Sprintf("%s with id %s not found", e.Resource, e.ID)
-}
-
-// Sentinel errors
-var (
-    ErrNotFound      = errors.New("not found")
-    ErrUnauthorized  = errors.New("unauthorized")
-    ErrInvalidInput  = errors.New("invalid input")
-)
-
-// Functions return (result, error)
-func GetUser(id string) (*User, error) {
-    user, err := db.FindUser(id)
-    if err != nil {
-        if errors.Is(err, sql.ErrNoRows) {
-            return nil, &NotFoundError{Resource: "User", ID: id}
-        }
-        return nil, fmt.Errorf("failed to get user %s: %w", id, err)
-    }
-    return user, nil
-}
-
-// Error handling with type assertions
-func HandleRequest(userID string) error {
-    user, err := GetUser(userID)
-    if err != nil {
-        var notFound *NotFoundError
-        if errors.As(err, &notFound) {
-            // Handle not found specifically
-            return respondWithStatus(404, "User not found")
-        }
-        // Log and return generic error
-        log.Error("Failed to get user", "error", err)
-        return respondWithStatus(500, "Internal error")
-    }
-
-    // Use user..
-    return nil
-}
-
-// Wrapping errors for context
-func ProcessOrder(orderID string) error {
-    order, err := GetOrder(orderID)
-    if err != nil {
-        return fmt.Errorf("processing order %s: %w", orderID, err)
-    }
-
-    if err := ValidateOrder(order); err != nil {
-        return fmt.Errorf("validating order %s: %w", orderID, err)
-    }
-
-    if err := ChargePayment(order); err != nil {
-        return fmt.Errorf("charging payment for order %s: %w", orderID, err)
-    }
-
-    return nil
-}
-```
-
-### C. Rust Result Pattern
-
-```rust
-// Rust error handling
-use thiserror::Error;
-
-#[derive(Error, Debug)]
-pub enum AppError {
-    #[error("Validation error: {message}")]
-    Validation { field: String, message: String },
-
-    #[error("{resource} with id {id} not found")]
-    NotFound { resource: String, id: String },
-
-    #[error("Unauthorized")]
-    Unauthorized,
-
-    #[error("External service error: {service}")]
-    ExternalService {
-        service: String,
-        #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
-    },
-
-    #[error("Internal error")]
-    Internal(#[from] anyhow::Error),
-}
-
-// Functions return Result<T, E>
-fn get_user(id: &str) -> Result<User, AppError> {
-    let user = db::find_user(id)
-        .map_err(|e| AppError::Internal(e.into()))?;
-
-    user.ok_or_else(|| AppError::NotFound {
-        resource: "User".into(),
-        id: id.into(),
-    })
-}
-
-// Using ? operator for propagation
-fn process_order(order_id: &str) -> Result<(), AppError> {
-    let order = get_order(order_id)?;
-    validate_order(&order)?;
-    charge_payment(&order)?;
-    Ok(())
-}
-
-// Pattern matching on errors
-fn handle_request(user_id: &str) -> HttpResponse {
-    match get_user(user_id) {
-        Ok(user) => HttpResponse::Ok().json(user),
-        Err(AppError::NotFound { .. }) => {
-            HttpResponse::NotFound().body("User not found")
-        }
-        Err(AppError::Unauthorized) => {
-            HttpResponse::Unauthorized().finish()
-        }
-        Err(e) => {
-            log::error!("Internal error: {}", e);
-            HttpResponse::InternalServerError().body("Internal error")
-        }
-    }
-}
-```
+> The hierarchy is a *model*, not a code dump. Each language guide shows its idiomatic encoding: Python typed-exception tree, Go sentinel + `errors.As`, Rust `enum` + `thiserror`, TS discriminated `AppError`. Those bindings live there, not here.
 
 ---
 
-## 5. Try-Catch Patterns (MANDATORY)
+## 4. Error vs. Exception Model — choosing the encoding
 
-### A. Proper Exception Handling
+Two encodings; pick per failure class, not per language fashion.
 
-```python
-# Python try-except patterns
+- **Errors-as-values** (Result/Either/`(T, error)`): expected, recoverable, domain failures. They are part of the signature, force the caller to handle them, and read linearly. Preferred for domain/use-case layers (ERR-MODEL-01). Idioms: Rust `Result`/`?`, Go `(T, error)`, TS discriminated union, Python return-or-raise at the edge.
+- **Exceptions/panics**: unexpected or unrecoverable conditions, and crossing wide layers where threading a value is impractical. Reserve for the abnormal (ERR-MODEL-02). One centralized boundary handler converts them to safe responses (ERR-MSG-02).
 
-# ✅ CORRECT - Specific exceptions, appropriate handling
-def process_user_data(user_id: str, data: dict):
-    try:
-        user = get_user(user_id)
-    except NotFoundError:
-        # Expected case - handle specifically
-        raise ValidationError(f"User {user_id} does not exist")
-    except DatabaseError as e:
-        # Infrastructure error - log and re-raise
-        logger.error("Database error", user_id=user_id, error=str(e))
-        raise
-
-    try:
-        validated_data = validate_data(data)
-    except ValidationError:
-        # Let validation errors propagate (expected)
-        raise
-    except Exception as e:
-        # Unexpected error - wrap with context
-        raise InternalError(f"Unexpected error validating data") from e
-
-    return update_user(user, validated_data)
-
-
-# ❌ WRONG - Bare except, swallowing errors
-def process_data_wrong(data):
-    try:
-        return do_something(data)
-    except:  # Catches everything including KeyboardInterrupt!
-        return None  # Error is swallowed, no logging
-
-
-# ❌ WRONG - Too broad exception handling
-def process_data_also_wrong(data):
-    try:
-        validate(data)
-        process(data)
-        save(data)
-    except Exception as e:
-        # Which operation failed? No context
-        logger.error("Something failed")
-        raise
-```
-
-### B. Exception Handling Scope
-
-```python
-# ✅ CORRECT - Narrow try blocks
-
-def create_order(order_data: dict) -> Order:
-    # Validate (might raise ValidationError)
-    validated = validate_order_data(order_data)
-
-    # Get user (might raise NotFoundError)
-    try:
-        user = get_user(validated['user_id'])
-    except NotFoundError:
-        raise ValidationError("Invalid user_id")
-
-    # Create order (might raise DatabaseError)
-    try:
-        order = Order.create(user=user, **validated)
-    except IntegrityError as e:
-        if "duplicate" in str(e).lower():
-            raise ConflictError("Order already exists")
-        raise
-
-    # Send notification (failure shouldn't fail order creation)
-    try:
-        send_order_notification(order)
-    except NotificationError as e:
-        logger.warning("Failed to send notification", order_id=order.id, error=e)
-        # Don't re-raise - order was created successfully
-
-    return order
-
-
-# ❌ WRONG - Entire function in one try block
-def create_order_wrong(order_data: dict) -> Order:
-    try:
-        validated = validate_order_data(order_data)
-        user = get_user(validated['user_id'])
-        order = Order.create(user=user, **validated)
-        send_order_notification(order)
-        return order
-    except Exception as e:
-        # What failed? We don't know!
-        logger.error("Order creation failed")
-        raise
-```
+Rules that hold regardless of encoding:
+- Never use exceptions for the happy path or normal control flow.
+- A function's failure modes are documented/typed; callers don't guess.
+- At the I/O boundary, convert between models deliberately (e.g. wrap a thrown driver error into a typed domain `Result`), preserving the cause (ERR-CTX-01).
 
 ---
 
-## 6. Error Context and Wrapping
+## 5. Propagation vs. Recovery
 
-### A. Adding Context to Errors
+Decide at each layer: **handle here**, **wrap and propagate**, or **let pass**.
 
-```python
-# Python - Error wrapping with context
-
-class ErrorContext:
-    """Add context to errors while preserving original error."""
-
-    def __init__(self, message: str, **context):
-        self.message = message
-        self.context = context
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_val is not None:
-            # Re-raise with context
-            raise type(exc_val)(
-                f"{self.message}: {exc_val}"
-            ).with_traceback(exc_tb) from exc_val
-        return False
-
-
-# Usage
-def process_user_order(user_id: str, order_id: str):
-    with ErrorContext("Processing user order", user_id=user_id, order_id=order_id):
-        user = get_user(user_id)
-        order = get_order(order_id)
-        return process(user, order)
-
-
-# Alternative: Explicit wrapping
-def get_order_items(order_id: str) -> list:
-    try:
-        order = get_order(order_id)
-    except DatabaseError as e:
-        raise DatabaseError(
-            f"Failed to fetch order {order_id}"
-        ) from e
-
-    try:
-        items = fetch_items(order.item_ids)
-    except DatabaseError as e:
-        raise DatabaseError(
-            f"Failed to fetch items for order {order_id}"
-        ) from e
-
-    return items
-```
-
-### B. Error Chain Preservation
-
-```typescript
-// TypeScript - Preserving error chains
-
-class ChainedError extends Error {
-  readonly cause?: Error;
-
-  constructor(message: string, cause?: Error) {
-    super(message);
-    this.cause = cause;
-    this.name = 'ChainedError';
-
-    // Append cause to stack trace
-    if (cause?.stack) {
-      this.stack += '\nCaused by: ' + cause.stack;
-    }
-  }
-}
-
-// Usage
-async function processPayment(orderId: string): Promise<void> {
-  let order: Order;
-
-  try {
-    order = await getOrder(orderId);
-  } catch (error) {
-    throw new ChainedError(
-      `Failed to fetch order ${orderId} for payment processing`,
-      error as Error
-    );
-  }
-
-  try {
-    await chargeCard(order.paymentMethod, order.total);
-  } catch (error) {
-    throw new ChainedError(
-      `Payment failed for order ${orderId}`,
-      error as Error
-    );
-  }
-}
-```
+- **Recover** only where you have enough context to do something meaningful (translate a not-found into a domain result, supply a fallback, retry a transient). Recovering "everything" everywhere hides bugs.
+- **Wrap & propagate** when you can add context but not resolve: attach the operation + identifiers, preserve the cause, re-raise/return (ERR-CTX-01). Add context *once per layer*, not per line.
+- **Let pass** when the current layer adds nothing — don't catch just to re-raise unchanged.
+- **Narrow scope** (ERR-CTX-02): wrap a single fallible operation so the failing step is unambiguous; never a whole function.
+- **Side-effect isolation**: a failure in a non-essential side effect (e.g. notification after a successful write) is logged and degraded, not propagated to fail the primary operation (ERR-RES-04).
 
 ---
 
-## 7. Retry and Recovery Patterns
+## 6. Resilience: Timeouts, Retries, Circuit Breakers
 
-### A. Retry with Exponential Backoff
+Owned here; language guides bind to a library (e.g. Tenacity, `failsafe`, resilience4j, Polly, Go `context`).
 
-```python
-import time
-import random
-from functools import wraps
-from typing import Callable, TypeVar, Type
+- **Timeouts first (ERR-RES-01)**: every outbound call gets a deadline. Set timeouts to a realistic budget; propagate a *deadline/cancellation* through the call chain (a 30s request must not spawn a 60s downstream wait). An unbounded wait is a latent outage.
+- **Retries (ERR-RES-02)**: transient-only, bounded attempts, **exponential backoff with jitter** (jitter prevents synchronized retry storms / thundering herd). Honour `Retry-After`/rate-limit hints. Retry only idempotent operations, or guard with an idempotency key. Cap total retry time within the caller's deadline. Never retry validation/auth/not-found.
+- **Circuit breakers (ERR-RES-03)**: CLOSED → (failures ≥ threshold) → OPEN (fast-fail, no calls) → after cooldown HALF-OPEN (probe) → CLOSED on success. Protects callers from a stuck dependency and gives it room to recover; combine with retries (breaker wraps the retried call).
+- **Bulkheads & load-shedding**: isolate resource pools per dependency so one slow downstream can't exhaust all threads/connections; shed load (429) instead of queueing unboundedly.
+- **Graceful degradation (ERR-RES-04)**: define fallbacks (cached/stale data, partial response, default) for non-critical dependencies so their failure degrades, not denies.
 
-T = TypeVar('T')
-
-class RetryConfig:
-    def __init__(
-        self,
-        max_attempts: int = 3,
-        base_delay: float = 1.0,
-        max_delay: float = 60.0,
-        exponential_base: float = 2.0,
-        jitter: bool = True,
-        retryable_exceptions: tuple = (Exception,),
-    ):
-        self.max_attempts = max_attempts
-        self.base_delay = base_delay
-        self.max_delay = max_delay
-        self.exponential_base = exponential_base
-        self.jitter = jitter
-        self.retryable_exceptions = retryable_exceptions
-
-
-def retry(config: RetryConfig = None):
-    """Decorator for retry with exponential backoff."""
-    config = config or RetryConfig()
-
-    def decorator(func: Callable[..., T]) -> Callable[..., T]:
-        @wraps(func)
-        def wrapper(*args, **kwargs) -> T:
-            last_exception = None
-
-            for attempt in range(config.max_attempts):
-                try:
-                    return func(*args, **kwargs)
-                except config.retryable_exceptions as e:
-                    last_exception = e
-
-                    if attempt == config.max_attempts - 1:
-                        break
-
-                    # Calculate delay with exponential backoff
-                    delay = min(
-                        config.base_delay * (config.exponential_base ** attempt),
-                        config.max_delay
-                    )
-
-                    # Add jitter
-                    if config.jitter:
-                        delay = delay * (0.5 + random.random())
-
-                    logger.warning(
-                        "Retry attempt",
-                        function=func.__name__,
-                        attempt=attempt + 1,
-                        max_attempts=config.max_attempts,
-                        delay=delay,
-                        error=str(e)
-                    )
-
-                    time.sleep(delay)
-
-            raise last_exception
-
-        return wrapper
-    return decorator
-
-
-# Usage
-@retry(RetryConfig(
-    max_attempts=3,
-    base_delay=1.0,
-    retryable_exceptions=(ConnectionError, TimeoutError)
-))
-def call_external_api(endpoint: str) -> dict:
-    response = requests.get(endpoint, timeout=10)
-    response.raise_for_status()
-    return response.json()
-```
-
-### B. Circuit Breaker Pattern
-
-```python
-import time
-from enum import Enum
-from threading import Lock
-
-class CircuitState(Enum):
-    CLOSED = "closed"      # Normal operation
-    OPEN = "open"          # Failing, reject requests
-    HALF_OPEN = "half_open"  # Testing if service recovered
-
-
-class CircuitBreaker:
-    def __init__(
-        self,
-        failure_threshold: int = 5,
-        recovery_timeout: float = 30.0,
-        expected_exception: type = Exception,
-    ):
-        self.failure_threshold = failure_threshold
-        self.recovery_timeout = recovery_timeout
-        self.expected_exception = expected_exception
-
-        self.state = CircuitState.CLOSED
-        self.failure_count = 0
-        self.last_failure_time = None
-        self.lock = Lock()
-
-    def __call__(self, func):
-        def wrapper(*args, **kwargs):
-            with self.lock:
-                if self.state == CircuitState.OPEN:
-                    if self._should_attempt_reset():
-                        self.state = CircuitState.HALF_OPEN
-                    else:
-                        raise CircuitBreakerOpenError(
-                            f"Circuit breaker is open for {func.__name__}"
-                        )
-
-            try:
-                result = func(*args, **kwargs)
-                self._on_success()
-                return result
-            except self.expected_exception as e:
-                self._on_failure()
-                raise
-
-        return wrapper
-
-    def _should_attempt_reset(self) -> bool:
-        return (
-            self.last_failure_time and
-            time.time() - self.last_failure_time >= self.recovery_timeout
-        )
-
-    def _on_success(self):
-        with self.lock:
-            self.failure_count = 0
-            self.state = CircuitState.CLOSED
-
-    def _on_failure(self):
-        with self.lock:
-            self.failure_count += 1
-            self.last_failure_time = time.time()
-
-            if self.failure_count >= self.failure_threshold:
-                self.state = CircuitState.OPEN
-
-
-# Usage
-payment_circuit = CircuitBreaker(
-    failure_threshold=5,
-    recovery_timeout=30.0,
-    expected_exception=PaymentServiceError
-)
-
-@payment_circuit
-def process_payment(amount: float) -> dict:
-    return payment_service.charge(amount)
-```
+> Concurrency-level cancellation/deadline propagation semantics: see [`parallelism.md`](guides://parallelism.md). Cross-service propagation of these policies: see [`microservices.md`](guides://microservices.md).
 
 ---
 
-## 8. User-Facing Error Messages
+## 7. Fail-Fast
 
-### A. Error Message Guidelines
-
-```python
-# Error message formatting
-
-class ErrorMessage:
-    """User-friendly error messages."""
-
-    # ✅ GOOD - Clear, actionable, no technical details
-    MESSAGES = {
-        "validation_error": "Please correct the errors below and try again.",
-        "not_found": "The requested resource could not be found.",
-        "unauthorized": "Please log in to continue.",
-        "forbidden": "You don't have permission to perform this action.",
-        "rate_limited": "Too many requests. Please wait a moment and try again.",
-        "service_unavailable": "This service is temporarily unavailable. Please try again later.",
-        "internal_error": "Something went wrong. Please try again or contact support.",
-    }
-
-    # ❌ BAD - Technical, scary, unhelpful
-    BAD_MESSAGES = {
-        "validation_error": "JSON schema validation failed at $.user.email",
-        "not_found": "SELECT query returned 0 rows",
-        "internal_error": "NullPointerException at line 234 in UserService.java",
-    }
-
-
-def format_user_error(error: AppError, include_details: bool = False) -> dict:
-    """Format error for API response."""
-    response = {
-        "error": error.code,
-        "message": ErrorMessage.MESSAGES.get(
-            error.code,
-            ErrorMessage.MESSAGES["internal_error"]
-        ),
-    }
-
-    # Include field-level validation errors
-    if isinstance(error, ValidationError) and include_details:
-        response["details"] = error.details
-
-    return response
-```
-
-### B. Field-Level Validation Errors
-
-```python
-# Detailed validation error responses
-
-class ValidationResult:
-    def __init__(self):
-        self.errors: dict[str, list[str]] = {}
-
-    def add_error(self, field: str, message: str):
-        if field not in self.errors:
-            self.errors[field] = []
-        self.errors[field].append(message)
-
-    def is_valid(self) -> bool:
-        return len(self.errors) == 0
-
-    def to_response(self) -> dict:
-        return {
-            "error": "VALIDATION_ERROR",
-            "message": "Please correct the following errors",
-            "details": {
-                "fields": self.errors
-            }
-        }
-
-
-def validate_user_input(data: dict) -> ValidationResult:
-    result = ValidationResult()
-
-    # Email validation
-    if not data.get("email"):
-        result.add_error("email", "Email is required")
-    elif not is_valid_email(data["email"]):
-        result.add_error("email", "Please enter a valid email address")
-
-    # Password validation
-    password = data.get("password", "")
-    if len(password) < 8:
-        result.add_error("password", "Password must be at least 8 characters")
-    if not any(c.isupper() for c in password):
-        result.add_error("password", "Password must contain an uppercase letter")
-    if not any(c.isdigit() for c in password):
-        result.add_error("password", "Password must contain a number")
-
-    return result
-
-
-# API response example
-# {
-#     "error": "VALIDATION_ERROR",
-#     "message": "Please correct the following errors",
-#     "details": {
-#         "fields": {
-#             "email": ["Please enter a valid email address"],
-#             "password": [
-#                 "Password must be at least 8 characters",
-#                 "Password must contain a number"
-#             ]
-#         }
-#     }
-# }
-```
+- **Validate at boot (ERR-FAIL-01)**: config, secrets, schema, and connectivity preconditions are checked at startup; an invalid environment prevents the process from serving — not a 500 on the first request hours later.
+- **Assert invariants (ERR-FAIL-02)**: programming errors (broken invariants, impossible states) must surface loudly — alert and, where safe, crash so a supervisor restarts a clean process. Do not catch-and-continue past corruption; a fast crash beats serving corrupt state.
+- **No defensive over-catching**: don't wrap invariant violations in a generic handler that returns 200/empty — that masks bugs the taxonomy classifies as unrecoverable.
 
 ---
 
-## 9. Logging Errors
+## 8. User-Facing vs. Internal Errors
 
-### A. Error Logging Best Practices
+The split this guide mandates (ERR-MSG-01, ERR-SEC-01); the *data-classification* rules behind "sensitive" are owned by [`secure-coding.md`](guides://secure-coding.md).
 
-**CRITICAL: Stack traces and internal error details MUST NOT be exposed in production responses.**
-
-```python
-import traceback
-from typing import Optional
-import os
-
-def log_error(
-    logger,
-    error: Exception,
-    context: dict = None,
-    include_traceback: bool = None  # Auto-detect based on environment
-):
-    """Log error with appropriate level and context.
-
-    IMPORTANT: Stack traces are logged server-side for debugging but
-    NEVER included in responses sent to users in production.
-    """
-
-    # Auto-detect: only include traceback in non-production logs
-    if include_traceback is None:
-        include_traceback = os.getenv("ENV", "production") != "production"
-
-    log_data = {
-        "error_type": type(error).__name__,
-        "error_message": str(error),
-        **(context or {}),
-    }
-
-    # Add traceback for internal logging only (NEVER in API responses)
-    # In production, tracebacks are logged but not returned to users
-    if include_traceback:
-        log_data["traceback"] = traceback.format_exc()
-
-    # Add cause chain
-    if error.__cause__:
-        log_data["caused_by"] = {
-            "type": type(error.__cause__).__name__,
-            "message": str(error.__cause__),
-        }
-
-    # Determine log level based on error type
-    if isinstance(error, ValidationError):
-        logger.info("Validation error", **log_data)
-    elif isinstance(error, NotFoundError):
-        logger.info("Resource not found", **log_data)
-    elif isinstance(error, AuthorizationError):
-        logger.warning("Authorization denied", **log_data)
-    elif isinstance(error, TransientError):
-        logger.warning("Transient error", **log_data)
-    else:
-        logger.error("Unexpected error", **log_data)
-
-
-# Usage in exception handler
-def handle_request(request):
-    try:
-        return process_request(request)
-    except AppError as e:
-        log_error(logger, e, context={
-            "request_id": request.id,
-            "user_id": request.user_id,
-            "endpoint": request.path,
-        })
-        return error_response(e)
-    except Exception as e:
-        log_error(logger, e, context={
-            "request_id": request.id,
-            "endpoint": request.path,
-        })
-        return error_response(InternalError("Unexpected error"))
-```
+- **User-facing**: actionable, non-technical, stable per category, plus a correlation/request ID for support. Validation errors carry structured field-level detail. Example contract:
+  ```json
+  { "error": "VALIDATION_ERROR",
+    "message": "Please correct the highlighted fields.",
+    "request_id": "req_01H...",
+    "fields": { "email": ["Enter a valid email address."],
+                "password": ["Must be at least 12 characters."] } }
+  ```
+- **Internal**: full type, cause chain, stack trace, parameters — logged server-side per [`logging.md`](guides://logging.md), surfaced as metrics/traces per [`observability.md`](guides://observability.md). NEVER returned to the client.
+- **Boundary handler (ERR-MSG-02)**: a single top-level handler per service maps category → status and serializes the safe shape; no raw exception, stack trace, SQL, secret, PII, or topology hint escapes (ERR-SEC-01). Protocol-specific status mapping: bind to [`rest.md`](guides://rest.md) / [`grpc.md`](guides://grpc.md) / [`graphql.md`](guides://graphql.md).
 
 ---
 
-## 10. Global Error Handlers
+## 9. Logging, Metrics & Testing of Errors (delegated)
 
-### A. Express.js Error Handler
+This guide assigns *what* and *which level/signal*; the *how* lives in the owners — do not restate them.
 
-```typescript
-// Express global error handler
-import { Request, Response, NextFunction } from 'express';
-
-function errorHandler(
-  error: Error,
-  req: Request,
-  res: Response,
-  next: NextFunction
-): void {
-  // Log error
-  logger.error('Request error', {
-    error: error.message,
-    stack: error.stack,
-    requestId: req.id,
-    path: req.path,
-    method: req.method,
-  });
-
-  // Handle known error types
-  if (error instanceof AppError) {
-    res.status(error.statusCode).json(error.toJSON());
-    return;
-  }
-
-  // Handle validation errors (e.g., from Joi, Zod)
-  if (error.name === 'ValidationError') {
-    res.status(400).json({
-      error: 'VALIDATION_ERROR',
-      message: 'Invalid request data',
-      details: error.details,
-    });
-    return;
-  }
-
-  // Unknown error - return generic message
-  res.status(500).json({
-    error: 'INTERNAL_ERROR',
-    message: 'An unexpected error occurred',
-    requestId: req.id, // For support reference
-  });
-}
-
-// Async error wrapper
-const asyncHandler = (fn: Function) => (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  Promise.resolve(fn(req, res, next)).catch(next);
-};
-
-// Usage
-app.get('/users/:id', asyncHandler(async (req, res) => {
-  const user = await getUser(req.params.id);
-  res.json(user);
-}));
-
-app.use(errorHandler);
-```
-
-### B. Python FastAPI Error Handler
-
-```python
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-
-app = FastAPI()
-
-@app.exception_handler(AppError)
-async def app_error_handler(request: Request, error: AppError):
-    log_error(logger, error, context={
-        "request_id": request.state.request_id,
-        "path": request.url.path,
-    })
-
-    return JSONResponse(
-        status_code=get_status_code(error),
-        content=error.to_dict(),
-    )
-
-@app.exception_handler(Exception)
-async def general_error_handler(request: Request, error: Exception):
-    logger.error(
-        "Unhandled exception",
-        error_type=type(error).__name__,
-        error_message=str(error),
-        traceback=traceback.format_exc(),
-        request_id=request.state.request_id,
-        path=request.url.path,
-    )
-
-    return JSONResponse(
-        status_code=500,
-        content={
-            "error": "INTERNAL_ERROR",
-            "message": "An unexpected error occurred",
-            "request_id": request.state.request_id,
-        },
-    )
-
-def get_status_code(error: AppError) -> int:
-    status_codes = {
-        ValidationError: 400,
-        AuthenticationError: 401,
-        AuthorizationError: 403,
-        NotFoundError: 404,
-        ConflictError: 409,
-        TransientError: 503,
-    }
-    for error_type, code in status_codes.items():
-        if isinstance(error, error_type):
-            return code
-    return 500
-```
+- **Logging (ERR-LOG-01 → [`logging.md`](guides://logging.md))**: each error logged once, structured, at the category's level (§3 matrix). Avoid double-logging the same error at multiple layers (log-and-throw is an anti-pattern: log at the boundary *or* propagate, not both).
+- **Observability (ERR-OBS-01 → [`observability.md`](guides://observability.md))**: error count by category feeds error-rate SLOs/alerts; the current span gets error status + attributes; correlation/request ID ties logs↔traces.
+- **Secure data (ERR-SEC-01 → [`secure-coding.md`](guides://secure-coding.md))**: error payloads/logs are scrubbed of secrets/PII per its classification rules.
+- **Testing (ERR-TST-01 → [`tdd.md`](guides://tdd.md))**: error/recovery paths are first-class tests — assert the right typed error, status, retry-exhaustion, breaker-open, timeout, and fallback. Every bug fix begins with a failing regression test (Red-Green-Refactor mechanics owned by `tdd.md`).
 
 ---
 
-## 11. Bug Fix Protocol (MANDATORY)
+## Deployment Checklist
 
-**CRITICAL: Every bug fix MUST have a regression test written BEFORE the fix is applied.**
+Generated from §2 — one box per requirement ID. No new requirements here.
 
-### A. Bug Fix Workflow
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                      Bug Fix Workflow                            │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│   1. Bug Reported/Discovered                                    │
-│      - Document: component, input, expected vs actual behavior  │
-│                          ↓                                       │
-│   2. Write Test that REPRODUCES the Bug                         │
-│      - Create test case with exact failing scenario             │
-│      - Test MUST FAIL (proves bug exists)                       │
-│                          ↓                                       │
-│   3. Verify Test Fails for the RIGHT Reason                     │
-│      - Confirm error matches reported bug                        │
-│      - Not a different/unrelated failure                         │
-│                          ↓                                       │
-│   4. Fix the Bug                                                │
-│      - Apply minimal fix to address the issue                   │
-│                          ↓                                       │
-│   5. Verify Test Now PASSES                                     │
-│      - Bug is fixed                                              │
-│      - All other tests still pass (no regressions)              │
-│                          ↓                                       │
-│   6. Document in Test Comments                                  │
-│      - Include bug/ticket ID                                     │
-│      - Describe original issue                                   │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### B. Example Regression Test
-
-```python
-# tests/regression/test_bug_123_null_user_error.py
-
-def test_bug_123_handle_null_user_gracefully():
-    """
-    Bug #123: System crashed with NullPointerException when user was None.
-
-    Expected: Return NotFoundError with helpful message
-    Actual: Unhandled exception crashed the request
-
-    Regression test: Ensures null user case is handled properly.
-    """
-    # Arrange
-    user_id = "nonexistent-user-id-12345678901234567890"
-
-    # Act
-    result = user_service.get_user(user_id)
-
-    # Assert - should return proper error, not crash
-    assert result.is_error()
-    assert result.error_code == "NOT_FOUND"
-    assert "user" in result.error_message.lower()
-```
-
-**Cross-reference:** See rest.md Section 2B and secure-coding.md Section 2 for TDD protocols.
+- [ ] ERR-TAX-01/02 — every error classified + stable code; single typed hierarchy, no untyped raises
+- [ ] ERR-MODEL-01/02/03 — expected failures as values; exceptions only for the abnormal; no silent swallow
+- [ ] ERR-CTX-01/02 — cause chain preserved; try-scopes narrow
+- [ ] ERR-RES-01 — every external call has a timeout/deadline
+- [ ] ERR-RES-02 — retries bounded, backoff+jitter, transient + idempotent only
+- [ ] ERR-RES-03 — circuit breaker on critical dependencies
+- [ ] ERR-RES-04 — graceful degradation / fallback for non-critical deps
+- [ ] ERR-FAIL-01/02 — fail-fast on bad config at boot; invariant breaks not swallowed
+- [ ] ERR-MSG-01/02 — safe actionable messages + correlation ID; centralized boundary mapping
+- [ ] ERR-LOG-01 — logged once at correct level (see `logging.md`)
+- [ ] ERR-OBS-01 — error metrics + span status (see `observability.md`)
+- [ ] ERR-SEC-01 — no stack traces/PII/secrets/topology leaked (see `secure-coding.md`)
+- [ ] ERR-TST-01 — error paths tested; bug fixes have a regression test first (see `tdd.md`)
+- [ ] Agent ran the project's gate commands and documented any fixes
 
 ---
-
-## 12. Deployment Checklist
-
-### Error Handling
-- [ ] Custom exception hierarchy defined
-- [ ] All exceptions have error codes
-- [ ] Error context is preserved (wrapping)
-- [ ] Specific exceptions caught (not bare except)
-- [ ] Bug fixes have regression tests (written BEFORE fix)
-
-### User Experience
-- [ ] User-facing messages are helpful
-- [ ] No technical details exposed to users
-- [ ] Validation errors include field-level details
-- [ ] Error responses include request ID
-
-### Logging
-- [ ] All errors are logged
-- [ ] Log level appropriate to error type
-- [ ] Context included (request ID, user ID, etc.)
-- [ ] No sensitive data in error logs
-
-### Recovery
-- [ ] Retry logic for transient errors
-- [ ] Circuit breakers for external services
-- [ ] Graceful degradation implemented
-- [ ] Timeout handling in place
-
----
-
-## 12. Quick Reference
-
-```python
-# Error type decision tree
-"""
-Is it user's fault (bad input)?
-  → ValidationError (400)
-
-Is user not logged in?
-  → AuthenticationError (401)
-
-Is user not allowed?
-  → AuthorizationError (403)
-
-Does resource not exist?
-  → NotFoundError (404)
-
-Is there a conflict (duplicate)?
-  → ConflictError (409)
-
-Is it a temporary issue?
-  → TransientError (503) + retry
-
-Is it our fault?
-  → InternalError (500) + alert
-"""
-
-# Exception handling rules
-"""
-1. Catch specific exceptions
-2. Keep try blocks narrow
-3. Add context when re-raising
-4. Log at appropriate level
-5. Never swallow exceptions silently
-6. User messages: helpful, not technical
-7. Always preserve error chain
-"""
-```
-
----
-
-## 13. Why This Configuration Works
-
-- **Typed exception hierarchies enable precise handling**: A structured hierarchy (ValidationError, NotFoundError, TransientError, etc.) allows each layer of the application to catch and respond to specific failure modes rather than treating all errors the same, resulting in better user experiences and clearer debugging.
-- **Error context preservation accelerates debugging**: Wrapping errors with contextual information as they propagate up the call stack means engineers can reconstruct the full chain of events from a single error log entry, dramatically reducing mean time to resolution.
-- **Separation of user and internal messages prevents information leaks**: Maintaining distinct user-facing messages (helpful, non-technical) and internal log messages (detailed, with stack traces) ensures users get actionable guidance while attackers receive no exploitable system details.
-- **Retry and circuit breaker patterns build resilience**: Automatic retry with exponential backoff handles transient failures gracefully, while circuit breakers prevent cascading failures across services. Together they make distributed systems self-healing without manual intervention.
-- **Bug-fix-first testing prevents regressions**: Requiring a failing regression test before applying any fix ensures the bug is reproducible, the fix is verifiable, and the same defect cannot silently reappear in future changes.
-
----
-
-**Last Updated:** 2026-01-31
-**Version:** 1.0
-**Maintainer:** Engineering Team
-
-
 **End of Error Handling Guidelines**

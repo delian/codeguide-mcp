@@ -1,1634 +1,344 @@
 # End-to-End Testing Guidelines
-Mandatory standards for end-to-end (E2E) testing using modern testing frameworks like Playwright, Cypress, and Selenium.
+Mandatory standards for the end-to-end (UI) test tier: Playwright/Cypress patterns, page objects, stable locators, fixtures, flake elimination, visual regression, and running e2e in CI. Playwright 1.50+, Cypress 14+, @axe-core/playwright.
+
+---
+name: e2e-testing
+title: End-to-End Testing Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: cross-cutting
+tools: [playwright@1.50, cypress@14, "@axe-core/playwright", percy]
+requires: []
+recommends:
+  - tdd
+  - ci-cd
+  - accessibility
+  - observability
+provides:
+  - e2e-patterns
+  - page-objects
+  - flake-elimination
+  - visual-regression
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide owns the **e2e / UI tier only** — the unit and integration tiers below it belong to [`tdd.md`](guides://tdd.md).
 
 ---
 
-**Agent Profile**: The E2E Testing Specialist
-**Role**: Senior QA Engineer & Test Automation Architect
-**Objective**: Generate reliable, maintainable, and fast end-to-end tests that validate complete user workflows.
-**Tools**: Playwright, Cypress, Selenium WebDriver, TestCafe, Puppeteer.
+## 0. Prerequisites & References
+
+This guide has **no hard prerequisites**, but it sits on top of several owners. Fetch them when the task touches their concern; this guide assumes their rules and does not repeat them.
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`tdd.md`](guides://tdd.md) — the test pyramid and the unit/integration tiers **below** e2e, Red-Green-Refactor, regression-test-before-fix, coverage. *(This guide owns only the top tier.)*
+> - [`ci-cd.md`](guides://ci-cd.md) — pipeline stages, gating, artifact retention, parallelism policy. *(e2e binding: where the e2e job runs and what gates the merge.)*
+> - [`accessibility.md`](guides://accessibility.md) — WCAG scope, a11y rules and severity. *(e2e binding: assert with `@axe-core/playwright` in the e2e suite.)*
+> - [`observability.md`](guides://observability.md) — metrics/tracing policy. *(e2e binding: emit flake-rate and duration metrics from the runner.)*
+
+> 📎 **SEE ALSO:** [`code-review.md`](guides://code-review.md) · [`env-config.md`](guides://env-config.md) — base URLs / credentials come from config, never hardcoded. UI-level behaviour and component conventions live in the relevant framework guide (e.g. [`reactjs.md`](guides://reactjs.md), [`nextjs.md`](guides://nextjs.md), [`ui.md`](guides://ui.md)).
 
 ---
 
 ## 1. Core Philosophies: E2E-FIRST
 
-The agent must adhere to the **E2E-FIRST** principles:
+E2E-specific principles only. The pyramid itself, coverage, and regression-before-fix are owned by [`tdd.md`](guides://tdd.md) — not restated here.
 
-- **E**ssential Paths Only: Test critical user journeys, not every possible path
-- **2**-Layer Strategy: Combine E2E with unit/integration tests (test pyramid)
-- **E**xplicit Waits: Never use arbitrary sleeps; wait for specific conditions
-- **F**lake-Free: Eliminate test flakiness through proper synchronization
-- **I**solated Tests: Each test should be independent and repeatable
-- **R**ealistic Data: Use production-like test data and environments
-- **S**electors Strategy: Use stable, semantic selectors (data-testid preferred)
-- **T**imed Appropriately: Run E2E in CI but optimize for speed
+- **E**ssential paths only: e2e is the **smallest, slowest** tier — test critical user journeys end-to-end; push edge cases down to unit/integration (see `tdd.md`).
+- **2**-way state setup: arrange state through the **fastest reliable door** (API/DB seed), assert through the UI. Never drive 6 screens to reach the screen under test.
+- **E**xplicit waits: assert on conditions (web-first auto-waiting assertions), never fixed `sleep`/`waitForTimeout`.
+- **F**lake-free: a test that needs a retry to pass is a **defect**, not noise — quarantine and fix it (see §7).
+- **I**solated & idempotent: each test creates and tears down its own data; tests pass in any order, in parallel, run twice.
+- **R**esilient locators: user-facing role/label/text first; `data-testid` for ambiguous nodes; CSS/XPath as last resort (see §4).
+- **S**ealed inputs: freeze clock, control randomness, stub third-party calls — the SUT is deterministic for a given input.
+- **T**iered in CI: e2e runs on every PR, sharded and headless, gating merge (see `ci-cd.md`).
+
+**Verified Code**: agent-generated e2e suites MUST pass every gate in §2 before delivery.
 
 ---
 
-## 2. Framework Selection
+## 2. Requirements (MANDATORY, auditable)
 
-### A. Playwright (Recommended)
+RFC-2119 keywords. IDs `E2E-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a shared rule cite its owner.
+
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| E2E-TST-01 | E2E suite MUST be green with **0 retries needed** to pass | `npx playwright test` (CI: `retries=0` audit run) | exit 0, no test passed-on-retry |
+| E2E-TST-02 | Each user-facing bug MUST get a failing e2e/regression test before the fix (see `tdd.md`) | run new spec on old build | failing→passing |
+| E2E-SCOPE-01 | E2E MUST cover only critical journeys; non-journey logic MUST live in lower tiers (see `tdd.md`) | review test inventory | no edge cases at e2e tier |
+| E2E-WAIT-01 | Tests MUST NOT use arbitrary sleeps (`waitForTimeout`, `cy.wait(<ms>)`) | `grep -rE "waitForTimeout|cy\.wait\([0-9]" e2e/` | 0 matches |
+| E2E-LOC-01 | Locators MUST be role/label/text or `data-testid`; raw XPath MUST NOT be used | `grep -rE "xpath=|//" e2e/ pages/` | 0 matches |
+| E2E-POM-01 | Page/screen interactions MUST be encapsulated in page objects/fixtures, not inlined per spec | review | no raw selectors in `*.spec.*` |
+| E2E-ISO-01 | Each test MUST set up & tear down its own data; suite MUST pass in parallel and when re-run | `npx playwright test --workers=4 --repeat-each=2` | exit 0 |
+| E2E-CFG-01 | Base URL & credentials MUST come from config/env, never hardcoded (see `env-config.md`) | `grep -rE "https?://(localhost|[0-9])" e2e/` | only via `baseURL`/env |
+| E2E-VIS-01 | Visual baselines (if used) MUST be deterministic: clock frozen, animations disabled, dynamic content masked | review config + run twice | byte-stable diff |
+| E2E-A11Y-01 | Critical pages SHOULD assert 0 a11y violations in e2e (see `accessibility.md`) | `npx playwright test a11y` | `violations == []` |
+| E2E-CI-01 | E2E suite MUST run on every PR, sharded, headless, gating merge (see `ci-cd.md`) | CI config review | required check present |
+| E2E-CI-02 | Failure artifacts (trace, video, screenshot) MUST be retained on failure | inspect pipeline artifacts | uploaded on failure |
+
+> **Forbidden**: shipping a flaky test masked by retries (violates E2E-TST-01), arbitrary sleeps, XPath locators, tests that depend on execution order or leftover data, hardcoded URLs/credentials, or driving the full UI to set up state that an API/DB seed can establish.
+
+---
+
+## 3. Verification Protocol
+
+Run, in order, before presenting an e2e change. Fix → re-run until every gate is green.
+
+```bash
+grep -rE "waitForTimeout|cy\.wait\([0-9]" e2e/ pages/   # E2E-WAIT-01
+grep -rE "xpath=|//[a-z]" e2e/ pages/                    # E2E-LOC-01
+npx playwright test --workers=4 --repeat-each=2          # E2E-ISO-01 (order/parallel/idempotency)
+npx playwright test --retries=0                          # E2E-TST-01 (no hidden flake)
+npx playwright test a11y                                 # E2E-A11Y-01 (see accessibility.md)
+```
+
+The *why* behind the pyramid, coverage, CI gating, and a11y severity lives in their §0 owners; do not re-derive it here.
+
+---
+
+## 4. Locator Strategy
+
+The single biggest lever on suite stability. Prefer locators a user (and a screen reader) understands; they survive refactors and double as accessibility coverage.
 
 ```typescript
-// playwright.config.ts
-import { defineConfig, devices } from '@playwright/test';
+// Priority — most to least preferred:
+page.getByRole('button', { name: 'Submit' });   // 1. role + accessible name (also a11y signal)
+page.getByLabel('Email address');                // 1. form controls by label
+page.getByText('Welcome back');                  // 2. stable, unique visible text
+page.getByTestId('order-row');                   // 3. data-testid for ambiguous/dynamic nodes
+page.locator('.order-table tbody tr');           // 4. CSS — only when nothing semantic fits
+// XPath — FORBIDDEN (E2E-LOC-01): brittle, opaque, breaks on any DOM reshuffle
+```
 
+Rules:
+- Scope locators to a container (`row.getByRole(...)`) instead of global, brittle CSS chains.
+- `data-testid` is a contract: add it in the component, keep it stable, never reuse it for styling. Configure `testIdAttribute` once in config.
+- Never select on auto-generated/hashed classes (`.css-1a2b3c`) or DOM position (`nth-child`).
+- Role-first locators give you a11y coverage for free — see `accessibility.md` for the assertion policy.
+
+---
+
+## 5. Page-Object Model & Fixtures
+
+Encapsulate *where things are* and *how to act* so specs read as user intent. Specs assert; page objects locate and interact (E2E-POM-01).
+
+```typescript
+// pages/base.page.ts — shared chrome
+import { Page, Locator, expect } from '@playwright/test';
+
+export abstract class BasePage {
+  protected readonly toast: Locator;
+  constructor(protected readonly page: Page) {
+    this.toast = page.getByTestId('toast');
+  }
+  abstract readonly path: string;
+  async goto() { await this.page.goto(this.path); }
+  async expectToast(msg: string) { await expect(this.toast).toContainText(msg); }
+}
+
+// pages/login.page.ts
+import { Page, expect } from '@playwright/test';
+import { BasePage } from './base.page';
+
+export class LoginPage extends BasePage {
+  readonly path = '/login';
+  private email = this.page.getByLabel('Email address');
+  private password = this.page.getByLabel('Password');
+  private submit = this.page.getByRole('button', { name: 'Log in' });
+
+  async login(email: string, password: string) {
+    await this.email.fill(email);
+    await this.password.fill(password);
+    await this.submit.click();
+  }
+  async expectError(msg: string) {
+    await expect(this.page.getByRole('alert')).toContainText(msg);
+  }
+}
+```
+
+Promote page objects to **custom fixtures** so specs declare what they need and get pre-wired, auto-torn-down objects:
+
+```typescript
+// fixtures.ts
+import { test as base } from '@playwright/test';
+import { LoginPage } from './pages/login.page';
+
+export const test = base.extend<{ loginPage: LoginPage }>({
+  loginPage: async ({ page }, use) => { await use(new LoginPage(page)); },
+});
+export { expect } from '@playwright/test';
+```
+
+Conventions: one page object per screen/significant component; expose intent methods (`login`, `addToCart`), not raw clicks; return the next page object on navigation; keep assertions thin (`expectError`) but let specs own the *what*. Suggested layout:
+
+```
+e2e/
+├── fixtures.ts            # custom test fixtures (page objects, seeded data, auth)
+├── pages/                 # page objects (one per screen/component)
+├── support/               # API/DB seed + teardown helpers
+└── specs/<journey>/*.spec.ts
+```
+
+---
+
+## 6. Test Data & State Setup
+
+Arrange state through the fastest reliable door; assert through the UI (E2E-ISO-01).
+
+- **Seed via API/DB, assert via UI.** Building state by clicking through screens is slow and flaky.
+- **Own your data.** Each test creates uniquely-keyed data (e.g. `user+${uuid}@test.com`) and tears it down — no shared mutable fixtures, no reliance on a previous test.
+- **Static fixtures** (`fixtures/*.json|.ts`) are for read-only reference data only; anything a test mutates must be created per-test.
+- **Authenticate once, reuse session.** Save storage state in setup and reuse it instead of logging in through the form every test.
+
+```typescript
+// auth.setup.ts — runs once, persists session
+import { test as setup } from '@playwright/test';
+setup('authenticate', async ({ page }) => {
+  await page.goto('/login');
+  await page.getByLabel('Email address').fill(process.env.E2E_USER!);     // from env (E2E-CFG-01)
+  await page.getByLabel('Password').fill(process.env.E2E_PASS!);
+  await page.getByRole('button', { name: 'Log in' }).click();
+  await page.context().storageState({ path: '.auth/user.json' });
+});
+
+// stub third-party / unstable upstreams at the network boundary
+test('handles upstream 500 gracefully', async ({ page }) => {
+  await page.route('**/api/users', r => r.fulfill({ status: 500, body: '{}' }));
+  await page.goto('/users');
+  await expect(page.getByRole('alert')).toContainText('Unable to load users');
+});
+```
+
+Cypress equivalent: `cy.session()` to cache login; `cy.intercept()` to stub; seed via `cy.task()` hitting the DB.
+
+---
+
+## 7. Flake Elimination
+
+A test that passes only on retry is a defect (E2E-TST-01). Retries are a *detector and safety net for CI*, never a fix. Root-cause every flake; quarantine (skip + ticket) only to keep the suite green while you fix it.
+
+| Root cause | Fix |
+|---|---|
+| Asserting before data lands | Wait on the populating response/state, then assert: `await page.waitForResponse(r => r.url().includes('/api/dashboard'))`. Lean on web-first auto-retrying assertions (`await expect(loc).toHaveText(...)`). |
+| Arbitrary `sleep` | Delete it. Wait for a condition (`toBeVisible`, `toHaveURL`), never a duration (E2E-WAIT-01). |
+| Overlay/cookie banner intercepts click | Dismiss the overlay first; never paper over with `{ force: true }`. |
+| Animations/transitions mid-action | Disable globally in tests: inject CSS zeroing `animation/transition-duration`. |
+| Clock/`Date`/timezone drift | Freeze time: `await page.clock.setFixedTime(new Date('2026-01-15T10:00:00Z'))`. |
+| Shared/order-dependent state | Per-test setup + teardown; run with `--repeat-each` and shuffled order to prove isolation. |
+| Element below the fold / virtualized | `scrollIntoViewIfNeeded()` before interacting. |
+| Animation/network race on navigation | Wait for the specific network/DOM signal, not `networkidle` as a blanket crutch. |
+
+Track flake rate as a metric (see `observability.md`): emit per-test pass/fail/retry counts from a custom reporter and alert when a test both passes and fails across runs. Quarantined tests MUST carry a ticket reference and a deadline.
+
+---
+
+## 8. Visual Regression
+
+Pixel comparison catches unintended UI changes that functional assertions miss. It is only viable if baselines are **deterministic** (E2E-VIS-01) — otherwise every run is noise.
+
+```typescript
+test.beforeEach(async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-06-15T10:00:00Z'));   // freeze time
+  await page.addStyleTag({ content: `*,*::before,*::after{
+    animation-duration:0s!important;transition-duration:0s!important;}` });
+});
+
+test('dashboard matches baseline', async ({ page }) => {
+  await page.route('**/api/dashboard/**', r => r.fulfill({           // pin dynamic data
+    status: 200, body: JSON.stringify({ users: 1234, orders: 567 }) }));
+  await page.goto('/dashboard');
+  await page.getByTestId('live-timestamp').evaluate(el => el.remove()); // mask volatile nodes
+  await expect(page).toHaveScreenshot('dashboard.png', {
+    fullPage: true, maxDiffPixelRatio: 0.01, animations: 'disabled',
+  });
+});
+```
+
+Rules: generate baselines in the **same environment as CI** (font rendering differs across OSes — run on the Playwright container image or upload from CI). Review baseline diffs in PRs like code. For cross-browser/cross-width coverage at scale, offload to a hosted differ (Percy: `percySnapshot(page, 'Dashboard', { widths: [375, 768, 1280] })`) instead of committing thousands of PNGs. Update intentionally with `--update-snapshots`, never blindly.
+
+---
+
+## 9. Running E2E in CI
+
+The *pipeline policy* (stages, required checks, retention) is owned by [`ci-cd.md`](guides://ci-cd.md). E2E binding (E2E-CI-01/02):
+
+- **Headless, on every PR**, as a required check gating merge.
+- **Shard** across parallel jobs; merge blob reports into one HTML report.
+- **CI retries = a flake detector, not a pass.** Keep `retries: process.env.CI ? 2 : 0`, but also run an audit lane at `--retries=0` to enforce E2E-TST-01; surface any passed-on-retry as a failure signal.
+- **Always upload trace + video + screenshot on failure** — these are how you debug a CI-only failure.
+- Use the official `mcr.microsoft.com/playwright:v1.50.0-noble` image to pin browser + OS for stable visual baselines.
+
+```yaml
+# .github/workflows/e2e.yml — minimal binding; full pipeline policy in ci-cd.md
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    strategy: { fail-fast: false, matrix: { shard: [1, 2, 3, 4] } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: 'npm' }
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test --shard=${{ matrix.shard }}/4
+        env: { CI: 'true', BASE_URL: 'http://localhost:3000' }   # config, not hardcoded
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: blob-${{ matrix.shard }}, path: blob-report/, retention-days: 7 }
+```
+
+```typescript
+// playwright.config.ts — the load-bearing CI knobs
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
-  forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
-  reporter: [
-    ['html'],
-    ['junit', { outputFile: 'results/junit.xml' }]
-  ],
+  forbidOnly: !!process.env.CI,          // no .only sneaks into CI
+  retries: process.env.CI ? 2 : 0,       // detector + audit lane enforces TST-01
+  reporter: process.env.CI ? [['blob'], ['github']] : [['html']],
   use: {
-    baseURL: process.env.BASE_URL || 'http://localhost:3000',
+    baseURL: process.env.BASE_URL,       // E2E-CFG-01: from env
+    testIdAttribute: 'data-testid',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
   },
-  projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
-    { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
-    { name: 'webkit', use: { ...devices['Desktop Safari'] } },
-    { name: 'mobile', use: { ...devices['iPhone 13'] } },
-  ],
-  webServer: {
-    command: 'npm run start',
-    url: 'http://localhost:3000',
-    reuseExistingServer: !process.env.CI,
-  },
-});
-```
-
-### B. Cypress
-
-```javascript
-// cypress.config.js
-const { defineConfig } = require('cypress');
-
-module.exports = defineConfig({
-  e2e: {
-    baseUrl: 'http://localhost:3000',
-    supportFile: 'cypress/support/e2e.js',
-    specPattern: 'cypress/e2e/**/*.cy.{js,jsx,ts,tsx}',
-    viewportWidth: 1280,
-    viewportHeight: 720,
-    video: true,
-    screenshotOnRunFailure: true,
-    retries: {
-      runMode: 2,
-      openMode: 0,
-    },
-    env: {
-      apiUrl: 'http://localhost:3001/api',
-    },
-  },
-});
-```
-
-### C. Selenium WebDriver
-
-```python
-# conftest.py
-import pytest
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-
-@pytest.fixture(scope="session")
-def driver():
-    options = Options()
-    options.add_argument("--headless")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--window-size=1920,1080")
-
-    driver = webdriver.Chrome(options=options)
-    driver.implicitly_wait(10)
-    yield driver
-    driver.quit()
-```
-
----
-
-## 3. Test Structure (MANDATORY)
-
-### A. Page Object Model
-
-```typescript
-// pages/login.page.ts
-import { Page, Locator, expect } from '@playwright/test';
-
-export class LoginPage {
-  readonly page: Page;
-  readonly emailInput: Locator;
-  readonly passwordInput: Locator;
-  readonly submitButton: Locator;
-  readonly errorMessage: Locator;
-
-  constructor(page: Page) {
-    this.page = page;
-    this.emailInput = page.getByTestId('email-input');
-    this.passwordInput = page.getByTestId('password-input');
-    this.submitButton = page.getByTestId('login-submit');
-    this.errorMessage = page.getByTestId('error-message');
-  }
-
-  async goto() {
-    await this.page.goto('/login');
-  }
-
-  async login(email: string, password: string) {
-    await this.emailInput.fill(email);
-    await this.passwordInput.fill(password);
-    await this.submitButton.click();
-  }
-
-  async expectError(message: string) {
-    await expect(this.errorMessage).toContainText(message);
-  }
-
-  async expectLoggedIn() {
-    await expect(this.page).toHaveURL(/.*dashboard/);
-  }
-}
-```
-
-### B. Test Organization
-
-```
-e2e/
-├── fixtures/
-│   ├── users.json
-│   └── test-data.ts
-├── pages/
-│   ├── login.page.ts
-│   ├── dashboard.page.ts
-│   └── checkout.page.ts
-├── support/
-│   ├── commands.ts
-│   └── helpers.ts
-├── specs/
-│   ├── auth/
-│   │   ├── login.spec.ts
-│   │   └── logout.spec.ts
-│   ├── checkout/
-│   │   └── purchase.spec.ts
-│   └── user/
-│       └── profile.spec.ts
-└── playwright.config.ts
-```
-
----
-
-## 4. Selector Strategy (MANDATORY)
-
-### A. Selector Priority
-
-```typescript
-// Priority order (most to least preferred):
-
-// 1. data-testid (PREFERRED - most stable)
-page.getByTestId('submit-button')
-
-// 2. Accessibility roles and labels
-page.getByRole('button', { name: 'Submit' })
-page.getByLabel('Email address')
-page.getByPlaceholder('Enter your email')
-
-// 3. Text content (for static, unique text)
-page.getByText('Welcome back')
-
-// 4. CSS selectors (when necessary)
-page.locator('.unique-class-name')
-
-// 5. XPath (AVOID - fragile)
-// Only use as last resort
-```
-
-### B. Adding Test IDs
-
-```tsx
-// React component with test IDs
-function LoginForm() {
-  return (
-    <form data-testid="login-form">
-      <input
-        data-testid="email-input"
-        type="email"
-        aria-label="Email address"
-      />
-      <input
-        data-testid="password-input"
-        type="password"
-        aria-label="Password"
-      />
-      <button data-testid="login-submit" type="submit">
-        Log In
-      </button>
-    </form>
-  );
-}
-```
-
----
-
-## 5. Waiting Strategies (MANDATORY)
-
-### A. Explicit Waits
-
-```typescript
-// ✅ CORRECT - Wait for specific conditions
-await page.waitForSelector('[data-testid="results"]');
-await page.waitForURL('**/dashboard');
-await page.waitForLoadState('networkidle');
-await page.waitForResponse(resp => resp.url().includes('/api/users'));
-
-// Wait for element state
-await expect(element).toBeVisible();
-await expect(element).toBeEnabled();
-await expect(element).toHaveText('Expected text');
-
-// ❌ WRONG - Arbitrary sleep
-await page.waitForTimeout(5000); // NEVER do this!
-```
-
-### B. Custom Wait Helpers
-
-```typescript
-// support/helpers.ts
-export async function waitForApi(page: Page, urlPattern: string) {
-  return page.waitForResponse(
-    response => response.url().includes(urlPattern) && response.status() === 200
-  );
-}
-
-export async function waitForTableLoad(page: Page) {
-  await page.waitForSelector('[data-testid="table-body"]');
-  await page.waitForFunction(() => {
-    const rows = document.querySelectorAll('[data-testid="table-row"]');
-    return rows.length > 0;
-  });
-}
-
-export async function retryUntil(
-  action: () => Promise<boolean>,
-  maxAttempts = 5,
-  delay = 1000
-): Promise<boolean> {
-  for (let i = 0; i < maxAttempts; i++) {
-    if (await action()) return true;
-    await new Promise(r => setTimeout(r, delay));
-  }
-  return false;
-}
-```
-
----
-
-## 6. Test Patterns (MANDATORY)
-
-### A. Authentication Flow
-
-```typescript
-// e2e/specs/auth/login.spec.ts
-import { test, expect } from '@playwright/test';
-import { LoginPage } from '../pages/login.page';
-
-test.describe('Authentication', () => {
-  test.beforeEach(async ({ page }) => {
-    // Clear any existing session
-    await page.context().clearCookies();
-  });
-
-  test('successful login redirects to dashboard', async ({ page }) => {
-    const loginPage = new LoginPage(page);
-    await loginPage.goto();
-    await loginPage.login('user@example.com', 'validPassword123');
-    await loginPage.expectLoggedIn();
-  });
-
-  test('invalid credentials show error message', async ({ page }) => {
-    const loginPage = new LoginPage(page);
-    await loginPage.goto();
-    await loginPage.login('user@example.com', 'wrongPassword');
-    await loginPage.expectError('Invalid email or password');
-  });
-
-  test('empty form shows validation errors', async ({ page }) => {
-    const loginPage = new LoginPage(page);
-    await loginPage.goto();
-    await loginPage.submitButton.click();
-    await expect(page.getByText('Email is required')).toBeVisible();
-    await expect(page.getByText('Password is required')).toBeVisible();
-  });
-});
-```
-
-### B. CRUD Operations
-
-```typescript
-// e2e/specs/user/profile.spec.ts
-import { test, expect } from '@playwright/test';
-
-test.describe('User Profile', () => {
-  test.use({ storageState: 'auth.json' }); // Pre-authenticated
-
-  test('can update profile information', async ({ page }) => {
-    await page.goto('/profile');
-
-    // Update name
-    await page.getByTestId('name-input').fill('New Name');
-    await page.getByTestId('save-button').click();
-
-    // Verify success
-    await expect(page.getByTestId('success-toast')).toBeVisible();
-
-    // Verify persistence (reload and check)
-    await page.reload();
-    await expect(page.getByTestId('name-input')).toHaveValue('New Name');
-  });
-
-  test('can delete account with confirmation', async ({ page }) => {
-    await page.goto('/profile/settings');
-
-    await page.getByTestId('delete-account-button').click();
-
-    // Confirmation dialog
-    await expect(page.getByRole('dialog')).toBeVisible();
-    await page.getByTestId('confirm-delete').click();
-
-    // Should redirect to home
-    await expect(page).toHaveURL('/');
-  });
-});
-```
-
-### C. E-Commerce Checkout Flow
-
-```typescript
-// e2e/specs/checkout/purchase.spec.ts
-import { test, expect } from '@playwright/test';
-
-test.describe('Checkout Flow', () => {
-  test('complete purchase flow', async ({ page }) => {
-    // Step 1: Browse and add to cart
-    await page.goto('/products');
-    await page.getByTestId('product-card').first().click();
-    await page.getByTestId('add-to-cart').click();
-    await expect(page.getByTestId('cart-count')).toHaveText('1');
-
-    // Step 2: Go to cart
-    await page.getByTestId('cart-icon').click();
-    await expect(page.getByTestId('cart-item')).toHaveCount(1);
-
-    // Step 3: Proceed to checkout
-    await page.getByTestId('checkout-button').click();
-
-    // Step 4: Fill shipping information
-    await page.getByTestId('shipping-name').fill('John Doe');
-    await page.getByTestId('shipping-address').fill('123 Main St');
-    await page.getByTestId('shipping-city').fill('New York');
-    await page.getByTestId('shipping-zip').fill('10001');
-    await page.getByTestId('continue-to-payment').click();
-
-    // Step 5: Fill payment information
-    await page.getByTestId('card-number').fill('4111111111111111');
-    await page.getByTestId('card-expiry').fill('12/28');
-    await page.getByTestId('card-cvc').fill('123');
-
-    // Step 6: Place order
-    await page.getByTestId('place-order').click();
-
-    // Step 7: Verify confirmation
-    await expect(page.getByTestId('order-confirmation')).toBeVisible();
-    await expect(page.getByTestId('order-number')).toBeVisible();
-  });
-});
-```
-
-### D. Multi-Step Form Wizard
-
-```typescript
-// e2e/specs/onboarding/wizard.spec.ts
-import { test, expect } from '@playwright/test';
-
-test.describe('Onboarding Wizard', () => {
-  test('completes all steps of the onboarding wizard', async ({ page }) => {
-    await page.goto('/onboarding');
-
-    // Step 1: Personal info
-    await expect(page.getByTestId('step-indicator')).toHaveText('Step 1 of 4');
-    await page.getByTestId('first-name').fill('Jane');
-    await page.getByTestId('last-name').fill('Doe');
-    await page.getByTestId('next-button').click();
-
-    // Step 2: Company info
-    await expect(page.getByTestId('step-indicator')).toHaveText('Step 2 of 4');
-    await page.getByTestId('company-name').fill('Acme Corp');
-    await page.getByRole('combobox', { name: 'Industry' }).selectOption('technology');
-    await page.getByTestId('company-size').selectOption('50-200');
-    await page.getByTestId('next-button').click();
-
-    // Step 3: Preferences
-    await expect(page.getByTestId('step-indicator')).toHaveText('Step 3 of 4');
-    await page.getByLabel('Email notifications').check();
-    await page.getByLabel('Weekly digest').check();
-    await page.getByTestId('next-button').click();
-
-    // Step 4: Review and confirm
-    await expect(page.getByTestId('step-indicator')).toHaveText('Step 4 of 4');
-    await expect(page.getByTestId('review-name')).toHaveText('Jane Doe');
-    await expect(page.getByTestId('review-company')).toHaveText('Acme Corp');
-    await page.getByTestId('confirm-button').click();
-
-    // Verify completion
-    await expect(page.getByTestId('success-message')).toContainText('Welcome aboard');
-    await expect(page).toHaveURL(/.*dashboard/);
-  });
-
-  test('can navigate back without losing data', async ({ page }) => {
-    await page.goto('/onboarding');
-
-    // Fill step 1
-    await page.getByTestId('first-name').fill('Jane');
-    await page.getByTestId('last-name').fill('Doe');
-    await page.getByTestId('next-button').click();
-
-    // Go to step 2, then back
-    await page.getByTestId('company-name').fill('Acme Corp');
-    await page.getByTestId('back-button').click();
-
-    // Verify step 1 data is preserved
-    await expect(page.getByTestId('first-name')).toHaveValue('Jane');
-    await expect(page.getByTestId('last-name')).toHaveValue('Doe');
-
-    // Go forward again, step 2 data should also be preserved
-    await page.getByTestId('next-button').click();
-    await expect(page.getByTestId('company-name')).toHaveValue('Acme Corp');
-  });
-});
-```
-
-### E. Advanced Page Object Model Pattern
-
-```typescript
-// pages/base.page.ts - Abstract base page with common functionality
-import { Page, Locator, expect } from '@playwright/test';
-
-export abstract class BasePage {
-  readonly page: Page;
-  readonly loadingSpinner: Locator;
-  readonly toastMessage: Locator;
-  readonly navigationMenu: Locator;
-
-  constructor(page: Page) {
-    this.page = page;
-    this.loadingSpinner = page.getByTestId('loading-spinner');
-    this.toastMessage = page.getByTestId('toast-message');
-    this.navigationMenu = page.getByTestId('nav-menu');
-  }
-
-  abstract get url(): string;
-
-  async goto() {
-    await this.page.goto(this.url);
-    await this.waitForPageLoad();
-  }
-
-  async waitForPageLoad() {
-    await this.loadingSpinner.waitFor({ state: 'hidden', timeout: 10000 });
-  }
-
-  async expectToastMessage(message: string) {
-    await expect(this.toastMessage).toContainText(message);
-  }
-
-  async navigateTo(menuItem: string) {
-    await this.navigationMenu.getByText(menuItem).click();
-    await this.waitForPageLoad();
-  }
-}
-
-// pages/dashboard.page.ts
-import { Page, Locator, expect } from '@playwright/test';
-import { BasePage } from './base.page';
-
-export class DashboardPage extends BasePage {
-  readonly statsCards: Locator;
-  readonly recentActivity: Locator;
-  readonly searchInput: Locator;
-  readonly filterDropdown: Locator;
-
-  constructor(page: Page) {
-    super(page);
-    this.statsCards = page.getByTestId('stats-card');
-    this.recentActivity = page.getByTestId('activity-item');
-    this.searchInput = page.getByTestId('dashboard-search');
-    this.filterDropdown = page.getByTestId('filter-dropdown');
-  }
-
-  get url() { return '/dashboard'; }
-
-  async getStatValue(statName: string): Promise<string> {
-    const card = this.page.getByTestId(`stat-${statName}`);
-    return (await card.getByTestId('stat-value').textContent()) ?? '';
-  }
-
-  async searchFor(query: string) {
-    await this.searchInput.fill(query);
-    await this.searchInput.press('Enter');
-    await this.waitForPageLoad();
-  }
-
-  async filterBy(option: string) {
-    await this.filterDropdown.click();
-    await this.page.getByRole('option', { name: option }).click();
-    await this.waitForPageLoad();
-  }
-
-  async expectActivityCount(count: number) {
-    await expect(this.recentActivity).toHaveCount(count);
-  }
-}
-
-// pages/data-table.page.ts - Reusable table component page object
-import { Page, Locator, expect } from '@playwright/test';
-
-export class DataTable {
-  readonly container: Locator;
-  readonly rows: Locator;
-  readonly headers: Locator;
-  readonly pagination: Locator;
-  readonly sortButtons: Locator;
-
-  constructor(page: Page, containerTestId: string) {
-    this.container = page.getByTestId(containerTestId);
-    this.rows = this.container.getByTestId('table-row');
-    this.headers = this.container.getByTestId('table-header');
-    this.pagination = this.container.getByTestId('pagination');
-    this.sortButtons = this.container.locator('[data-testid^="sort-"]');
-  }
-
-  async getRowCount(): Promise<number> {
-    return this.rows.count();
-  }
-
-  async getCellText(row: number, column: number): Promise<string> {
-    return (await this.rows.nth(row).locator('td').nth(column).textContent()) ?? '';
-  }
-
-  async sortBy(columnName: string) {
-    await this.container.getByTestId(`sort-${columnName}`).click();
-  }
-
-  async goToPage(pageNum: number) {
-    await this.pagination.getByText(String(pageNum)).click();
-  }
-
-  async expectRowCount(count: number) {
-    await expect(this.rows).toHaveCount(count);
-  }
-
-  async expectSorted(column: number, direction: 'asc' | 'desc') {
-    const values: string[] = [];
-    const count = await this.rows.count();
-    for (let i = 0; i < count; i++) {
-      values.push(await this.getCellText(i, column));
-    }
-    const sorted = [...values].sort();
-    if (direction === 'desc') sorted.reverse();
-    expect(values).toEqual(sorted);
-  }
-}
-```
-
-### F. API Testing Integration
-
-```typescript
-// e2e/specs/api/orders-api.spec.ts
-import { test, expect } from '@playwright/test';
-
-test.describe('Orders API', () => {
-  let authToken: string;
-
-  test.beforeAll(async ({ request }) => {
-    // Get auth token via API
-    const response = await request.post('/api/auth/login', {
-      data: {
-        email: 'user@test.com',
-        password: 'TestPass123!',
-      },
-    });
-    expect(response.ok()).toBeTruthy();
-    const body = await response.json();
-    authToken = body.token;
-  });
-
-  test('create and retrieve an order', async ({ request }) => {
-    // Create order
-    const createResponse = await request.post('/api/orders', {
-      headers: { Authorization: `Bearer ${authToken}` },
-      data: {
-        items: [
-          { productId: 'PROD-001', quantity: 2 },
-          { productId: 'PROD-002', quantity: 1 },
-        ],
-        shippingAddress: {
-          street: '123 Main St',
-          city: 'New York',
-          zip: '10001',
-        },
-      },
-    });
-
-    expect(createResponse.status()).toBe(201);
-    const order = await createResponse.json();
-    expect(order.id).toBeDefined();
-    expect(order.items).toHaveLength(2);
-    expect(order.status).toBe('pending');
-
-    // Retrieve order
-    const getResponse = await request.get(`/api/orders/${order.id}`, {
-      headers: { Authorization: `Bearer ${authToken}` },
-    });
-
-    expect(getResponse.ok()).toBeTruthy();
-    const retrieved = await getResponse.json();
-    expect(retrieved.id).toBe(order.id);
-    expect(retrieved.items).toHaveLength(2);
-  });
-
-  test('returns 401 for unauthenticated requests', async ({ request }) => {
-    const response = await request.get('/api/orders');
-    expect(response.status()).toBe(401);
-  });
-
-  test('validates order payload', async ({ request }) => {
-    const response = await request.post('/api/orders', {
-      headers: { Authorization: `Bearer ${authToken}` },
-      data: {
-        items: [],  // Empty items should fail validation
-      },
-    });
-
-    expect(response.status()).toBe(400);
-    const body = await response.json();
-    expect(body.errors).toContainEqual(
-      expect.objectContaining({ field: 'items', message: expect.any(String) })
-    );
-  });
-});
-
-// Combined API + UI test: verify API state reflects in UI
-test('order created via API appears in dashboard', async ({ page, request }) => {
-  // Create order via API
-  const response = await request.post('/api/orders', {
-    headers: { Authorization: `Bearer ${authToken}` },
-    data: { items: [{ productId: 'PROD-001', quantity: 1 }] },
-  });
-  const order = await response.json();
-
-  // Verify in UI
-  await page.goto('/dashboard/orders');
-  await expect(page.getByTestId(`order-${order.id}`)).toBeVisible();
-  await expect(page.getByTestId(`order-${order.id}`)).toContainText('pending');
-});
-```
-
-### G. Cypress Advanced Patterns
-
-```javascript
-// cypress/e2e/search.cy.js
-describe('Search Functionality', () => {
-  beforeEach(() => {
-    cy.login('user@test.com', 'TestPass123!');
-  });
-
-  it('searches and filters results in real time', () => {
-    cy.visit('/search');
-
-    // Type in search box and verify results update
-    cy.get('[data-testid="search-input"]').type('laptop');
-
-    // Wait for debounced search results
-    cy.get('[data-testid="search-results"]')
-      .should('be.visible')
-      .find('[data-testid="result-item"]')
-      .should('have.length.greaterThan', 0);
-
-    // Apply filter
-    cy.get('[data-testid="filter-category"]').select('Electronics');
-
-    // Verify filtered results
-    cy.get('[data-testid="result-item"]').each(($item) => {
-      cy.wrap($item)
-        .find('[data-testid="item-category"]')
-        .should('contain', 'Electronics');
-    });
-
-    // Verify result count updates
-    cy.get('[data-testid="result-count"]')
-      .invoke('text')
-      .then((text) => {
-        const count = parseInt(text);
-        cy.get('[data-testid="result-item"]').should('have.length', count);
-      });
-  });
-
-  it('handles empty search results gracefully', () => {
-    cy.visit('/search');
-    cy.get('[data-testid="search-input"]').type('xyznonexistent123');
-
-    cy.get('[data-testid="no-results"]').should('be.visible');
-    cy.get('[data-testid="no-results"]').should(
-      'contain',
-      'No results found'
-    );
-    cy.get('[data-testid="search-suggestions"]').should('be.visible');
-  });
-});
-
-// cypress/e2e/file-upload.cy.js
-describe('File Upload', () => {
-  it('uploads a file and shows preview', () => {
-    cy.visit('/upload');
-
-    // Upload file
-    cy.get('[data-testid="file-input"]').selectFile('cypress/fixtures/test-image.png');
-
-    // Verify preview
-    cy.get('[data-testid="file-preview"]').should('be.visible');
-    cy.get('[data-testid="file-name"]').should('contain', 'test-image.png');
-    cy.get('[data-testid="file-size"]').should('be.visible');
-
-    // Submit
-    cy.get('[data-testid="upload-button"]').click();
-    cy.get('[data-testid="upload-success"]').should('be.visible');
-  });
-
-  it('rejects files that exceed size limit', () => {
-    cy.visit('/upload');
-
-    // Create a large file fixture
-    cy.get('[data-testid="file-input"]').selectFile({
-      contents: Cypress.Buffer.alloc(10 * 1024 * 1024), // 10MB
-      fileName: 'large-file.bin',
-    });
-
-    cy.get('[data-testid="error-message"]').should(
-      'contain',
-      'File size exceeds the 5MB limit'
-    );
-  });
 });
 ```
 
 ---
 
-## 7. Test Data Management
-
-### A. Fixtures
-
-```typescript
-// fixtures/users.ts
-export const testUsers = {
-  admin: {
-    email: 'admin@test.com',
-    password: 'AdminPass123!',
-    role: 'admin',
-  },
-  regular: {
-    email: 'user@test.com',
-    password: 'UserPass123!',
-    role: 'user',
-  },
-  premium: {
-    email: 'premium@test.com',
-    password: 'PremiumPass123!',
-    role: 'premium',
-  },
-};
-
-// fixtures/products.ts
-export const testProducts = {
-  basic: {
-    name: 'Test Product',
-    price: 29.99,
-    sku: 'TEST-001',
-  },
-};
-```
-
-### B. Database Seeding
-
-```typescript
-// support/database.ts
-import { prisma } from './prisma';
-
-export async function seedTestData() {
-  // Clean up
-  await prisma.order.deleteMany();
-  await prisma.user.deleteMany();
-
-  // Seed users
-  await prisma.user.createMany({
-    data: [
-      { email: 'admin@test.com', role: 'ADMIN' },
-      { email: 'user@test.com', role: 'USER' },
-    ],
-  });
-}
-
-export async function cleanupTestData() {
-  await prisma.order.deleteMany();
-  await prisma.user.deleteMany({ where: { email: { contains: '@test.com' } } });
-}
-```
-
-### C. API Mocking
-
-```typescript
-// Playwright route mocking
-test('handles API error gracefully', async ({ page }) => {
-  // Mock API to return error
-  await page.route('**/api/users', route => {
-    route.fulfill({
-      status: 500,
-      body: JSON.stringify({ error: 'Internal Server Error' }),
-    });
-  });
-
-  await page.goto('/users');
-  await expect(page.getByTestId('error-message')).toContainText('Unable to load users');
-});
-
-// Mock successful response
-test('displays user list', async ({ page }) => {
-  await page.route('**/api/users', route => {
-    route.fulfill({
-      status: 200,
-      body: JSON.stringify([
-        { id: 1, name: 'John Doe', email: 'john@example.com' },
-        { id: 2, name: 'Jane Doe', email: 'jane@example.com' },
-      ]),
-    });
-  });
-
-  await page.goto('/users');
-  await expect(page.getByTestId('user-row')).toHaveCount(2);
-});
-```
-
----
-
-## 8. Authentication Handling
-
-### A. Storage State (Playwright)
-
-```typescript
-// Setup authentication state
-// auth.setup.ts
-import { test as setup, expect } from '@playwright/test';
-
-setup('authenticate', async ({ page }) => {
-  await page.goto('/login');
-  await page.getByTestId('email-input').fill('user@example.com');
-  await page.getByTestId('password-input').fill('password123');
-  await page.getByTestId('login-submit').click();
-
-  await expect(page).toHaveURL(/.*dashboard/);
-
-  // Save authentication state
-  await page.context().storageState({ path: 'auth.json' });
-});
-
-// Use in tests
-test.describe('Authenticated tests', () => {
-  test.use({ storageState: 'auth.json' });
-
-  test('can access dashboard', async ({ page }) => {
-    await page.goto('/dashboard');
-    await expect(page.getByTestId('welcome-message')).toBeVisible();
-  });
-});
-```
-
-### B. Custom Commands (Cypress)
-
-```javascript
-// cypress/support/commands.js
-Cypress.Commands.add('login', (email, password) => {
-  cy.session([email, password], () => {
-    cy.visit('/login');
-    cy.get('[data-testid="email-input"]').type(email);
-    cy.get('[data-testid="password-input"]').type(password);
-    cy.get('[data-testid="login-submit"]').click();
-    cy.url().should('include', '/dashboard');
-  });
-});
-
-// Usage in tests
-describe('Dashboard', () => {
-  beforeEach(() => {
-    cy.login('user@example.com', 'password123');
-  });
-
-  it('shows user data', () => {
-    cy.visit('/dashboard');
-    cy.get('[data-testid="user-name"]').should('be.visible');
-  });
-});
-```
-
----
-
-## 9. CI/CD Integration
-
-### A. GitHub Actions
-
-```yaml
-# .github/workflows/e2e.yml
-name: E2E Tests
-
-on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main, develop]
-
-jobs:
-  e2e:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps
-
-      - name: Build application
-        run: npm run build
-
-      - name: Run E2E tests
-        run: npx playwright test
-        env:
-          BASE_URL: http://localhost:3000
-          CI: true
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: playwright-report
-          path: playwright-report/
-          retention-days: 30
-
-      - name: Upload test videos
-        uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: test-videos
-          path: test-results/
-          retention-days: 7
-```
-
-### B. GitHub Actions with Sharding (Parallel Execution)
-
-```yaml
-# .github/workflows/e2e-sharded.yml
-name: E2E Tests (Sharded)
-
-on:
-  pull_request:
-    branches: [main]
-
-jobs:
-  e2e:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4]  # Run 4 shards in parallel
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
-
-      - name: Run E2E tests (shard ${{ matrix.shard }}/4)
-        run: npx playwright test --shard=${{ matrix.shard }}/4
-        env:
-          CI: true
-
-      - name: Upload blob report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: blob-report-${{ matrix.shard }}
-          path: blob-report/
-          retention-days: 1
-
-  merge-reports:
-    needs: e2e
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-      - run: npm ci
-
-      - name: Download all blob reports
-        uses: actions/download-artifact@v4
-        with:
-          path: all-blob-reports
-          pattern: blob-report-*
-          merge-multiple: true
-
-      - name: Merge reports
-        run: npx playwright merge-reports --reporter html ./all-blob-reports
-
-      - name: Upload merged report
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-report
-          path: playwright-report/
-          retention-days: 14
-```
-
-### C. GitLab CI Integration
-
-```yaml
-# .gitlab-ci.yml
-e2e-tests:
-  stage: test
-  image: mcr.microsoft.com/playwright:v1.40.0-jammy
-  services:
-    - name: postgres:15
-      alias: db
-  variables:
-    DATABASE_URL: "postgresql://test:test@db:5432/test"
-    BASE_URL: "http://localhost:3000"
-  before_script:
-    - npm ci
-    - npm run db:migrate
-    - npm run build
-    - npm run start &
-    - npx wait-on http://localhost:3000 --timeout 30000
-  script:
-    - npx playwright test
-  artifacts:
-    when: always
-    paths:
-      - playwright-report/
-      - test-results/
-    expire_in: 7 days
-  retry:
-    max: 1
-    when: script_failure
-```
-
-### D. Docker Support
-
-```dockerfile
-# Dockerfile.e2e
-FROM mcr.microsoft.com/playwright:v1.40.0-jammy
-
-WORKDIR /app
-
-COPY package*.json ./
-RUN npm ci
-
-COPY . .
-
-CMD ["npx", "playwright", "test"]
-```
-
-```yaml
-# docker-compose.e2e.yml
-version: '3.8'
-services:
-  app:
-    build: .
-    ports:
-      - "3000:3000"
-    environment:
-      - DATABASE_URL=postgres://test:test@db:5432/test
-
-  db:
-    image: postgres:15
-    environment:
-      POSTGRES_USER: test
-      POSTGRES_PASSWORD: test
-      POSTGRES_DB: test
-
-  e2e:
-    build:
-      dockerfile: Dockerfile.e2e
-    depends_on:
-      - app
-    environment:
-      - BASE_URL=http://app:3000
-    volumes:
-      - ./playwright-report:/app/playwright-report
-```
-
----
-
-## 10. Flakiness Prevention
-
-### A. Common Causes and Solutions
-
-```typescript
-// Problem 1: Race conditions with animations
-// Solution: Disable animations in tests
-await page.addStyleTag({
-  content: `
-    *, *::before, *::after {
-      animation-duration: 0s !important;
-      transition-duration: 0s !important;
-    }
-  `,
-});
-
-// Problem 2: Element not yet interactive
-// Solution: Wait for element to be ready
-await page.getByTestId('button').waitFor({ state: 'visible' });
-await page.getByTestId('button').click();
-
-// Problem 3: Network timing issues
-// Solution: Wait for network idle
-await page.waitForLoadState('networkidle');
-
-// Problem 4: Dynamic content loading
-// Solution: Wait for specific content
-await page.waitForFunction(() => {
-  const items = document.querySelectorAll('[data-testid="list-item"]');
-  return items.length >= 5;
-});
-
-// Problem 5: Date/time dependent tests
-// Solution: Mock the clock
-await page.clock.setFixedTime(new Date('2024-01-15T10:00:00'));
-```
-
-### B. Retry Strategies
-
-```typescript
-// playwright.config.ts
-export default defineConfig({
-  retries: process.env.CI ? 2 : 0, // Retry failed tests in CI
-
-  expect: {
-    timeout: 10000, // Increase assertion timeout
-  },
-
-  use: {
-    actionTimeout: 15000, // Increase action timeout
-  },
-});
-
-// Test-specific retry
-test('flaky external service', async ({ page }) => {
-  test.slow(); // Mark as slow, triple the timeout
-
-  // Or set specific timeout
-  test.setTimeout(60000);
-
-  // Implementation
-});
-```
-
-### C. Systematic Flaky Test Mitigation
-
-```typescript
-// Pattern 1: Wait for network idle BEFORE asserting
-// ❌ Flaky: Assert immediately after navigation
-test('bad: assert too early', async ({ page }) => {
-  await page.goto('/dashboard');
-  await expect(page.getByTestId('data-count')).toHaveText('42'); // May fail!
-});
-
-// ✅ Stable: Wait for data to load
-test('good: wait for data', async ({ page }) => {
-  await page.goto('/dashboard');
-  // Wait for the specific API call that populates the data
-  await page.waitForResponse(resp =>
-    resp.url().includes('/api/dashboard') && resp.status() === 200
-  );
-  await expect(page.getByTestId('data-count')).toHaveText('42');
-});
-
-// Pattern 2: Handle overlapping elements (modals, tooltips)
-// ❌ Flaky: Click may hit overlay instead of target
-test('bad: click behind overlay', async ({ page }) => {
-  await page.getByTestId('submit-button').click(); // May hit cookie banner!
-});
-
-// ✅ Stable: Dismiss overlays first, or use force click
-test('good: handle overlays', async ({ page }) => {
-  // Dismiss any cookie banners/modals
-  const banner = page.getByTestId('cookie-banner');
-  if (await banner.isVisible()) {
-    await page.getByTestId('accept-cookies').click();
-    await banner.waitFor({ state: 'hidden' });
-  }
-  await page.getByTestId('submit-button').click();
-});
-
-// Pattern 3: Isolate tests from shared state
-// ❌ Flaky: Tests depend on order of execution
-test('bad: relies on previous test state', async ({ page }) => {
-  // Assumes previous test created an item
-  await page.goto('/items');
-  await expect(page.getByTestId('item-row')).toHaveCount(1);
-});
-
-// ✅ Stable: Each test sets up its own state
-test('good: self-contained setup', async ({ page, request }) => {
-  // Create test data via API before asserting in UI
-  await request.post('/api/items', {
-    data: { name: 'Test Item', price: 9.99 },
-    headers: { Authorization: `Bearer ${authToken}` },
-  });
-
-  await page.goto('/items');
-  await expect(page.getByText('Test Item')).toBeVisible();
-});
-
-// Pattern 4: Handle viewport-dependent behavior
-// ❌ Flaky: Element may be off-screen or behind sticky header
-test('bad: element not in viewport', async ({ page }) => {
-  await page.getByTestId('footer-link').click(); // May be below fold!
-});
-
-// ✅ Stable: Scroll into view first
-test('good: scroll then interact', async ({ page }) => {
-  const footerLink = page.getByTestId('footer-link');
-  await footerLink.scrollIntoViewIfNeeded();
-  await footerLink.click();
-});
-```
-
-### D. Flaky Test Monitoring and Quarantine
-
-```typescript
-// Track flaky tests with annotations and reporting
-// playwright.config.ts
-export default defineConfig({
-  reporter: [
-    ['html'],
-    // Custom reporter to track flaky tests
-    ['./reporters/flaky-tracker.ts'],
-  ],
-});
-
-// reporters/flaky-tracker.ts
-import { Reporter, TestCase, TestResult } from '@playwright/test/reporter';
-
-class FlakyTracker implements Reporter {
-  private results: Map<string, { passed: number; failed: number }> = new Map();
-
-  onTestEnd(test: TestCase, result: TestResult) {
-    const key = `${test.parent.title} > ${test.title}`;
-    const stats = this.results.get(key) || { passed: 0, failed: 0 };
-
-    if (result.status === 'passed') {
-      // If this test previously failed but now passes (retry success), it is flaky
-      if (result.retry > 0) {
-        console.warn(`FLAKY TEST DETECTED: ${key} (passed on retry ${result.retry})`);
-      }
-      stats.passed++;
-    } else {
-      stats.failed++;
-    }
-    this.results.set(key, stats);
-  }
-
-  onEnd() {
-    // Report flaky tests (tests that both passed and failed)
-    for (const [name, stats] of this.results) {
-      if (stats.passed > 0 && stats.failed > 0) {
-        console.warn(`FLAKY: "${name}" - passed ${stats.passed}x, failed ${stats.failed}x`);
-      }
-    }
-  }
-}
-
-export default FlakyTracker;
-```
-
----
-
-## 11. Visual Regression Testing
-
-### A. Playwright Screenshots
-
-```typescript
-test('visual regression - homepage', async ({ page }) => {
-  await page.goto('/');
-  await page.waitForLoadState('networkidle');
-
-  // Full page screenshot comparison
-  await expect(page).toHaveScreenshot('homepage.png', {
-    fullPage: true,
-    maxDiffPixelRatio: 0.01,
-  });
-});
-
-test('visual regression - component', async ({ page }) => {
-  await page.goto('/components');
-
-  // Element screenshot comparison
-  const card = page.getByTestId('product-card').first();
-  await expect(card).toHaveScreenshot('product-card.png');
-});
-```
-
-### B. Visual Regression Best Practices
-
-```typescript
-// Stabilize visual tests by controlling dynamic content
-
-test.describe('Visual Regression', () => {
-  test.beforeEach(async ({ page }) => {
-    // Freeze time to prevent date/time-based diffs
-    await page.clock.setFixedTime(new Date('2024-06-15T10:00:00Z'));
-
-    // Disable animations for consistent screenshots
-    await page.addStyleTag({
-      content: `
-        *, *::before, *::after {
-          animation-duration: 0s !important;
-          animation-delay: 0s !important;
-          transition-duration: 0s !important;
-          transition-delay: 0s !important;
-        }
-      `,
-    });
-  });
-
-  test('dashboard layout matches baseline', async ({ page }) => {
-    // Mock API to return consistent data
-    await page.route('**/api/dashboard/stats', route => {
-      route.fulfill({
-        status: 200,
-        body: JSON.stringify({
-          users: 1234,
-          orders: 567,
-          revenue: 89012.34,
-        }),
-      });
-    });
-
-    await page.goto('/dashboard');
-    await page.waitForLoadState('networkidle');
-
-    // Hide dynamic elements that change between runs
-    await page.evaluate(() => {
-      document.querySelectorAll('[data-testid="live-timestamp"]').forEach(
-        (el) => (el as HTMLElement).style.visibility = 'hidden'
-      );
-    });
-
-    await expect(page).toHaveScreenshot('dashboard-full.png', {
-      fullPage: true,
-      maxDiffPixelRatio: 0.01,  // Allow 1% pixel difference
-      animations: 'disabled',
-    });
-  });
-
-  test('responsive layout at mobile breakpoint', async ({ page }) => {
-    await page.setViewportSize({ width: 375, height: 812 }); // iPhone
-    await page.goto('/dashboard');
-    await page.waitForLoadState('networkidle');
-
-    await expect(page).toHaveScreenshot('dashboard-mobile.png', {
-      fullPage: true,
-    });
-  });
-
-  test('component states: button variants', async ({ page }) => {
-    await page.goto('/components/buttons');
-
-    // Screenshot individual component in different states
-    const button = page.getByTestId('primary-button');
-
-    await expect(button).toHaveScreenshot('button-default.png');
-
-    await button.hover();
-    await expect(button).toHaveScreenshot('button-hover.png');
-
-    await button.focus();
-    await expect(button).toHaveScreenshot('button-focus.png');
-  });
-});
-```
-
-### C. Percy Integration for Cross-Browser Visual Testing
-
-```typescript
-// With Percy for cross-browser visual testing
-import percySnapshot from '@percy/playwright';
-
-test('visual test with Percy', async ({ page }) => {
-  await page.goto('/dashboard');
-  await page.waitForLoadState('networkidle');
-
-  await percySnapshot(page, 'Dashboard');
-});
-
-// Percy with responsive widths
-test('responsive visual test', async ({ page }) => {
-  await page.goto('/pricing');
-  await page.waitForLoadState('networkidle');
-
-  await percySnapshot(page, 'Pricing Page', {
-    widths: [375, 768, 1280],  // Mobile, tablet, desktop
-    minHeight: 1024,
-  });
-});
-```
-
----
-
-## 12. Accessibility Testing
-
-```typescript
-import { test, expect } from '@playwright/test';
-import AxeBuilder from '@axe-core/playwright';
-
-test.describe('Accessibility', () => {
-  test('homepage has no accessibility violations', async ({ page }) => {
-    await page.goto('/');
-
-    const accessibilityScanResults = await new AxeBuilder({ page }).analyze();
-
-    expect(accessibilityScanResults.violations).toEqual([]);
-  });
-
-  test('login form is accessible', async ({ page }) => {
-    await page.goto('/login');
-
-    const results = await new AxeBuilder({ page })
-      .include('[data-testid="login-form"]')
-      .analyze();
-
-    expect(results.violations).toEqual([]);
-  });
-});
-```
-
----
-
-## 13. Performance Testing
-
-```typescript
-test('page load performance', async ({ page }) => {
-  await page.goto('/');
-
-  const performanceMetrics = await page.evaluate(() => {
-    const timing = performance.timing;
-    return {
-      loadTime: timing.loadEventEnd - timing.navigationStart,
-      domContentLoaded: timing.domContentLoadedEventEnd - timing.navigationStart,
-      firstPaint: performance.getEntriesByName('first-paint')[0]?.startTime,
-    };
-  });
-
-  expect(performanceMetrics.loadTime).toBeLessThan(3000);
-  expect(performanceMetrics.domContentLoaded).toBeLessThan(2000);
-});
-
-test('no memory leaks during navigation', async ({ page }) => {
-  const initialMemory = await page.evaluate(() =>
-    (performance as any).memory?.usedJSHeapSize
-  );
-
-  // Navigate through multiple pages
-  for (const path of ['/page1', '/page2', '/page3', '/page1']) {
-    await page.goto(path);
-    await page.waitForLoadState('networkidle');
-  }
-
-  const finalMemory = await page.evaluate(() =>
-    (performance as any).memory?.usedJSHeapSize
-  );
-
-  // Memory shouldn't grow more than 50%
-  expect(finalMemory).toBeLessThan(initialMemory * 1.5);
-});
-```
-
----
-
-## 14. Deployment Checklist
-
-### Test Coverage
-- [ ] Critical user journeys covered
-- [ ] Authentication flows tested
-- [ ] Error states handled
-- [ ] Cross-browser testing configured
-- [ ] Mobile viewport testing included
-
-### Test Quality
-- [ ] Page Object Model implemented
-- [ ] Stable selectors (data-testid) used
-- [ ] No arbitrary waits/sleeps
-- [ ] Tests are independent
-- [ ] Proper test data management
-
-### CI/CD Integration
-- [ ] Tests run on every PR
-- [ ] Parallel execution configured
-- [ ] Artifacts uploaded on failure
-- [ ] Test reports generated
-- [ ] Flaky test monitoring in place
-
-### Accessibility
-- [ ] Axe accessibility checks included
-- [ ] Keyboard navigation tested
-- [ ] Screen reader compatibility verified
-
----
-
-## 15. Quick Reference
-
-### Playwright Commands
+## 10. Quick Reference
 
 ```bash
-# Run all tests
-npx playwright test
-
-# Run specific file
-npx playwright test login.spec.ts
-
-# Run in headed mode
-npx playwright test --headed
-
-# Run with UI mode
-npx playwright test --ui
-
-# Debug mode
-npx playwright test --debug
-
-# Generate tests
-npx playwright codegen localhost:3000
-
-# Show report
-npx playwright show-report
-
-# Update snapshots
-npx playwright test --update-snapshots
-```
-
-### Cypress Commands
-
-```bash
-# Open Cypress UI
-npx cypress open
-
-# Run headless
-npx cypress run
-
-# Run specific spec
-npx cypress run --spec "cypress/e2e/login.cy.js"
-
-# Run in specific browser
-npx cypress run --browser chrome
+npx playwright test                       # run all (headless)
+npx playwright test --ui                  # interactive UI mode (local debugging)
+npx playwright test --debug               # step debugger
+npx playwright codegen localhost:3000     # record locators/actions
+npx playwright show-report                # open HTML report
+npx playwright test --update-snapshots    # refresh visual baselines (intentional only)
+npx playwright merge-reports --reporter html ./all-blob-reports  # merge shards
+# Cypress: npx cypress open | npx cypress run --browser chrome
 ```
 
 ---
 
-## 16. Why This Configuration Works
+## 11. Deployment Checklist
 
-- **Validates real user journeys**: E2E tests exercise the full application stack from the user's perspective, catching integration issues that unit and integration tests miss. This ensures critical business workflows actually function end-to-end before reaching production.
-- **Stable selectors eliminate flakiness**: The data-testid-first selector strategy decouples tests from visual design changes, meaning UI refactors and CSS updates do not break the test suite. This dramatically reduces false failures and maintenance burden.
-- **Page Object Model scales with complexity**: Encapsulating page interactions in page objects means changes to UI structure only require updates in one place, not across dozens of test files. This keeps the test suite maintainable as the application grows.
-- **CI/CD integration provides continuous confidence**: Running E2E tests on every pull request with parallel execution, failure artifacts, and cross-browser coverage ensures regressions are caught before merge, not after deployment.
-- **Explicit waits over arbitrary sleeps**: Waiting for specific conditions rather than fixed timeouts makes tests both faster and more reliable, eliminating the most common source of flaky test results.
+Generated from §2 — one box per requirement ID. No new requirements here.
+
+- [ ] E2E-TST-01 — suite green with 0 retries needed (audit lane at `--retries=0`)
+- [ ] E2E-TST-02 — each user-facing bug has a failing-first e2e regression test
+- [ ] E2E-SCOPE-01 — only critical journeys at e2e; edge cases pushed to lower tiers
+- [ ] E2E-WAIT-01 — no arbitrary sleeps/`waitForTimeout`
+- [ ] E2E-LOC-01 — role/label/text or `data-testid` only; no XPath
+- [ ] E2E-POM-01 — interactions encapsulated in page objects/fixtures
+- [ ] E2E-ISO-01 — self-contained data; passes in parallel and on re-run
+- [ ] E2E-CFG-01 — base URL & credentials from config/env
+- [ ] E2E-VIS-01 — visual baselines deterministic (clock/animations/dynamic data)
+- [ ] E2E-A11Y-01 — critical pages assert 0 a11y violations
+- [ ] E2E-CI-01 — e2e runs on every PR, sharded, headless, gates merge
+- [ ] E2E-CI-02 — trace/video/screenshot retained on failure
+- [ ] Agent ran every §3 command and documented any fixes
 
 ---
-
-**Last Updated:** 2026-01-31
-**Version:** 1.0
-**Maintainer:** QA Team
-
-
 **End of End-to-End Testing Guidelines**

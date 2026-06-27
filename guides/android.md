@@ -1,1175 +1,315 @@
 # Android Development Guidelines
-Mandatory standards for building native Android applications using Kotlin and Jetpack. Android Studio, Kotlin 1.9+, Jetpack Compose, Coroutines, Hilt, Room.
+Mandatory standards for native Android apps: Compose-first, unidirectional state, layered architecture, DI'd and test-covered. Android SDK 35, Kotlin 2.x, Jetpack Compose, Hilt, Coroutines/Flow, Room, WorkManager.
+
+---
+name: android
+title: Android Development Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: framework
+tools: [android-sdk@35, kotlin@2.0, jetpack-compose, hilt, coroutines, room, gradle, agp@8.5]
+requires:
+  - kotlin
+  - tdd
+  - secure-coding
+recommends:
+  - java
+  - accessibility
+  - performance
+  - ui
+  - oauth
+  - observability
+provides:
+  - jetpack-compose
+  - android-architecture
+  - viewmodel-stateflow
+  - android-lifecycle
+  - hilt
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide covers only what is unique to the Android platform — the Kotlin language itself is owned by [`kotlin.md`](guides://kotlin.md).
 
 ---
 
-**Agent Profile**: The Android Expert
-**Role**: Senior Android Developer & Mobile Architect
-**Objective**: Generate modern, maintainable Android applications following Material Design and Android best practices.
-**Tools**: Android Studio, Kotlin 1.9+, Jetpack Compose, Coroutines, Hilt, Room.
+## 0. Prerequisites & References
+
+Fetch and apply these **before** generating Android code. Their rules are assumed below and not repeated.
+
+> 📎 **REQUIRED — fetch & apply first:**
+> - [`kotlin.md`](guides://kotlin.md) — the language: coroutines/Flow semantics, null-safety, idioms, ktlint/detekt. This guide does **not** restate Kotlin.
+> - [`tdd.md`](guides://tdd.md) — test-first, Red-Green-Refactor, regression-test-before-fix, coverage. *(Android binding: JUnit + MockK + Turbine for unit tests, Compose test rule / Espresso for UI; runner `./gradlew test connectedAndroidTest`.)*
+> - [`secure-coding.md`](guides://secure-coding.md) — supply chain, secrets, CVE policy. *(Android binding: EncryptedSharedPreferences/Keystore, Network Security Config, OWASP dependency-check, no secrets in VCS, minimal permissions.)*
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`ui.md`](guides://ui.md) — UX/component design *(binding: Compose + Material 3)*
+> - [`accessibility.md`](guides://accessibility.md) — a11y policy *(binding: Compose semantics, TalkBack, touch targets)*
+> - [`oauth.md`](guides://oauth.md) — auth flows *(binding: AppAuth / Credential Manager, no implicit grant)*
+> - [`java.md`](guides://java.md) — legacy interop for mixed Java/Kotlin modules
+> - [`performance.md`](guides://performance.md) · [`observability.md`](guides://observability.md)
+
+> 📎 **SEE ALSO:** [`material.md`](guides://material.md) · [`ci-cd.md`](guides://ci-cd.md) · [`error-handling.md`](guides://error-handling.md) · [`logging.md`](guides://logging.md) · [`e2e-testing.md`](guides://e2e-testing.md)
 
 ---
 
 ## 1. Core Philosophies: ANDROID-FIRST
 
-**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
-**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+Android-platform principles only. The Kotlin language, TDD, and security come from §0 — do not restate them.
 
-- **A**rchitecture: Clean Architecture with MVVM
-- **N**ative: Leverage platform capabilities
-- **D**eclarative: Jetpack Compose for UI
-- **R**eactive: Kotlin Flows for data streams
-- **O**ffline: Room for local persistence
-- **I**njected: Hilt for dependency injection
-- **D**ecoupled: Testable, modular code
+- **A**rchitecture: the official **UI → domain → data** layering; dependencies point inward; ViewModels never touch Android `View`/`Context` UI types.
+- **N**o Views: **Jetpack Compose is the default UI**; XML layouts and the View system are legacy, used only for interop with existing screens.
+- **D**eclarative state: **unidirectional data flow** — state flows down as immutable `UiState`, events flow up as function calls; the UI is a pure function of state.
+- **R**eactive lifecycle: expose `StateFlow`; collect with `collectAsStateWithLifecycle()`; scope coroutines to `viewModelScope`/`lifecycleScope`. Never leak work across lifecycle boundaries.
+- **O**ffline-capable: Room is the single source of truth; the network refreshes the cache, the UI observes the cache.
+- **I**njected: **Hilt** wires every dependency at compile time; no manual singletons, no service locators.
+- **D**ecoupled & testable: ViewModels and use cases are plain JVM unit tests (no emulator); composables are tested with the Compose test rule.
 
----
-
-## 2. Project Structure (MANDATORY)
-
-### A. Package Structure
-
-```
-app/
-├── src/
-│   ├── main/
-│   │   ├── java/com/example/myapp/
-│   │   │   ├── MyApplication.kt
-│   │   │   ├── di/                    # Dependency injection
-│   │   │   │   ├── AppModule.kt
-│   │   │   │   ├── NetworkModule.kt
-│   │   │   │   └── DatabaseModule.kt
-│   │   │   ├── data/                  # Data layer
-│   │   │   │   ├── local/
-│   │   │   │   │   ├── AppDatabase.kt
-│   │   │   │   │   ├── dao/
-│   │   │   │   │   └── entity/
-│   │   │   │   ├── remote/
-│   │   │   │   │   ├── api/
-│   │   │   │   │   └── dto/
-│   │   │   │   └── repository/
-│   │   │   ├── domain/                # Domain layer
-│   │   │   │   ├── model/
-│   │   │   │   ├── repository/
-│   │   │   │   └── usecase/
-│   │   │   ├── ui/                    # Presentation layer
-│   │   │   │   ├── theme/
-│   │   │   │   ├── components/
-│   │   │   │   ├── navigation/
-│   │   │   │   └── screens/
-│   │   │   │       ├── home/
-│   │   │   │       ├── detail/
-│   │   │   │       └── settings/
-│   │   │   └── util/
-│   │   ├── res/
-│   │   └── AndroidManifest.xml
-│   ├── test/                          # Unit tests
-│   └── androidTest/                   # Instrumentation tests
-├── build.gradle.kts
-└── proguard-rules.pro
-```
+**Verified Code**: Agent-generated Android code MUST pass every gate in §2 before delivery.
 
 ---
 
-## 2A. TDD Protocol (MANDATORY)
+## 2. Requirements (MANDATORY, auditable)
 
-**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+RFC-2119 keywords. IDs `AND-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a shared rule cite its owner.
 
-### Red-Green-Refactor Cycle with JUnit 5 and Espresso
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| AND-TST-01 | Every feature MUST be test-first (see `tdd.md`) | `./gradlew test` | exit 0, 0 skips |
+| AND-TST-02 | Each bug MUST get a regression test before the fix (see `tdd.md`) | `./gradlew test` | failing→passing |
+| AND-TST-03 | UI behavior MUST have Compose/instrumentation tests (see `tdd.md`) | `./gradlew connectedAndroidTest` | exit 0 |
+| AND-FMT-01 | Code MUST be formatted (see `kotlin.md`) | `./gradlew ktlintCheck` | no diff |
+| AND-LINT-01 | Android Lint + detekt MUST pass clean | `./gradlew lint detekt` | 0 errors |
+| AND-ARCH-01 | UI/domain/data layering respected; ViewModel holds no Android UI types | review / module-graph | no inward→outward |
+| AND-STATE-01 | UI state MUST be immutable + unidirectional; collected lifecycle-aware | review / `collectAsStateWithLifecycle` | no `MutableState` leaked to UI |
+| AND-DI-01 | Dependencies MUST be provided by Hilt, not constructed ad hoc | review | no manual singletons |
+| AND-SEC-01 | No secrets in source/VCS; on-device secrets via Keystore (see `secure-coding.md`) | grep / review | 0 literals |
+| AND-SEC-02 | 0 high/critical CVEs in deps (see `secure-coding.md`) | `./gradlew dependencyCheckAnalyze` | failBuildOnCVSS=7 |
+| AND-SEC-03 | Cleartext traffic disabled; minimal manifest permissions (see `secure-coding.md`) | review manifest / network config | HTTPS only |
+| AND-A11Y-01 | Interactive composables MUST expose semantics (see `accessibility.md`) | Accessibility Scanner / test | 0 missing labels |
+| AND-REL-01 | Release builds MUST enable R8 minify + resource shrink | inspect `release` buildType | `isMinifyEnabled=true` |
 
-```kotlin
-// ═══════════════════════════════════════════════════════════════
-// STEP 1: RED - Write failing test first
-// ═══════════════════════════════════════════════════════════════
-
-// test/ui/screens/home/HomeViewModelTest.kt
-@OptIn(ExperimentalCoroutinesApi::class)
-class HomeViewModelTest {
-
-    @get:Rule
-    val mainDispatcherRule = MainDispatcherRule()
-
-    private lateinit var viewModel: HomeViewModel
-    private val mockGetItems: GetItemsUseCase = mockk()
-    private val mockRefreshItems: RefreshItemsUseCase = mockk()
-
-    @Test
-    fun `loadItems sets loading state then shows items`() = runTest {
-        // Given
-        val items = listOf(Item(id = "1", title = "Test Item"))
-        every { mockGetItems() } returns flowOf(items)
-
-        // When
-        viewModel = HomeViewModel(mockGetItems, mockRefreshItems, SavedStateHandle())
-
-        // Then
-        viewModel.uiState.test {
-            val state = awaitItem()
-            assertThat(state.items).hasSize(1)
-            assertThat(state.items.first().title).isEqualTo("Test Item")
-            assertThat(state.isLoading).isFalse()
-        }
-    }
-}
-
-// Run: ./gradlew test
-// ❌ FAILS - ViewModel or UseCase doesn't exist yet
-
-// ═══════════════════════════════════════════════════════════════
-// STEP 2: GREEN - Write minimal implementation
-// ═══════════════════════════════════════════════════════════════
-
-// Implement GetItemsUseCase and HomeViewModel to make the test pass
-
-// Run: ./gradlew test
-// ✅ PASSES - all tests pass
-
-// ═══════════════════════════════════════════════════════════════
-// STEP 3: REFACTOR - Add error handling, improve while tests stay green
-// ═══════════════════════════════════════════════════════════════
-```
+> **Forbidden**: shipping implementation before its test (violates `tdd.md`); blocking the main thread with IO; holding `Activity`/`Context`/`View` references in a ViewModel; leaking secrets into `strings.xml` or `BuildConfig`; new screens built in XML when Compose is viable.
 
 ---
 
-## 2B. Bug Fix Protocol (MANDATORY)
+## 3. Verification Protocol
 
-**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+Run, in order, before presenting code. Fix → re-run until every gate is green.
 
-### Bug Fix Workflow Example
-
-```kotlin
-// ═══════════════════════════════════════════════════════════════
-// Bug Report #456: HomeScreen crashes when refresh returns empty
-// list after previously showing items (NPE in ItemList composable)
-// ═══════════════════════════════════════════════════════════════
-
-// STEP 1: Write test that reproduces the bug
-// test/ui/screens/home/HomeViewModelTest.kt
-
-@Test
-fun `refresh with empty result shows empty state not crash - Bug #456`() = runTest {
-    // Bug: Refreshing when items existed caused NPE in ItemList
-    // Discovered: 2026-03-20
-    // Root cause: State not updated to empty list after refresh
-
-    val itemsFlow = MutableStateFlow(listOf(Item(id = "1", title = "Old")))
-    every { mockGetItems() } returns itemsFlow
-    coEvery { mockRefreshItems() } coAnswers {
-        itemsFlow.value = emptyList()
-        Result.success(Unit)
-    }
-
-    viewModel = HomeViewModel(mockGetItems, mockRefreshItems, SavedStateHandle())
-    viewModel.refresh()
-
-    viewModel.uiState.test {
-        val state = awaitItem()
-        assertThat(state.items).isEmpty()
-        assertThat(state.isRefreshing).isFalse()
-    }
-}
-
-// Run: ./gradlew test
-// ❌ FAILS - NPE when transitioning to empty list
-
-// STEP 2: Fix the bug - Handle empty list state in ViewModel
-
-// Run: ./gradlew test
-// ✅ PASSES - bug fixed, regression prevented forever
+```bash
+./gradlew ktlintCheck detekt           # AND-FMT-01 / AND-LINT-01 (+ kotlin.md)
+./gradlew lint                         # AND-LINT-01 (Android Lint)
+./gradlew test                         # AND-TST-01/02 (JVM unit tests)
+./gradlew connectedAndroidTest         # AND-TST-03 (Compose/instrumentation)
+./gradlew dependencyCheckAnalyze       # AND-SEC-02
+./gradlew assembleRelease              # AND-REL-01 (verify R8/shrink)
 ```
+
+The *why* behind each gate lives in its §0 owner; do not re-derive it here.
 
 ---
 
-## 3. Jetpack Compose (MANDATORY)
+## 4. App Architecture & Project Structure
 
-### A. Composable Functions
+The official Android guidance: three layers — **UI**, **domain** (optional, for reusable business logic), **data** — with dependencies pointing inward (UI → domain → data). State holders (ViewModel) live in the UI layer; repositories are the public API of the data layer and the single source of truth.
 
-```kotlin
-// ui/components/Button.kt
-@Composable
-fun PrimaryButton(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    loading: Boolean = false
-) {
-    Button(
-        onClick = onClick,
-        modifier = modifier.heightIn(min = 48.dp),
-        enabled = enabled && !loading,
-        colors = ButtonDefaults.buttonColors(
-            containerColor = MaterialTheme.colorScheme.primary,
-            disabledContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-        )
-    ) {
-        if (loading) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(20.dp),
-                color = MaterialTheme.colorScheme.onPrimary,
-                strokeWidth = 2.dp
-            )
-        } else {
-            Text(
-                text = text,
-                style = MaterialTheme.typography.labelLarge
-            )
-        }
-    }
-}
-
-@Preview
-@Composable
-private fun PrimaryButtonPreview() {
-    MyAppTheme {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            PrimaryButton(text = "Click me", onClick = {})
-            PrimaryButton(text = "Loading", onClick = {}, loading = true)
-            PrimaryButton(text = "Disabled", onClick = {}, enabled = false)
-        }
-    }
-}
+```
+app/src/main/java/com/example/app/
+├── App.kt                      # @HiltAndroidApp Application
+├── di/                         # Hilt modules (Network, Database, Repository, Dispatcher)
+├── data/                       # DATA layer — repositories are the public API
+│   ├── local/                  #   Room: AppDatabase, dao/, entity/
+│   ├── remote/                 #   Retrofit/Ktor api/ + dto/
+│   └── repository/             #   *RepositoryImpl — caches, exposes Flow
+├── domain/                     # DOMAIN layer (optional) — pure Kotlin, no Android imports
+│   ├── model/                  #   domain models
+│   └── usecase/                #   use cases orchestrating repositories
+└── ui/                         # UI layer — Compose only
+    ├── theme/                  #   Material 3 theme
+    ├── navigation/             #   Navigation Compose graph
+    ├── components/             #   reusable composables
+    └── feature/<screen>/       #   Screen + Content composables + ViewModel + UiState
+test/         # JVM unit tests — ViewModels, use cases, repositories (see tdd.md)
+androidTest/  # instrumentation — Compose UI, Room, Hilt (see tdd.md)
 ```
 
-### B. Screen Composable
+- Group by **feature**, not by type; large apps split features into Gradle modules with convention plugins.
+- The domain layer (and ideally domain models) MUST NOT import `android.*` (AND-ARCH-01).
+- Repositories expose `Flow`; the UI observes, never calls the network directly.
+
+---
+
+## 5. Android Specifics
+
+The unique value of this guide. Coroutine/Flow *semantics* are owned by [`kotlin.md`](guides://kotlin.md); below is their **Android binding**.
+
+### A. Jetpack Compose — composables, state hoisting, unidirectional flow
+State is **hoisted**: a stateless `Content` composable takes immutable state + event lambdas; a thin stateful `Screen` wires the ViewModel. This keeps UI previewable and testable.
 
 ```kotlin
-// ui/screens/home/HomeScreen.kt
 @Composable
 fun HomeScreen(
+    onNavigateToDetail: (String) -> Unit,
     viewModel: HomeViewModel = hiltViewModel(),
-    onNavigateToDetail: (String) -> Unit
 ) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-
-    HomeContent(
-        uiState = uiState,
-        onRefresh = viewModel::refresh,
-        onItemClick = onNavigateToDetail,
-        onRetry = viewModel::retry
-    )
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()   // lifecycle-aware (AND-STATE-01)
+    HomeContent(uiState, onItemClick = onNavigateToDetail, onRetry = viewModel::retry)
 }
 
 @Composable
-private fun HomeContent(
+private fun HomeContent(                       // stateless, previewable, unit-testable
     uiState: HomeUiState,
-    onRefresh: () -> Unit,
     onItemClick: (String) -> Unit,
-    onRetry: () -> Unit
+    onRetry: () -> Unit,
 ) {
-    val pullRefreshState = rememberPullRefreshState(
-        refreshing = uiState.isRefreshing,
-        onRefresh = onRefresh
-    )
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .pullRefresh(pullRefreshState)
-    ) {
-        when {
-            uiState.isLoading && uiState.items.isEmpty() -> {
-                LoadingContent()
+    when (uiState) {
+        HomeUiState.Loading -> LoadingIndicator()
+        is HomeUiState.Error -> ErrorPane(uiState.message, onRetry)
+        is HomeUiState.Success -> LazyColumn {
+            items(uiState.items, key = { it.id }) { item ->
+                ItemCard(item, modifier = Modifier
+                    .clickable { onItemClick(item.id) }
+                    .semantics { contentDescription = item.title })   // a11y (AND-A11Y-01)
             }
-            uiState.error != null && uiState.items.isEmpty() -> {
-                ErrorContent(
-                    message = uiState.error,
-                    onRetry = onRetry
-                )
-            }
-            uiState.items.isEmpty() -> {
-                EmptyContent(message = "No items yet")
-            }
-            else -> {
-                ItemList(
-                    items = uiState.items,
-                    onItemClick = onItemClick
-                )
-            }
-        }
-
-        PullRefreshIndicator(
-            refreshing = uiState.isRefreshing,
-            state = pullRefreshState,
-            modifier = Modifier.align(Alignment.TopCenter)
-        )
-    }
-}
-
-@Composable
-private fun ItemList(
-    items: List<Item>,
-    onItemClick: (String) -> Unit
-) {
-    LazyColumn(
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        items(
-            items = items,
-            key = { it.id }
-        ) { item ->
-            ItemCard(
-                item = item,
-                onClick = { onItemClick(item.id) },
-                modifier = Modifier.animateItemPlacement()
-            )
         }
     }
 }
 ```
 
----
+- **`remember`** caches across recompositions; **`rememberSaveable`** survives config changes/process death.
+- **`derivedStateOf`** for values computed from other state (avoids recomposing on every keystroke); **`LaunchedEffect`/`rememberCoroutineScope`/`DisposableEffect`** for side effects keyed correctly.
+- Pass **stable/`@Immutable`** types to composables; defer state reads into lambdas to minimize recomposition scope (perf details → [`performance.md`](guides://performance.md)).
+- Use Material 3 + `@Preview` for every screen state. Component/UX design → [`ui.md`](guides://ui.md).
 
-## 4. ViewModel and State (MANDATORY)
-
-### A. ViewModel
-
-```kotlin
-// ui/screens/home/HomeViewModel.kt
-@HiltViewModel
-class HomeViewModel @Inject constructor(
-    private val getItemsUseCase: GetItemsUseCase,
-    private val refreshItemsUseCase: RefreshItemsUseCase,
-    private val savedStateHandle: SavedStateHandle
-) : ViewModel() {
-
-    private val _uiState = MutableStateFlow(HomeUiState())
-    val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
-
-    init {
-        loadItems()
-    }
-
-    private fun loadItems() {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, error = null) }
-
-            getItemsUseCase()
-                .catch { e ->
-                    _uiState.update {
-                        it.copy(isLoading = false, error = e.message)
-                    }
-                }
-                .collect { items ->
-                    _uiState.update {
-                        it.copy(isLoading = false, items = items)
-                    }
-                }
-        }
-    }
-
-    fun refresh() {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isRefreshing = true) }
-
-            refreshItemsUseCase()
-                .onSuccess {
-                    _uiState.update { it.copy(isRefreshing = false) }
-                }
-                .onFailure { e ->
-                    _uiState.update {
-                        it.copy(isRefreshing = false, error = e.message)
-                    }
-                }
-        }
-    }
-
-    fun retry() {
-        loadItems()
-    }
-}
-
-// UI State
-data class HomeUiState(
-    val items: List<Item> = emptyList(),
-    val isLoading: Boolean = false,
-    val isRefreshing: Boolean = false,
-    val error: String? = null
-)
-```
-
-### B. State Management Patterns
+### B. ViewModel + StateFlow (UI state)
+Model UI state as a single immutable type (a `data class` or a `sealed interface` for mutually-exclusive states). One-time effects (navigation, snackbars) go through a `Channel`/`SharedFlow`, never the state object.
 
 ```kotlin
-// Sealed interface for UI events
-sealed interface HomeEvent {
-    data class ItemClicked(val id: String) : HomeEvent
-    data object RefreshRequested : HomeEvent
-    data object RetryClicked : HomeEvent
-}
-
-// Sealed interface for one-time effects
-sealed interface HomeEffect {
-    data class NavigateToDetail(val id: String) : HomeEffect
-    data class ShowSnackbar(val message: String) : HomeEffect
+sealed interface HomeUiState {
+    data object Loading : HomeUiState
+    data class Success(val items: List<Item>) : HomeUiState
+    data class Error(val message: String) : HomeUiState
 }
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
-    private val getItemsUseCase: GetItemsUseCase
+    getItems: GetItemsUseCase,
+    private val refreshItems: RefreshItemsUseCase,
 ) : ViewModel() {
+    val uiState: StateFlow<HomeUiState> = getItems()
+        .map { HomeUiState.Success(it) as HomeUiState }
+        .catch { emit(HomeUiState.Error(it.message ?: "Unknown")) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState.Loading)
 
-    private val _uiState = MutableStateFlow(HomeUiState())
-    val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
-
-    private val _effects = Channel<HomeEffect>()
-    val effects: Flow<HomeEffect> = _effects.receiveAsFlow()
-
-    fun onEvent(event: HomeEvent) {
-        when (event) {
-            is HomeEvent.ItemClicked -> {
-                viewModelScope.launch {
-                    _effects.send(HomeEffect.NavigateToDetail(event.id))
-                }
-            }
-            HomeEvent.RefreshRequested -> refresh()
-            HomeEvent.RetryClicked -> retry()
-        }
-    }
+    fun retry() = viewModelScope.launch { refreshItems() }
 }
 ```
+
+- `WhileSubscribed(5_000)` keeps the upstream alive across short config changes but stops it when the UI is gone.
+- ViewModels hold **no** `Context`/`View`/`Activity` (AND-ARCH-01); pass `@ApplicationContext` only into the data layer via Hilt.
+
+### C. Coroutines & Flow on Android
+- `viewModelScope` (cancelled in `onCleared`) and `lifecycleScope` (`repeatOnLifecycle(STARTED)`) are the only scopes for app work — never `GlobalScope`.
+- Inject a `DispatcherProvider`; do IO on `Dispatchers.IO`, never the main thread (footgun → ANR).
+- `collectAsStateWithLifecycle()` (not `collectAsState()`) so collection pauses when the app is backgrounded.
+
+### D. Dependency Injection — Hilt
+```kotlin
+@Module @InstallIn(SingletonComponent::class)
+object DataModule {
+    @Provides @Singleton
+    fun provideDb(@ApplicationContext ctx: Context): AppDatabase =
+        Room.databaseBuilder(ctx, AppDatabase::class.java, "app.db")
+            .addMigrations(MIGRATION_1_2).build()
+}
+
+@Module @InstallIn(SingletonComponent::class)
+abstract class RepoModule {
+    @Binds @Singleton
+    abstract fun bindItemRepository(impl: ItemRepositoryImpl): ItemRepository
+}
+```
+- `@HiltAndroidApp` on `Application`, `@AndroidEntryPoint` on activities, `@HiltViewModel` + `hiltViewModel()` for ViewModels.
+- Scope to the right component (`SingletonComponent`, `ViewModelComponent`, …). `@Binds` for interface→impl, `@Provides` for constructed/third-party types. Compile-time wiring is a feature (AND-DI-01).
+
+### E. Navigation — Navigation Compose
+Single `NavHost`; routes are type-safe (use the Kotlin-serialization `@Serializable` route classes in Navigation 2.8+). Pass IDs, not objects; hoist navigation lambdas to the caller so screens stay decoupled.
+
+```kotlin
+NavHost(navController, startDestination = Home) {
+    composable<Home> { HomeScreen(onNavigateToDetail = { navController.navigate(Detail(it)) }) }
+    composable<Detail> { entry -> DetailScreen(entry.toRoute<Detail>().id, navController::popBackStack) }
+}
+```
+
+### F. Data layer — Room (single source of truth)
+Room exposes `Flow<List<Entity>>`; the repository maps entities↔domain and decides cache vs. network. Always `exportSchema = true` and supply explicit `Migration`s — never ship `fallbackToDestructiveMigration` in release. Validate migrations with `MigrationTestHelper`. Network/serialization (Retrofit/Ktor + kotlinx.serialization) lives in `data/remote`.
+
+### G. WorkManager — deferrable, guaranteed background work
+Use `WorkManager` for tasks that must survive process death / reboot (sync, upload), **not** for immediate UI work. Use Hilt's `@HiltWorker` + `HiltWorkerFactory`; apply `Constraints` (network, charging) and exponential backoff. Foreground/expedited work for user-visible long tasks.
+
+### H. Lifecycle & permissions
+- Prefer ViewModel + Compose state over Activity/Fragment lifecycle callbacks; when needed, use `LifecycleEventObserver`/`repeatOnLifecycle`. Survive config changes via `rememberSaveable` + `SavedStateHandle` (not `onSaveInstanceState` plumbing).
+- Request runtime permissions with the `ActivityResult` API (`rememberLauncherForActivityResult` / `rememberPermissionState`); request at point-of-use, handle denial + "don't ask again", declare the **minimum** set in the manifest (AND-SEC-03).
+
+### I. Build — Gradle / AGP
+- Kotlin DSL (`build.gradle.kts`) + a **version catalog** (`gradle/libs.versions.toml`) as the single source of dependency versions.
+- Enable the Compose compiler plugin (Kotlin 2.x), `buildConfig` only for non-secret config, and per-flavor signing via `local.properties`/CI — never commit keystores.
+- Release `buildType`: `isMinifyEnabled = true`, `isShrinkResources = true`, R8 with checked `proguard-rules.pro` (AND-REL-01). Generate a **Baseline Profile** for startup/scroll performance.
+
+### J. Security bindings
+Policy is owned by [`secure-coding.md`](guides://secure-coding.md). Android specifics: on-device secrets via the **Android Keystore** / `EncryptedSharedPreferences`; enforce HTTPS with a **Network Security Config** (`cleartextTrafficPermitted="false"`) and certificate pinning for critical endpoints; OWASP dependency-check + Dependabot for the Gradle graph; auth flows per [`oauth.md`](guides://oauth.md) (Credential Manager / AppAuth, no secrets in the app).
 
 ---
 
-## 5. Dependency Injection (MANDATORY)
+## 6. Tooling & Dependencies
 
-### A. Hilt Modules
+Security/supply-chain *policy* → [`secure-coding.md`](guides://secure-coding.md); language tooling (ktlint/detekt) → [`kotlin.md`](guides://kotlin.md). Android binding:
 
-```kotlin
-// di/NetworkModule.kt
-@Module
-@InstallIn(SingletonComponent::class)
-object NetworkModule {
-
-    @Provides
-    @Singleton
-    fun provideOkHttpClient(): OkHttpClient {
-        return OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .addInterceptor(HttpLoggingInterceptor().apply {
-                level = if (BuildConfig.DEBUG) {
-                    HttpLoggingInterceptor.Level.BODY
-                } else {
-                    HttpLoggingInterceptor.Level.NONE
-                }
-            })
-            .addInterceptor(AuthInterceptor())
-            .build()
-    }
-
-    @Provides
-    @Singleton
-    fun provideRetrofit(okHttpClient: OkHttpClient): Retrofit {
-        return Retrofit.Builder()
-            .baseUrl(BuildConfig.API_BASE_URL)
-            .client(okHttpClient)
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-    }
-
-    @Provides
-    @Singleton
-    fun provideApiService(retrofit: Retrofit): ApiService {
-        return retrofit.create(ApiService::class.java)
-    }
-}
-
-// di/DatabaseModule.kt
-@Module
-@InstallIn(SingletonComponent::class)
-object DatabaseModule {
-
-    @Provides
-    @Singleton
-    fun provideDatabase(@ApplicationContext context: Context): AppDatabase {
-        return Room.databaseBuilder(
-            context,
-            AppDatabase::class.java,
-            "app_database"
-        )
-            .addMigrations(MIGRATION_1_2)
-            .build()
-    }
-
-    @Provides
-    fun provideItemDao(database: AppDatabase): ItemDao {
-        return database.itemDao()
-    }
-}
-
-// di/RepositoryModule.kt
-@Module
-@InstallIn(SingletonComponent::class)
-abstract class RepositoryModule {
-
-    @Binds
-    @Singleton
-    abstract fun bindItemRepository(
-        impl: ItemRepositoryImpl
-    ): ItemRepository
-}
-```
-
----
-
-## 6. Data Layer (MANDATORY)
-
-### A. Repository
-
-```kotlin
-// data/repository/ItemRepositoryImpl.kt
-@Singleton
-class ItemRepositoryImpl @Inject constructor(
-    private val apiService: ApiService,
-    private val itemDao: ItemDao,
-    private val dispatchers: DispatcherProvider
-) : ItemRepository {
-
-    override fun getItems(): Flow<List<Item>> {
-        return itemDao.getAllItems()
-            .map { entities -> entities.map { it.toDomain() } }
-            .flowOn(dispatchers.io)
-    }
-
-    override suspend fun refreshItems(): Result<Unit> {
-        return withContext(dispatchers.io) {
-            try {
-                val response = apiService.getItems()
-                val entities = response.map { it.toEntity() }
-                itemDao.insertAll(entities)
-                Result.success(Unit)
-            } catch (e: Exception) {
-                Result.failure(e)
-            }
-        }
-    }
-
-    override suspend fun getItemById(id: String): Result<Item> {
-        return withContext(dispatchers.io) {
-            try {
-                val cached = itemDao.getItemById(id)
-                if (cached != null) {
-                    Result.success(cached.toDomain())
-                } else {
-                    val response = apiService.getItem(id)
-                    itemDao.insert(response.toEntity())
-                    Result.success(response.toDomain())
-                }
-            } catch (e: Exception) {
-                Result.failure(e)
-            }
-        }
-    }
-}
-```
-
-### B. Room Database
-
-```kotlin
-// data/local/AppDatabase.kt
-@Database(
-    entities = [ItemEntity::class, UserEntity::class],
-    version = 2,
-    exportSchema = true
-)
-@TypeConverters(Converters::class)
-abstract class AppDatabase : RoomDatabase() {
-    abstract fun itemDao(): ItemDao
-    abstract fun userDao(): UserDao
-}
-
-// data/local/entity/ItemEntity.kt
-@Entity(tableName = "items")
-data class ItemEntity(
-    @PrimaryKey
-    val id: String,
-    val title: String,
-    val description: String,
-    val imageUrl: String?,
-    val createdAt: Instant,
-    val updatedAt: Instant
-)
-
-// data/local/dao/ItemDao.kt
-@Dao
-interface ItemDao {
-    @Query("SELECT * FROM items ORDER BY createdAt DESC")
-    fun getAllItems(): Flow<List<ItemEntity>>
-
-    @Query("SELECT * FROM items WHERE id = :id")
-    suspend fun getItemById(id: String): ItemEntity?
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insert(item: ItemEntity)
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertAll(items: List<ItemEntity>)
-
-    @Delete
-    suspend fun delete(item: ItemEntity)
-
-    @Query("DELETE FROM items")
-    suspend fun deleteAll()
-}
-```
-
-### C. API Service
-
-```kotlin
-// data/remote/api/ApiService.kt
-interface ApiService {
-    @GET("items")
-    suspend fun getItems(): List<ItemDto>
-
-    @GET("items/{id}")
-    suspend fun getItem(@Path("id") id: String): ItemDto
-
-    @POST("items")
-    suspend fun createItem(@Body item: CreateItemRequest): ItemDto
-
-    @PUT("items/{id}")
-    suspend fun updateItem(
-        @Path("id") id: String,
-        @Body item: UpdateItemRequest
-    ): ItemDto
-
-    @DELETE("items/{id}")
-    suspend fun deleteItem(@Path("id") id: String)
-}
-
-// data/remote/dto/ItemDto.kt
-data class ItemDto(
-    @SerializedName("id")
-    val id: String,
-    @SerializedName("title")
-    val title: String,
-    @SerializedName("description")
-    val description: String,
-    @SerializedName("image_url")
-    val imageUrl: String?,
-    @SerializedName("created_at")
-    val createdAt: String,
-    @SerializedName("updated_at")
-    val updatedAt: String
-) {
-    fun toEntity(): ItemEntity = ItemEntity(
-        id = id,
-        title = title,
-        description = description,
-        imageUrl = imageUrl,
-        createdAt = Instant.parse(createdAt),
-        updatedAt = Instant.parse(updatedAt)
-    )
-
-    fun toDomain(): Item = Item(
-        id = id,
-        title = title,
-        description = description,
-        imageUrl = imageUrl,
-        createdAt = Instant.parse(createdAt),
-        updatedAt = Instant.parse(updatedAt)
-    )
-}
-```
-
----
-
-## 7. Navigation (MANDATORY)
-
-### A. Navigation Setup
-
-```kotlin
-// ui/navigation/AppNavigation.kt
-@Composable
-fun AppNavigation(
-    navController: NavHostController = rememberNavController()
-) {
-    NavHost(
-        navController = navController,
-        startDestination = Route.Home.route
-    ) {
-        composable(route = Route.Home.route) {
-            HomeScreen(
-                onNavigateToDetail = { id ->
-                    navController.navigate(Route.Detail.createRoute(id))
-                }
-            )
-        }
-
-        composable(
-            route = Route.Detail.route,
-            arguments = listOf(
-                navArgument(Route.Detail.ARG_ID) { type = NavType.StringType }
-            )
-        ) { backStackEntry ->
-            val id = backStackEntry.arguments?.getString(Route.Detail.ARG_ID)
-            requireNotNull(id) { "Item ID is required" }
-
-            DetailScreen(
-                itemId = id,
-                onNavigateBack = { navController.popBackStack() }
-            )
-        }
-
-        composable(route = Route.Settings.route) {
-            SettingsScreen(
-                onNavigateBack = { navController.popBackStack() }
-            )
-        }
-    }
-}
-
-// ui/navigation/Route.kt
-sealed class Route(val route: String) {
-    data object Home : Route("home")
-
-    data object Detail : Route("detail/{id}") {
-        const val ARG_ID = "id"
-        fun createRoute(id: String) = "detail/$id"
-    }
-
-    data object Settings : Route("settings")
-}
-```
-
----
-
-## 8. Testing (MANDATORY)
-
-### A. Unit Tests
-
-```kotlin
-// test/ui/screens/home/HomeViewModelTest.kt
-@OptIn(ExperimentalCoroutinesApi::class)
-class HomeViewModelTest {
-
-    @get:Rule
-    val mainDispatcherRule = MainDispatcherRule()
-
-    private lateinit var viewModel: HomeViewModel
-    private lateinit var getItemsUseCase: GetItemsUseCase
-    private lateinit var refreshItemsUseCase: RefreshItemsUseCase
-
-    @Before
-    fun setup() {
-        getItemsUseCase = mockk()
-        refreshItemsUseCase = mockk()
-    }
-
-    @Test
-    fun `initial load success shows items`() = runTest {
-        // Given
-        val items = listOf(
-            Item(id = "1", title = "Item 1"),
-            Item(id = "2", title = "Item 2")
-        )
-        every { getItemsUseCase() } returns flowOf(items)
-
-        // When
-        viewModel = HomeViewModel(getItemsUseCase, refreshItemsUseCase, SavedStateHandle())
-
-        // Then
-        viewModel.uiState.test {
-            val state = awaitItem()
-            assertThat(state.items).isEqualTo(items)
-            assertThat(state.isLoading).isFalse()
-            assertThat(state.error).isNull()
-        }
-    }
-
-    @Test
-    fun `initial load failure shows error`() = runTest {
-        // Given
-        every { getItemsUseCase() } returns flow {
-            throw IOException("Network error")
-        }
-
-        // When
-        viewModel = HomeViewModel(getItemsUseCase, refreshItemsUseCase, SavedStateHandle())
-
-        // Then
-        viewModel.uiState.test {
-            val state = awaitItem()
-            assertThat(state.error).isEqualTo("Network error")
-            assertThat(state.isLoading).isFalse()
-        }
-    }
-
-    @Test
-    fun `refresh success updates items`() = runTest {
-        // Given
-        every { getItemsUseCase() } returns flowOf(emptyList())
-        coEvery { refreshItemsUseCase() } returns Result.success(Unit)
-
-        viewModel = HomeViewModel(getItemsUseCase, refreshItemsUseCase, SavedStateHandle())
-
-        // When
-        viewModel.refresh()
-
-        // Then
-        viewModel.uiState.test {
-            val state = awaitItem()
-            assertThat(state.isRefreshing).isFalse()
-        }
-        coVerify { refreshItemsUseCase() }
-    }
-}
-```
-
-### B. Compose UI Tests
-
-```kotlin
-// androidTest/ui/screens/home/HomeScreenTest.kt
-@HiltAndroidTest
-class HomeScreenTest {
-
-    @get:Rule(order = 0)
-    val hiltRule = HiltAndroidRule(this)
-
-    @get:Rule(order = 1)
-    val composeRule = createAndroidComposeRule<MainActivity>()
-
-    @Before
-    fun setup() {
-        hiltRule.inject()
-    }
-
-    @Test
-    fun homeScreen_displaysItems() {
-        composeRule.setContent {
-            MyAppTheme {
-                HomeContent(
-                    uiState = HomeUiState(
-                        items = listOf(
-                            Item(id = "1", title = "Test Item")
-                        )
-                    ),
-                    onRefresh = {},
-                    onItemClick = {},
-                    onRetry = {}
-                )
-            }
-        }
-
-        composeRule
-            .onNodeWithText("Test Item")
-            .assertIsDisplayed()
-    }
-
-    @Test
-    fun homeScreen_showsLoadingIndicator() {
-        composeRule.setContent {
-            MyAppTheme {
-                HomeContent(
-                    uiState = HomeUiState(isLoading = true),
-                    onRefresh = {},
-                    onItemClick = {},
-                    onRetry = {}
-                )
-            }
-        }
-
-        composeRule
-            .onNodeWithTag("loading_indicator")
-            .assertIsDisplayed()
-    }
-
-    @Test
-    fun homeScreen_itemClick_triggersCallback() {
-        var clickedId: String? = null
-
-        composeRule.setContent {
-            MyAppTheme {
-                HomeContent(
-                    uiState = HomeUiState(
-                        items = listOf(Item(id = "1", title = "Test Item"))
-                    ),
-                    onRefresh = {},
-                    onItemClick = { clickedId = it },
-                    onRetry = {}
-                )
-            }
-        }
-
-        composeRule
-            .onNodeWithText("Test Item")
-            .performClick()
-
-        assertThat(clickedId).isEqualTo("1")
-    }
-}
-```
-
----
-
-## 9. Performance (MANDATORY)
-
-### A. Compose Optimization
-
-```kotlin
-// Use stable types
-@Immutable
-data class Item(
-    val id: String,
-    val title: String,
-    val description: String
-)
-
-// Skip recomposition with remember
-@Composable
-fun ItemList(items: List<Item>) {
-    val sortedItems = remember(items) {
-        items.sortedBy { it.title }
-    }
-
-    LazyColumn {
-        items(sortedItems, key = { it.id }) { item ->
-            ItemRow(item)
-        }
-    }
-}
-
-// Use derivedStateOf for computed values
-@Composable
-fun SearchScreen(items: List<Item>) {
-    var query by remember { mutableStateOf("") }
-
-    val filteredItems by remember(query, items) {
-        derivedStateOf {
-            if (query.isEmpty()) items
-            else items.filter { it.title.contains(query, ignoreCase = true) }
-        }
-    }
-}
-
-// Defer reads with lambda
-@Composable
-fun AnimatedHeader(scrollState: LazyListState) {
-    val alpha by remember {
-        derivedStateOf {
-            (scrollState.firstVisibleItemScrollOffset / 100f).coerceIn(0f, 1f)
-        }
-    }
-
-    Box(
-        modifier = Modifier.graphicsLayer { this.alpha = alpha }
-    )
-}
-```
-
-### B. Image Loading
-
-```kotlin
-// Using Coil
-@Composable
-fun ItemImage(
-    imageUrl: String?,
-    modifier: Modifier = Modifier
-) {
-    AsyncImage(
-        model = ImageRequest.Builder(LocalContext.current)
-            .data(imageUrl)
-            .crossfade(true)
-            .placeholder(R.drawable.placeholder)
-            .error(R.drawable.error)
-            .build(),
-        contentDescription = null,
-        modifier = modifier,
-        contentScale = ContentScale.Crop
-    )
-}
-```
-
----
-
-## 10. Security & Dependency Management (MANDATORY)
-
-### A. Dependency Vulnerability Scanning
-
-**OWASP Dependency-Check Gradle Plugin:**
-```kotlin
-// build.gradle.kts (project-level)
-plugins {
-    id("org.owasp.dependencycheck") version "9.0.9" apply false
-}
-
-// build.gradle.kts (app-level)
-plugins {
-    id("org.owasp.dependencycheck")
-}
-
-dependencyCheck {
-    failBuildOnCVSS = 7.0f  // Fail on HIGH+ severity
-    formats = listOf("HTML", "JSON")
-    suppressionFile = "config/owasp-suppressions.xml"
-}
-```
-
-**Run vulnerability scan:**
 ```bash
-./gradlew dependencyCheckAnalyze
+./gradlew dependencies                 # resolve graph (catalog-pinned)
+./gradlew dependencyUpdates            # report newer versions
+./gradlew dependencyCheckAnalyze       # AND-SEC-02: CVE scan
+./gradlew lint detekt ktlintCheck      # static analysis
 ```
+Pin versions in `gradle/libs.versions.toml`; commit `gradle.lockfile` if dependency locking is enabled. Configure Dependabot for `gradle` in `.github/dependabot.yml`.
 
-- Review the generated report in `build/reports/dependency-check-report.html`
-- Run scans in CI on every PR and at least weekly on the main branch
-- Configure **Dependabot** for Gradle dependencies in `.github/dependabot.yml`:
+---
 
-```yaml
-# .github/dependabot.yml
-version: 2
-updates:
-  - package-ecosystem: "gradle"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 10
+## 7. Quick Reference
+
+```bash
+./gradlew assembleDebug                # build
+./gradlew test                         # JVM unit tests
+./gradlew connectedAndroidTest         # instrumentation/Compose UI tests
+./gradlew ktlintCheck detekt lint      # format + static analysis
+./gradlew installDebug                 # deploy to device/emulator
 ```
-
-### B. App Signing and Code Protection
-
-- **Google Play App Signing**: ALWAYS enroll in Play App Signing; let Google manage your app signing key. Upload key should be separate and rotatable.
-- **ProGuard/R8**: Enable for all release builds. Verify rules in `proguard-rules.pro` to prevent stripping critical classes.
-
 ```kotlin
-// build.gradle.kts (app-level)
-android {
-    buildTypes {
-        release {
-            isMinifyEnabled = true
-            isShrinkResources = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
-        }
-    }
-}
-```
-
-### C. Secret Management
-
-- NEVER hardcode API keys, tokens, or secrets in source code or `strings.xml`
-- Use `local.properties` (excluded from VCS) or encrypted environment variables in CI
-- For runtime secrets, use the Android Keystore system:
-
-```kotlin
-// Store secrets in Android Keystore
-val keyStore = KeyStore.getInstance("AndroidKeyStore")
-keyStore.load(null)
-val secretKeyEntry = keyStore.getEntry("my_secret_alias", null) as KeyStore.SecretKeyEntry
-```
-
-### D. Network Security
-
-- Enforce HTTPS for all network connections via Network Security Config:
-
-```xml
-<!-- res/xml/network_security_config.xml -->
-<network-security-config>
-    <base-config cleartextTrafficPermitted="false">
-        <trust-anchors>
-            <certificates src="system" />
-        </trust-anchors>
-    </base-config>
-</network-security-config>
-```
-
-- Enable certificate pinning for critical API endpoints
-- Use `BuildConfig` fields for base URLs; never commit production URLs to source
-
-### E. Security Checklist
-
-- [ ] OWASP dependency-check plugin configured and passing
-- [ ] Dependabot enabled for Gradle dependencies
-- [ ] ProGuard/R8 enabled for release builds
-- [ ] Google Play App Signing enrolled
-- [ ] No secrets in source code or version control
-- [ ] Network Security Config enforces HTTPS
-- [ ] Android Keystore used for on-device secrets
-- [ ] CI pipeline runs vulnerability scans on every build
-
----
-
-## 11. Deployment Checklist
-
-### Code Quality
-- [ ] ProGuard/R8 rules configured
-- [ ] No hardcoded strings
-- [ ] Proper null safety
-- [ ] Memory leaks checked
-
-### Performance
-- [ ] Baseline profile generated
-- [ ] Compose stability verified
-- [ ] Network caching configured
-- [ ] Image loading optimized
-
-### Release
-- [ ] Signing configured
-- [ ] Version code incremented
-- [ ] Release notes written
-- [ ] Play Store assets ready
-
----
-
-## 12. Quick Reference
-
-```kotlin
-// Coroutines
-viewModelScope.launch { }
-withContext(Dispatchers.IO) { }
-flow { emit(value) }
-stateIn(scope, SharingStarted.WhileSubscribed(5000), initialValue)
-
-// Compose
-remember { }
-derivedStateOf { }
-LaunchedEffect(key) { }
-collectAsStateWithLifecycle()
-
-// Hilt
-@HiltViewModel
-@Inject constructor
-@Provides @Singleton
-@Binds
-
-// Room
-@Entity @Dao @Database
-@Query @Insert @Update @Delete
-Flow<List<T>>
+collectAsStateWithLifecycle()          // lifecycle-aware state
+stateIn(viewModelScope, WhileSubscribed(5_000), initial)
+remember {} / rememberSaveable {} / derivedStateOf {} / LaunchedEffect(key) {}
+@HiltViewModel / hiltViewModel() / @Provides / @Binds / @HiltWorker
+@Entity @Dao @Database / Flow<List<T>> / Migration
 ```
 
 ---
 
-## 13. Why This Configuration Works
+## 8. Deployment Checklist
 
-1. **MVVM with Clean Architecture**: Separating UI, domain, and data layers keeps ViewModels testable, use cases reusable, and data sources swappable without touching presentation logic.
+Generated from §2 — one box per requirement ID.
 
-2. **Jetpack Compose over XML**: Declarative UI eliminates View binding boilerplate, reduces layout bugs, and enables real-time previews with `@Preview` annotations.
-
-3. **Hilt for Dependency Injection**: Compile-time DI verification catches wiring errors at build time rather than runtime, while scoped bindings align lifecycles with Android components.
-
-4. **Kotlin Coroutines with Flows**: Structured concurrency prevents leaked coroutines, while `StateFlow` and `SharedFlow` provide lifecycle-aware reactive streams without RxJava complexity.
-
-5. **Room with Flow Return Types**: Reactive database queries automatically update the UI when data changes, eliminating manual refresh logic and stale data bugs.
-
-6. **ProGuard/R8 Optimization**: Code shrinking and obfuscation reduce APK size by 30-50% and make reverse engineering significantly harder.
-
-7. **Gradle Version Catalogs**: Centralizing dependency versions in `libs.versions.toml` prevents version conflicts across modules and simplifies updates.
-
-8. **TDD with JUnit 5 and Turbine**: Testing ViewModels with Turbine for Flow assertions ensures reactive streams emit the correct sequence of states.
-
-9. **Material 3 Theming**: Dynamic color and systematic theming ensure visual consistency while supporting personalization and dark mode out of the box.
-
-10. **Modular Build with Convention Plugins**: Shared build logic via convention plugins keeps multi-module builds consistent and reduces Gradle configuration duplication.
+- [ ] AND-TST-01/02 — tests pass, bugs have regression tests
+- [ ] AND-TST-03 — Compose/instrumentation tests pass
+- [ ] AND-FMT-01 — ktlint clean (see `kotlin.md`)
+- [ ] AND-LINT-01 — Android Lint + detekt: 0 errors
+- [ ] AND-ARCH-01 — UI/domain/data layering respected; ViewModel free of Android UI types
+- [ ] AND-STATE-01 — immutable, unidirectional, lifecycle-aware state
+- [ ] AND-DI-01 — dependencies provided by Hilt
+- [ ] AND-SEC-01/03 — no secrets in VCS, HTTPS-only, minimal permissions (see `secure-coding.md`)
+- [ ] AND-SEC-02 — 0 high/critical CVEs (`dependencyCheckAnalyze`)
+- [ ] AND-A11Y-01 — interactive composables expose semantics (see `accessibility.md`)
+- [ ] AND-REL-01 — release build: R8 minify + resource shrink enabled
+- [ ] Agent ran every §3 command and documented any fixes
 
 ---
-
-**Last Updated:** 2026-01-31
-**Version:** 1.0
-**Maintainer:** Android Team
-
-
-**End of Android Development Guidelines**
+**End of Android Guidelines**

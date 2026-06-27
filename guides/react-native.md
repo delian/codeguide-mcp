@@ -1,1253 +1,297 @@
 # React Native Development Guidelines
-Mandatory standards for building cross-platform mobile applications with React Native. React Native 0.76+, Bridgeless Architecture, Expo, TypeScript, React Navigation, Reanimated.
+Mandatory standards for cross-platform iOS/Android apps with React Native on the New Architecture. React Native 0.76+, Expo SDK 52+, TypeScript, React Navigation/Expo Router, Reanimated 3, FlashList.
+
+---
+name: react-native
+title: React Native Development Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: framework
+tools: [react-native@0.76, expo@52, typescript@5.6, react-navigation@7, expo-router@4, reanimated@3, react-native-gesture-handler@2, "@shopify/flash-list@1", jest, "@testing-library/react-native", detox]
+requires:
+  - reactjs
+  - typescript
+  - tdd
+  - secure-coding
+recommends:
+  - javascript
+  - accessibility
+  - e2e-testing
+  - performance
+  - ios
+  - android
+  - observability
+provides:
+  - react-native-newarch
+  - expo
+  - rn-navigation
+  - native-modules
+  - rn-lists
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide covers only what is unique to React Native. React itself (hooks, component model, state) is owned by [`reactjs.md`](guides://reactjs.md).
 
 ---
 
-**Agent Profile**: The React Native Expert
-**Role**: Senior Mobile Developer & Cross-Platform Architect
-**Objective**: Generate performant, maintainable React Native applications that provide native-quality experiences on iOS and Android.
-**Tools**: React Native 0.76+, Expo, TypeScript, React Navigation, Reanimated.
+## 0. Prerequisites & References
+
+Fetch and apply these **before** generating React Native code. Their rules are assumed below and not repeated.
+
+> 📎 **REQUIRED — fetch & apply first:**
+> - [`reactjs.md`](guides://reactjs.md) — components, hooks, rendering, state, memoization. *(RN reuses React; only the host components and platform APIs differ.)*
+> - [`typescript.md`](guides://typescript.md) — strict typing, `tsconfig`, generics. *(RN binding: `strict: true`, typed navigation params, `npx tsc --noEmit`.)*
+> - [`tdd.md`](guides://tdd.md) — test-first, Red-Green-Refactor, regression-test-before-fix, coverage. *(RN binding: Jest + `@testing-library/react-native` for units; Detox/Maestro for E2E.)*
+> - [`secure-coding.md`](guides://secure-coding.md) — supply chain, secrets, CVE policy. *(RN binding: `expo-secure-store`/`react-native-keychain` for secrets; never ship keys in the JS bundle.)*
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`accessibility.md`](guides://accessibility.md) — a11y policy *(binding: `accessibilityRole`/`accessibilityLabel`/`accessibilityState` props, `AccessibilityInfo`).*
+> - [`e2e-testing.md`](guides://e2e-testing.md) — E2E strategy *(binding: Detox or Maestro on simulators/devices).*
+> - [`performance.md`](guides://performance.md) — perf budgets/profiling *(binding: list virtualization, JS-thread vs UI-thread, Reanimated worklets).*
+> - [`ios.md`](guides://ios.md) · [`android.md`](guides://android.md) — the native platforms beneath RN (entitlements, permissions, store builds, native modules).
+> - [`javascript.md`](guides://javascript.md) · [`observability.md`](guides://observability.md)
+
+> 📎 **SEE ALSO:** [`flutter.md`](guides://flutter.md) *(alternative cross-platform stack)* · [`oauth.md`](guides://oauth.md) *(mobile auth flows)*
 
 ---
 
 ## 1. Core Philosophies: NATIVE-FIRST
 
-The agent must adhere to the **NATIVE-FIRST** principles for every React Native implementation:
+React Native-specific principles only. TDD, security, React fundamentals, and typing come from §0.
 
-**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
-**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
-**Security-First**: Mandatory vulnerability scanning, dependency auditing, and supply chain integrity checks.
-**Bridgeless Architecture**: Default to the New Architecture (TurboModules, Fabric) and avoid the legacy bridge.
+- **N**ew Architecture by default: Fabric renderer + TurboModules + JSI are the default in 0.76+; never scaffold against or re-enable the legacy bridge.
+- **A**daptive per platform: respect each OS's conventions via `Platform`, `.ios.tsx`/`.android.tsx` files, and safe-area insets — not a lowest-common-denominator UI.
+- **T**hread-aware: keep the JS thread free; run animations/gestures on the UI thread via Reanimated worklets; virtualize all long lists.
+- **I**ntegrated toolchain: Expo (managed or prebuild/CNG) is the default; drop to a bare/`expo prebuild` native project only when a dependency demands it.
+- **V**erified on real targets: gates in §2 plus a smoke run on at least one iOS simulator and one Android emulator before delivery.
+- **E**xpo-native primitives: prefer Expo SDK modules (`expo-secure-store`, `expo-image`, `expo-haptics`, `expo-router`) over unmaintained community equivalents.
 
-- **N**ative feel: Apps should feel native on each platform (iOS/Android specific UX).
-- **A**synchronous: Non-blocking operations for smooth 60/120 FPS UI.
-- **T**yped: TypeScript strict mode for reliability.
-- **I**solated: Component-based architecture with clear boundaries.
-- **V**erified: Tested on real devices and emulators.
-- **E**fficient: Optimized for mobile memory and battery constraints.
-
-**Verified Code**: Agent-generated code MUST pass `tsc`, security audits, and component tests before delivery.
+**Verified Code**: Agent-generated React Native MUST pass every gate in §2 before delivery.
 
 ---
 
-## 2. Agent Code Generation Requirements (MANDATORY)
+## 2. Requirements (MANDATORY, auditable)
 
-### A. Verification Protocol
+RFC-2119 keywords. IDs `RN-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a shared rule cite its owner.
 
-**CRITICAL: Agents MUST verify that all generated React Native code compiles, passes tests, and follows security best practices before presenting it to the user.**
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| RN-TST-01 | Every feature MUST be test-first (see `tdd.md`) | `npm test` | exit 0, 0 skips |
+| RN-TST-02 | Each bug MUST get a regression test before the fix (see `tdd.md`) | `npm test` | failing→passing |
+| RN-TST-03 | Critical user journeys MUST have an E2E test (see `e2e-testing.md`) | `detox test` / `maestro test` | exit 0 |
+| RN-TYP-01 | No type errors; strict TS, typed nav params (see `typescript.md`) | `npx tsc --noEmit` | exit 0 |
+| RN-FMT-01 | Code MUST be formatted | `npx @biomejs/biome format .` (or `prettier --check`) | no diff |
+| RN-LINT-01 | Linter MUST pass clean | `npx @biomejs/biome lint .` (or `eslint .`) | exit 0 |
+| RN-ARCH-01 | New Architecture (Fabric/TurboModules) MUST stay enabled; no legacy bridge | `grep newArchEnabled` / Expo config | enabled, no `NativeModules` bridge specs |
+| RN-PERF-01 | Long lists MUST use FlashList/FlatList virtualization (see `performance.md`) | review / grep for `.map` over large data in JSX | no unvirtualized lists |
+| RN-A11Y-01 | Interactive elements MUST expose a11y props (see `accessibility.md`) | review / a11y lint | role+label present |
+| RN-SEC-01 | Secrets MUST be in SecureStore/Keychain, never `AsyncStorage` or bundle (see `secure-coding.md`) | grep `AsyncStorage`/`EXPO_PUBLIC_` for secrets | none found |
+| RN-SEC-02 | 0 high/critical CVEs in deps (see `secure-coding.md`) | `npm audit --audit-level=high` | 0 high/critical |
+| RN-DEP-01 | Lockfile in sync; Expo deps SDK-aligned | `npm ci` + `npx expo install --check` | in sync |
+| RN-DOC-01 | Public components/hooks documented (see `comments.md`) | review / `tsc` doc build | JSDoc present |
 
-#### Pre-Delivery Checklist
-
-**Before delivering ANY React Native code, the agent MUST:**
-
-1. **TypeScript & Build Check**:
-   ```bash
-   # Run TypeScript compiler
-   npx tsc --noEmit
-   
-   # Verify Expo config (if applicable)
-   npx expo config
-   ```
-   - **MUST** return exit code 0.
-   - All nullable prop warnings must be resolved.
-
-2. **Security & Dependency Verification (MANDATORY)**:
-   ```bash
-   # Scan for vulnerabilities in dependencies
-   npm audit --audit-level=high
-   ```
-   - **MUST** have 0 high/critical vulnerabilities.
-   - Supply chain integrity (`package-lock.json`) MUST be verified.
-
-3. **Test Execution**:
-   ```bash
-   # Run all unit and component tests
-   npm test
-   ```
-   - **MUST** pass all tests (100% pass rate).
-   - Minimum 80% code coverage.
-
-4. **Documentation Verification**:
-   - All public APIs, components, and custom hooks have JSDoc comments.
-   - Navigation routes are explicitly typed.
-
-#### Error Correction Process
-
-If verification fails:
-
-1. **Identify the error**: Read the full compiler or test runner output.
-2. **Fix the root cause**:
-   - Navigation error? Check the `StackParamList` definitions.
-   - Native module error? Ensure TurboModule compatibility.
-3. **Re-verify**: Run build, tests, and audits again.
+> **Forbidden**: shipping implementation before its test (violates `tdd.md`); fixing a bug without a regression test first; storing tokens/PII in `AsyncStorage`; embedding secrets in `EXPO_PUBLIC_*` env or the JS bundle; re-enabling the legacy bridge; rendering large datasets with `.map()` instead of a virtualized list; inline `StyleSheet.create` objects rebuilt every render.
 
 ---
 
-## 2A. TDD Protocol (MANDATORY)
+## 3. Verification Protocol
 
-**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
-
-### Red-Green-Refactor Cycle with Jest and React Native Testing Library
-
-```tsx
-// ═══════════════════════════════════════════════════════════════
-// STEP 1: RED - Write failing test first
-// ═══════════════════════════════════════════════════════════════
-
-// __tests__/hooks/useOrders.test.ts
-import { renderHook, waitFor } from '@testing-library/react-native';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useOrders } from '@/features/orders/hooks/useOrders';
-import { ordersApi } from '@/features/orders/services/ordersApi';
-
-jest.mock('@/features/orders/services/ordersApi');
-
-const wrapper = ({ children }: { children: React.ReactNode }) => {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
-  return (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  );
-};
-
-describe('useOrders', () => {
-  it('returns orders on successful fetch', async () => {
-    const mockOrders = [
-      { id: '1', title: 'Order 1' },
-      { id: '2', title: 'Order 2' },
-    ];
-    (ordersApi.getOrders as jest.Mock).mockResolvedValue({
-      orders: mockOrders,
-      hasMore: false,
-      page: 1,
-    });
-
-    const { result } = renderHook(() => useOrders(), { wrapper });
-
-    await waitFor(() => {
-      expect(result.current.isLoading).toBe(false);
-    });
-
-    expect(result.current.orders).toHaveLength(2);
-    expect(result.current.orders[0].title).toBe('Order 1');
-  });
-
-  it('returns error on failed fetch', async () => {
-    (ordersApi.getOrders as jest.Mock).mockRejectedValue(
-      new Error('Network error')
-    );
-
-    const { result } = renderHook(() => useOrders(), { wrapper });
-
-    await waitFor(() => {
-      expect(result.current.error).toBeTruthy();
-    });
-
-    expect(result.current.error?.message).toBe('Network error');
-  });
-});
-
-// Run: npm test
-// ❌ FAILS - useOrders hook doesn't exist yet
-
-// ═══════════════════════════════════════════════════════════════
-// STEP 2: GREEN - Write minimal implementation
-// ═══════════════════════════════════════════════════════════════
-
-// Implement useOrders hook with React Query to make tests pass
-
-// Run: npm test
-// ✅ PASSES - all tests pass
-
-// ═══════════════════════════════════════════════════════════════
-// STEP 3: REFACTOR - Add pagination, improve while tests stay green
-// ═══════════════════════════════════════════════════════════════
-```
-
----
-
-## 2B. Bug Fix Protocol (MANDATORY)
-
-**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
-
-### Bug Fix Workflow Example
-
-```tsx
-// ═══════════════════════════════════════════════════════════════
-// Bug Report #789: Button component fires onPress callback even
-// when disabled prop is true on Android
-// ═══════════════════════════════════════════════════════════════
-
-// STEP 1: Write test that reproduces the bug
-// __tests__/Button.test.tsx
-
-import React from 'react';
-import { render, fireEvent } from '@testing-library/react-native';
-import { Button } from '@/components/ui/Button';
-
-test('does not fire onPress when disabled - Bug #789', () => {
-  // Bug: onPress fires on disabled button on Android
-  // Discovered: 2026-03-22
-  // Root cause: TouchableOpacity disabled prop not propagated
-
-  const onPress = jest.fn();
-  const { getByText } = render(
-    <Button title="Submit" onPress={onPress} disabled />
-  );
-
-  fireEvent.press(getByText('Submit'));
-  expect(onPress).not.toHaveBeenCalled();
-});
-
-test('does not fire onPress when loading - Bug #789', () => {
-  const onPress = jest.fn();
-  const { getByTestId } = render(
-    <Button title="Submit" onPress={onPress} loading />
-  );
-
-  fireEvent.press(getByTestId('activity-indicator'));
-  expect(onPress).not.toHaveBeenCalled();
-});
-
-// Run: npm test
-// ❌ FAILS - onPress is called even when disabled
-
-// STEP 2: Fix the bug - Ensure disabled={isDisabled} on TouchableOpacity
-
-// Run: npm test
-// ✅ PASSES - bug fixed, regression prevented forever
-```
-
----
-
-## 3. Project Structure (MANDATORY)
-
-### A. Directory Layout
-
-```
-src/
-├── app/                      # App entry and navigation
-│   ├── App.tsx
-│   ├── navigation/
-│   │   ├── index.tsx
-│   │   ├── MainNavigator.tsx
-│   │   ├── AuthNavigator.tsx
-│   │   └── types.ts
-│   └── providers/
-│       └── AppProviders.tsx
-├── components/               # Reusable components
-│   ├── ui/                   # Basic UI components
-│   │   ├── Button.tsx
-│   │   ├── Input.tsx
-│   │   └── Card.tsx
-│   ├── forms/
-│   └── shared/
-├── screens/                  # Screen components
-│   ├── auth/
-│   │   ├── LoginScreen.tsx
-│   │   └── RegisterScreen.tsx
-│   ├── home/
-│   │   └── HomeScreen.tsx
-│   └── profile/
-│       └── ProfileScreen.tsx
-├── features/                 # Feature modules
-│   ├── auth/
-│   │   ├── hooks/
-│   │   ├── services/
-│   │   └── store/
-│   └── orders/
-├── hooks/                    # Global custom hooks
-├── services/                 # API and external services
-├── store/                    # Global state management
-├── theme/                    # Styling and theming
-│   ├── colors.ts
-│   ├── spacing.ts
-│   ├── typography.ts
-│   └── index.ts
-├── utils/                    # Utility functions
-├── types/                    # TypeScript types
-└── constants/                # App constants
-```
-
----
-
-## 3. Component Patterns (MANDATORY)
-
-### A. Functional Components
-
-```tsx
-// components/ui/Button.tsx
-import React from 'react';
-import {
-  TouchableOpacity,
-  Text,
-  StyleSheet,
-  ActivityIndicator,
-  ViewStyle,
-  TextStyle,
-} from 'react-native';
-
-interface ButtonProps {
-  title: string;
-  onPress: () => void;
-  variant?: 'primary' | 'secondary' | 'outline';
-  size?: 'small' | 'medium' | 'large';
-  disabled?: boolean;
-  loading?: boolean;
-  style?: ViewStyle;
-  textStyle?: TextStyle;
-}
-
-export function Button({
-  title,
-  onPress,
-  variant = 'primary',
-  size = 'medium',
-  disabled = false,
-  loading = false,
-  style,
-  textStyle,
-}: ButtonProps) {
-  const isDisabled = disabled || loading;
-
-  return (
-    <TouchableOpacity
-      style={[
-        styles.base,
-        styles[variant],
-        styles[size],
-        isDisabled && styles.disabled,
-        style,
-      ]}
-      onPress={onPress}
-      disabled={isDisabled}
-      activeOpacity={0.7}
-    >
-      {loading ? (
-        <ActivityIndicator color={variant === 'primary' ? '#fff' : '#007AFF'} />
-      ) : (
-        <Text style={[styles.text, styles[`${variant}Text`], textStyle]}>
-          {title}
-        </Text>
-      )}
-    </TouchableOpacity>
-  );
-}
-
-const styles = StyleSheet.create({
-  base: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 8,
-  },
-  primary: {
-    backgroundColor: '#007AFF',
-  },
-  secondary: {
-    backgroundColor: '#E5E5EA',
-  },
-  outline: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: '#007AFF',
-  },
-  small: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-  },
-  medium: {
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-  },
-  large: {
-    paddingVertical: 16,
-    paddingHorizontal: 32,
-  },
-  disabled: {
-    opacity: 0.5,
-  },
-  text: {
-    fontWeight: '600',
-  },
-  primaryText: {
-    color: '#fff',
-  },
-  secondaryText: {
-    color: '#000',
-  },
-  outlineText: {
-    color: '#007AFF',
-  },
-});
-```
-
-### B. Screen Components
-
-```tsx
-// screens/home/HomeScreen.tsx
-import React, { useCallback } from 'react';
-import { View, FlatList, StyleSheet, RefreshControl } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
-import { useOrders } from '@/features/orders/hooks/useOrders';
-import { OrderCard } from '@/features/orders/components/OrderCard';
-import { EmptyState } from '@/components/shared/EmptyState';
-import { LoadingState } from '@/components/shared/LoadingState';
-import { ErrorState } from '@/components/shared/ErrorState';
-import type { HomeScreenNavigationProp } from '@/app/navigation/types';
-
-export function HomeScreen() {
-  const navigation = useNavigation<HomeScreenNavigationProp>();
-  const insets = useSafeAreaInsets();
-
-  const {
-    orders,
-    isLoading,
-    isRefreshing,
-    error,
-    refetch,
-    fetchMore,
-    hasMore,
-  } = useOrders();
-
-  const handleOrderPress = useCallback((orderId: string) => {
-    navigation.navigate('OrderDetail', { orderId });
-  }, [navigation]);
-
-  const handleEndReached = useCallback(() => {
-    if (hasMore && !isLoading) {
-      fetchMore();
-    }
-  }, [hasMore, isLoading, fetchMore]);
-
-  if (isLoading && !orders.length) {
-    return <LoadingState />;
-  }
-
-  if (error && !orders.length) {
-    return <ErrorState message={error.message} onRetry={refetch} />;
-  }
-
-  return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <FlatList
-        data={orders}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <OrderCard order={item} onPress={() => handleOrderPress(item.id)} />
-        )}
-        contentContainerStyle={styles.listContent}
-        refreshControl={
-          <RefreshControl refreshing={isRefreshing} onRefresh={refetch} />
-        }
-        onEndReached={handleEndReached}
-        onEndReachedThreshold={0.5}
-        ListEmptyComponent={<EmptyState message="No orders yet" />}
-      />
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F2F2F7',
-  },
-  listContent: {
-    padding: 16,
-  },
-});
-```
-
----
-
-## 4. Navigation (MANDATORY)
-
-### A. Navigation Setup
-
-```tsx
-// app/navigation/index.tsx
-import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-
-import { useAuth } from '@/features/auth/hooks/useAuth';
-import { AuthNavigator } from './AuthNavigator';
-import { MainNavigator } from './MainNavigator';
-import { linking } from './linking';
-
-const Stack = createNativeStackNavigator();
-
-export function RootNavigator() {
-  const { isAuthenticated, isLoading } = useAuth();
-
-  if (isLoading) {
-    return <SplashScreen />;
-  }
-
-  return (
-    <NavigationContainer linking={linking}>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        {isAuthenticated ? (
-          <Stack.Screen name="Main" component={MainNavigator} />
-        ) : (
-          <Stack.Screen name="Auth" component={AuthNavigator} />
-        )}
-      </Stack.Navigator>
-    </NavigationContainer>
-  );
-}
-```
-
-### B. Type-Safe Navigation
-
-```tsx
-// app/navigation/types.ts
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
-import type { CompositeNavigationProp, RouteProp } from '@react-navigation/native';
-
-// Root stack
-export type RootStackParamList = {
-  Auth: undefined;
-  Main: undefined;
-};
-
-// Auth stack
-export type AuthStackParamList = {
-  Login: undefined;
-  Register: undefined;
-  ForgotPassword: { email?: string };
-};
-
-// Main tab navigator
-export type MainTabParamList = {
-  Home: undefined;
-  Search: undefined;
-  Cart: undefined;
-  Profile: undefined;
-};
-
-// Home stack
-export type HomeStackParamList = {
-  HomeMain: undefined;
-  OrderDetail: { orderId: string };
-  ProductDetail: { productId: string };
-};
-
-// Navigation prop types
-export type HomeScreenNavigationProp = CompositeNavigationProp<
-  NativeStackNavigationProp<HomeStackParamList, 'HomeMain'>,
-  BottomTabNavigationProp<MainTabParamList>
->;
-
-export type OrderDetailRouteProp = RouteProp<HomeStackParamList, 'OrderDetail'>;
-
-// Usage in component
-import { useNavigation, useRoute } from '@react-navigation/native';
-
-function OrderDetailScreen() {
-  const navigation = useNavigation<HomeScreenNavigationProp>();
-  const route = useRoute<OrderDetailRouteProp>();
-
-  const { orderId } = route.params; // Type-safe!
-
-  // navigation.navigate() has autocomplete
-}
-```
-
----
-
-## 5. State Management (MANDATORY)
-
-### A. Zustand Store
-
-```tsx
-// store/useAuthStore.ts
-import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-interface User {
-  id: string;
-  email: string;
-  name: string;
-}
-
-interface AuthState {
-  user: User | null;
-  token: string | null;
-  isAuthenticated: boolean;
-  isLoading: boolean;
-
-  // Actions
-  setUser: (user: User, token: string) => void;
-  logout: () => void;
-  setLoading: (loading: boolean) => void;
-}
-
-export const useAuthStore = create<AuthState>()(
-  persist(
-    (set) => ({
-      user: null,
-      token: null,
-      isAuthenticated: false,
-      isLoading: true,
-
-      setUser: (user, token) =>
-        set({
-          user,
-          token,
-          isAuthenticated: true,
-          isLoading: false,
-        }),
-
-      logout: () =>
-        set({
-          user: null,
-          token: null,
-          isAuthenticated: false,
-        }),
-
-      setLoading: (loading) => set({ isLoading: loading }),
-    }),
-    {
-      name: 'auth-storage',
-      storage: createJSONStorage(() => AsyncStorage),
-      partialize: (state) => ({
-        user: state.user,
-        token: state.token,
-        isAuthenticated: state.isAuthenticated,
-      }),
-    }
-  )
-);
-```
-
-### B. React Query for Server State
-
-```tsx
-// features/orders/hooks/useOrders.ts
-import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ordersApi } from '../services/ordersApi';
-
-export function useOrders() {
-  const {
-    data,
-    isLoading,
-    isRefetching,
-    error,
-    refetch,
-    fetchNextPage,
-    hasNextPage,
-  } = useInfiniteQuery({
-    queryKey: ['orders'],
-    queryFn: ({ pageParam = 1 }) => ordersApi.getOrders({ page: pageParam }),
-    getNextPageParam: (lastPage) =>
-      lastPage.hasMore ? lastPage.page + 1 : undefined,
-    staleTime: 5 * 60 * 1000, // 5 minutes
-  });
-
-  const orders = data?.pages.flatMap((page) => page.orders) ?? [];
-
-  return {
-    orders,
-    isLoading,
-    isRefreshing: isRefetching,
-    error,
-    refetch,
-    fetchMore: fetchNextPage,
-    hasMore: hasNextPage,
-  };
-}
-
-export function useCreateOrder() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: ordersApi.createOrder,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['orders'] });
-    },
-  });
-}
-```
-
----
-
-## 6. Styling (MANDATORY)
-
-### A. Theme System
-
-```tsx
-// theme/index.ts
-export const theme = {
-  colors: {
-    primary: '#007AFF',
-    secondary: '#5856D6',
-    success: '#34C759',
-    warning: '#FF9500',
-    error: '#FF3B30',
-
-    background: {
-      primary: '#FFFFFF',
-      secondary: '#F2F2F7',
-      tertiary: '#E5E5EA',
-    },
-
-    text: {
-      primary: '#000000',
-      secondary: '#3C3C43',
-      tertiary: '#8E8E93',
-      inverse: '#FFFFFF',
-    },
-
-    border: '#C6C6C8',
-  },
-
-  spacing: {
-    xs: 4,
-    sm: 8,
-    md: 16,
-    lg: 24,
-    xl: 32,
-    xxl: 48,
-  },
-
-  borderRadius: {
-    sm: 4,
-    md: 8,
-    lg: 16,
-    full: 9999,
-  },
-
-  typography: {
-    largeTitle: {
-      fontSize: 34,
-      fontWeight: '700' as const,
-      lineHeight: 41,
-    },
-    title1: {
-      fontSize: 28,
-      fontWeight: '700' as const,
-      lineHeight: 34,
-    },
-    title2: {
-      fontSize: 22,
-      fontWeight: '700' as const,
-      lineHeight: 28,
-    },
-    headline: {
-      fontSize: 17,
-      fontWeight: '600' as const,
-      lineHeight: 22,
-    },
-    body: {
-      fontSize: 17,
-      fontWeight: '400' as const,
-      lineHeight: 22,
-    },
-    callout: {
-      fontSize: 16,
-      fontWeight: '400' as const,
-      lineHeight: 21,
-    },
-    caption: {
-      fontSize: 12,
-      fontWeight: '400' as const,
-      lineHeight: 16,
-    },
-  },
-} as const;
-
-export type Theme = typeof theme;
-```
-
-### B. Platform-Specific Styles
-
-```tsx
-import { Platform, StyleSheet } from 'react-native';
-
-const styles = StyleSheet.create({
-  container: {
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 4,
-      },
-    }),
-  },
-});
-
-// Or use Platform.OS
-const hitSlop = Platform.OS === 'ios'
-  ? { top: 10, bottom: 10, left: 10, right: 10 }
-  : { top: 15, bottom: 15, left: 15, right: 15 };
-```
-
----
-
-## 7. Performance (MANDATORY)
-
-### A. List Optimization
-
-```tsx
-import React, { useCallback, useMemo } from 'react';
-import { FlatList } from 'react-native';
-
-function OptimizedList({ data }) {
-  // Memoize keyExtractor
-  const keyExtractor = useCallback((item: Item) => item.id, []);
-
-  // Memoize renderItem
-  const renderItem = useCallback(
-    ({ item }: { item: Item }) => <ItemCard item={item} />,
-    []
-  );
-
-  // Memoize getItemLayout for fixed-height items
-  const getItemLayout = useCallback(
-    (_: any, index: number) => ({
-      length: ITEM_HEIGHT,
-      offset: ITEM_HEIGHT * index,
-      index,
-    }),
-    []
-  );
-
-  return (
-    <FlatList
-      data={data}
-      keyExtractor={keyExtractor}
-      renderItem={renderItem}
-      getItemLayout={getItemLayout}
-      // Performance optimizations
-      removeClippedSubviews={true}
-      maxToRenderPerBatch={10}
-      windowSize={5}
-      initialNumToRender={10}
-      // Prevent re-renders of unchanged items
-      extraData={undefined}
-    />
-  );
-}
-
-// Memoize list item component
-const ItemCard = React.memo(function ItemCard({ item }: { item: Item }) {
-  return (
-    <View style={styles.card}>
-      <Text>{item.title}</Text>
-    </View>
-  );
-});
-```
-
-### B. Image Optimization
-
-```tsx
-import FastImage from 'react-native-fast-image';
-
-function OptimizedImage({ uri, style }) {
-  return (
-    <FastImage
-      source={{
-        uri,
-        priority: FastImage.priority.normal,
-        cache: FastImage.cacheControl.immutable,
-      }}
-      style={style}
-      resizeMode={FastImage.resizeMode.cover}
-    />
-  );
-}
-```
-
-### C. Animations with Reanimated
-
-```tsx
-import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring,
-  withTiming,
-} from 'react-native-reanimated';
-
-function AnimatedCard({ children }) {
-  const scale = useSharedValue(1);
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-  }));
-
-  const handlePressIn = () => {
-    scale.value = withSpring(0.95);
-  };
-
-  const handlePressOut = () => {
-    scale.value = withSpring(1);
-  };
-
-  return (
-    <Pressable onPressIn={handlePressIn} onPressOut={handlePressOut}>
-      <Animated.View style={animatedStyle}>{children}</Animated.View>
-    </Pressable>
-  );
-}
-```
-
----
-
-## 8. Native Modules (MANDATORY)
-
-### A. Platform-Specific Code
-
-```tsx
-// Using .ios.tsx and .android.tsx files
-// components/Haptics.ios.tsx
-import * as Haptics from 'expo-haptics';
-
-export function triggerHaptic(type: 'light' | 'medium' | 'heavy') {
-  const impact = {
-    light: Haptics.ImpactFeedbackStyle.Light,
-    medium: Haptics.ImpactFeedbackStyle.Medium,
-    heavy: Haptics.ImpactFeedbackStyle.Heavy,
-  };
-  Haptics.impactAsync(impact[type]);
-}
-
-// components/Haptics.android.tsx
-import { Vibration } from 'react-native';
-
-export function triggerHaptic(type: 'light' | 'medium' | 'heavy') {
-  const duration = { light: 10, medium: 20, heavy: 30 };
-  Vibration.vibrate(duration[type]);
-}
-
-// Usage (automatically picks correct file)
-import { triggerHaptic } from '@/components/Haptics';
-```
-
-### B. Native Module Bridge
-
-```tsx
-// For custom native functionality
-import { NativeModules, Platform } from 'react-native';
-
-const { CustomModule } = NativeModules;
-
-interface CustomModuleInterface {
-  processData(data: string): Promise<string>;
-  getDeviceInfo(): Promise<DeviceInfo>;
-}
-
-export const customModule: CustomModuleInterface = Platform.select({
-  ios: CustomModule,
-  android: CustomModule,
-  default: {
-    processData: async () => '',
-    getDeviceInfo: async () => ({}),
-  },
-});
-```
-
----
-
-## 9. Testing (MANDATORY)
-
-### A. Component Tests
-
-```tsx
-// __tests__/Button.test.tsx
-import React from 'react';
-import { render, fireEvent } from '@testing-library/react-native';
-import { Button } from '../components/ui/Button';
-
-describe('Button', () => {
-  it('renders correctly', () => {
-    const { getByText } = render(
-      <Button title="Press me" onPress={() => {}} />
-    );
-    expect(getByText('Press me')).toBeTruthy();
-  });
-
-  it('calls onPress when pressed', () => {
-    const onPress = jest.fn();
-    const { getByText } = render(
-      <Button title="Press me" onPress={onPress} />
-    );
-
-    fireEvent.press(getByText('Press me'));
-    expect(onPress).toHaveBeenCalledTimes(1);
-  });
-
-  it('shows loading indicator when loading', () => {
-    const { getByTestId, queryByText } = render(
-      <Button title="Press me" onPress={() => {}} loading />
-    );
-
-    expect(queryByText('Press me')).toBeNull();
-    expect(getByTestId('activity-indicator')).toBeTruthy();
-  });
-
-  it('is disabled when disabled prop is true', () => {
-    const onPress = jest.fn();
-    const { getByText } = render(
-      <Button title="Press me" onPress={onPress} disabled />
-    );
-
-    fireEvent.press(getByText('Press me'));
-    expect(onPress).not.toHaveBeenCalled();
-  });
-});
-```
-
-### B. Integration Tests
-
-```tsx
-// __tests__/LoginScreen.test.tsx
-import React from 'react';
-import { render, fireEvent, waitFor } from '@testing-library/react-native';
-import { NavigationContainer } from '@react-navigation/native';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-
-import { LoginScreen } from '../screens/auth/LoginScreen';
-import { authApi } from '../services/authApi';
-
-jest.mock('../services/authApi');
-
-const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: false } },
-});
-
-function renderWithProviders(component: React.ReactElement) {
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <NavigationContainer>{component}</NavigationContainer>
-    </QueryClientProvider>
-  );
-}
-
-describe('LoginScreen', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
-
-  it('submits login form with valid credentials', async () => {
-    (authApi.login as jest.Mock).mockResolvedValue({
-      user: { id: '1', email: 'test@example.com' },
-      token: 'token',
-    });
-
-    const { getByPlaceholderText, getByText } = renderWithProviders(
-      <LoginScreen />
-    );
-
-    fireEvent.changeText(
-      getByPlaceholderText('Email'),
-      'test@example.com'
-    );
-    fireEvent.changeText(
-      getByPlaceholderText('Password'),
-      'password123'
-    );
-    fireEvent.press(getByText('Login'));
-
-    await waitFor(() => {
-      expect(authApi.login).toHaveBeenCalledWith({
-        email: 'test@example.com',
-        password: 'password123',
-      });
-    });
-  });
-
-  it('shows error message on login failure', async () => {
-    (authApi.login as jest.Mock).mockRejectedValue(
-      new Error('Invalid credentials')
-    );
-
-    const { getByPlaceholderText, getByText } = renderWithProviders(
-      <LoginScreen />
-    );
-
-    fireEvent.changeText(getByPlaceholderText('Email'), 'test@example.com');
-    fireEvent.changeText(getByPlaceholderText('Password'), 'wrong');
-    fireEvent.press(getByText('Login'));
-
-    await waitFor(() => {
-      expect(getByText('Invalid credentials')).toBeTruthy();
-    });
-  });
-});
-```
-
----
-
-## 10. Security & Dependency Management (MANDATORY)
-
-### A. Automated Dependency Management
-
-**Use npm/yarn with lockfiles and automated auditing for secure mobile development:**
-
-```json
-// package.json
-{
-  "scripts": {
-    "audit": "npm audit --audit-level=high",
-    "doctor": "npx expo doctor"
-  }
-}
-```
-
-- **Lockfiles**: ALWAYS commit `package-lock.json` or `yarn.lock`. Use `npm ci` in CI/CD.
-- **Expo SDK Updates**: Use `npx expo install --fix` to ensure all dependencies are compatible with your SDK version.
-- **Native Security**: Audit native dependencies (pods, gradle) using `npx expo-doctor`.
-
-### B. Vulnerability Scanning & Security
-
-**Mandatory security checks for ALL React Native projects:**
-
-1. **Vulnerability Scan**:
-   ```bash
-   # Scan JS dependencies
-   npm audit --audit-level=high
-   
-   # Scan for hardcoded secrets in the codebase
-   # (Using a tool like gitleaks or simple grep for API_KEY)
-   ```
-   - Agents MUST ensure 0 HIGH or CRITICAL vulnerabilities are present in the JS bundle.
-
-2. **Secure Storage**:
-   - Sensitive data (tokens, PII) MUST be stored in `react-native-keychain` or `expo-secure-store`, NEVER in `AsyncStorage`.
-
-### C. Dependency File
-
-```json
-// Example package.json dependencies
-{
-  "dependencies": {
-    "react-native": "0.76.0",
-    "expo": "~52.0.0",
-    "react-native-reanimated": "~3.16.0"
-  }
-}
-```
-
----
-
-## 11. Deployment Checklist
-
-### Agent-Generated Code Verification (MANDATORY)
-
-#### Build & Compilation
-- [ ] Code compiles: `npx tsc --noEmit` returns exit code 0
-- [ ] New Architecture compatibility: No legacy bridge dependencies
-- [ ] Android 15 support: `react-native-safe-area-context` used for edge-to-edge
-- [ ] Code formatted: `npx @biomejs/biome check --apply .` passes
-
-#### Testing
-- [ ] All tests pass: `npm test` returns exit code 0
-- [ ] Reasonable coverage: `npm test -- --coverage` shows >80%
-- [ ] Components tested with `@testing-library/react-native`
-
-#### Security
-- [ ] Dependency scan passes: `npm audit` shows 0 HIGH/CRITICAL vulnerabilities
-- [ ] Secrets check: 0 hardcoded secrets in code or `.env` files
-- [ ] Secure storage: Sensitive data stored in Keychain/SecureStore
-- [ ] ProGuard/R8: Configured for Android release builds
-
-#### Code Quality
-- [ ] No unused dependencies or dead code
-- [ ] Images optimized and using `FastImage` where applicable
-- [ ] Project structure follows standard layout
-
-#### Documentation
-- [ ] All public APIs (components/hooks) have JSDoc comments
-- [ ] Navigation `ParamList` is explicitly typed and documented
-- [ ] Examples provided for complex UI interactions
-
-#### Architecture
-- [ ] Bridgeless mode enabled by default
-- [ ] TurboModules used for new native integrations
-- [ ] Separation of UI and business logic (custom hooks)
-
-#### Agent Workflow Completed
-- [ ] Agent verified code builds successfully
-- [ ] Agent ran all tests and verified they pass
-- [ ] Agent ran security scans and verified 0 high vulnerabilities
-- [ ] Agent verified documentation and native compliance
-
----
-
-## 12. Why This Configuration Works
-
-**Bridgeless Architecture**:
-- Eliminates the asynchronous overhead of the legacy bridge, allowing for direct, synchronous communication between JavaScript and Native code (C++/Swift/Kotlin).
-
-**TurboModules**:
-- Provides lazy-loading of native modules, significantly improving app startup time and reducing memory footprint.
-
-**Expo SDK 52+**:
-- Simplifies dependency management and provides a unified API for high-quality native features, ensuring better stability across iOS and Android.
-
----
-
-## 13. Quick Reference
-
-### Common Commands
+Run, in order, before presenting code. Fix → re-run until every gate is green.
 
 ```bash
-# Start development server
-npx expo start
-
-# Run on iOS/Android
-npx expo run:ios
-npx expo run:android
-
-# Security and compatibility check
-npx expo doctor
-
-# Run tests
-npm test
-
-# Build for production
-npx expo export
+npx @biomejs/biome check .          # RN-FMT-01 / RN-LINT-01 (or prettier + eslint)
+npx tsc --noEmit                    # RN-TYP-01
+npm test                            # RN-TST-01/02
+npx expo-doctor                     # RN-ARCH-01 / RN-DEP-01 (native deps, SDK alignment)
+npx expo install --check            # RN-DEP-01 (SDK-compatible versions)
+npm audit --audit-level=high        # RN-SEC-02
+# Then smoke-run: npx expo run:ios && npx expo run:android (or expo start)
 ```
 
-### Modern React Native Patterns Cheat Sheet
+The *why* behind each gate lives in its §0 owner; do not re-derive it here.
+
+---
+
+## 4. Project Structure
+
+Two valid layouts. **Expo Router** uses file-based routing under `app/`; classic **React Navigation** centralizes route trees. Architectural principles (separation of UI/logic, dependency direction) come from `reactjs.md`/`hexagonal.md` — below is only the RN mapping.
+
+```
+# Expo Router (recommended)
+app/                      # file-based routes (each file = a screen)
+│   ├── _layout.tsx       # root layout: providers, Stack/Tabs
+│   ├── (tabs)/           # tab group
+│   │   ├── index.tsx     # /  (Home)
+│   │   └── profile.tsx   # /profile
+│   └── order/[id].tsx    # dynamic route /order/:id
+src/
+├── components/           # reusable UI; ui/ primitives, shared/ composites
+├── features/<domain>/    # hooks/ services/ store/ per feature (group by domain)
+├── hooks/                # cross-feature hooks
+├── services/             # API clients, native-module wrappers
+├── theme/                # tokens: colors, spacing, typography (no CSS — see §5.D)
+└── types/                # shared TS types
+__tests__/  or  *.test.tsx co-located   # see tdd.md
+app.json / app.config.ts  # Expo config (plugins, permissions, newArchEnabled)
+```
+
+- Group by feature/domain, not by file type. Keep screens thin; push logic into hooks.
+- Platform-divergent code lives in `Name.ios.tsx` / `Name.android.tsx`; the bundler resolves the right file from a plain `import './Name'`.
+
+---
+
+## 5. React Native Specifics
+
+The unique value of this guide.
+
+### A. New Architecture (default in 0.76+)
+Fabric (new renderer), TurboModules (lazy, typed native modules), and JSI (synchronous JS↔native calls, no JSON bridge) are **on by default**. Do not author against the legacy bridge.
+
+- Keep `newArchEnabled: true` (Expo sets it; bare RN: `gradle.properties` + `Podfile` flag). `npx expo-doctor` flags incompatible deps.
+- New native modules MUST be **TurboModules**, specified with Codegen from a typed JS spec (`*NativeComponent`/`Native*` spec files) — not the old `NativeModules` + `RCTBridgeModule` pattern.
+- JSI enables synchronous host functions; prefer existing Expo/community TurboModules before writing your own.
+
+### B. Core components & APIs
+There is no DOM. Build from RN host components, not HTML:
 
 ```tsx
-// Bridgeless native module (TurboModule)
-import { NativeModules } from 'react-native';
-const { MyTurboModule } = NativeModules;
+import { View, Text, Pressable, ScrollView, TextInput, Image } from 'react-native';
+// View ≈ div, Text is REQUIRED to wrap any string, Pressable replaces
+// Touchable*; never put raw text outside <Text>. ScrollView for small,
+// bounded content only — long/unbounded data goes to a virtualized list (§5.E).
+```
 
-// Safe Area (Android 15 Edge-to-Edge)
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-const insets = useSafeAreaInsets();
+- Use `Pressable` (with `android_ripple` / pressed state) over the legacy `TouchableOpacity`/`TouchableHighlight`.
+- Wrap screens in `SafeAreaView`/`useSafeAreaInsets` (`react-native-safe-area-context`) for notches and Android edge-to-edge.
+- Prefer `expo-image` over the core `Image` for caching, transitions, and memory behavior.
 
-// Reanimated 3 (Worklets)
-const animatedStyle = useAnimatedStyle(() => {
-  'worklet';
-  return { opacity: withSpring(sv.value) };
+### C. Navigation (React Navigation / Expo Router)
+Both are built on React Navigation. Routes and params MUST be typed.
+
+```tsx
+// Expo Router — typed, file-based
+import { Link, useLocalSearchParams } from 'expo-router';
+<Link href={{ pathname: '/order/[id]', params: { id: '123' } }}>View order</Link>
+const { id } = useLocalSearchParams<{ id: string }>();   // typed params
+
+// React Navigation — typed param list
+type HomeStackParamList = { Home: undefined; OrderDetail: { orderId: string } };
+const navigation = useNavigation<NativeStackNavigationProp<HomeStackParamList>>();
+navigation.navigate('OrderDetail', { orderId });          // autocompleted + checked
+```
+
+Use native-stack (`@react-navigation/native-stack`) for native screen transitions; deep-link config maps URLs to routes (Expo Router derives them from the file tree).
+
+### D. Styling — `StyleSheet`, not CSS
+No CSS/CSS-in-JS cascade. Styles are JS objects (a flexbox subset, default `flexDirection: 'column'`, dimensions unitless DP).
+
+```tsx
+const styles = StyleSheet.create({          // create ONCE at module scope
+  card: { flex: 1, padding: 16, borderRadius: 8 },
 });
+// Platform-divergent style:
+...Platform.select({ ios: { shadowOpacity: 0.1 }, android: { elevation: 4 } })
+```
 
-// Expo Router (Typed Routes)
-import { Link } from 'expo-router';
-<Link href={{ pathname: "/user/[id]", params: { id: '123' } }}>View Profile</Link>
+- Never build the style object inline in `render` (defeats memoization, allocates each frame). Compose with the array form: `style={[styles.card, isActive && styles.active]}`.
+- Centralize design tokens (colors/spacing/typography) in `theme/`; for utility-class DX, NativeWind (Tailwind) is acceptable but still compiles to `StyleSheet`.
+
+### E. Lists & performance — FlatList / FlashList
+Rendering large arrays with `.map()` mounts every row → jank and OOM. Use a virtualized list (RN-PERF-01).
+
+```tsx
+import { FlashList } from '@shopify/flash-list';   // preferred: recycles views
+<FlashList
+  data={orders}
+  keyExtractor={(o) => o.id}
+  estimatedItemSize={72}                 // FlashList: required for recycling
+  renderItem={({ item }) => <OrderRow order={item} />}
+  onEndReached={fetchMore} onEndReachedThreshold={0.5}
+/>
+```
+
+- Memoize `renderItem`/`keyExtractor`; wrap row components in `React.memo` (rules: `reactjs.md`).
+- For `FlatList`, set `getItemLayout` for fixed-height rows, plus `windowSize`/`maxToRenderPerBatch`/`initialNumToRender`. Profiling/budgets policy: `performance.md`.
+
+### F. Gestures & animations — Reanimated 3 + Gesture Handler
+Run animation/gesture logic on the **UI thread** via worklets so it stays smooth when JS is busy.
+
+```tsx
+import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
+const scale = useSharedValue(1);
+const style = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));  // worklet
+// drive with react-native-gesture-handler's Gesture API (not the legacy PanResponder)
+```
+
+Use `react-native-gesture-handler`'s `Gesture`/`GestureDetector` over the legacy `PanResponder`. Reserve the JS-thread `Animated` API for trivial cases.
+
+### G. Platform-specific code & native modules
+- Branch small differences with `Platform.OS`/`Platform.select`; split larger ones into `.ios.tsx`/`.android.tsx`.
+- Need native capability? Reach for an Expo SDK module or a maintained TurboModule first. Authoring one: define a typed Codegen spec, implement Swift/Kotlin (or C++), wire via an Expo config plugin for CNG. Native platform concerns (entitlements, Gradle/Pods, store config) are owned by [`ios.md`](guides://ios.md) / [`android.md`](guides://android.md).
+
+### H. Async storage, secure storage & permissions
+- **Non-sensitive** local state → `@react-native-async-storage/async-storage` (unencrypted key/value; fine for caches/prefs).
+- **Sensitive** data (tokens, PII) → `expo-secure-store` or `react-native-keychain` (Keychain/Keystore-backed). Never `AsyncStorage`, never the JS bundle (RN-SEC-01; policy `secure-coding.md`). `EXPO_PUBLIC_*` env vars are embedded in the client bundle — public only.
+- **Permissions**: request at point-of-use via the owning module's hook (e.g. `expo-camera`'s `useCameraPermissions`, `expo-location`); declare the matching iOS usage strings / Android manifest permissions in `app.json` plugins. Platform specifics: `ios.md`/`android.md`.
+
+### I. Common footguns
+- Raw string outside `<Text>` → crash. Always wrap text.
+- Inline `StyleSheet`/arrow props on list rows → re-renders; hoist + memoize.
+- Forgetting safe-area insets → content under the notch / nav bar.
+- `console.log` in worklets, or calling JS-thread functions from a worklet without `runOnJS`.
+- Importing a Node/web-only library that has no RN/Hermes support → runtime crash; check Hermes compatibility.
+
+---
+
+## 6. Tooling & Dependencies
+
+Security/supply-chain *policy* → [`secure-coding.md`](guides://secure-coding.md). React Native binding:
+
+```bash
+npx create-expo-app@latest          # scaffold (Expo, New Arch, TS by default)
+npx expo install <pkg>              # add SDK-compatible dep (NOT plain npm install for native deps)
+npx expo install --check            # RN-DEP-01: deps match the SDK
+npx expo-doctor                     # RN-ARCH-01: native/New-Arch compatibility
+npm ci                              # reproducible install in CI (commit the lockfile)
+npm audit --audit-level=high        # RN-SEC-02: CVE scan
+npx expo prebuild                   # generate native ios/android projects (CNG) only when needed
+```
+
+Commit the lockfile (`package-lock.json`/`yarn.lock`/`pnpm-lock.yaml`). Use `npx expo install` for any native dependency so versions stay SDK-aligned; reserve plain `npm install` for pure-JS packages.
+
+---
+
+## 7. Quick Reference
+
+```bash
+npx expo start                 # dev server (Metro)
+npx expo run:ios               # build + run on iOS simulator
+npx expo run:android           # build + run on Android emulator
+npm test                       # Jest + @testing-library/react-native
+npx tsc --noEmit               # type check
+npx @biomejs/biome check .     # lint + format
+detox test                     # E2E (see e2e-testing.md)
+eas build --platform all       # production build (EAS)
 ```
 
 ---
 
-**Last Updated:** 2026-02-06
-**Version:** 1.1
-**Maintainer:** Mobile Team
+## 8. Deployment Checklist
 
+Generated from §2 — one box per requirement ID.
 
-**End of React Native Development Guidelines**
+- [ ] RN-TST-01/02 — tests pass, bugs have regression tests
+- [ ] RN-TST-03 — critical journeys covered by Detox/Maestro
+- [ ] RN-TYP-01 — `tsc --noEmit` clean, nav params typed
+- [ ] RN-FMT-01 / RN-LINT-01 — formatter + linter clean
+- [ ] RN-ARCH-01 — New Architecture enabled, no legacy bridge (`expo-doctor` clean)
+- [ ] RN-PERF-01 — long lists virtualized (FlashList/FlatList)
+- [ ] RN-A11Y-01 — interactive elements have role + label
+- [ ] RN-SEC-01 — secrets in SecureStore/Keychain, none in bundle/AsyncStorage
+- [ ] RN-SEC-02 — `npm audit` 0 high/critical
+- [ ] RN-DEP-01 — lockfile committed, `expo install --check` clean
+- [ ] RN-DOC-01 — public components/hooks documented
+- [ ] Smoke-ran on an iOS simulator and an Android emulator
+- [ ] Agent ran every §3 command and documented any fixes
+
+---
+**End of React Native Guidelines**

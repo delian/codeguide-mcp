@@ -1,3687 +1,520 @@
-# Software Design Patterns Reference Guide
-Comprehensive overview of essential software design patterns, their modern implementations, comparisons, and guidance for selecting the right pattern. This guide is language-agnostic with examples in pseudocode. SOLID principles, Gang of Four patterns, modern functional patterns, domain-driven design patterns.
+# Software Design Patterns Guidelines
+Canonical catalog of software design patterns — GoF creational/structural/behavioral, presentation, and modern functional patterns — with selection guidance and anti-patterns. Language-agnostic.
+
+---
+name: designpatterns
+title: Software Design Patterns Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: cross-cutting
+tools: []
+requires: []
+recommends:
+  - hexagonal
+  - cleanarch
+  - error-handling
+  - tdd
+provides:
+  - gof-patterns
+  - creational-patterns
+  - structural-patterns
+  - behavioral-patterns
+  - presentation-patterns
+  - pattern-selection
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide owns the design-pattern catalog; architecture, error strategy, and test workflow live in their owners.
 
 ---
 
-**Agent Profile**: The Design Pattern Expert
-**Role**: Senior Software Engineer & Pattern Specialist
-**Objective**: Apply appropriate design patterns to solve common software problems while avoiding over-engineering and pattern abuse.
-**Tools**: SOLID principles, Gang of Four patterns, modern functional patterns, domain-driven design patterns.
+## 0. Prerequisites & References
+
+This guide is the canonical owner of design patterns. Other guides reference it for pattern definitions and show only their language binding. The concerns below are owned elsewhere — fetch them when the task touches them; do not re-derive them here.
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`hexagonal.md`](guides://hexagonal.md) — Ports & Adapters, dependency inversion, dependency direction. *(Adapter/Repository patterns map directly to hexagonal ports.)*
+> - [`cleanarch.md`](guides://cleanarch.md) — layered application architecture; where these patterns sit in a layered system.
+> - [`error-handling.md`](guides://error-handling.md) — error strategy, propagation, and the canonical Result/Either and Option/Maybe rules.
+> - [`tdd.md`](guides://tdd.md) — Red-Green-Refactor, regression-test-before-fix. *(Patterns EMERGE from refactoring; do not design them upfront.)*
+
+> 📎 **SEE ALSO:** [`architectures.md`](guides://architectures.md) · [`microservices.md`](guides://microservices.md) · [`parallelism.md`](guides://parallelism.md) *(concurrency-safe pattern variants)* · the language guides (`python.md`, `typescript.md`, `java.md`, `csharp.md`, `go.md`, `rust.md`, …) for idiomatic per-language realizations.
+
+Examples below use a neutral, TypeScript-like pseudocode chosen for readability; each pattern ends with a **language-variation** note rather than re-listing the same code in N languages. For a concrete binding, fetch the relevant language guide.
 
 ---
 
 ## 1. Core Philosophies: PATTERNS-FIRST
 
-The agent must adhere to the **PATTERNS-FIRST** principles for every pattern decision:
+Design-pattern-specific principles only. Test workflow (`tdd.md`), error strategy (`error-handling.md`), and dependency direction (`hexagonal.md`/`cleanarch.md`) come from the references in §0.
 
-- **P**roblem-Driven: Apply patterns to solve real problems, not for their own sake
-- **A**ppropriate Scope: Use the simplest pattern that solves the problem
-- **T**estability: Patterns should enhance, not hinder, testability
-- **T**ransparency: Code should be readable; patterns shouldn't obscure intent
-- **E**volution: Prefer patterns that allow code to evolve
-- **R**efactor To: Introduce patterns through refactoring when needed, not upfront
-- **N**aming Matters: Use pattern names in code when they clarify intent
-- **S**implicity First: Sometimes no pattern is the best pattern
-
-**Key Principle:**
+- **P**roblem-driven: a pattern is a solution to a problem in a context; no problem → no pattern.
+- **A**ppropriate scope: choose the simplest pattern that solves the problem; "no pattern" is a valid choice.
+- **T**estability: a pattern MUST improve, never hinder, testability.
+- **T**ransparency: the pattern must clarify intent, not obscure it.
+- **E**volution: prefer patterns that let code change cheaply (composition over inheritance).
+- **R**efactor-to: introduce patterns by refactoring under green tests (see `tdd.md`), not as upfront framework-building.
+- **N**aming: use the pattern's name in code (`PricingStrategy`, `OrderEventPublisher`) when it communicates the role.
+- **S**implicity-first: modern language features (closures, pattern matching, `?.`, `??`, sum types) replace many classic OOP patterns — reach for the feature before the pattern.
 
 > "A pattern is a solution to a problem in a context. If you don't have the problem, you don't need the solution."
 
 ---
 
-## 2. Pattern Categories Overview
+## 2. Requirements (MANDATORY, auditable)
 
-```
-DESIGN PATTERN TAXONOMY:
+RFC-2119 keywords. IDs `DP-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a shared rule cite its owner. These are reviewer/auditor checks — design patterns have no compiler gate, so verification is review- or test-based.
 
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  CREATIONAL              STRUCTURAL             BEHAVIORAL              │
-│  (Object Creation)       (Composition)          (Communication)         │
-│                                                                         │
-│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐     │
-│  │ • Factory       │    │ • Adapter       │    │ • Strategy      │     │
-│  │ • Builder       │    │ • Decorator     │    │ • Observer      │     │
-│  │ • Singleton     │    │ • Facade        │    │ • Command       │     │
-│  │ • Prototype     │    │ • Composite     │    │ • State         │     │
-│  │                 │    │ • Proxy         │    │ • Template      │     │
-│  └─────────────────┘    └─────────────────┘    │ • Chain of Resp │     │
-│                                                 └─────────────────┘     │
-│                                                                         │
-│  PRESENTATION            ARCHITECTURAL          FUNCTIONAL              │
-│  (UI Patterns)           (Application)          (Modern FP)             │
-│                                                                         │
-│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐     │
-│  │ • MVC           │    │ • Repository    │    │ • Result/Either │     │
-│  │ • MVP           │    │ • Unit of Work  │    │ • Option/Maybe  │     │
-│  │ • MVVM          │    │ • Specification │    │ • Pipe/Compose  │     │
-│  │ • MVI           │    │ • CQRS          │    │ • Monad         │     │
-│  └─────────────────┘    └─────────────────┘    └─────────────────┘     │
-│                                                                         │
-│  FOUNDATIONAL TECHNIQUES (Enable all patterns above)                    │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │ • Dependency Injection (DI)    • Inversion of Control (IoC)     │   │
-│  │ • Dependency Inversion (DIP)   • Composition Root               │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| DP-FIT-01 | Every applied pattern MUST address a present, named problem — not a speculative one | Code review / ADR (see `adr.md`) | reviewer confirms problem |
+| DP-FIT-02 | The simplest pattern that solves the problem MUST be chosen; "no pattern" preferred when sufficient | Code review | reviewer confirms |
+| DP-EMERGE-01 | Patterns MUST be introduced by refactoring under green tests, not designed upfront (see `tdd.md`) | `tdd.md` test run | tests green before & after refactor |
+| DP-TST-01 | A pattern's behavior MUST be covered by tests asserting behavior, not internal wiring (see `tdd.md`) | language test runner | exit 0, behavior asserted |
+| DP-COMP-01 | New variant behavior MUST extend via composition/new type (Open-Closed), not by editing existing classes | Code review / diff | no edits to existing strategy/handler |
+| DP-DI-01 | Dependencies MUST be injected, not located; no Service Locator in business logic; no global Singleton access | grep for `getInstance(`/`ServiceLocator`/container in domain | none in business code |
+| DP-DIP-01 | High-level modules MUST depend on abstractions, not concretions (see `hexagonal.md`) | review / dep-linter | no high→concrete deps |
+| DP-OBS-01 | Observer/event subjects MUST iterate a snapshot of subscribers and isolate subscriber failures | Unit test: unsubscribe-during-notify; failing observer | no concurrent-mod, chain not broken |
+| DP-ERR-01 | Result/Either & Option/Maybe usage MUST follow the canonical rules (see `error-handling.md`) | review | conforms to `error-handling.md` |
+| DP-DOC-01 | Non-obvious pattern choice MUST be recorded (ADR or code comment) (see `adr.md`, `comments.md`) | review | rationale present |
+
+> **Forbidden**: pattern fever (applying patterns without a problem), forcing the wrong pattern, naming everything after a pattern, "just-in-case" abstraction (YAGNI), Singleton for anything DI can provide, or designing a pattern before a failing test demands it.
 
 ---
 
-## 2A. TDD Protocol for Design Patterns
-
-Test-Driven Development ensures that design patterns are implemented correctly and remain testable. The TDD cycle helps validate that patterns solve the actual problem without over-engineering.
-
-```
-TDD CYCLE FOR PATTERN IMPLEMENTATION:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│            ┌──────────────────────────────────────────┐                 │
-│            │                                          │                 │
-│            ▼                                          │                 │
-│     ┌─────────────┐                                   │                 │
-│     │    RED      │  Write a failing test that        │                 │
-│     │             │  describes desired behavior       │                 │
-│     └──────┬──────┘                                   │                 │
-│            │                                          │                 │
-│            │  Test fails (expected)                   │                 │
-│            ▼                                          │                 │
-│     ┌─────────────┐                                   │                 │
-│     │   GREEN     │  Write minimal code to pass       │                 │
-│     │             │  (implement pattern if needed)    │                 │
-│     └──────┬──────┘                                   │                 │
-│            │                                          │                 │
-│            │  Test passes                             │                 │
-│            ▼                                          │                 │
-│     ┌─────────────┐                                   │                 │
-│     │  REFACTOR   │  Improve design, extract pattern  │                 │
-│     │             │  Keep tests green                 │                 │
-│     └──────┬──────┘                                   │                 │
-│            │                                          │                 │
-│            └──────────────────────────────────────────┘                 │
-│                                                                         │
-│  KEY INSIGHT: Patterns EMERGE from refactoring, not upfront design      │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-PATTERN-SPECIFIC TDD WORKFLOW:
-
-Phase 1: RED - Define Behavior Through Tests
-├── Write test for the PROBLEM, not the pattern
-├── Focus on what the code should DO
-├── Use interfaces/abstractions in test setup
-└── Test should fail for the right reason
-
-Phase 2: GREEN - Minimal Implementation
-├── Write simplest code that passes
-├── May use inline/hardcoded logic initially
-├── Avoid premature pattern application
-└── Get the behavior correct first
-
-Phase 3: REFACTOR - Extract Pattern
-├── Identify code smells (duplication, complexity)
-├── Recognize pattern opportunity
-├── Extract pattern incrementally
-├── Keep tests passing throughout
-└── Verify pattern improves design
-```
-
-### TDD Example: Implementing Strategy Pattern
-
-```
-SCENARIO: Payment processing system needs multiple payment methods
-
-═══════════════════════════════════════════════════════════════════════════
-STEP 1: RED - Write failing test for the behavior
-═══════════════════════════════════════════════════════════════════════════
-
-// Test file: payment_processor_test
-describe("PaymentProcessor", () => {
-    it("should process credit card payment", () => {
-        const processor = new PaymentProcessor()
-        const result = processor.process({
-            amount: 100.00,
-            method: "credit_card",
-            cardNumber: "4111111111111111"
-        })
-
-        expect(result.success).toBe(true)
-        expect(result.transactionId).toBeDefined()
-    })
-})
-
-// RUN TEST → FAILS (PaymentProcessor doesn't exist)
-
-═══════════════════════════════════════════════════════════════════════════
-STEP 2: GREEN - Minimal implementation (no pattern yet)
-═══════════════════════════════════════════════════════════════════════════
-
-class PaymentProcessor {
-    process(payment) {
-        if (payment.method === "credit_card") {
-            // Process credit card
-            return {
-                success: true,
-                transactionId: generateId()
-            }
-        }
-    }
-}
-
-// RUN TEST → PASSES ✅
-
-═══════════════════════════════════════════════════════════════════════════
-STEP 3: RED - Add another payment method test
-═══════════════════════════════════════════════════════════════════════════
-
-it("should process PayPal payment", () => {
-    const processor = new PaymentProcessor()
-    const result = processor.process({
-        amount: 100.00,
-        method: "paypal",
-        email: "user@example.com"
-    })
-
-    expect(result.success).toBe(true)
-})
-
-// RUN TEST → FAILS
-
-═══════════════════════════════════════════════════════════════════════════
-STEP 4: GREEN - Add PayPal handling (code smell emerging)
-═══════════════════════════════════════════════════════════════════════════
-
-class PaymentProcessor {
-    process(payment) {
-        if (payment.method === "credit_card") {
-            // Credit card logic
-            return { success: true, transactionId: generateId() }
-        }
-        if (payment.method === "paypal") {
-            // PayPal logic
-            return { success: true, transactionId: generateId() }
-        }
-    }
-}
-
-// RUN TEST → PASSES ✅
-// CODE SMELL: Growing if/else, Open-Closed Principle violation
-
-═══════════════════════════════════════════════════════════════════════════
-STEP 5: REFACTOR - Extract Strategy Pattern
-═══════════════════════════════════════════════════════════════════════════
-
-// Strategy interface
-interface PaymentStrategy {
-    process(payment: Payment): PaymentResult
-    supports(method: string): boolean
-}
-
-// Concrete strategies
-class CreditCardStrategy implements PaymentStrategy {
-    supports(method) { return method === "credit_card" }
-    process(payment) {
-        // Credit card specific logic
-        return { success: true, transactionId: generateId() }
-    }
-}
-
-class PayPalStrategy implements PaymentStrategy {
-    supports(method) { return method === "paypal" }
-    process(payment) {
-        // PayPal specific logic
-        return { success: true, transactionId: generateId() }
-    }
-}
-
-// Context (uses strategy)
-class PaymentProcessor {
-    constructor(private strategies: PaymentStrategy[]) {}
-
-    process(payment) {
-        const strategy = this.strategies.find(s => s.supports(payment.method))
-        if (!strategy) {
-            throw new Error(`Unsupported payment method: ${payment.method}`)
-        }
-        return strategy.process(payment)
-    }
-}
-
-// RUN ALL TESTS → STILL PASS ✅
-// Pattern extracted, Open-Closed Principle satisfied
-
-═══════════════════════════════════════════════════════════════════════════
-STEP 6: Update tests to use DI (better test isolation)
-═══════════════════════════════════════════════════════════════════════════
-
-describe("PaymentProcessor with Strategy", () => {
-    it("should delegate to correct strategy", () => {
-        const mockStrategy = {
-            supports: (m) => m === "test_method",
-            process: jest.fn().mockReturnValue({ success: true })
-        }
-
-        const processor = new PaymentProcessor([mockStrategy])
-        processor.process({ method: "test_method", amount: 100 })
-
-        expect(mockStrategy.process).toHaveBeenCalled()
-    })
-
-    it("should throw for unsupported method", () => {
-        const processor = new PaymentProcessor([])
-
-        expect(() => processor.process({ method: "unknown" }))
-            .toThrow("Unsupported payment method")
-    })
-})
-```
-
-### TDD Pattern Guidelines
-
-```
-WHEN TO INTRODUCE A PATTERN (TDD Signals):
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  DUPLICATION SIGNAL (Rule of Three)                                     │
-│  ─────────────────────────────────────                                  │
-│  • First occurrence: Write simple code                                  │
-│  • Second occurrence: Note the similarity                               │
-│  • Third occurrence: REFACTOR → Extract pattern                         │
-│                                                                         │
-│  COMPLEXITY SIGNAL                                                      │
-│  ─────────────────                                                      │
-│  • Long switch/if-else chains → Strategy Pattern                        │
-│  • Complex object construction → Builder Pattern                        │
-│  • Nested conditionals for state → State Pattern                        │
-│  • Multiple similar notifications → Observer Pattern                    │
-│                                                                         │
-│  TEST DIFFICULTY SIGNAL                                                 │
-│  ─────────────────────                                                  │
-│  • Hard to isolate for testing → Extract interface, use DI              │
-│  • Can't mock dependencies → Apply Dependency Inversion                 │
-│  • Test setup is complex → Facade or Builder for test helpers           │
-│                                                                         │
-│  CHANGE FREQUENCY SIGNAL                                                │
-│  ─────────────────────────                                              │
-│  • Same area changes repeatedly → Stabilize with pattern                │
-│  • New variants needed often → Strategy or Factory                      │
-│  • Behavior needs runtime changes → Strategy or State                   │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-TDD + PATTERN ANTI-PATTERNS TO AVOID:
-
-❌ PATTERN-FIRST THINKING
-   Don't: "I'll use Factory pattern here"
-   Do:    "Tests reveal I need flexible object creation"
-
-❌ PREMATURE ABSTRACTION
-   Don't: Create interfaces before you have two implementations
-   Do:    Extract interface when second implementation is needed
-
-❌ TESTING THE PATTERN, NOT THE BEHAVIOR
-   Don't: "Test that Observer notifies all subscribers"
-   Do:    "Test that price change updates all price displays"
-
-❌ OVER-MOCKING
-   Don't: Mock every collaborator
-   Do:    Mock external dependencies, use real objects for value types
-```
-
----
-
-## 2B. Bug Fix Protocol for Design Patterns
-
-When bugs occur in pattern-based code, systematic diagnosis prevents both quick fixes that break the pattern and unnecessary pattern changes.
-
-```
-BUG FIX WORKFLOW FOR PATTERN-BASED CODE:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │ STEP 1: REPRODUCE                                                │   │
-│  │ Write a failing test that captures the bug                       │   │
-│  └──────────────────────────────┬──────────────────────────────────┘   │
-│                                 │                                       │
-│                                 ▼                                       │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │ STEP 2: DIAGNOSE - Identify bug location                         │   │
-│  │ ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐   │   │
-│  │ │ Pattern     │  │ Pattern     │  │ Integration             │   │   │
-│  │ │ Interface   │  │ Implementation│ │ Between Patterns       │   │   │
-│  │ │ (contract)  │  │ (concrete)  │  │ (wiring)                │   │   │
-│  │ └─────────────┘  └─────────────┘  └─────────────────────────┘   │   │
-│  └──────────────────────────────┬──────────────────────────────────┘   │
-│                                 │                                       │
-│                                 ▼                                       │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │ STEP 3: FIX - Apply minimal fix preserving pattern integrity     │   │
-│  └──────────────────────────────┬──────────────────────────────────┘   │
-│                                 │                                       │
-│                                 ▼                                       │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │ STEP 4: VERIFY - All tests pass, no pattern degradation          │   │
-│  └──────────────────────────────┬──────────────────────────────────┘   │
-│                                 │                                       │
-│                                 ▼                                       │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │ STEP 5: REVIEW - Consider if pattern itself needs improvement    │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-DIAGNOSIS DECISION TREE:
-
-Is the bug in..
-
-├── The Pattern Contract (Interface)?
-│   ├── Missing method in interface?
-│   ├── Wrong return type specification?
-│   ├── Incomplete abstraction?
-│   └── FIX: Modify interface carefully, update ALL implementations
-│
-├── A Specific Implementation?
-│   ├── Logic error in one concrete class?
-│   ├── Missing edge case handling?
-│   ├── Wrong algorithm in strategy/state?
-│   └── FIX: Fix that implementation only, add tests for the case
-│
-├── Pattern Wiring/Integration?
-│   ├── Wrong dependency injected?
-│   ├── Incorrect pattern composition?
-│   ├── Missing registration in factory/container?
-│   └── FIX: Fix composition root or factory configuration
-│
-└── Pattern Selection (wrong pattern)?
-    ├── Pattern doesn't fit the problem?
-    ├── Over-engineered solution?
-    ├── Missing pattern where needed?
-    └── FIX: Refactor to appropriate pattern (larger change)
-```
-
-### Bug Fix Example: Observer Pattern Issue
-
-```
-SCENARIO: Notification system not updating all subscribers
-
-═══════════════════════════════════════════════════════════════════════════
-STEP 1: REPRODUCE - Write failing test
-═══════════════════════════════════════════════════════════════════════════
-
-// Bug report: "Price changes don't update the mobile app display"
-
-describe("PriceSubject - Bug #1234", () => {
-    it("should notify all observers including late subscribers", () => {
-        const subject = new PriceSubject()
-        const webDisplay = new MockObserver()
-        const mobileDisplay = new MockObserver()
-
-        subject.subscribe(webDisplay)
-        subject.setPrice(100)  // First update
-        subject.subscribe(mobileDisplay)  // Late subscriber
-        subject.setPrice(200)  // Second update
-
-        // Bug: mobileDisplay only has [200], expected [200]
-        // But investigation shows it has [] - never notified!
-        expect(mobileDisplay.updates).toEqual([200])
-    })
-})
-
-// RUN TEST → FAILS (reproduces the bug)
-
-═══════════════════════════════════════════════════════════════════════════
-STEP 2: DIAGNOSE - Locate the bug
-═══════════════════════════════════════════════════════════════════════════
-
-// Check 1: Is the interface correct?
-interface Observer {
-    update(value: any): void  // ✅ Looks correct
-}
-
-// Check 2: Is the Subject implementation correct?
-class PriceSubject {
-    private observers: Observer[] = []
-    private price: number = 0
-
-    subscribe(observer: Observer) {
-        this.observers.push(observer)
-    }
-
-    setPrice(price: number) {
-        this.price = price
-        this.notify()
-    }
-
-    private notify() {
-        // 🔍 FOUND IT: Using forEach with potential mutation issue
-        this.observers.forEach((obs, index) => {
-            obs.update(this.price)
-            // BUG: Some observer's update() is removing itself,
-            // which mutates array during iteration
-        })
-    }
-}
-
-// Check 3: Is there an observer with problematic behavior?
-class AutoUnsubscribeObserver implements Observer {
-    update(value) {
-        this.processValue(value)
-        if (this.shouldUnsubscribe(value)) {
-            subject.unsubscribe(this)  // ❌ Mutates during iteration!
-        }
-    }
-}
-
-═══════════════════════════════════════════════════════════════════════════
-STEP 3: FIX - Preserve pattern, fix implementation
-═══════════════════════════════════════════════════════════════════════════
-
-class PriceSubject {
-    private observers: Observer[] = []
-    private price: number = 0
-
-    subscribe(observer: Observer) {
-        this.observers.push(observer)
-    }
-
-    unsubscribe(observer: Observer) {
-        const index = this.observers.indexOf(observer)
-        if (index > -1) {
-            this.observers.splice(index, 1)
-        }
-    }
-
-    setPrice(price: number) {
-        this.price = price
-        this.notify()
-    }
-
-    private notify() {
-        // FIX: Copy array before iterating to handle mutations safely
-        const observersCopy = [...this.observers]
-        observersCopy.forEach(obs => {
-            obs.update(this.price)
-        })
-    }
-}
-
-// RUN TEST → PASSES ✅
-
-═══════════════════════════════════════════════════════════════════════════
-STEP 4: VERIFY - Run full test suite
-═══════════════════════════════════════════════════════════════════════════
-
-// Run all Observer-related tests
-// ✅ Original functionality preserved
-// ✅ New edge case (late subscribers) handled
-// ✅ Unsubscribe during notification now safe
-
-═══════════════════════════════════════════════════════════════════════════
-STEP 5: REVIEW - Pattern improvement considerations
-═══════════════════════════════════════════════════════════════════════════
-
-// Consider: Should we add this to our Observer template?
-// Document the pattern gotcha for future implementations
-
-/*
- * OBSERVER PATTERN NOTE:
- * Always copy observer list before notification iteration
- * to safely handle observers that unsubscribe during update.
- */
-```
-
-### Common Bug Categories by Pattern
-
-```
-PATTERN-SPECIFIC BUG CHECKLIST:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│ CREATIONAL PATTERNS                                                     │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│ Factory/Abstract Factory:                                               │
-│   □ Wrong product type returned for given input                         │
-│   □ Missing case in factory switch/map                                  │
-│   □ Factory not updated when new product type added                     │
-│   □ Null returned instead of throwing for unknown type                  │
-│                                                                         │
-│ Builder:                                                                │
-│   □ Build() called with incomplete required fields                      │
-│   □ Builder state not reset between builds                              │
-│   □ Method chaining returns wrong builder instance                      │
-│   □ Validation missing in build step                                    │
-│                                                                         │
-│ Singleton:                                                              │
-│   □ Race condition in lazy initialization                               │
-│   □ State persists unexpectedly between tests                           │
-│   □ Serialization creates new instances                                 │
-│                                                                         │
-├─────────────────────────────────────────────────────────────────────────┤
-│ STRUCTURAL PATTERNS                                                     │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│ Adapter:                                                                │
-│   □ Data lost or transformed incorrectly in adaptation                  │
-│   □ Adapter doesn't handle all methods of target interface              │
-│   □ Error mapping between different error types                         │
-│                                                                         │
-│ Decorator:                                                              │
-│   □ Decorator order matters but not enforced                            │
-│   □ Decorator breaks when wrapped object returns null                   │
-│   □ State shared incorrectly between decorator and wrapped              │
-│                                                                         │
-│ Facade:                                                                 │
-│   □ Facade exposes subsystem errors without translation                 │
-│   □ Facade method doing too much (hidden complexity)                    │
-│   □ Subsystem state changes not reflected through facade                │
-│                                                                         │
-├─────────────────────────────────────────────────────────────────────────┤
-│ BEHAVIORAL PATTERNS                                                     │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│ Strategy:                                                               │
-│   □ Context doesn't validate strategy before use                        │
-│   □ Strategy assumes context state not guaranteed                       │
-│   □ Runtime strategy change leaves system in bad state                  │
-│                                                                         │
-│ Observer:                                                               │
-│   □ Memory leak from unremoved subscriptions                            │
-│   □ Notification order dependencies not handled                         │
-│   □ Observer exception breaks notification chain                        │
-│   □ Concurrent modification during notification                         │
-│                                                                         │
-│ State:                                                                  │
-│   □ Invalid state transition allowed                                    │
-│   □ State entry/exit actions not called correctly                       │
-│   □ Shared state between state objects                                  │
-│                                                                         │
-│ Command:                                                                │
-│   □ Undo doesn't fully reverse execute                                  │
-│   □ Command captures stale references                                   │
-│   □ Command queue processing error handling                             │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-BUG FIX PRINCIPLES FOR PATTERNS:
-
-1. FIX THE IMPLEMENTATION, NOT AROUND THE PATTERN
-   ❌ Adding special case outside the pattern
-   ✅ Fixing the specific implementation within the pattern
-
-2. MAINTAIN PATTERN CONTRACTS
-   ❌ Quick fix that violates Liskov Substitution
-   ✅ Fix that keeps all implementations interchangeable
-
-3. ADD REGRESSION TESTS
-   ❌ Fix without test (bug will return)
-   ✅ Failing test first, then fix, then verify
-
-4. CONSIDER PATTERN ENHANCEMENT
-   After fix: Is this a common case that needs pattern-level handling?
-   Example: Observer copy-before-iterate as standard practice
-
-5. DOCUMENT PATTERN PITFALLS
-   Add comments explaining non-obvious pattern constraints
-   Update team pattern guidelines if widely applicable
-```
-
----
-
-## 3. Foundational Techniques
-
-These are not classic "patterns" but fundamental techniques and principles that enable good design and make patterns work effectively.
-
-### A. Dependency Inversion Principle (DIP)
-
-```
-DEPENDENCY INVERSION PRINCIPLE:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  The "D" in SOLID - A principle, not a pattern                          │
-│                                                                         │
-│  DEFINITION:                                                            │
-│    1. High-level modules should not depend on low-level modules.        │
-│       Both should depend on abstractions.                               │
-│    2. Abstractions should not depend on details.                        │
-│       Details should depend on abstractions.                            │
-│                                                                         │
-│  WITHOUT DIP:                        WITH DIP:                          │
-│                                                                         │
-│  ┌─────────────────┐                ┌─────────────────┐                │
-│  │  OrderService   │                │  OrderService   │                │
-│  │  (high-level)   │                │  (high-level)   │                │
-│  └────────┬────────┘                └────────┬────────┘                │
-│           │ depends on                       │ depends on              │
-│           ▼                                  ▼                         │
-│  ┌─────────────────┐                ┌─────────────────┐                │
-│  │ PostgresRepo    │                │ <<interface>>   │                │
-│  │ (low-level)     │                │ OrderRepository │                │
-│  └─────────────────┘                └────────▲────────┘                │
-│                                              │ implements              │
-│  High-level depends on                ┌──────┴──────┐                  │
-│  low-level concrete class             │             │                  │
-│  ❌ Tight coupling              ┌─────┴─────┐ ┌─────┴─────┐            │
-│                                 │PostgresRepo│ │MongoRepo  │            │
-│                                 └───────────┘ └───────────┘            │
-│                                                                         │
-│                                 Both depend on abstraction             │
-│                                 ✅ Loose coupling                      │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-WHY "INVERSION"?
-  Traditional: High-level → Low-level (top-down dependency)
-  Inverted:    Both → Abstraction (dependency points to abstraction)
-
-  The low-level module's dependency is "inverted" - instead of
-  high-level depending on it, IT depends on an interface defined
-  by the high-level module's needs.
-```
-
-### B. Inversion of Control (IoC)
-
-```
-INVERSION OF CONTROL:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  A paradigm where control flow is inverted                              │
-│  "Don't call us, we'll call you" (Hollywood Principle)                  │
-│                                                                         │
-│  TRADITIONAL CONTROL:               INVERTED CONTROL:                   │
-│                                                                         │
-│  // Your code controls flow         // Framework controls flow          │
-│  main() {                           // You provide hooks/callbacks      │
-│    data = readInput()                                                   │
-│    result = process(data)           @Controller                         │
-│    writeOutput(result)              class OrderController {             │
-│  }                                    @Get("/orders/:id")               │
-│                                       getOrder(id) {                    │
-│  You call the libraries               return orderService.get(id)       │
-│                                       }                                 │
-│                                     }                                   │
-│                                                                         │
-│                                     Framework calls YOUR code           │
-│                                                                         │
-│  FORMS OF IoC:                                                          │
-│                                                                         │
-│  1. Dependency Injection - Dependencies provided to you                 │
-│  2. Event-driven/Callbacks - You register, framework calls              │
-│  3. Template Method - Framework calls your overridden methods           │
-│  4. Service Locator - You ask container for dependencies                │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### C. Dependency Injection (DI)
-
-```
-DEPENDENCY INJECTION:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  A TECHNIQUE to achieve IoC and implement DIP                           │
-│  "Don't create your dependencies, receive them"                         │
-│                                                                         │
-│  WITHOUT DI:                        WITH DI:                            │
-│                                                                         │
-│  class OrderService {               class OrderService {                │
-│    constructor() {                    constructor(                      │
-│      // Creates own dependencies        repo: OrderRepository,          │
-│      this.repo = new PostgresRepo()     email: EmailService,            │
-│      this.email = new SmtpEmail()       logger: Logger                  │
-│      this.logger = new FileLogger()   ) {                               │
-│    }                                    this.repo = repo                │
-│  }                                      this.email = email              │
-│                                         this.logger = logger            │
-│  ❌ Hard to test                      }                                 │
-│  ❌ Hard to change implementations  }                                   │
-│  ❌ Hidden dependencies                                                 │
-│                                     ✅ Easy to test (inject mocks)      │
-│                                     ✅ Easy to change (inject different)│
-│                                     ✅ Explicit dependencies            │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-THREE TYPES OF INJECTION:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  1. CONSTRUCTOR INJECTION (Preferred)                                   │
-│  ─────────────────────────────────────                                  │
-│                                                                         │
-│  class OrderService {                                                   │
-│      constructor(                                                       │
-│          private repo: OrderRepository,    // Required dependency       │
-│          private email: EmailService       // Required dependency       │
-│      ) {}                                                               │
-│  }                                                                      │
-│                                                                         │
-│  ✅ Dependencies are explicit and required                              │
-│  ✅ Object is fully initialized after construction                      │
-│  ✅ Immutable dependencies (can be readonly)                            │
-│  ✅ Easy to see all dependencies at a glance                            │
-│                                                                         │
-│  ─────────────────────────────────────────────────────────────────────  │
-│                                                                         │
-│  2. SETTER/PROPERTY INJECTION (For optional dependencies)               │
-│  ─────────────────────────────────────────────────────────              │
-│                                                                         │
-│  class OrderService {                                                   │
-│      private logger?: Logger                                            │
-│                                                                         │
-│      setLogger(logger: Logger) {      // Optional dependency            │
-│          this.logger = logger                                           │
-│      }                                                                  │
-│  }                                                                      │
-│                                                                         │
-│  ⚠️  Use sparingly - only for truly optional dependencies               │
-│  ❌ Object may be in incomplete state                                   │
-│  ❌ Dependency can be changed after construction                        │
-│                                                                         │
-│  ─────────────────────────────────────────────────────────────────────  │
-│                                                                         │
-│  3. INTERFACE INJECTION (Rare)                                          │
-│  ─────────────────────────────                                          │
-│                                                                         │
-│  interface LoggerAware {                                                │
-│      setLogger(logger: Logger): void                                    │
-│  }                                                                      │
-│                                                                         │
-│  class OrderService implements LoggerAware {                            │
-│      setLogger(logger: Logger) { ... }                                  │
-│  }                                                                      │
-│                                                                         │
-│  ⚠️  Rarely used - adds complexity without much benefit                 │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-RECOMMENDATION: Use Constructor Injection by default.
-                Use Setter Injection only for optional dependencies.
-```
-
-### D. DI Containers (IoC Containers)
-
-```
-DEPENDENCY INJECTION CONTAINERS:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  A container/framework that automates dependency injection              │
-│                                                                         │
-│  MANUAL DI (Pure DI):               WITH DI CONTAINER:                  │
-│                                                                         │
-│  // You wire everything             // Container wires for you          │
-│  const logger = new Logger()        container.register(Logger)          │
-│  const config = new Config()        container.register(Config)          │
-│  const db = new Database(config)    container.register(Database)        │
-│  const repo = new UserRepo(db)      container.register(UserRepository)  │
-│  const email = new EmailSvc(config) container.register(EmailService)    │
-│  const userSvc = new UserService(   container.register(UserService)     │
-│    repo, email, logger                                                  │
-│  )                                  // Container resolves dependencies  │
-│                                     const userSvc = container           │
-│  Tedious for large apps               .resolve(UserService)             │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-DI CONTAINER FEATURES:
-
-1. REGISTRATION (Tell container what exists)
-   container.register(OrderRepository, PostgresOrderRepository)
-   container.register(EmailService, SmtpEmailService)
-
-2. RESOLUTION (Container creates with dependencies)
-   const service = container.resolve(OrderService)
-   // Container sees OrderService needs OrderRepository and EmailService
-   // Creates PostgresOrderRepository, SmtpEmailService, injects them
-
-3. LIFETIME MANAGEMENT
-   container.registerSingleton(DatabaseConnection)  // One instance
-   container.registerTransient(RequestHandler)      // New each time
-   container.registerScoped(UserContext)            // One per scope/request
-
-EXAMPLE - Modern DI Container:
-
-// Registration (typically at app startup)
-@injectable()
-class PostgresOrderRepository implements OrderRepository {
-    constructor(private db: DatabaseConnection) {}
-    // ..
-}
-
-@injectable()
+## 3. Foundational Techniques (DI, IoC, DIP)
+
+These enable every pattern below. The **principle** of dependency inversion and dependency direction is owned by [`hexagonal.md`](guides://hexagonal.md) and [`cleanarch.md`](guides://cleanarch.md) — fetch them for the rules. This section gives only the pattern-mechanics the catalog relies on.
+
+| Term | What it is | Level |
+|------|-----------|-------|
+| **DIP** | "Depend on abstractions, not concretions" — the *D* in SOLID | Design principle (owner: `hexagonal.md`) |
+| **IoC** | "Don't call us, we'll call you" — framework/control-flow inversion | Paradigm |
+| **DI** | "Receive your dependencies, don't create them" | Implementation technique |
+| **DI container** | Tool that automates wiring (lifetimes: singleton/transient/scoped) | Framework/library |
+| **Composition Root** | The one place near the entry point where the object graph is wired | Structural pattern |
+| **Service Locator** | "Ask a global for dependencies" | **Anti-pattern** — avoid in business code |
+
+**Dependency Injection — prefer constructor injection:**
+```ts
 class OrderService {
-    constructor(
-        private repo: OrderRepository,
-        private email: EmailService
-    ) {}
+  constructor(                       // all dependencies explicit & required
+    private readonly repo: OrderRepository,   // depend on the abstraction
+    private readonly email: EmailService,
+  ) {}
 }
-
-// Configuration
-container.register(OrderRepository, PostgresOrderRepository)
-container.register(EmailService, SmtpEmailService)
-container.registerSingleton(DatabaseConnection)
-
-// Resolution (container figures out the graph)
-const orderService = container.resolve(OrderService)
-
-// What container does internally:
-// 1. OrderService needs OrderRepository and EmailService
-// 2. OrderRepository → PostgresOrderRepository needs DatabaseConnection
-// 3. DatabaseConnection is singleton, create once or reuse
-// 4. Create PostgresOrderRepository with DatabaseConnection
-// 5. Create SmtpEmailService
-// 6. Create OrderService with both dependencies
-
-POPULAR DI CONTAINERS:
-  • TypeScript/JS: InversifyJS, tsyringe, NestJS DI
-  • Java: Spring, Guice, Dagger
-  • C#: Microsoft.Extensions.DI, Autofac, Ninject
-  • Python: dependency-injector, inject
-  • Go: wire, dig, fx
 ```
+- **Constructor injection** (default): required deps, object fully initialized, immutable wiring.
+- **Setter injection**: only for genuinely optional deps; leaves the object temporarily incomplete.
+- **Interface injection**: rare; adds ceremony for little benefit.
 
-### E. Composition Root
-
-```
-COMPOSITION ROOT:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  The ONE place where all dependencies are wired together                │
-│  (As close to application entry point as possible)                      │
-│                                                                         │
-│  APPLICATION STRUCTURE:                                                 │
-│                                                                         │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                         main() / startup                         │   │
-│  │  ┌───────────────────────────────────────────────────────────┐  │   │
-│  │  │              COMPOSITION ROOT                              │  │   │
-│  │  │                                                            │  │   │
-│  │  │  // All wiring happens HERE and ONLY here                  │  │   │
-│  │  │  const config = loadConfig()                               │  │   │
-│  │  │  const db = new DatabaseConnection(config.db)              │  │   │
-│  │  │  const orderRepo = new PostgresOrderRepo(db)               │  │   │
-│  │  │  const emailService = new SmtpEmailService(config.smtp)    │  │   │
-│  │  │  const orderService = new OrderService(orderRepo, email)   │  │   │
-│  │  │  const orderController = new OrderController(orderService) │  │   │
-│  │  │                                                            │  │   │
-│  │  │  // Or with DI container:                                  │  │   │
-│  │  │  container.register(...)                                   │  │   │
-│  │  │  container.register(...)                                   │  │   │
-│  │  │                                                            │  │   │
-│  │  └───────────────────────────────────────────────────────────┘  │   │
-│  │                              │                                   │   │
-│  │                              ▼                                   │   │
-│  │                    Start Application                             │   │
-│  │                    (everything is wired)                         │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-│                                                                         │
-│  REST OF APPLICATION: No "new" for services, only receive dependencies │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-EXAMPLE - Express.js Application:
-
-// composition-root.ts (or main.ts)
-function createApp(): Express {
-    // === COMPOSITION ROOT ===
-
-    // Infrastructure
-    const config = loadConfig()
-    const db = new PostgresConnection(config.database)
-    const cache = new RedisCache(config.redis)
-
-    // Repositories
-    const userRepo = new PostgresUserRepository(db)
-    const orderRepo = new PostgresOrderRepository(db)
-
-    // External Services
-    const emailService = new SendGridEmailService(config.sendgrid)
-    const paymentGateway = new StripePaymentGateway(config.stripe)
-
-    // Application Services
-    const userService = new UserService(userRepo, emailService)
-    const orderService = new OrderService(orderRepo, paymentGateway, emailService)
-
-    // Controllers
-    const userController = new UserController(userService)
-    const orderController = new OrderController(orderService)
-
-    // Express App
-    const app = express()
-    app.use('/users', userController.router)
-    app.use('/orders', orderController.router)
-
-    return app
+**Composition Root** — wire the whole graph in one place (`main`/startup), nowhere else; the rest of the app only *receives* dependencies:
+```ts
+function createApp() {                // === COMPOSITION ROOT ===
+  const config = loadConfig()
+  const db     = new PostgresConnection(config.db)
+  const repo   = new PostgresOrderRepository(db)
+  const email  = new SmtpEmailService(config.smtp)
+  const svc    = new OrderService(repo, email)
+  return new OrderController(svc)
 }
-
-// index.ts
-const app = createApp()
-app.listen(3000)
-
-RULES:
-  ✅ All object construction in composition root
-  ✅ Rest of code receives dependencies via constructors
-  ❌ No "new ServiceClass()" scattered through codebase
-  ❌ No service locator calls in business logic
 ```
+A DI container automates this (`container.register(OrderRepository, PostgresOrderRepository)` then `container.resolve(OrderService)`), managing singleton/transient/scoped lifetimes — but it is still configured **only at the composition root**.
 
-### F. DI vs Service Locator
+> **Service Locator is an anti-pattern in business logic** (DP-DI-01): it hides dependencies (you must read all the code to know what a class needs), makes tests fragile (global must be configured first), and turns missing deps into runtime errors. Inject explicitly instead. Acceptable only in framework internals, plugin loaders, or temporary legacy migration.
 
-```
-DEPENDENCY INJECTION vs SERVICE LOCATOR:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  Both achieve IoC, but DI is preferred                                  │
-│                                                                         │
-│  SERVICE LOCATOR (Anti-pattern):    DEPENDENCY INJECTION:               │
-│                                                                         │
-│  class OrderService {               class OrderService {                │
-│    doSomething() {                    constructor(                      │
-│      // ASK for dependency              private repo: OrderRepository,  │
-│      const repo = ServiceLocator        private email: EmailService     │
-│        .get(OrderRepository)          ) {}                              │
-│      const email = ServiceLocator                                       │
-│        .get(EmailService)             doSomething() {                   │
-│                                         // Already HAVE dependencies    │
-│      repo.save(...)                     this.repo.save(...)             │
-│      email.send(...)                    this.email.send(...)            │
-│    }                                  }                                 │
-│  }                                  }                                   │
-│                                                                         │
-│  ❌ Hidden dependencies             ✅ Explicit dependencies            │
-│  ❌ Global state                    ✅ No global state                  │
-│  ❌ Hard to test                    ✅ Easy to test                     │
-│  ❌ Runtime errors if missing       ✅ Compile-time safety              │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-WHY SERVICE LOCATOR IS AN ANTI-PATTERN:
-
-1. HIDDEN DEPENDENCIES
-   // What does this class need? Have to read ALL the code to find out.
-   class OrderService {
-       process() {
-           const x = Locator.get(SomeService)      // Hidden!
-           const y = Locator.get(AnotherService)   // Hidden!
-           // ... 500 lines later ..
-           const z = Locator.get(YetAnother)       // Hidden!
-       }
-   }
-
-2. TESTING DIFFICULTY
-   // Must configure global locator before testing
-   beforeEach(() => {
-       ServiceLocator.register(OrderRepository, mockRepo)
-       ServiceLocator.register(EmailService, mockEmail)
-       // Easy to forget one!
-   })
-
-3. WITH DI - Everything is explicit:
-   // Constructor shows ALL dependencies immediately
-   class OrderService {
-       constructor(
-           private repo: OrderRepository,      // Visible!
-           private email: EmailService,        // Visible!
-           private payment: PaymentGateway     // Visible!
-       ) {}
-   }
-
-   // Testing - must provide all dependencies (compiler enforces)
-   const service = new OrderService(mockRepo, mockEmail, mockPayment)
-
-WHEN SERVICE LOCATOR IS ACCEPTABLE:
-  • Legacy code migration (temporary)
-  • Framework internals (hidden from user code)
-  • Plugin systems with dynamic loading
-```
-
-### G. DI Best Practices
-
-```
-DEPENDENCY INJECTION BEST PRACTICES:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  ✅ DO                                                                  │
-│  ────                                                                   │
-│                                                                         │
-│  1. Use constructor injection by default                                │
-│     constructor(private repo: OrderRepository) {}                       │
-│                                                                         │
-│  2. Depend on abstractions (interfaces), not concretions                │
-│     constructor(repo: OrderRepository)     // ✅ Interface              │
-│     constructor(repo: PostgresOrderRepo)   // ❌ Concrete               │
-│                                                                         │
-│  3. Keep constructors simple (assignment only)                          │
-│     constructor(private repo: OrderRepository) {                        │
-│         this.repo = repo  // Just assign                                │
-│         // NO complex logic, NO calls to other services                 │
-│     }                                                                   │
-│                                                                         │
-│  4. Single composition root at application entry                        │
-│                                                                         │
-│  5. Make dependencies explicit and required                             │
-│                                                                         │
-│  ─────────────────────────────────────────────────────────────────────  │
-│                                                                         │
-│  ❌ DON'T                                                               │
-│  ────────                                                               │
-│                                                                         │
-│  1. Use Service Locator in business logic                               │
-│     const repo = Container.get(OrderRepository)  // ❌ Hidden           │
-│                                                                         │
-│  2. Inject the container itself                                         │
-│     constructor(private container: Container)    // ❌ Service Locator  │
-│                                                                         │
-│  3. Create dependencies inside classes (except value objects)           │
-│     this.repo = new PostgresOrderRepository()    // ❌ Tight coupling   │
-│                                                                         │
-│  4. Have too many dependencies (code smell)                             │
-│     constructor(a, b, c, d, e, f, g, h, i, j)   // ❌ Class does too much│
-│     // If > 3-4 dependencies, class may need splitting                  │
-│                                                                         │
-│  5. Inject dependencies you don't directly use                          │
-│     constructor(repo: OrderRepository) {                                │
-│         this.thing = repo.getThing()  // ❌ Just inject Thing directly  │
-│     }                                                                   │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-WHEN NOT TO USE DI:
-
-  • Value objects and data classes
-    new Money(100, "USD")           // ✅ OK to create directly
-    new Email("user@example.com")   // ✅ OK to create directly
-
-  • Simple utilities with no dependencies
-    StringUtils.capitalize(str)     // ✅ Static utility is fine
-
-  • Factories (they exist to create things)
-    factory.create(type)            // ✅ Factory's job is to create
-```
-
-### H. The Complete Picture
-
-```
-HOW IT ALL FITS TOGETHER:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  SOLID PRINCIPLES                                                       │
-│       │                                                                 │
-│       │ includes                                                        │
-│       ▼                                                                 │
-│  DEPENDENCY INVERSION PRINCIPLE (DIP)                                   │
-│  "Depend on abstractions, not concretions"                              │
-│       │                                                                 │
-│       │ leads to                                                        │
-│       ▼                                                                 │
-│  INVERSION OF CONTROL (IoC)                                             │
-│  "Don't call us, we'll call you"                                        │
-│       │                                                                 │
-│       │ implemented via                                                 │
-│       ▼                                                                 │
-│  DEPENDENCY INJECTION (DI)                                              │
-│  "Receive dependencies, don't create them"                              │
-│       │                                                                 │
-│       ├─────────────────────────────┐                                   │
-│       │                             │                                   │
-│       ▼                             ▼                                   │
-│  PURE/MANUAL DI              DI CONTAINER                               │
-│  (Wire by hand)              (Automated wiring)                         │
-│       │                             │                                   │
-│       └──────────────┬──────────────┘                                   │
-│                      │                                                  │
-│                      ▼                                                  │
-│              COMPOSITION ROOT                                           │
-│              (Single wiring location)                                   │
-│                      │                                                  │
-│                      │ enables                                          │
-│                      ▼                                                  │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                                                                   │   │
-│  │  • Testability (inject mocks)                                    │   │
-│  │  • Flexibility (swap implementations)                            │   │
-│  │  • Maintainability (loose coupling)                              │   │
-│  │  • All the design patterns work properly                         │   │
-│  │    (Strategy, Repository, Adapter, etc.)                         │   │
-│  │                                                                   │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-SUMMARY:
-
-| Term | What It Is | Level |
-|------|------------|-------|
-| DIP | SOLID Principle | Design Principle |
-| IoC | Paradigm | Architectural Concept |
-| DI | Technique | Implementation Technique |
-| DI Container | Tool | Framework/Library |
-| Composition Root | Location | Architectural Pattern |
-| Service Locator | Anti-pattern | Avoid in business code |
-```
+**Language variation:** containers are ecosystem-specific — Spring/Guice/Dagger (Java), Microsoft.Extensions.DI/Autofac (C#), InversifyJS/tsyringe/NestJS (TS), wire/fx/dig (Go), `dependency-injector` (Python). Many small apps need no container — pure/manual DI at the composition root is enough.
 
 ---
 
 ## 4. Creational Patterns
 
-### A. Factory Pattern
+How objects are created, decoupling clients from concrete classes. `provides: creational-patterns`.
 
-```
-FACTORY PATTERN:
+### 4.1 Factory (Factory Method / Simple Factory / Abstract Factory)
 
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  PROBLEM: Object creation logic is complex or needs to be centralized   │
-│                                                                         │
-│  WITHOUT FACTORY:                   WITH FACTORY:                       │
-│                                                                         │
-│  // Scattered creation logic        // Centralized creation             │
-│  if (type == "pdf") {               document = DocumentFactory          │
-│    doc = new PdfDocument()            .create(type)                     │
-│    doc.setRenderer(pdfRenderer)                                         │
-│    doc.setParser(pdfParser)         // Factory handles complexity       │
-│  } else if (type == "word") {                                           │
-│    doc = new WordDocument()                                             │
-│    doc.setRenderer(wordRenderer)                                        │
-│    // ... repeated everywhere                                           │
-│  }                                                                      │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+**Problem:** object creation is complex, branchy, or must be reused; the client should not name concrete classes.
 
-MODERN IMPLEMENTATION:
-
-// Simple Factory (most common)
+```ts
+// Registration-based factory — extensible without editing existing code (Open-Closed)
 class NotificationFactory {
-    create(type: string, config: Config): Notification {
-        switch (type) {
-            case "email": return new EmailNotification(config)
-            case "sms": return new SmsNotification(config)
-            case "push": return new PushNotification(config)
-            default: throw new UnknownNotificationType(type)
-        }
-    }
+  private creators = new Map<string, (c: Config) => Notification>()
+  register(type: string, make: (c: Config) => Notification) { this.creators.set(type, make) }
+  create(type: string, c: Config): Notification {
+    const make = this.creators.get(type)
+    if (!make) throw new UnknownNotificationType(type)
+    return make(c)
+  }
 }
-
-// Factory with Registration (extensible)
-class NotificationFactory {
-    private creators: Map<string, () => Notification> = new Map()
-
-    register(type: string, creator: () => Notification) {
-        this.creators.set(type, creator)
-    }
-
-    create(type: string): Notification {
-        const creator = this.creators.get(type)
-        if (!creator) throw new UnknownNotificationType(type)
-        return creator()
-    }
-}
-
-// Usage
-factory.register("email", () => new EmailNotification())
-factory.register("slack", () => new SlackNotification())  // Easy to extend
-
-// FUNCTIONAL ALTERNATIVE (Modern):
-const notificationCreators = {
-    email: (config) => new EmailNotification(config),
-    sms: (config) => new SmsNotification(config),
-    push: (config) => new PushNotification(config),
-}
-
-const createNotification = (type, config) =>
-    notificationCreators[type]?.(config)
-    ?? throw new UnknownNotificationType(type)
-
-WHEN TO USE:
-  ✅ Complex object creation with multiple steps
-  ✅ Creation logic needs to be reused across codebase
-  ✅ Need to decouple client from concrete classes
-  ✅ Object families that should be created together
-
-WHEN TO AVOID:
-  ❌ Simple object creation (just use constructor)
-  ❌ Only one implementation exists
-  ❌ Adding complexity without benefit
+factory.register("email", c => new EmailNotification(c))
+factory.register("slack", c => new SlackNotification(c))   // extend, don't modify
 ```
+- **Simple Factory**: one method maps a key → product (a `switch`/map). Most common.
+- **Factory Method**: subclasses decide which product to instantiate (`abstract createButton()`).
+- **Abstract Factory**: a family of related products created together (`WidgetFactory.button()`, `.checkbox()`), so a whole family swaps consistently (e.g. light/dark theme).
 
-### B. Builder Pattern
+**Use when** creation is complex/reused, you must decouple from concrete types, or a product *family* must stay consistent. **Avoid** for trivial construction — just call the constructor.
 
+**Language variation:** in functional/dynamic languages a factory is often just a map of constructor functions (`{email: makeEmail, sms: makeSms}[type](config)`); no class needed.
+
+### 4.2 Builder
+
+**Problem:** an object has many optional parameters or multi-step construction; telescoping constructors are unreadable.
+
+```ts
+const request = HttpRequest.builder()
+  .method("POST").url("https://api/users")
+  .header("Authorization", "Bearer …")
+  .body({ name: "John" }).timeout(5000)
+  .build()                              // build() validates required fields, throws if missing
 ```
-BUILDER PATTERN:
+Prefer an **immutable builder** (each step returns a new builder with `{...params, field}`) when the result must be immutable. **Use when** many optional params or fluent construction adds clarity. **Avoid** when all params are required and few.
 
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  PROBLEM: Object has many optional parameters or complex construction   │
-│                                                                         │
-│  WITHOUT BUILDER:                   WITH BUILDER:                       │
-│                                                                         │
-│  // Telescoping constructors        // Fluent, readable                 │
-│  new Email(to, from, subject,       Email.builder()                     │
-│    body, cc, bcc, attachments,        .to("user@example.com")           │
-│    headers, priority, null,           .from("app@example.com")          │
-│    null, replyTo, ...)                .subject("Hello")                 │
-│                                       .body("Content")                  │
-│  // What is that 7th null?            .priority(HIGH)                   │
-│                                       .build()                          │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+**Language variation:** Python uses keyword args / `@dataclass`; Kotlin/Scala named+default params; Go the functional-options idiom (`New(WithTimeout(5*time.Second))`). These often make an explicit Builder unnecessary.
 
-MODERN IMPLEMENTATION:
+### 4.3 Prototype
 
-class HttpRequestBuilder {
-    private method: string = "GET"
-    private url: string
-    private headers: Map<string, string> = new Map()
-    private body: any = null
-    private timeout: number = 30000
+**Problem:** creating an object fresh is expensive or its configuration is complex; cloning an existing instance is cheaper.
 
-    static create(): HttpRequestBuilder {
-        return new HttpRequestBuilder()
-    }
-
-    withMethod(method: string): this {
-        this.method = method
-        return this
-    }
-
-    withUrl(url: string): this {
-        this.url = url
-        return this
-    }
-
-    withHeader(key: string, value: string): this {
-        this.headers.set(key, value)
-        return this
-    }
-
-    withBody(body: any): this {
-        this.body = body
-        return this
-    }
-
-    withTimeout(ms: number): this {
-        this.timeout = ms
-        return this
-    }
-
-    build(): HttpRequest {
-        if (!this.url) throw new Error("URL is required")
-        return new HttpRequest(
-            this.method,
-            this.url,
-            this.headers,
-            this.body,
-            this.timeout
-        )
-    }
-}
-
-// Usage
-const request = HttpRequestBuilder.create()
-    .withMethod("POST")
-    .withUrl("https://api.example.com/users")
-    .withHeader("Content-Type", "application/json")
-    .withHeader("Authorization", "Bearer token")
-    .withBody({ name: "John" })
-    .withTimeout(5000)
-    .build()
-
-// IMMUTABLE BUILDER (Modern - Functional Style):
-class QueryBuilder {
-    private constructor(private readonly params: QueryParams) {}
-
-    static create(): QueryBuilder {
-        return new QueryBuilder({ table: "", conditions: [], limit: null })
-    }
-
-    from(table: string): QueryBuilder {
-        return new QueryBuilder({ ...this.params, table })
-    }
-
-    where(condition: Condition): QueryBuilder {
-        return new QueryBuilder({
-            ...this.params,
-            conditions: [...this.params.conditions, condition]
-        })
-    }
-
-    limit(n: number): QueryBuilder {
-        return new QueryBuilder({ ...this.params, limit: n })
-    }
-
-    build(): Query {
-        return new Query(this.params)
-    }
-}
-
-WHEN TO USE:
-  ✅ Objects with many optional parameters
-  ✅ Object construction has multiple steps
-  ✅ Need immutable objects with complex creation
-  ✅ Want fluent, readable construction API
-
-WHEN TO AVOID:
-  ❌ Simple objects with few parameters
-  ❌ All parameters are required
-  ❌ Object is mutable and can be modified after creation
+```ts
+interface Cloneable<T> { clone(): T }
+const base = new GameEnemy({ hp: 100, weapons, ai })   // expensive to assemble
+const variant = base.clone()                            // copy, then tweak
+variant.hp = 150
 ```
+Beware shallow vs deep copy (shared mutable references). **Use when** cloning beats constructing, or for many objects sharing a base config. **Language variation:** JS `structuredClone`, Python `copy.deepcopy`, C# `MemberwiseClone`, Rust `#[derive(Clone)]` — usually no hand-written pattern needed.
 
-### C. Singleton Pattern
+### 4.4 Singleton
 
-```
-SINGLETON PATTERN:
+> ⚠️ Usually an anti-pattern: it is hidden global state, hard to test (cannot inject a mock), tightly coupled, and concurrency-prone (race in lazy init).
 
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  PROBLEM: Need exactly one instance of a class, globally accessible     │
-│                                                                         │
-│  ⚠️  WARNING: Often overused and considered an anti-pattern             │
-│                                                                         │
-│  PROBLEMS WITH SINGLETON:                                               │
-│    • Global state (hidden dependencies)                                 │
-│    • Hard to test (can't inject mocks)                                  │
-│    • Tight coupling                                                     │
-│    • Concurrency issues                                                 │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-CLASSIC SINGLETON (Avoid):
-
-class DatabaseConnection {
-    private static instance: DatabaseConnection
-
-    private constructor() {}
-
-    static getInstance(): DatabaseConnection {
-        if (!DatabaseConnection.instance) {
-            DatabaseConnection.instance = new DatabaseConnection()
-        }
-        return DatabaseConnection.instance
-    }
-}
-
-// Usage - creates hidden dependency
-class UserRepository {
-    findById(id: string): User {
-        const db = DatabaseConnection.getInstance()  // Hidden dependency!
-        return db.query("SELECT * FROM users WHERE id = ?", id)
-    }
-}
-
-MODERN ALTERNATIVE - Dependency Injection (Preferred):
-
-// Register as singleton in DI container
+```ts
+// PREFER: singleton *lifetime* via DI, not the Singleton *pattern*
 container.registerSingleton(DatabaseConnection)
-
-// Inject as dependency (explicit, testable)
 class UserRepository {
-    constructor(private db: DatabaseConnection) {}  // Explicit dependency
-
-    findById(id: string): User {
-        return this.db.query("SELECT * FROM users WHERE id = ?", id)
-    }
+  constructor(private readonly db: DatabaseConnection) {}   // explicit, mockable
 }
-
-// In tests - easy to mock
-const mockDb = createMock<DatabaseConnection>()
-const repo = new UserRepository(mockDb)
-
-WHEN SINGLETON IS ACCEPTABLE:
-  ✅ Logging (truly global, stateless)
-  ✅ Configuration (read-only after initialization)
-  ✅ Connection pools (managed resource)
-  ✅ Caches (with proper invalidation)
-
-MODERN APPROACH:
-  • Use DI container to manage lifetime (singleton scope)
-  • Inject dependencies explicitly
-  • Singleton lifetime, not singleton pattern
-
-WHEN TO AVOID:
-  ❌ Any case where DI is available
-  ❌ When you need to test the class
-  ❌ When the "single instance" requirement isn't real
-  ❌ For business logic classes
 ```
+A true global instance is acceptable only for genuinely global, stateless/read-only resources (logger, immutable config, connection pool). Even then, model it as a **singleton-scoped DI registration**, not a `getInstance()` global (DP-DI-01).
 
-### D. Creational Patterns Comparison
+### Creational comparison
 
-```
-CREATIONAL PATTERNS COMPARISON:
-
-┌──────────────┬─────────────────────────────────────────────────────────┐
-│ Pattern      │ Use When                                                │
-├──────────────┼─────────────────────────────────────────────────────────┤
-│ Factory      │ • Need to decouple creation from usage                  │
-│              │ • Multiple types share an interface                     │
-│              │ • Creation logic is complex                             │
-├──────────────┼─────────────────────────────────────────────────────────┤
-│ Builder      │ • Many optional parameters                              │
-│              │ • Step-by-step construction                             │
-│              │ • Want fluent API                                       │
-├──────────────┼─────────────────────────────────────────────────────────┤
-│ Singleton    │ • Truly need ONE instance (rare)                        │
-│              │ • Prefer DI container singleton scope instead           │
-├──────────────┼─────────────────────────────────────────────────────────┤
-│ Prototype    │ • Cloning is cheaper than creating                      │
-│              │ • Objects have many shared configurations               │
-└──────────────┴─────────────────────────────────────────────────────────┘
-```
+| Pattern | Use when |
+|---|---|
+| Factory | decouple creation from use; multiple types share an interface; complex creation |
+| Abstract Factory | a *family* of related products must be created consistently |
+| Builder | many optional params; step-by-step / fluent; immutable result |
+| Prototype | cloning is cheaper than constructing; many shared base configs |
+| Singleton | truly need ONE instance (rare) — prefer DI singleton scope |
 
 ---
 
-## 4. Structural Patterns
+## 5. Structural Patterns
 
-### A. Adapter Pattern
+How objects are composed into larger structures. `provides: structural-patterns`.
 
+### 5.1 Adapter
+
+**Problem:** the interface you have ≠ the interface you need (third-party SDK, legacy system).
+
+```ts
+interface PaymentGateway { charge(amount: Money, card: Card): PaymentResult }
+
+class StripeAdapter implements PaymentGateway {       // adapts StripeSDK → your port
+  constructor(private readonly stripe: StripeSDK) {}
+  charge(amount: Money, card: Card): PaymentResult {
+    const c = this.stripe.createCharge({ amount: amount.cents, currency: amount.currency, source: card.token })
+    return { transactionId: c.id, status: c.status === "succeeded" ? "success" : "failed" }
+  }
+}
+const checkout = new CheckoutService(new StripeAdapter(stripe))  // swap providers freely
 ```
-ADAPTER PATTERN:
+> Adapter is the structural realization of a **port adapter** in Ports & Adapters — see [`hexagonal.md`](guides://hexagonal.md). The interface (`PaymentGateway`) is the port; `StripeAdapter` is the driven adapter.
 
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  PROBLEM: Interface mismatch between what you have and what you need    │
-│                                                                         │
-│  ┌─────────────┐                              ┌─────────────┐           │
-│  │   Client    │ ── expects Interface A ──►  │   Legacy    │           │
-│  │             │                              │   System    │           │
-│  └─────────────┘                              │ (Interface B)│           │
-│                                               └─────────────┘           │
-│                                                                         │
-│  SOLUTION:                                                              │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐                 │
-│  │   Client    │───►│   Adapter   │───►│   Legacy    │                 │
-│  │             │    │  (A → B)    │    │   System    │                 │
-│  └─────────────┘    └─────────────┘    └─────────────┘                 │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+**Use when** integrating external libs/legacy code or swapping implementations. **Avoid** when you control both sides (just change the interface).
 
-MODERN IMPLEMENTATION:
+### 5.2 Decorator
 
-// Your application expects this interface
-interface PaymentGateway {
-    charge(amount: Money, card: Card): PaymentResult
-    refund(transactionId: string, amount: Money): RefundResult
-}
+**Problem:** add behavior to an object dynamically, composably, without subclassing every combination.
 
-// Third-party SDK has different interface
-class StripeSDK {
-    createCharge(params: StripeChargeParams): StripeCharge { ... }
-    createRefund(chargeId: string, params: StripeRefundParams): StripeRefund { ... }
-}
-
-// Adapter translates between them
-class StripeAdapter implements PaymentGateway {
-    constructor(private stripe: StripeSDK) {}
-
-    charge(amount: Money, card: Card): PaymentResult {
-        const stripeParams = this.toStripeChargeParams(amount, card)
-        const stripeCharge = this.stripe.createCharge(stripeParams)
-        return this.toPaymentResult(stripeCharge)
-    }
-
-    refund(transactionId: string, amount: Money): RefundResult {
-        const stripeParams = this.toStripeRefundParams(amount)
-        const stripeRefund = this.stripe.createRefund(transactionId, stripeParams)
-        return this.toRefundResult(stripeRefund)
-    }
-
-    private toStripeChargeParams(amount: Money, card: Card): StripeChargeParams {
-        return {
-            amount: amount.cents,
-            currency: amount.currency.toLowerCase(),
-            source: card.token,
-        }
-    }
-
-    private toPaymentResult(charge: StripeCharge): PaymentResult {
-        return {
-            transactionId: charge.id,
-            status: charge.status === "succeeded" ? "success" : "failed",
-            amount: Money.fromCents(charge.amount, charge.currency),
-        }
-    }
-}
-
-// Usage - client doesn't know about Stripe
-class CheckoutService {
-    constructor(private paymentGateway: PaymentGateway) {}
-
-    processPayment(order: Order, card: Card): void {
-        const result = this.paymentGateway.charge(order.total, card)
-        // ..
-    }
-}
-
-// Easy to swap payment providers
-const checkout = new CheckoutService(new StripeAdapter(stripe))
-// or
-const checkout = new CheckoutService(new PayPalAdapter(paypal))
-
-WHEN TO USE:
-  ✅ Integrating third-party libraries
-  ✅ Working with legacy code
-  ✅ Need to swap implementations
-  ✅ Interface doesn't match your domain
-
-WHEN TO AVOID:
-  ❌ Interfaces are already compatible
-  ❌ You control both sides (just change the interface)
-```
-
-### B. Decorator Pattern
-
-```
-DECORATOR PATTERN:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  PROBLEM: Need to add behavior to objects dynamically without           │
-│           modifying the class or using inheritance                      │
-│                                                                         │
-│  ┌─────────────┐                                                       │
-│  │   Base      │                                                       │
-│  │  Component  │                                                       │
-│  └──────┬──────┘                                                       │
-│         │                                                               │
-│  ┌──────┴──────┐                                                       │
-│  │  Decorator  │ ──wraps──► Component                                  │
-│  │  (adds      │                                                       │
-│  │  behavior)  │                                                       │
-│  └─────────────┘                                                       │
-│                                                                         │
-│  Decorators can be stacked:                                             │
-│  Logging(Caching(Retry(HttpClient)))                                   │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-MODERN IMPLEMENTATION:
-
-// Base interface
-interface HttpClient {
-    request(url: string, options: RequestOptions): Response
-}
-
-// Base implementation
-class BasicHttpClient implements HttpClient {
-    request(url: string, options: RequestOptions): Response {
-        return fetch(url, options)
-    }
-}
-
-// Decorator base
+```ts
 abstract class HttpClientDecorator implements HttpClient {
-    constructor(protected wrapped: HttpClient) {}
-
-    request(url: string, options: RequestOptions): Response {
-        return this.wrapped.request(url, options)
-    }
+  constructor(protected readonly wrapped: HttpClient) {}
+  request(url: string, o: RequestOptions) { return this.wrapped.request(url, o) }
 }
+class LoggingHttpClient extends HttpClientDecorator { /* log around super.request */ }
+class RetryHttpClient   extends HttpClientDecorator { /* retry around super.request */ }
+class CachingHttpClient extends HttpClientDecorator { /* cache GETs */ }
 
-// Logging decorator
-class LoggingHttpClient extends HttpClientDecorator {
-    constructor(wrapped: HttpClient, private logger: Logger) {
-        super(wrapped)
-    }
-
-    request(url: string, options: RequestOptions): Response {
-        this.logger.info(`Request: ${options.method} ${url}`)
-        const start = Date.now()
-
-        const response = super.request(url, options)
-
-        this.logger.info(`Response: ${response.status} in ${Date.now() - start}ms`)
-        return response
-    }
-}
-
-// Retry decorator
-class RetryHttpClient extends HttpClientDecorator {
-    constructor(wrapped: HttpClient, private maxRetries: number = 3) {
-        super(wrapped)
-    }
-
-    request(url: string, options: RequestOptions): Response {
-        let lastError: Error
-
-        for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
-            try {
-                return super.request(url, options)
-            } catch (error) {
-                lastError = error
-                if (attempt < this.maxRetries) {
-                    sleep(exponentialBackoff(attempt))
-                }
-            }
-        }
-
-        throw lastError
-    }
-}
-
-// Caching decorator
-class CachingHttpClient extends HttpClientDecorator {
-    constructor(wrapped: HttpClient, private cache: Cache) {
-        super(wrapped)
-    }
-
-    request(url: string, options: RequestOptions): Response {
-        if (options.method === "GET") {
-            const cached = this.cache.get(url)
-            if (cached) return cached
-        }
-
-        const response = super.request(url, options)
-
-        if (options.method === "GET") {
-            this.cache.set(url, response)
-        }
-
-        return response
-    }
-}
-
-// Stack decorators
-const client = new LoggingHttpClient(
-    new RetryHttpClient(
-        new CachingHttpClient(
-            new BasicHttpClient(),
-            cache
-        ),
-        3
-    ),
-    logger
-)
-
-// Request flows through: Logging → Retry → Caching → Basic
-
-FUNCTIONAL ALTERNATIVE (Modern):
-
-// Using higher-order functions
-const withLogging = (client: HttpClient, logger: Logger): HttpClient => ({
-    request: (url, options) => {
-        logger.info(`Request: ${url}`)
-        const response = client.request(url, options)
-        logger.info(`Response: ${response.status}`)
-        return response
-    }
-})
-
-const withRetry = (client: HttpClient, maxRetries: number): HttpClient => ({
-    request: (url, options) => {
-        for (let i = 0; i < maxRetries; i++) {
-            try {
-                return client.request(url, options)
-            } catch (e) {
-                if (i === maxRetries - 1) throw e
-            }
-        }
-    }
-})
-
-// Compose
-const client = withLogging(
-    withRetry(
-        new BasicHttpClient(),
-        3
-    ),
-    logger
-)
-
-WHEN TO USE:
-  ✅ Add responsibilities dynamically
-  ✅ Behavior composition over inheritance
-  ✅ Single Responsibility (each decorator = one concern)
-  ✅ Cross-cutting concerns (logging, caching, retry)
-
-WHEN TO AVOID:
-  ❌ Only one combination is needed (just use inheritance)
-  ❌ Order of decorators doesn't matter (may indicate wrong pattern)
+// Stack — request flows Logging → Retry → Caching → Basic
+const client = new LoggingHttpClient(new RetryHttpClient(new CachingHttpClient(new BasicHttpClient(), cache), 3), logger)
 ```
+Each decorator = one cross-cutting concern (logging, retry, caching) → Single Responsibility, composable. **Order can matter** — make it explicit. **Avoid** when only one fixed combination exists (use inheritance) .
 
-### C. Facade Pattern
+**Language variation:** with higher-order functions a decorator is just function composition (`withLogging(withRetry(base))`); Python has `@decorator` syntax; many languages favor middleware chains for the same effect.
 
+### 5.3 Facade
+
+**Problem:** a complex subsystem exposes many classes; the client wants one simple entry point.
+
+```ts
+class OrderFacade {                       // orchestrates inventory, payment, shipping, notification
+  constructor(private inv: InventoryService, private pay: PaymentService,
+              private ship: ShippingService, private notify: NotificationService) {}
+  placeOrder(cart: Cart, method: PaymentMethod, addr: Address): OrderResult {
+    // check stock → calc shipping → authorize → reserve → capture → ship → notify
+  }
+}
 ```
-FACADE PATTERN:
+**Use when** simplifying a subsystem or providing a layered entry point. **Avoid** letting it grow into a god-object — if it does too much, split it.
 
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  PROBLEM: Complex subsystem with many classes, client needs simple API  │
-│                                                                         │
-│  WITHOUT FACADE:                    WITH FACADE:                        │
-│                                                                         │
-│  // Client knows all subsystems     // Client knows only facade         │
-│  videoDecoder.decode(file)          videoConverter.convert(             │
-│  audioDecoder.decode(file)            file,                             │
-│  subtitleParser.parse(file)           outputFormat                      │
-│  encoder.encode(video, audio)       )                                   │
-│  muxer.mux(encoded, subtitles)                                          │
-│  writer.write(output)               // Facade handles complexity        │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+### 5.4 Composite
 
-MODERN IMPLEMENTATION:
+**Problem:** clients should treat individual objects and compositions of objects uniformly (tree/part-whole hierarchies).
 
-// Complex subsystem classes
-class InventoryService {
-    checkStock(productId: string): number { ... }
-    reserveStock(productId: string, quantity: number): void { ... }
+```ts
+interface FsNode { size(): number }                       // component
+class File implements FsNode { constructor(private bytes: number) {} size() { return this.bytes } }
+class Directory implements FsNode {                        // composite
+  private children: FsNode[] = []
+  add(n: FsNode) { this.children.push(n) }
+  size() { return this.children.reduce((t, c) => t + c.size(), 0) }   // recurse uniformly
 }
-
-class PaymentService {
-    authorize(amount: Money, paymentMethod: PaymentMethod): AuthResult { ... }
-    capture(authId: string): CaptureResult { ... }
-}
-
-class ShippingService {
-    calculateShipping(address: Address, items: Item[]): Money { ... }
-    createShipment(orderId: string, address: Address): Shipment { ... }
-}
-
-class NotificationService {
-    sendOrderConfirmation(email: string, order: Order): void { ... }
-    sendShippingNotification(email: string, tracking: string): void { ... }
-}
-
-// Facade provides simple interface
-class OrderFacade {
-    constructor(
-        private inventory: InventoryService,
-        private payment: PaymentService,
-        private shipping: ShippingService,
-        private notification: NotificationService
-    ) {}
-
-    placeOrder(cart: Cart, payment: PaymentMethod, address: Address): OrderResult {
-        // 1. Check inventory
-        for (const item of cart.items) {
-            const stock = this.inventory.checkStock(item.productId)
-            if (stock < item.quantity) {
-                return OrderResult.outOfStock(item.productId)
-            }
-        }
-
-        // 2. Calculate shipping
-        const shippingCost = this.shipping.calculateShipping(address, cart.items)
-        const total = cart.subtotal.add(shippingCost)
-
-        // 3. Process payment
-        const auth = this.payment.authorize(total, payment)
-        if (!auth.success) {
-            return OrderResult.paymentFailed(auth.error)
-        }
-
-        // 4. Reserve inventory
-        for (const item of cart.items) {
-            this.inventory.reserveStock(item.productId, item.quantity)
-        }
-
-        // 5. Capture payment
-        this.payment.capture(auth.id)
-
-        // 6. Create shipment
-        const order = Order.create(cart, address, auth.id)
-        const shipment = this.shipping.createShipment(order.id, address)
-
-        // 7. Send notification
-        this.notification.sendOrderConfirmation(cart.customer.email, order)
-
-        return OrderResult.success(order, shipment)
-    }
-}
-
-// Client code is simple
-class CheckoutController {
-    constructor(private orderFacade: OrderFacade) {}
-
-    checkout(request: CheckoutRequest): CheckoutResponse {
-        const result = this.orderFacade.placeOrder(
-            request.cart,
-            request.paymentMethod,
-            request.shippingAddress
-        )
-        return this.toResponse(result)
-    }
-}
-
-WHEN TO USE:
-  ✅ Simplify complex subsystems
-  ✅ Decouple client from subsystem details
-  ✅ Provide entry point to layered system
-  ✅ Wrap legacy systems
-
-WHEN TO AVOID:
-  ❌ Subsystem is already simple
-  ❌ Client needs fine-grained control
-  ❌ Facade becomes a "god class" (break it up)
 ```
+**Use for** trees (filesystems, UI component trees, org charts) where leaves and branches share an interface.
 
-### D. Structural Patterns Comparison
+### 5.5 Proxy
 
+**Problem:** control access to an object — lazy loading, access control, caching, remoting — behind the same interface.
+
+```ts
+class LazyImage implements Image {                 // virtual proxy: defer expensive load
+  private real: RealImage | null = null
+  constructor(private readonly path: string) {}
+  render() { (this.real ??= new RealImage(this.path)).render() }
+}
 ```
-STRUCTURAL PATTERNS COMPARISON:
+Variants: **virtual** (lazy init), **protection** (access checks), **remote** (RPC stub), **caching/smart** proxy. Distinguish from Decorator: Proxy controls *access* to the same interface; Decorator *adds behavior*.
 
-┌──────────────┬─────────────────────────────────────────────────────────┐
-│ Pattern      │ Use When                                                │
-├──────────────┼─────────────────────────────────────────────────────────┤
-│ Adapter      │ • Interface mismatch                                    │
-│              │ • Integrating external libraries                        │
-│              │ • Wrapping legacy code                                  │
-├──────────────┼─────────────────────────────────────────────────────────┤
-│ Decorator    │ • Add behavior dynamically                              │
-│              │ • Compose functionality                                 │
-│              │ • Cross-cutting concerns                                │
-├──────────────┼─────────────────────────────────────────────────────────┤
-│ Facade       │ • Simplify complex subsystems                           │
-│              │ • Provide unified interface                             │
-│              │ • Hide complexity                                       │
-├──────────────┼─────────────────────────────────────────────────────────┤
-│ Composite    │ • Tree structures                                       │
-│              │ • Part-whole hierarchies                                │
-│              │ • Uniform treatment of leaves and composites            │
-├──────────────┼─────────────────────────────────────────────────────────┤
-│ Proxy        │ • Lazy loading                                          │
-│              │ • Access control                                        │
-│              │ • Remote objects                                        │
-│              │ • Caching                                               │
-└──────────────┴─────────────────────────────────────────────────────────┘
-```
+### 5.6 Bridge & Flyweight (briefly)
+
+- **Bridge**: split an abstraction from its implementation so both vary independently (`Shape` ↔ `Renderer`: `Circle(VectorRenderer)` vs `Circle(RasterRenderer)`). Prevents a class explosion (`VectorCircle`, `RasterCircle`, …).
+- **Flyweight**: share immutable intrinsic state across many objects to save memory (glyphs, tile types, particle sprites); pass extrinsic state (position) as method args. Reach for it only under real memory pressure.
+
+### Structural comparison
+
+| Pattern | Use when |
+|---|---|
+| Adapter | interface mismatch; wrap external/legacy code |
+| Decorator | add behavior dynamically/composably; cross-cutting concerns |
+| Facade | simplify/unify a complex subsystem |
+| Composite | tree / part-whole; uniform leaf & branch treatment |
+| Proxy | control access: lazy, protection, remote, caching |
+| Bridge | abstraction & implementation must vary independently |
+| Flyweight | many objects share immutable state; memory pressure |
 
 ---
 
-## 5. Behavioral Patterns
+## 6. Behavioral Patterns
 
-### A. Strategy Pattern
+How objects communicate and distribute responsibility. `provides: behavioral-patterns`.
 
-```
-STRATEGY PATTERN:
+### 6.1 Strategy
 
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  PROBLEM: Multiple algorithms/behaviors that should be interchangeable  │
-│                                                                         │
-│  WITHOUT STRATEGY:                  WITH STRATEGY:                      │
-│                                                                         │
-│  class Shipping {                   class Shipping {                    │
-│    calculate(order, method) {         constructor(strategy) {           │
-│      if (method == "ground") {          this.strategy = strategy        │
-│        // ground logic                }                                 │
-│      } else if (method == "air") {    calculate(order) {                │
-│        // air logic                     return this.strategy            │
-│      } else if (method == "sea") {        .calculate(order)             │
-│        // sea logic                   }                                 │
-│      }                              }                                   │
-│      // Growing if-else chain                                           │
-│    }                                // Add new strategies without       │
-│  }                                  // modifying Shipping class         │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+**Problem:** several interchangeable algorithms; growing `if/else`/`switch` over a "kind".
 
-MODERN IMPLEMENTATION:
+```ts
+interface PricingStrategy { calculate(order: Order): Money }
+class RegularPricing implements PricingStrategy { calculate(o) { /* … */ } }
+class BulkPricing    implements PricingStrategy { calculate(o) { /* 20% off ≥100 units */ } }
 
-// Strategy interface
-interface PricingStrategy {
-    calculatePrice(order: Order): Money
-}
-
-// Concrete strategies
-class RegularPricing implements PricingStrategy {
-    calculatePrice(order: Order): Money {
-        return order.items.reduce(
-            (total, item) => total.add(item.price.multiply(item.quantity)),
-            Money.zero()
-        )
-    }
-}
-
-class PremiumPricing implements PricingStrategy {
-    constructor(private discountPercent: number) {}
-
-    calculatePrice(order: Order): Money {
-        const subtotal = new RegularPricing().calculatePrice(order)
-        return subtotal.multiply(1 - this.discountPercent / 100)
-    }
-}
-
-class BulkPricing implements PricingStrategy {
-    calculatePrice(order: Order): Money {
-        return order.items.reduce((total, item) => {
-            const unitPrice = item.quantity >= 100
-                ? item.price.multiply(0.8)  // 20% off for bulk
-                : item.price
-            return total.add(unitPrice.multiply(item.quantity))
-        }, Money.zero())
-    }
-}
-
-// Context
 class OrderService {
-    constructor(private pricingStrategy: PricingStrategy) {}
-
-    // Strategy can be changed at runtime
-    setPricingStrategy(strategy: PricingStrategy): void {
-        this.pricingStrategy = strategy
-    }
-
-    calculateTotal(order: Order): Money {
-        return this.pricingStrategy.calculatePrice(order)
-    }
+  constructor(private strategy: PricingStrategy) {}
+  setStrategy(s: PricingStrategy) { this.strategy = s }   // swap at runtime
+  total(o: Order) { return this.strategy.calculate(o) }
 }
-
-// Usage
-const orderService = new OrderService(new RegularPricing())
-let total = orderService.calculateTotal(order)
-
-// Customer upgrades to premium
-orderService.setPricingStrategy(new PremiumPricing(15))
-total = orderService.calculateTotal(order)
-
-FUNCTIONAL ALTERNATIVE (Modern):
-
-// Strategies as functions
-type PricingStrategy = (order: Order) => Money
-
-const regularPricing: PricingStrategy = (order) =>
-    order.items.reduce(
-        (total, item) => total.add(item.price.multiply(item.quantity)),
-        Money.zero()
-    )
-
-const premiumPricing = (discountPercent: number): PricingStrategy =>
-    (order) => regularPricing(order).multiply(1 - discountPercent / 100)
-
-const bulkPricing: PricingStrategy = (order) =>
-    order.items.reduce((total, item) => {
-        const unitPrice = item.quantity >= 100
-            ? item.price.multiply(0.8)
-            : item.price
-        return total.add(unitPrice.multiply(item.quantity))
-    }, Money.zero())
-
-// Usage - just pass functions
-const calculateOrder = (order: Order, pricing: PricingStrategy): Money =>
-    pricing(order)
-
-calculateOrder(order, regularPricing)
-calculateOrder(order, premiumPricing(15))
-calculateOrder(order, bulkPricing)
-
-WHEN TO USE:
-  ✅ Multiple algorithms for same task
-  ✅ Need to switch algorithms at runtime
-  ✅ Avoid complex conditionals
-  ✅ Algorithms need to be testable in isolation
-
-WHEN TO AVOID:
-  ❌ Only one algorithm (over-engineering)
-  ❌ Algorithms never change
-  ❌ Simple conditional logic (if/else is fine)
 ```
+**Use when** multiple algorithms must be selected at runtime or tested in isolation; it replaces conditional chains and satisfies Open-Closed. **Avoid** when there is only one algorithm.
 
-### B. Observer Pattern
+**Language variation:** in FP-leaning languages a strategy is just a function value (`type PricingStrategy = (o: Order) => Money`); pass the function, skip the interface and classes entirely.
 
-```
-OBSERVER PATTERN:
+### 6.2 Observer (Publish-Subscribe)
 
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  PROBLEM: Objects need to be notified when another object changes       │
-│                                                                         │
-│  ┌─────────────┐        notifies        ┌─────────────┐                │
-│  │   Subject   │ ─────────────────────► │  Observer   │                │
-│  │ (Publisher) │                        │(Subscriber) │                │
-│  └─────────────┘                        └─────────────┘                │
-│        │                                      ▲                         │
-│        │                                      │                         │
-│        └───────────────────────────┬──────────┘                         │
-│                                    │                                    │
-│                              ┌─────────────┐                           │
-│                              │  Observer   │                           │
-│                              │(Subscriber) │                           │
-│                              └─────────────┘                           │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+**Problem:** one object's change must notify many others, decoupled.
 
-MODERN IMPLEMENTATION:
-
-// Event types
-interface OrderEvent {
-    type: "placed" | "shipped" | "delivered" | "cancelled"
-    order: Order
-    timestamp: Date
-}
-
-// Observer interface
-interface OrderEventHandler {
-    handle(event: OrderEvent): void
-}
-
-// Subject (Publisher)
+```ts
 class OrderEventPublisher {
-    private handlers: Set<OrderEventHandler> = new Set()
-
-    subscribe(handler: OrderEventHandler): void {
-        this.handlers.add(handler)
+  private handlers = new Set<OrderEventHandler>()
+  subscribe(h: OrderEventHandler)   { this.handlers.add(h) }
+  unsubscribe(h: OrderEventHandler) { this.handlers.delete(h) }
+  publish(e: OrderEvent) {
+    for (const h of [...this.handlers]) {   // DP-OBS-01: snapshot — safe if a handler unsubscribes
+      try { h.handle(e) } catch (err) { this.log.error(err) }  // isolate failures; don't break the chain
     }
-
-    unsubscribe(handler: OrderEventHandler): void {
-        this.handlers.delete(handler)
-    }
-
-    publish(event: OrderEvent): void {
-        for (const handler of this.handlers) {
-            handler.handle(event)
-        }
-    }
+  }
 }
-
-// Concrete observers
-class EmailNotificationHandler implements OrderEventHandler {
-    constructor(private emailService: EmailService) {}
-
-    handle(event: OrderEvent): void {
-        switch (event.type) {
-            case "placed":
-                this.emailService.send(
-                    event.order.customer.email,
-                    "Order Confirmation",
-                    `Your order ${event.order.id} has been placed.`
-                )
-                break
-            case "shipped":
-                this.emailService.send(
-                    event.order.customer.email,
-                    "Order Shipped",
-                    `Your order ${event.order.id} is on its way!`
-                )
-                break
-        }
-    }
-}
-
-class InventoryHandler implements OrderEventHandler {
-    constructor(private inventoryService: InventoryService) {}
-
-    handle(event: OrderEvent): void {
-        if (event.type === "placed") {
-            for (const item of event.order.items) {
-                this.inventoryService.reserve(item.productId, item.quantity)
-            }
-        } else if (event.type === "cancelled") {
-            for (const item of event.order.items) {
-                this.inventoryService.release(item.productId, item.quantity)
-            }
-        }
-    }
-}
-
-class AnalyticsHandler implements OrderEventHandler {
-    constructor(private analytics: AnalyticsService) {}
-
-    handle(event: OrderEvent): void {
-        this.analytics.track("order_event", {
-            type: event.type,
-            orderId: event.order.id,
-            total: event.order.total.amount,
-        })
-    }
-}
-
-// Setup
-const publisher = new OrderEventPublisher()
-publisher.subscribe(new EmailNotificationHandler(emailService))
-publisher.subscribe(new InventoryHandler(inventoryService))
-publisher.subscribe(new AnalyticsHandler(analytics))
-
-// Usage
-class OrderService {
-    constructor(private publisher: OrderEventPublisher) {}
-
-    placeOrder(order: Order): void {
-        // ... order logic
-
-        this.publisher.publish({
-            type: "placed",
-            order,
-            timestamp: new Date()
-        })
-    }
-}
-
-MODERN ALTERNATIVES:
-
-// 1. Event Emitter (Node.js style)
-class OrderEvents extends EventEmitter {
-    emitPlaced(order: Order) {
-        this.emit("placed", order)
-    }
-}
-
-orderEvents.on("placed", (order) => sendEmail(order))
-orderEvents.on("placed", (order) => updateInventory(order))
-
-// 2. Reactive Streams (RxJS style)
-const orderPlaced$ = new Subject<Order>()
-
-orderPlaced$.subscribe(order => sendEmail(order))
-orderPlaced$.subscribe(order => updateInventory(order))
-orderPlaced$
-    .pipe(filter(o => o.total > 1000))
-    .subscribe(order => notifyVIP(order))
-
-// 3. Message Broker (for distributed systems)
-// See Kafka, RabbitMQ patterns
-
-WHEN TO USE:
-  ✅ One-to-many dependency between objects
-  ✅ Decoupled communication
-  ✅ Event-driven systems
-  ✅ UI state changes
-
-WHEN TO AVOID:
-  ❌ Observers need results from subject
-  ❌ Order of notification matters
-  ❌ Simple direct calls suffice
 ```
+> **Two recurring bugs (DP-OBS-01):** (1) a subscriber that unsubscribes *during* notification mutates the list mid-iteration → iterate a copy; (2) one observer throwing aborts the rest → catch per-observer. Also watch for memory leaks from never-unsubscribed handlers.
 
-### C. Command Pattern
+**Use for** one-to-many, event-driven decoupling, UI state. **Avoid** when the subject needs results back, or strict notification ordering is required.
 
+**Language variation / modern alternatives:** Node `EventEmitter` (`emitter.on("placed", …)`), reactive streams (RxJS `Subject`, with `pipe(filter(…))`), or — across process boundaries — a message broker (see [`kafka.md`](guides://kafka.md), [`microservices.md`](guides://microservices.md)).
+
+### 6.3 Command
+
+**Problem:** turn an operation into a first-class object so it can be queued, logged, undone, or dispatched.
+
+```ts
+interface CommandHandler<C, R> { handle(c: C): R }
+class CreateUserCommand { constructor(readonly email: string, readonly name: string) {} }   // pure data
+class CreateUserHandler implements CommandHandler<CreateUserCommand, User> { handle(c) { /* … */ } }
+
+class CommandBus {                       // dispatcher / mediator
+  private handlers = new Map<string, CommandHandler<any, any>>()
+  register(type: Function, h: CommandHandler<any, any>) { this.handlers.set(type.name, h) }
+  dispatch<R>(c: object): R { return this.handlers.get(c.constructor.name)!.handle(c) }
+}
 ```
-COMMAND PATTERN:
+For **undo/redo**, add `undo()` and keep a `CommandHistory` stack. Command underpins **CQRS** (commands separate from queries) and audit logs (commands are serializable data). **Use when** you need queuing, undo, audit, or invoker/operation decoupling.
 
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  PROBLEM: Need to parameterize, queue, or undo operations               │
-│                                                                         │
-│  COMMAND = Encapsulated operation (object representing an action)       │
-│                                                                         │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐                 │
-│  │   Invoker   │───►│   Command   │───►│  Receiver   │                 │
-│  │(Button/API) │    │ (Operation) │    │  (Service)  │                 │
-│  └─────────────┘    └─────────────┘    └─────────────┘                 │
-│                                                                         │
-│  Benefits:                                                              │
-│    • Operations as first-class objects                                  │
-│    • Undo/Redo support                                                  │
-│    • Command queuing                                                    │
-│    • Transaction-like behavior                                          │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+### 6.4 State
 
-MODERN IMPLEMENTATION (CQRS-style):
+**Problem:** behavior depends on an object's state, expressed as sprawling conditionals; transitions are complex.
 
-// Command interface
-interface Command<TResult> {
-    // Marker interface - commands are data objects
-}
-
-// Command handler interface
-interface CommandHandler<TCommand extends Command<TResult>, TResult> {
-    handle(command: TCommand): TResult
-}
-
-// Concrete commands (pure data)
-class CreateUserCommand implements Command<User> {
-    constructor(
-        public readonly email: string,
-        public readonly name: string,
-        public readonly role: Role
-    ) {}
-}
-
-class UpdateUserEmailCommand implements Command<void> {
-    constructor(
-        public readonly userId: string,
-        public readonly newEmail: string
-    ) {}
-}
-
-class DeleteUserCommand implements Command<void> {
-    constructor(public readonly userId: string) {}
-}
-
-// Command handlers (contain logic)
-class CreateUserHandler implements CommandHandler<CreateUserCommand, User> {
-    constructor(
-        private userRepository: UserRepository,
-        private emailService: EmailService
-    ) {}
-
-    handle(command: CreateUserCommand): User {
-        // Validate
-        if (this.userRepository.existsByEmail(command.email)) {
-            throw new EmailAlreadyExistsError(command.email)
-        }
-
-        // Create
-        const user = User.create(
-            command.email,
-            command.name,
-            command.role
-        )
-
-        // Persist
-        this.userRepository.save(user)
-
-        // Side effects
-        this.emailService.sendWelcome(user)
-
-        return user
-    }
-}
-
-// Command dispatcher (mediator)
-class CommandBus {
-    private handlers: Map<string, CommandHandler<any, any>> = new Map()
-
-    register<T extends Command<R>, R>(
-        commandType: new (...args: any[]) => T,
-        handler: CommandHandler<T, R>
-    ): void {
-        this.handlers.set(commandType.name, handler)
-    }
-
-    dispatch<T extends Command<R>, R>(command: T): R {
-        const handler = this.handlers.get(command.constructor.name)
-        if (!handler) {
-            throw new NoHandlerFoundError(command.constructor.name)
-        }
-        return handler.handle(command)
-    }
-}
-
-// Usage
-const bus = new CommandBus()
-bus.register(CreateUserCommand, new CreateUserHandler(repo, email))
-
-// In controller
-class UserController {
-    constructor(private commandBus: CommandBus) {}
-
-    createUser(request: CreateUserRequest): Response {
-        const command = new CreateUserCommand(
-            request.email,
-            request.name,
-            request.role
-        )
-
-        const user = this.commandBus.dispatch(command)
-
-        return Response.created(user)
-    }
-}
-
-WITH UNDO SUPPORT:
-
-interface UndoableCommand<TResult> extends Command<TResult> {
-    undo(): void
-}
-
-class MoveFileCommand implements UndoableCommand<void> {
-    private previousPath: string | null = null
-
-    constructor(
-        private fileSystem: FileSystem,
-        private sourcePath: string,
-        private destPath: string
-    ) {}
-
-    execute(): void {
-        this.previousPath = this.sourcePath
-        this.fileSystem.move(this.sourcePath, this.destPath)
-    }
-
-    undo(): void {
-        if (this.previousPath) {
-            this.fileSystem.move(this.destPath, this.previousPath)
-        }
-    }
-}
-
-class CommandHistory {
-    private history: UndoableCommand<any>[] = []
-
-    execute(command: UndoableCommand<any>): void {
-        command.execute()
-        this.history.push(command)
-    }
-
-    undo(): void {
-        const command = this.history.pop()
-        command?.undo()
-    }
-}
-
-WHEN TO USE:
-  ✅ CQRS (separate commands from queries)
-  ✅ Undo/Redo functionality
-  ✅ Operation queuing
-  ✅ Audit logging (commands are data)
-  ✅ Decouple invoker from operation
-
-WHEN TO AVOID:
-  ❌ Simple operations without these needs
-  ❌ No benefit from decoupling
-```
-
-### D. State Pattern
-
-```
-STATE PATTERN:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  PROBLEM: Object behavior depends on its state, with many conditionals  │
-│                                                                         │
-│  WITHOUT STATE PATTERN:             WITH STATE PATTERN:                 │
-│                                                                         │
-│  class Order {                      class Order {                       │
-│    ship() {                           constructor() {                   │
-│      if (state == PENDING) {            this.state = new PendingState() │
-│        // can't ship                  }                                 │
-│      } else if (state == PAID) {      ship() {                          │
-│        // do shipping                   this.state.ship(this)           │
-│        state = SHIPPED                }                                 │
-│      } else if (state == SHIPPED) {   setState(state) {                 │
-│        // already shipped               this.state = state              │
-│      }                                }                                 │
-│      // Growing conditionals        }                                   │
-│    }                                                                    │
-│  }                                  // Each state handles its behavior │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-MODERN IMPLEMENTATION:
-
-// State interface
-interface OrderState {
-    pay(order: Order): void
-    ship(order: Order): void
-    deliver(order: Order): void
-    cancel(order: Order): void
-    getName(): string
-}
-
-// Concrete states
+```ts
+interface OrderState { pay(o: Order): void; ship(o: Order): void; cancel(o: Order): void }
 class PendingState implements OrderState {
-    pay(order: Order): void {
-        order.processPayment()
-        order.setState(new PaidState())
-    }
-
-    ship(order: Order): void {
-        throw new InvalidOperationError("Cannot ship unpaid order")
-    }
-
-    deliver(order: Order): void {
-        throw new InvalidOperationError("Cannot deliver unpaid order")
-    }
-
-    cancel(order: Order): void {
-        order.setState(new CancelledState())
-    }
-
-    getName(): string { return "pending" }
+  pay(o)    { o.processPayment(); o.setState(new PaidState()) }
+  ship(o)   { throw new InvalidOperation("cannot ship unpaid order") }
+  cancel(o) { o.setState(new CancelledState()) }
 }
+class PaidState implements OrderState { ship(o){ o.createShipment(); o.setState(new ShippedState()) } /* … */ }
 
-class PaidState implements OrderState {
-    pay(order: Order): void {
-        throw new InvalidOperationError("Order already paid")
-    }
-
-    ship(order: Order): void {
-        order.createShipment()
-        order.setState(new ShippedState())
-    }
-
-    deliver(order: Order): void {
-        throw new InvalidOperationError("Order not shipped yet")
-    }
-
-    cancel(order: Order): void {
-        order.refundPayment()
-        order.setState(new CancelledState())
-    }
-
-    getName(): string { return "paid" }
-}
-
-class ShippedState implements OrderState {
-    pay(order: Order): void {
-        throw new InvalidOperationError("Order already paid")
-    }
-
-    ship(order: Order): void {
-        throw new InvalidOperationError("Order already shipped")
-    }
-
-    deliver(order: Order): void {
-        order.confirmDelivery()
-        order.setState(new DeliveredState())
-    }
-
-    cancel(order: Order): void {
-        throw new InvalidOperationError("Cannot cancel shipped order")
-    }
-
-    getName(): string { return "shipped" }
-}
-
-class DeliveredState implements OrderState {
-    pay(order: Order): void {
-        throw new InvalidOperationError("Order already complete")
-    }
-
-    ship(order: Order): void {
-        throw new InvalidOperationError("Order already complete")
-    }
-
-    deliver(order: Order): void {
-        throw new InvalidOperationError("Order already delivered")
-    }
-
-    cancel(order: Order): void {
-        throw new InvalidOperationError("Cannot cancel delivered order")
-    }
-
-    getName(): string { return "delivered" }
-}
-
-// Context
 class Order {
-    private state: OrderState = new PendingState()
-
-    setState(state: OrderState): void {
-        console.log(`Order ${this.id}: ${this.state.getName()} → ${state.getName()}`)
-        this.state = state
-    }
-
-    pay(): void { this.state.pay(this) }
-    ship(): void { this.state.ship(this) }
-    deliver(): void { this.state.deliver(this) }
-    cancel(): void { this.state.cancel(this) }
-
-    // Internal methods called by states
-    processPayment(): void { /* ... */ }
-    createShipment(): void { /* ... */ }
-    confirmDelivery(): void { /* ... */ }
-    refundPayment(): void { /* ... */ }
+  private state: OrderState = new PendingState()
+  setState(s: OrderState) { this.state = s }
+  pay()  { this.state.pay(this) }       // delegate to current state
+  ship() { this.state.ship(this) }
 }
-
-STATE MACHINE ALTERNATIVE (Modern):
-
-// Using a state machine library
-const orderMachine = createMachine({
-    id: "order",
-    initial: "pending",
-    states: {
-        pending: {
-            on: {
-                PAY: "paid",
-                CANCEL: "cancelled"
-            }
-        },
-        paid: {
-            on: {
-                SHIP: "shipped",
-                CANCEL: { target: "cancelled", actions: "refund" }
-            }
-        },
-        shipped: {
-            on: {
-                DELIVER: "delivered"
-            }
-        },
-        delivered: { type: "final" },
-        cancelled: { type: "final" }
-    }
-})
-
-WHEN TO USE:
-  ✅ Object behavior depends on state
-  ✅ Many state-dependent conditionals
-  ✅ State transitions are complex
-  ✅ Need state machine visualization
-
-WHEN TO AVOID:
-  ❌ Few states with simple transitions
-  ❌ States don't significantly change behavior
 ```
+Each state owns its transitions and forbids invalid ones, removing conditionals. **Use when** behavior is state-dependent with many transitions. **Avoid** for a couple of trivial states.
 
-### E. Behavioral Patterns Comparison
+**Modern alternative:** a declarative state-machine spec (`{ pending: { on: { PAY: "paid" } }, … }`, XState-style) for visualizable, validated transitions.
 
-```
-BEHAVIORAL PATTERNS COMPARISON:
+### 6.5 Template Method, Chain of Responsibility, and other GoF behaviorals (briefly)
 
-┌──────────────┬─────────────────────────────────────────────────────────┐
-│ Pattern      │ Use When                                                │
-├──────────────┼─────────────────────────────────────────────────────────┤
-│ Strategy     │ • Multiple interchangeable algorithms                   │
-│              │ • Need to select algorithm at runtime                   │
-│              │ • Avoid complex conditionals                            │
-├──────────────┼─────────────────────────────────────────────────────────┤
-│ Observer     │ • One-to-many notifications                             │
-│              │ • Event-driven communication                            │
-│              │ • Decoupled publishers/subscribers                      │
-├──────────────┼─────────────────────────────────────────────────────────┤
-│ Command      │ • Encapsulate operations as objects                     │
-│              │ • Undo/Redo support                                     │
-│              │ • Queue or log operations                               │
-│              │ • CQRS pattern                                          │
-├──────────────┼─────────────────────────────────────────────────────────┤
-│ State        │ • Behavior depends on state                             │
-│              │ • Complex state transitions                             │
-│              │ • State machines                                        │
-├──────────────┼─────────────────────────────────────────────────────────┤
-│ Template     │ • Algorithm skeleton with customizable steps            │
-│ Method       │ • Framework hooks                                       │
-│              │ • Inversion of control                                  │
-├──────────────┼─────────────────────────────────────────────────────────┤
-│ Chain of     │ • Multiple handlers for a request                       │
-│ Responsibility│ • Handler determined at runtime                        │
-│              │ • Middleware pipelines                                  │
-└──────────────┴─────────────────────────────────────────────────────────┘
-```
+- **Template Method**: a base class fixes the algorithm skeleton and lets subclasses fill steps (`prepare(); process(); finish()` with abstract `process()`). A common form of IoC ("don't call us, we'll call you"). FP equivalent: pass the varying step as a function.
+- **Chain of Responsibility**: pass a request along a chain until one handler handles it (middleware pipelines, validation chains, escalation). Each link decides to handle or forward.
+- **Mediator**: centralize many-to-many object communication in one mediator (the `CommandBus` above is one); reduces tangled direct references.
+- **Iterator**: provide sequential access without exposing internals — built into most modern languages (`for…of`, generators/`yield`, `Iterable`/`Iterator`). Rarely hand-written today.
+- **Memento**: capture/restore an object's state without breaking encapsulation (undo snapshots).
+- **Visitor**: add operations to a fixed object structure without modifying it (AST traversal, double dispatch). Powerful but heavy; sum types + pattern matching are the modern substitute.
+
+### Behavioral comparison
+
+| Pattern | Use when |
+|---|---|
+| Strategy | interchangeable algorithms, chosen at runtime |
+| Observer | one-to-many event notification; decoupled pub/sub |
+| Command | operations as objects: queue, undo, audit, CQRS |
+| State | behavior depends on state; complex transitions |
+| Template Method | fixed algorithm skeleton, variable steps |
+| Chain of Responsibility | a request handled by one of a chain (middleware) |
+| Mediator | centralize many-to-many communication |
+| Iterator | sequential traversal — usually language-built-in |
+| Visitor | new operations over a stable structure (AST) |
 
 ---
 
-## 6. Presentation Patterns (MVC Family)
-
-### A. MVC (Model-View-Controller)
-
-```
-MVC PATTERN:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  ORIGIN: Smalltalk GUI (1979) - Trygve Reenskaug                        │
-│  SCOPE: Presentation/UI layer (NOT an application architecture)         │
-│                                                                         │
-│  CLASSIC MVC (Desktop):                                                 │
-│                                                                         │
-│         User Input                                                      │
-│              │                                                          │
-│              ▼                                                          │
-│      ┌────────────────┐                                                │
-│      │   Controller   │────────────────┐                               │
-│      │ (Input Handler)│                │                               │
-│      └───────┬────────┘                │ Updates                       │
-│              │ Updates                 │                               │
-│              ▼                         ▼                               │
-│      ┌────────────────┐        ┌────────────────┐                      │
-│      │     Model      │◄───────│     View       │                      │
-│      │    (Data)      │ Reads  │    (Display)   │                      │
-│      └───────┬────────┘        └────────────────┘                      │
-│              │                         ▲                               │
-│              │ Notifies (Observer)     │                               │
-│              └─────────────────────────┘                               │
-│                                                                         │
-│  WEB MVC (Request/Response):                                            │
-│                                                                         │
-│      HTTP Request                                                       │
-│              │                                                          │
-│              ▼                                                          │
-│      ┌────────────────┐                                                │
-│      │   Controller   │                                                │
-│      │(Request Handler)│                                                │
-│      └───────┬────────┘                                                │
-│              │                                                          │
-│         Uses │                                                          │
-│              ▼                                                          │
-│      ┌────────────────┐                                                │
-│      │     Model      │                                                │
-│      │ (Domain/Data)  │                                                │
-│      └───────┬────────┘                                                │
-│              │                                                          │
-│        Passes│ to                                                       │
-│              ▼                                                          │
-│      ┌────────────────┐                                                │
-│      │     View       │                                                │
-│      │  (Template)    │                                                │
-│      └───────┬────────┘                                                │
-│              │                                                          │
-│              ▼                                                          │
-│      HTTP Response                                                      │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-COMPONENTS:
-
-Model:
-  • Business logic and data
-  • Independent of presentation
-  • Notifies views of changes (in classic MVC)
-
-View:
-  • Displays data to user
-  • Receives user input
-  • Multiple views can display same model
-
-Controller:
-  • Handles user input
-  • Updates model
-  • Selects view
-
-WHEN TO USE:
-  ✅ Web applications with server-side rendering
-  ✅ Traditional request/response cycle
-  ✅ Clear separation of presentation logic
-  ✅ Multiple views for same data
-
-LIMITATIONS:
-  ❌ View and Controller often tightly coupled
-  ❌ "Massive View Controller" problem
-  ❌ Doesn't scale well for complex UIs
-  ❌ Bidirectional data flow can be confusing
-```
-
-### B. MVP (Model-View-Presenter)
-
-```
-MVP PATTERN:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  IMPROVEMENT: View is passive (dumb), Presenter contains all logic      │
-│                                                                         │
-│         User Input                                                      │
-│              │                                                          │
-│              ▼                                                          │
-│      ┌────────────────┐                                                │
-│      │      View      │                                                │
-│      │   (Passive)    │                                                │
-│      └───────┬────────┘                                                │
-│              │ Delegates to                                             │
-│              ▼                                                          │
-│      ┌────────────────┐                                                │
-│      │   Presenter    │                                                │
-│      │(Presentation   │                                                │
-│      │    Logic)      │                                                │
-│      └───────┬────────┘                                                │
-│              │                                                          │
-│         Uses │                                                          │
-│              ▼                                                          │
-│      ┌────────────────┐                                                │
-│      │     Model      │                                                │
-│      │    (Data)      │                                                │
-│      └────────────────┘                                                │
-│                                                                         │
-│  KEY DIFFERENCE FROM MVC:                                               │
-│    • View is completely passive (no logic)                              │
-│    • Presenter updates View directly                                    │
-│    • View has reference to Presenter                                    │
-│    • Better testability (mock the View interface)                       │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-IMPLEMENTATION:
-
-// View interface (for testing)
-interface UserView {
-    showLoading(): void
-    hideLoading(): void
-    showUser(user: UserViewModel): void
-    showError(message: string): void
-}
-
-// Presenter (testable without UI)
-class UserPresenter {
-    constructor(
-        private view: UserView,
-        private userService: UserService
-    ) {}
-
-    async loadUser(userId: string): Promise<void> {
-        this.view.showLoading()
-
-        try {
-            const user = await this.userService.getUser(userId)
-            const viewModel = this.toViewModel(user)
-            this.view.showUser(viewModel)
-        } catch (error) {
-            this.view.showError("Failed to load user")
-        } finally {
-            this.view.hideLoading()
-        }
-    }
-
-    private toViewModel(user: User): UserViewModel {
-        return {
-            displayName: `${user.firstName} ${user.lastName}`,
-            email: user.email,
-            memberSince: formatDate(user.createdAt),
-        }
-    }
-}
-
-// View implementation (thin, no logic)
-class UserActivity implements UserView {
-    private presenter: UserPresenter
-
-    onCreate() {
-        this.presenter = new UserPresenter(this, userService)
-        this.presenter.loadUser(userId)
-    }
-
-    showLoading(): void {
-        this.loadingSpinner.visible = true
-    }
-
-    hideLoading(): void {
-        this.loadingSpinner.visible = false
-    }
-
-    showUser(user: UserViewModel): void {
-        this.nameText.text = user.displayName
-        this.emailText.text = user.email
-    }
-
-    showError(message: string): void {
-        this.errorText.text = message
-    }
-}
-
-WHEN TO USE:
-  ✅ Android development (traditional)
-  ✅ Need highly testable presentation logic
-  ✅ Complex view logic
-  ✅ Windows Forms, WPF (without MVVM)
-
-WHEN TO AVOID:
-  ❌ Simple views with little logic
-  ❌ Reactive frameworks available (use MVVM)
-```
-
-### C. MVVM (Model-View-ViewModel)
-
-```
-MVVM PATTERN:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  IMPROVEMENT: Data binding eliminates manual View updates               │
-│                                                                         │
-│      ┌────────────────┐                                                │
-│      │      View      │                                                │
-│      │  (Declarative) │                                                │
-│      └───────┬────────┘                                                │
-│              │                                                          │
-│              │ Data Binding (automatic sync)                            │
-│              │  ↑↓                                                      │
-│              │                                                          │
-│      ┌───────┴────────┐                                                │
-│      │   ViewModel    │                                                │
-│      │ (Presentation  │                                                │
-│      │     State)     │                                                │
-│      └───────┬────────┘                                                │
-│              │                                                          │
-│         Uses │                                                          │
-│              ▼                                                          │
-│      ┌────────────────┐                                                │
-│      │     Model      │                                                │
-│      │    (Data)      │                                                │
-│      └────────────────┘                                                │
-│                                                                         │
-│  KEY FEATURES:                                                          │
-│    • Two-way data binding                                               │
-│    • ViewModel doesn't know about View                                  │
-│    • Reactive/Observable properties                                     │
-│    • View is declarative                                                │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-MODERN IMPLEMENTATION (React-style):
-
-// ViewModel (React: custom hook)
-function useUserViewModel(userId: string) {
-    const [state, setState] = useState<UserState>({
-        loading: true,
-        user: null,
-        error: null,
-    })
-
-    useEffect(() => {
-        loadUser()
-    }, [userId])
-
-    async function loadUser() {
-        setState(s => ({ ...s, loading: true, error: null }))
-
-        try {
-            const user = await userService.getUser(userId)
-            setState({
-                loading: false,
-                user: toViewModel(user),
-                error: null,
-            })
-        } catch (error) {
-            setState({
-                loading: false,
-                user: null,
-                error: "Failed to load user",
-            })
-        }
-    }
-
-    function updateEmail(email: string) {
-        // Handle user input
-    }
-
-    return {
-        ...state,
-        updateEmail,
-        refresh: loadUser,
-    }
-}
-
-// View (declarative, no logic)
-function UserProfile({ userId }: Props) {
-    const { loading, user, error, updateEmail } = useUserViewModel(userId)
-
-    if (loading) return <Spinner />
-    if (error) return <Error message={error} />
-
-    return (
-        <div>
-            <h1>{user.displayName}</h1>
-            <input
-                value={user.email}
-                onChange={e => updateEmail(e.target.value)}
-            />
-        </div>
-    )
-}
-
-// Angular-style
-@Component({
-    template: `
-        <div *ngIf="loading">Loading...</div>
-        <div *ngIf="user">
-            <h1>{{ user.displayName }}</h1>
-            <input [(ngModel)]="user.email" />
-        </div>
-    `
-})
-class UserComponent {
-    loading = true
-    user: UserViewModel | null = null
-
-    constructor(private userService: UserService) {}
-
-    ngOnInit() {
-        this.loadUser()
-    }
-
-    async loadUser() {
-        this.loading = true
-        this.user = await this.userService.getUser(this.userId)
-        this.loading = false
-    }
-}
-
-WHEN TO USE:
-  ✅ Frameworks with data binding (Angular, Vue, React, SwiftUI)
-  ✅ Complex UI state
-  ✅ Need reactive updates
-  ✅ Form-heavy applications
-
-WHEN TO AVOID:
-  ❌ No data binding support
-  ❌ Very simple UIs
-```
-
-### D. MVI (Model-View-Intent)
-
-```
-MVI PATTERN:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  IMPROVEMENT: Unidirectional data flow, immutable state                 │
-│                                                                         │
-│      ┌────────────────┐                                                │
-│      │      View      │                                                │
-│      │   (Renders     │                                                │
-│      │    State)      │                                                │
-│      └───────┬────────┘                                                │
-│              │ User Intent                                              │
-│              ▼                                                          │
-│      ┌────────────────┐                                                │
-│      │    Intent      │                                                │
-│      │  (User Action) │                                                │
-│      └───────┬────────┘                                                │
-│              │                                                          │
-│              ▼                                                          │
-│      ┌────────────────┐                                                │
-│      │    Reducer     │                                                │
-│      │ (State Machine)│                                                │
-│      └───────┬────────┘                                                │
-│              │ New State                                                │
-│              ▼                                                          │
-│      ┌────────────────┐                                                │
-│      │     Model      │ ──────────────────┐                            │
-│      │ (Immutable     │                   │                            │
-│      │    State)      │                   │                            │
-│      └────────────────┘                   │                            │
-│              │                            │                            │
-│              │ Renders                    │                            │
-│              └────────────────────────────┘                            │
-│                                                                         │
-│  DATA FLOW: Intent → Reducer → State → View → Intent (cycle)           │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-MODERN IMPLEMENTATION (Redux-style):
-
-// State (immutable)
-interface UserState {
-    readonly loading: boolean
-    readonly user: User | null
-    readonly error: string | null
-}
-
-const initialState: UserState = {
-    loading: false,
-    user: null,
-    error: null,
-}
-
-// Intents (Actions)
-type UserIntent =
-    | { type: "LOAD_USER"; userId: string }
-    | { type: "LOAD_USER_SUCCESS"; user: User }
-    | { type: "LOAD_USER_FAILURE"; error: string }
-    | { type: "UPDATE_EMAIL"; email: string }
-
-// Reducer (pure function: state + intent → new state)
-function userReducer(state: UserState, intent: UserIntent): UserState {
-    switch (intent.type) {
-        case "LOAD_USER":
-            return { ...state, loading: true, error: null }
-
-        case "LOAD_USER_SUCCESS":
-            return { loading: false, user: intent.user, error: null }
-
-        case "LOAD_USER_FAILURE":
-            return { loading: false, user: null, error: intent.error }
-
-        case "UPDATE_EMAIL":
-            return state.user
-                ? { ...state, user: { ...state.user, email: intent.email } }
-                : state
-
-        default:
-            return state
-    }
-}
-
-// Side Effects (async operations)
-async function loadUserEffect(
-    userId: string,
-    dispatch: (intent: UserIntent) => void
-) {
-    dispatch({ type: "LOAD_USER", userId })
-
-    try {
-        const user = await userService.getUser(userId)
-        dispatch({ type: "LOAD_USER_SUCCESS", user })
-    } catch (error) {
-        dispatch({ type: "LOAD_USER_FAILURE", error: error.message })
-    }
-}
-
-// View (pure render of state)
-function UserView({ state, dispatch }: Props) {
-    if (state.loading) return <Spinner />
-    if (state.error) return <Error message={state.error} />
-    if (!state.user) return null
-
-    return (
-        <div>
-            <h1>{state.user.name}</h1>
-            <input
-                value={state.user.email}
-                onChange={e => dispatch({
-                    type: "UPDATE_EMAIL",
-                    email: e.target.value
-                })}
-            />
-        </div>
-    )
-}
-
-WHEN TO USE:
-  ✅ Complex state management
-  ✅ Need time-travel debugging
-  ✅ Predictable state changes
-  ✅ Multiple components share state
-
-WHEN TO AVOID:
-  ❌ Simple applications (overkill)
-  ❌ Team unfamiliar with functional concepts
-```
-
-### E. Presentation Patterns Comparison
-
-```
-PRESENTATION PATTERNS COMPARISON:
-
-┌─────────┬────────────────┬────────────────┬────────────────┬────────────┐
-│ Aspect  │     MVC        │     MVP        │     MVVM       │    MVI     │
-├─────────┼────────────────┼────────────────┼────────────────┼────────────┤
-│Data Flow│ Bidirectional  │ Bidirectional  │ Two-way binding│Unidirection│
-│         │                │                │                │            │
-│View Role│ Some logic     │ Passive (dumb) │ Declarative    │ Pure render│
-│         │                │                │                │            │
-│Testabil-│ Medium         │ High           │ High           │ Very High  │
-│ity      │                │                │                │            │
-│Complex- │ Low            │ Medium         │ Medium         │ High       │
-│ity      │                │                │                │            │
-│State    │ Mutable        │ Mutable        │ Observable     │ Immutable  │
-│         │                │                │                │            │
-│Best For │ Server-side    │ Android        │ Angular, Vue   │ Redux,     │
-│         │ web apps       │ (traditional)  │ React, SwiftUI │ complex UI │
-└─────────┴────────────────┴────────────────┴────────────────┴────────────┘
-
-SELECTION GUIDE:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  Server-rendered web app? ──► MVC                                       │
-│                                                                         │
-│  Need highly testable UI? ──► MVP                                       │
-│                                                                         │
-│  Using reactive framework? ──► MVVM                                     │
-│                                                                         │
-│  Complex state, need predictability? ──► MVI                            │
-│                                                                         │
-│  Simple UI, small team? ──► MVC or MVVM (whatever is idiomatic)        │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+## 7. Presentation Patterns (MVC Family)
+
+UI/presentation-layer separation. These govern presentation only — they are **not** application architectures (architecture: [`cleanarch.md`](guides://cleanarch.md), [`hexagonal.md`](guides://hexagonal.md)). `provides: presentation-patterns`.
+
+- **MVC** (Model-View-Controller): Controller handles input, updates Model, selects View; Model notifies Views. Origin: Smalltalk GUI, 1979. Fits server-rendered request/response web apps. Pitfall: bidirectional flow and "massive view controllers".
+- **MVP** (Model-View-Presenter): View is **passive** (an interface with `showLoading/showUser/showError`), Presenter holds all presentation logic and is unit-testable without a UI. Traditional Android, WinForms/WPF.
+- **MVVM** (Model-View-ViewModel): a ViewModel exposes observable state; **data binding** syncs View↔ViewModel automatically; the ViewModel doesn't know the View. Frameworks with binding (Angular, Vue, SwiftUI; React via hooks).
+- **MVI** (Model-View-Intent): strictly **unidirectional** flow — `Intent → Reducer → immutable State → View → Intent`. Predictable, time-travel-debuggable. Redux/Elm-style; best for complex shared state.
+
+| Aspect | MVC | MVP | MVVM | MVI |
+|---|---|---|---|---|
+| Data flow | bidirectional | bidirectional | two-way binding | unidirectional |
+| View role | some logic | passive | declarative | pure render |
+| State | mutable | mutable | observable | immutable |
+| Testability | medium | high | high | very high |
+| Best for | server-rendered web | traditional Android | Angular/Vue/SwiftUI | Redux / complex UI |
+
+**Selection:** server-rendered → MVC; need highly testable UI logic → MVP; reactive/binding framework → MVVM; complex predictable state → MVI. For per-framework realizations see [`reactjs.md`](guides://reactjs.md), [`angular.md`](guides://angular.md), [`svelte.md`](guides://svelte.md), [`android.md`](guides://android.md), [`flutter.md`](guides://flutter.md), [`ios.md`](guides://ios.md).
 
 ---
 
-## 7. Architectural Patterns
+## 8. Architectural & Functional Patterns (owned elsewhere — bindings only)
 
-### A. Repository Pattern
+A few catalog patterns are canonically owned by other guides. They appear here for completeness; fetch the owner for the rules.
 
-```
-REPOSITORY PATTERN:
+### 8.1 Repository & Specification
 
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  PROBLEM: Decouple domain logic from data access details                │
-│                                                                         │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐                 │
-│  │   Domain    │───►│ Repository  │───►│  Database   │                 │
-│  │   Logic     │    │ (Interface) │    │ (or any     │                 │
-│  │             │    │             │    │  storage)   │                 │
-│  └─────────────┘    └─────────────┘    └─────────────┘                 │
-│                           ▲                                             │
-│                           │ Implements                                  │
-│                     ┌─────────────┐                                    │
-│                     │ SQL Repo    │                                    │
-│                     │ Mongo Repo  │                                    │
-│                     │ Memory Repo │                                    │
-│                     └─────────────┘                                    │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+- **Repository**: an interface in the domain/application layer (`UserRepository` with `findById/save/…`) abstracts persistence; implementations (`PostgresUserRepository`, `InMemoryUserRepository` for tests) live in adapters. This is the persistence **port** of Ports & Adapters — see [`hexagonal.md`](guides://hexagonal.md) for layering rules and [`cleanarch.md`](guides://cleanarch.md) for where it sits. Use it to swap storage and to test domain logic against an in-memory fake. Avoid for trivial CRUD with no domain logic (it adds a layer for nothing).
+- **Specification**: encapsulate a business predicate as a composable object with `isSatisfiedBy(item)` plus `and`/`or`/`not`, so rules combine (`active.and(premium).and(recentlyActive(30))`) and can be evaluated in memory or translated to a query. Use for reusable, combinable business rules; for query/persistence concerns defer to the datastore guide.
 
-MODERN IMPLEMENTATION:
+### 8.2 Result/Either & Option/Maybe — see `error-handling.md`
 
-// Repository interface (in domain/application layer)
-interface UserRepository {
-    findById(id: UserId): Promise<User | null>
-    findByEmail(email: Email): Promise<User | null>
-    findActive(): Promise<User[]>
-    save(user: User): Promise<void>
-    delete(id: UserId): Promise<void>
-}
+These are the canonical functional error/absence types: `Result<T,E> = Success<T> | Failure<E>` and `Option<T> = Some<T> | None`, with `map`/`flatMap` for chaining. **The rules for when to return a Result vs. throw, and how to model error types, are owned by [`error-handling.md`](guides://error-handling.md)** — do not re-derive them here.
 
-// SQL implementation
-class PostgresUserRepository implements UserRepository {
-    constructor(private db: Database) {}
-
-    async findById(id: UserId): Promise<User | null> {
-        const row = await this.db.query(
-            "SELECT * FROM users WHERE id = $1",
-            [id.value]
-        )
-        return row ? this.toDomain(row) : null
-    }
-
-    async findByEmail(email: Email): Promise<User | null> {
-        const row = await this.db.query(
-            "SELECT * FROM users WHERE email = $1",
-            [email.value]
-        )
-        return row ? this.toDomain(row) : null
-    }
-
-    async save(user: User): Promise<void> {
-        await this.db.query(
-            `INSERT INTO users (id, email, name, status, created_at)
-             VALUES ($1, $2, $3, $4, $5)
-             ON CONFLICT (id) DO UPDATE SET
-               email = $2, name = $3, status = $4`,
-            [user.id.value, user.email.value, user.name, user.status, user.createdAt]
-        )
-    }
-
-    private toDomain(row: UserRow): User {
-        return User.reconstitute({
-            id: new UserId(row.id),
-            email: new Email(row.email),
-            name: row.name,
-            status: row.status,
-            createdAt: row.created_at,
-        })
-    }
-}
-
-// In-memory implementation (for testing)
-class InMemoryUserRepository implements UserRepository {
-    private users: Map<string, User> = new Map()
-
-    async findById(id: UserId): Promise<User | null> {
-        return this.users.get(id.value) ?? null
-    }
-
-    async save(user: User): Promise<void> {
-        this.users.set(user.id.value, user)
-    }
-
-    // ... other methods
-}
-
-// Usage in domain service
-class UserService {
-    constructor(private userRepository: UserRepository) {}
-
-    async registerUser(email: Email, name: string): Promise<User> {
-        const existing = await this.userRepository.findByEmail(email)
-        if (existing) {
-            throw new EmailAlreadyExistsError(email)
-        }
-
-        const user = User.create(email, name)
-        await this.userRepository.save(user)
-        return user
-    }
-}
-
-WHEN TO USE:
-  ✅ Domain-driven design
-  ✅ Need to swap storage implementations
-  ✅ Unit testing domain logic
-  ✅ Complex query requirements
-
-WHEN TO AVOID:
-  ❌ Simple CRUD with no business logic
-  ❌ Only one storage type ever
-```
-
-### B. Specification Pattern
-
-```
-SPECIFICATION PATTERN:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  PROBLEM: Complex query logic scattered across code                     │
-│                                                                         │
-│  SOLUTION: Encapsulate query criteria as composable objects             │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-MODERN IMPLEMENTATION:
-
-// Base specification
-interface Specification<T> {
-    isSatisfiedBy(item: T): boolean
-    and(other: Specification<T>): Specification<T>
-    or(other: Specification<T>): Specification<T>
-    not(): Specification<T>
-}
-
-abstract class CompositeSpecification<T> implements Specification<T> {
-    abstract isSatisfiedBy(item: T): boolean
-
-    and(other: Specification<T>): Specification<T> {
-        return new AndSpecification(this, other)
-    }
-
-    or(other: Specification<T>): Specification<T> {
-        return new OrSpecification(this, other)
-    }
-
-    not(): Specification<T> {
-        return new NotSpecification(this)
-    }
-}
-
-// Concrete specifications
-class ActiveUserSpecification extends CompositeSpecification<User> {
-    isSatisfiedBy(user: User): boolean {
-        return user.status === "active"
-    }
-}
-
-class PremiumUserSpecification extends CompositeSpecification<User> {
-    isSatisfiedBy(user: User): boolean {
-        return user.subscription === "premium"
-    }
-}
-
-class RecentlyActiveSpecification extends CompositeSpecification<User> {
-    constructor(private days: number) { super() }
-
-    isSatisfiedBy(user: User): boolean {
-        const cutoff = Date.now() - this.days * 24 * 60 * 60 * 1000
-        return user.lastLoginAt.getTime() > cutoff
-    }
-}
-
-// Usage - compose specifications
-const activePremiumUsers = new ActiveUserSpecification()
-    .and(new PremiumUserSpecification())
-
-const targetUsers = new ActiveUserSpecification()
-    .and(new PremiumUserSpecification())
-    .and(new RecentlyActiveSpecification(30))
-
-// Filter in memory
-const filtered = users.filter(u => targetUsers.isSatisfiedBy(u))
-
-// Or translate to SQL
-class UserRepository {
-    findBySpecification(spec: Specification<User>): Promise<User[]> {
-        const sql = this.specificationToSql(spec)
-        return this.db.query(sql)
-    }
-}
-
-WHEN TO USE:
-  ✅ Complex, reusable query criteria
-  ✅ Domain-driven design
-  ✅ Combinable business rules
-  ✅ Query building in repositories
-```
-
----
-
-## 8. Functional Patterns
-
-### A. Result/Either Pattern
-
-```
-RESULT/EITHER PATTERN:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  PROBLEM: Error handling with exceptions is implicit and error-prone    │
-│                                                                         │
-│  SOLUTION: Return explicit success/failure types                        │
-│                                                                         │
-│  Result<T, E> = Success<T> | Failure<E>                                │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-MODERN IMPLEMENTATION:
-
-// Result type
-type Result<T, E> = Success<T> | Failure<E>
-
-class Success<T> {
-    readonly isSuccess = true
-    readonly isFailure = false
-
-    constructor(public readonly value: T) {}
-
-    map<U>(fn: (value: T) => U): Result<U, never> {
-        return new Success(fn(this.value))
-    }
-
-    flatMap<U, E>(fn: (value: T) => Result<U, E>): Result<U, E> {
-        return fn(this.value)
-    }
-}
-
-class Failure<E> {
-    readonly isSuccess = false
-    readonly isFailure = true
-
-    constructor(public readonly error: E) {}
-
-    map<U>(_fn: (value: never) => U): Result<U, E> {
-        return this as unknown as Result<U, E>
-    }
-
-    flatMap<U, F>(_fn: (value: never) => Result<U, F>): Result<U, E | F> {
-        return this as unknown as Result<U, E | F>
-    }
-}
-
-// Helper functions
-const success = <T>(value: T): Result<T, never> => new Success(value)
-const failure = <E>(error: E): Result<never, E> => new Failure(error)
-
-// Error types
-type UserError =
-    | { type: "NOT_FOUND"; userId: string }
-    | { type: "EMAIL_TAKEN"; email: string }
-    | { type: "INVALID_EMAIL"; email: string }
-
-// Usage
-class UserService {
-    async createUser(
-        email: string,
-        name: string
-    ): Promise<Result<User, UserError>> {
-        // Validate email
-        if (!isValidEmail(email)) {
-            return failure({ type: "INVALID_EMAIL", email })
-        }
-
-        // Check if email taken
-        const existing = await this.userRepo.findByEmail(email)
-        if (existing) {
-            return failure({ type: "EMAIL_TAKEN", email })
-        }
-
-        // Create user
-        const user = User.create(email, name)
-        await this.userRepo.save(user)
-
-        return success(user)
-    }
-}
-
-// Caller must handle both cases
-async function handleCreateUser(email: string, name: string) {
-    const result = await userService.createUser(email, name)
-
-    if (result.isSuccess) {
-        console.log("User created:", result.value.id)
-    } else {
-        switch (result.error.type) {
-            case "INVALID_EMAIL":
-                console.log("Invalid email format")
-                break
-            case "EMAIL_TAKEN":
-                console.log("Email already registered")
-                break
-        }
-    }
-}
-
-// Chaining results
-async function registerAndNotify(
-    email: string,
-    name: string
-): Promise<Result<void, UserError | NotificationError>> {
-    const userResult = await userService.createUser(email, name)
-
-    return userResult.flatMap(user =>
-        notificationService.sendWelcome(user)
-    )
-}
-
-WHEN TO USE:
-  ✅ Expected failure cases (validation, not found)
-  ✅ Functional programming style
-  ✅ Explicit error handling
-  ✅ Chaining operations that can fail
-
-WHEN TO AVOID:
-  ❌ Unexpected errors (use exceptions)
-  ❌ Team unfamiliar with functional patterns
-  ❌ Simple cases where null/undefined suffices
-```
-
-### B. Option/Maybe Pattern
-
-```
-OPTION/MAYBE PATTERN:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  PROBLEM: Null/undefined checks are error-prone and verbose             │
-│                                                                         │
-│  SOLUTION: Wrap optional values in a container type                     │
-│                                                                         │
-│  Option<T> = Some<T> | None                                            │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-IMPLEMENTATION:
-
-type Option<T> = Some<T> | None
-
-class Some<T> {
-    readonly isSome = true
-    readonly isNone = false
-
-    constructor(public readonly value: T) {}
-
-    map<U>(fn: (value: T) => U): Option<U> {
-        return new Some(fn(this.value))
-    }
-
-    flatMap<U>(fn: (value: T) => Option<U>): Option<U> {
-        return fn(this.value)
-    }
-
-    getOrElse(_defaultValue: T): T {
-        return this.value
-    }
-}
-
-class None {
-    readonly isSome = false
-    readonly isNone = true
-
-    map<U>(_fn: (value: never) => U): Option<U> {
-        return this as unknown as Option<U>
-    }
-
-    flatMap<U>(_fn: (value: never) => Option<U>): Option<U> {
-        return this as unknown as Option<U>
-    }
-
-    getOrElse<T>(defaultValue: T): T {
-        return defaultValue
-    }
-}
-
-const some = <T>(value: T): Option<T> => new Some(value)
-const none: Option<never> = new None()
-
-// Usage
-function findUser(id: string): Option<User> {
-    const user = database.find(id)
-    return user ? some(user) : none
-}
-
-// Safe chaining
-const displayName = findUser("123")
-    .map(user => user.profile)
-    .map(profile => profile.displayName)
-    .getOrElse("Anonymous")
-
-// Without Option (error-prone)
-const user = findUser("123")
-const displayName = user?.profile?.displayName ?? "Anonymous"  // Optional chaining helps
-
-MODERN NOTE:
-  In many languages, optional chaining (?.) and nullish coalescing (??)
-  reduce the need for explicit Option types. Use Option when you want
-  to enforce handling of absent values or chain transformations.
-```
+Pattern note (mechanics only): return an explicit `Result` for **expected** failures (validation, not-found) and chain with `flatMap`; reserve exceptions for **unexpected** errors. For mere absence, modern languages' optional chaining (`?.`) and nullish coalescing (`??`) often replace an explicit `Option` — use `Option`/`Maybe` when you want to *force* handling or chain transformations. Sum types + pattern matching (Rust `Result`/`Option`, Kotlin sealed classes, TS discriminated unions, Scala `Either`) are the idiomatic realization.
 
 ---
 
 ## 9. Pattern Selection Guide
 
-### A. Decision Matrix
+| Problem | Pattern(s) to consider |
+|---|---|
+| Complex object creation | Factory, Builder |
+| Many optional parameters | Builder |
+| Families of related objects | Abstract Factory |
+| Cheap copy of a configured object | Prototype |
+| Interface mismatch / external SDK | Adapter |
+| Add behavior dynamically | Decorator |
+| Simplify a complex subsystem | Facade |
+| Tree / part-whole structure | Composite |
+| Control access (lazy/remote/cache) | Proxy |
+| Interchangeable algorithms | Strategy |
+| Notify many objects | Observer |
+| Operation as object (undo/queue/CQRS) | Command |
+| Behavior depends on state | State |
+| Fixed skeleton, variable steps | Template Method |
+| Request handled by one of a chain | Chain of Responsibility |
+| Decouple data access | Repository (see `hexagonal.md`) |
+| Composable business rules | Specification |
+| Explicit success/failure | Result/Either (see `error-handling.md`) |
+| UI state management | MVC / MVP / MVVM / MVI |
 
-```
-PATTERN SELECTION MATRIX:
+### Anti-patterns to avoid
 
-┌──────────────────────────────────────────────────────────────────────────┐
-│ Problem                              │ Pattern(s) to Consider            │
-├──────────────────────────────────────┼───────────────────────────────────┤
-│ Complex object creation              │ Factory, Builder                  │
-│ Many optional parameters             │ Builder                           │
-│ Object families                      │ Abstract Factory                  │
-│ Interface mismatch                   │ Adapter                           │
-│ Add behavior dynamically             │ Decorator                         │
-│ Simplify complex subsystem           │ Facade                            │
-│ Multiple algorithms                  │ Strategy                          │
-│ Notify multiple objects              │ Observer                          │
-│ Encapsulate operations               │ Command                           │
-│ Behavior depends on state            │ State                             │
-│ Decouple data access                 │ Repository                        │
-│ Complex queries                      │ Specification                     │
-│ Explicit error handling              │ Result/Either                     │
-│ UI state management                  │ MVC, MVP, MVVM, MVI               │
-└──────────────────────────────────────┴───────────────────────────────────┘
-```
+- **Pattern fever** — patterns everywhere; simple code beats clever code.
+- **Wrong pattern** — forcing a pattern that doesn't fit; understand the problem first.
+- **Pattern-name obsession** — naming everything after a pattern when it's just good design.
+- **Over-abstraction** — interfaces "just in case" (YAGNI).
+- **Singleton abuse** — global state for everything "that should be one"; use DI.
+- **God-object Facade** — a facade that grows into a do-everything class.
+- **Premature abstraction** — extracting an interface before the second implementation exists (let it emerge — see `tdd.md`).
 
-### B. Anti-Patterns to Avoid
-
-```
-PATTERN ANTI-PATTERNS:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  ❌ PATTERN FEVER                                                       │
-│  ────────────────                                                       │
-│  Using patterns everywhere, even where not needed                       │
-│  → Simple code is better than clever code                               │
-│                                                                         │
-│  ❌ WRONG PATTERN                                                       │
-│  ───────────────                                                        │
-│  Using a pattern that doesn't fit the problem                           │
-│  → Understand the problem before choosing a pattern                     │
-│                                                                         │
-│  ❌ PATTERN NAME OBSESSION                                              │
-│  ──────────────────────                                                 │
-│  Naming everything after patterns even when it's just good design       │
-│  → Patterns are discovered, not forced                                  │
-│                                                                         │
-│  ❌ OVER-ABSTRACTION                                                    │
-│  ─────────────────                                                      │
-│  Creating interfaces and abstractions "just in case"                    │
-│  → YAGNI (You Aren't Gonna Need It)                                    │
-│                                                                         │
-│  ❌ SINGLETON ABUSE                                                     │
-│  ────────────────                                                       │
-│  Using Singleton for everything that "should be one"                    │
-│  → Use dependency injection instead                                     │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+> "Patterns achieve flexibility by adding indirection, which can complicate a design and cost performance." — Gang of Four. Discover patterns through refactoring; don't force them.
 
 ---
 
-## 10. Summary
+## 10. Deployment Checklist
 
-### Key Takeaways
+Generated from §2 — one box per requirement ID. No new requirements.
 
-1. **Patterns solve specific problems** - Don't use them without the problem
-2. **Start simple** - Add patterns when complexity demands it
-3. **Refactor to patterns** - Introduce patterns through refactoring
-4. **Modern languages reduce need** - Functional features, optional chaining, etc.
-5. **Composition over inheritance** - Prefer Strategy, Decorator over class hierarchies
-6. **Dependency injection** - Makes patterns like Singleton unnecessary
-
-### Pattern Quick Reference
-
-| Category | Pattern | One-Line Summary |
-|----------|---------|------------------|
-| Creational | Factory | Centralize object creation |
-| Creational | Builder | Step-by-step construction |
-| Structural | Adapter | Convert interface A to B |
-| Structural | Decorator | Add behavior dynamically |
-| Structural | Facade | Simplify complex systems |
-| Behavioral | Strategy | Interchangeable algorithms |
-| Behavioral | Observer | Publish-subscribe notifications |
-| Behavioral | Command | Encapsulate operations as objects |
-| Behavioral | State | Behavior based on state |
-| Presentation | MVC | Separate Model, View, Controller |
-| Presentation | MVVM | Data binding with ViewModel |
-| Presentation | MVI | Unidirectional data flow |
-| Architectural | Repository | Abstract data access |
-| Functional | Result | Explicit success/failure |
-
-### Remember
-
-> "Design patterns should not be applied indiscriminately. Often they achieve flexibility and variability by introducing additional levels of indirection, and that can complicate a design and/or cost you some performance." — Gang of Four
-
-> "When you have a hammer, everything looks like a nail. When you know patterns, everything looks like a pattern opportunity. Resist the urge."
+- [ ] DP-FIT-01 — every pattern addresses a present, named problem (ADR/review)
+- [ ] DP-FIT-02 — simplest sufficient pattern chosen ("no pattern" preferred where it suffices)
+- [ ] DP-EMERGE-01 — patterns introduced by refactoring under green tests (see `tdd.md`)
+- [ ] DP-TST-01 — pattern behavior tested (behavior, not wiring; see `tdd.md`)
+- [ ] DP-COMP-01 — new variants extend via composition/new type, not edits (Open-Closed)
+- [ ] DP-DI-01 — dependencies injected; no Service Locator / global Singleton in business logic
+- [ ] DP-DIP-01 — high-level modules depend on abstractions (see `hexagonal.md`)
+- [ ] DP-OBS-01 — observers iterate a snapshot and isolate subscriber failures
+- [ ] DP-ERR-01 — Result/Either & Option/Maybe follow `error-handling.md`
+- [ ] DP-DOC-01 — non-obvious pattern choice recorded (ADR/comment)
 
 ---
-
-## 11. Implementation Checklist
-
-### Pattern Compliance
-- [ ] **Pattern solves a real problem**: The pattern addresses an identified complexity, not speculative future needs
-- [ ] **Simplest pattern chosen**: No more abstract than necessary for the current requirements
-- [ ] **Pattern correctly implemented**: Implementation matches the pattern's intent and structure
-- [ ] **No pattern mixing**: Each component uses one pattern clearly, not a hybrid of several
-- [ ] **Composition preferred**: Strategy, Decorator, and composition used over deep inheritance hierarchies
-
-### Code Quality
-- [ ] **Single Responsibility**: Each class/module has one reason to change
-- [ ] **Open/Closed Principle**: New behavior added via extension, not modification of existing code
-- [ ] **Interface Segregation**: Interfaces are small and focused, not bloated
-- [ ] **Dependency Inversion**: High-level modules depend on abstractions, not concrete implementations
-- [ ] **No Singleton abuse**: Dependency injection used instead of global Singleton access
-
-### Testing Verification
-- [ ] **Pattern behavior tested**: Tests verify the pattern's intended behavior (e.g., Strategy swaps algorithms)
-- [ ] **Tests written first**: TDD Red-Green-Refactor cycle followed for pattern implementation
-- [ ] **Edge cases covered**: Null strategies, empty decorators, missing observers handled
-- [ ] **Refactoring tests exist**: Tests confirm the pattern can be refactored without breaking behavior
-- [ ] **No implementation detail tests**: Tests assert behavior, not internal pattern wiring
-
-### Documentation
-- [ ] **Pattern choice documented**: ADR or code comment explains why this pattern was selected
-- [ ] **Participants identified**: Classes and their roles in the pattern are clearly named
-- [ ] **Extension points documented**: How to add new strategies, observers, or decorators is explained
-- [ ] **Anti-patterns noted**: Known misuses and pitfalls for the chosen pattern are documented
-
----
-
-## 12. Why This Configuration Works
-
-- **Problem-first pattern selection prevents over-engineering**: Requiring a concrete problem before applying a pattern stops developers from building abstract frameworks for hypothetical future needs, which is the most common source of unnecessary complexity in codebases.
-- **Composition-over-inheritance guidance reduces fragile hierarchies**: Steering teams toward Strategy, Decorator, and dependency injection instead of deep class hierarchies prevents the fragile base class problem and makes code easier to test, extend, and reason about.
-- **Modern language awareness eliminates redundant patterns**: Recognizing that functional features (closures, pattern matching, optional chaining) replace many traditional OOP patterns prevents teams from writing boilerplate wrapper classes when a lambda or built-in feature would suffice.
-- **Anti-pattern documentation prevents common traps**: Explicitly calling out misuses (Singleton for everything, God Object facades, observer memory leaks) helps teams recognize and avoid the mistakes that turn design patterns from solutions into new problems.
-- **Pattern quick reference accelerates decision-making**: A concise lookup table mapping problem types to appropriate patterns lets teams make consistent design choices quickly without re-reading chapters of the Gang of Four book for every decision.
-
----
-
-## Related Guides
-
-- **[architectures.md](architectures.md)**: Application architectures that use these patterns
-- **[hexagonal.md](hexagonal.md)**: Hexagonal Architecture using Adapter, Repository patterns
-- **[cleanarch.md](cleanarch.md)**: Clean Architecture using these patterns
-- **[tdd.md](tdd.md)**: Test-Driven Development - patterns enable testability
-- **[typescript.md](typescript.md)**: TypeScript implementations of these patterns
-
-
-**End of Software Design Patterns Reference Guide**
+**End of Software Design Patterns Guidelines**

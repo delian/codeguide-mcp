@@ -1,1996 +1,268 @@
-# Modern Zsh Shell Scripting Guidelines
-Mandatory coding standards and development practices for modern zsh shell scripts with **MANDATORY bash compatibility**. Emphasis on minimalistic, clean, readable, testable, and maintainable code using hexagonal architecture principles. Scripts MUST run in both bash and zsh. Zsh 5.8+, Bash 5.0+, getopt, shellcheck, shfmt, bats (testing framework).
+# Zsh Shell Scripting Guidelines
+Mandatory standards for zsh scripts and interactive config: when to choose zsh, the zsh/bash differences that bite, glob qualifiers, parameter-expansion flags, and the completion system. Zsh 5.9, zsh -n, shellcheck (portable subset only), shfmt.
+
+---
+name: zsh
+title: Zsh Shell Scripting Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: language
+tools: [zsh@5.9, shellcheck, shfmt, bats]
+requires:
+  - secure-coding
+  - error-handling
+recommends:
+  - bash
+  - fish
+  - comments
+provides:
+  - zsh-vs-bash
+  - glob-qualifiers
+  - zsh-expansion
+  - completion-system
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide covers only what is unique to **zsh** — the shared shell fundamentals live in [`bash.md`](guides://bash.md).
 
 ---
 
-**Agent Profile**: The Bash-Compatible Zsh Script Architect
-**Role**: Senior Shell Scripting Engineer & Cross-Shell Compatibility Specialist
-**Objective**: Generate production-ready, minimalistic, clean, readable, well-documented shell scripts that are **FULLY COMPATIBLE with both bash and zsh**, using hexagonal architecture with focus on portability, testability, and maintainability. **Bash compatibility is ALWAYS the priority** - use zsh-specific features ONLY when absolutely necessary and with clear fallbacks.
-**Tools**: Zsh 5.8+, Bash 5.0+ (full compatibility required), getopt, shellcheck, shfmt, bats (testing framework).
+## 0. Prerequisites & References
+
+Fetch and apply these **before** writing zsh code. Their rules are assumed below and not repeated.
+
+> 📎 **REQUIRED — fetch & apply first:**
+> - [`secure-coding.md`](guides://secure-coding.md) — input sanitization, secrets, supply chain. *(zsh binding: never put secrets in `.zshrc`/plugin files; vet plugin sources.)*
+> - [`error-handling.md`](guides://error-handling.md) — error strategy & propagation. *(zsh binding: `setopt ERR_EXIT NO_UNSET PIPE_FAIL`, `TRAPZERR`, `always` blocks — see §7.)*
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`bash.md`](guides://bash.md) — **the shared shell fundamentals**: hexagonal structure for scripts, strict mode, quoting, `getopt`/`getopts`, traps/`mktemp`, bats testing, shellcheck/shfmt. This guide does **not** restate them; it documents only where zsh *differs*.
+> - [`comments.md`](guides://comments.md) — function/usage documentation policy.
+> - [`fish.md`](guides://fish.md) — the other "human-first" shell; reference when comparing interactive shells.
+
+> 📎 **SEE ALSO:** [`tdd.md`](guides://tdd.md) · [`git.md`](guides://git.md) *(dotfiles in version control)*
 
 ---
 
-## 1. Core Philosophies: BASH-COMPATIBLE FIRST
+## 1. Core Philosophies
 
-The agent must adhere to the **BASH-COMPATIBLE FIRST** principles for every script implementation:
+Zsh-specific principles only. Quoting, strict-mode rationale, modular/hexagonal layout, and testing come from §0 — do **not** restate them here.
 
-**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
-**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+- **Pick the shell on purpose.** A POSIX-portable automation script that must run in CI, containers, or other people's machines belongs in **bash** (`#!/usr/bin/env bash`, see [`bash.md`](guides://bash.md)). Reach for **zsh** when the script is genuinely zsh-targeted (your dotfiles toolchain, a macOS-default-shell tool, completion/prompt code) **or** when zsh's globbing/expansion eliminates an external `find`/`sed`/`awk` pipeline.
+- **No accidental dialects.** Declare the target. A zsh script uses `#!/usr/bin/env zsh` and may freely use zsh features; do not write a `#!/bin/sh`/bash script that silently relies on zsh behavior, and do not claim portability you have not tested.
+- **Lean on what makes zsh zsh.** Glob qualifiers, expansion flags, and `zmodload`/`zsh/*` modules exist to replace fragile external-command pipelines — use them in zsh scripts instead of shelling out.
+- **`emulate -L zsh` in functions.** Library functions that must behave predictably regardless of the user's `setopt` state start with `emulate -L zsh` (locally resets options, auto-restored on return).
+- **Config is code.** `.zshrc`/`.zshenv` are programs that run on every shell start: keep them fast, idempotent, secret-free, and in version control (see `git.md`).
 
-**CRITICAL COMPATIBILITY PRINCIPLE**:
-🔴 **Scripts MUST be fully compatible with BOTH bash and zsh**
-🔴 **When there is ANY choice, ALWAYS prefer bash-compatible constructs**
-🔴 **Use zsh-specific features ONLY when absolutely necessary and with fallback mechanisms**
-
-- **B**ash Compatible: ALWAYS prefer bash-compatible syntax over zsh-specific features
-- **A**lways Portable: Scripts MUST execute correctly in both bash 5.0+ and zsh 5.8+
-- **S**afe Execution: set -euo pipefail (bash/zsh compatible), proper quoting, errexit options
-- **H**exagonal Architecture: Ports and adapters pattern
-
-- **C**ompatible First: Choose portable constructs over shell-specific optimizations
-- **O**ptional Zsh: Use zsh-specific features ONLY when bash cannot accomplish the task
-- **M**odular: Pure functions where possible, modular design
-- **P**arsing Standard: getopt for maximum compatibility (zparseopts only if zsh-only)
-- **A**lways Test: Test in BOTH bash and zsh - both MUST pass
-- **T**estable: Comprehensive test coverage with bats (works in both shells)
-
-**Additional Principles:**
-
-- **Portability Priority**: When choosing between implementations, bash-compatible ALWAYS wins
-- **Fallback Required**: If zsh features are used, MUST provide bash fallback
-- **Dual Verification**: Scripts MUST be verified in both bash and zsh
-- **Standard Tools**: Prefer POSIX/bash built-ins over zsh-specific features
-
-**Verified Code**: Agent-generated scripts MUST parse, execute, and pass tests in BOTH bash and zsh before delivery.
+**Verified Code**: Agent-generated zsh MUST pass every gate in §2 before delivery.
 
 ---
 
-## 2. Agent Code Generation Requirements (MANDATORY)
+## 2. Requirements (MANDATORY, auditable)
 
-### A. Verification Protocol
+RFC-2119 keywords. IDs `ZSH-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a shared rule cite its owner.
 
-**CRITICAL: Agents MUST verify that all generated/modified zsh scripts parse correctly, execute without breaking, and pass all tests before presenting them to the user.**
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| ZSH-SYN-01 | Scripts MUST parse clean in zsh | `zsh -n script.zsh` | exit 0 |
+| ZSH-SYN-02 | Strict-mode parse MUST pass | `zsh -o ERR_EXIT -o NO_UNSET -o PIPE_FAIL -n script.zsh` | exit 0 |
+| ZSH-SHEBANG-01 | A zsh script MUST declare `#!/usr/bin/env zsh`; portable scripts MUST NOT (use `bash`) | `head -1` review | correct interpreter |
+| ZSH-LINT-01 | The **bash-portable** subset MUST pass shellcheck; pure-zsh scripts are exempt (shellcheck has no zsh dialect) | `shellcheck -s bash file` *(portable only)* | exit 0 |
+| ZSH-FMT-01 | Portable scripts MUST be `shfmt`-clean (zsh-only syntax may be excluded) | `shfmt -d file` | no diff |
+| ZSH-ERR-01 | Scripts MUST enable strict mode & handle errors (see `error-handling.md`) | grep `setopt ERR_EXIT NO_UNSET PIPE_FAIL` / `TRAPZERR` | present |
+| ZSH-TST-01 | Logic MUST have tests; bug fixes get a regression test first (see `tdd.md`, harness in `bash.md`) | `zsh -f tests/*.ztst` / `bats tests/` | exit 0 |
+| ZSH-SEC-01 | No secrets in source/config; user input sanitized (see `secure-coding.md`) | review / grep | 0 secrets |
+| ZSH-SEC-02 | Interactive plugins MUST come from vetted sources, pinned (see `secure-coding.md`) | review plugin manifest | all vetted |
+| ZSH-RC-01 | `.zshrc`/`.zshenv` MUST be fast, idempotent, secret-free | `time zsh -ic exit` | < ~200 ms, no secrets |
 
-#### Pre-Delivery Checklist
-
-**Before delivering ANY zsh script, the agent MUST:**
-
-1. **Syntax Verification (MANDATORY - ALWAYS REQUIRED)**:
-   ```bash
-   # CRITICAL: Check bash syntax FIRST (bash compatibility is mandatory)
-   bash -n script.zsh
-   # Exit code MUST be 0
-
-   # Verify with bash in strict mode
-   bash -euo pipefail -n script.zsh
-   # Exit code MUST be 0
-
-   # Check zsh syntax
-   zsh -n script.zsh
-   # Exit code MUST be 0
-
-   # Verify with zsh in strict mode
-   zsh -o ERR_EXIT -o NO_UNSET -n script.zsh
-   # Exit code MUST be 0
-   ```
-   - **MUST** parse without errors in BOTH bash and zsh (exit code 0)
-   - **MUST** work in bash 5.0+ (primary requirement)
-   - **MUST** work in zsh 5.8+ (secondary requirement)
-   - No syntax errors or warnings in either shell
-
-2. **Shellcheck Verification (MANDATORY - if available)**:
-   ```bash
-   # Run shellcheck if available
-   if command -v shellcheck >/dev/null 2>&1; then
-       shellcheck -s bash script.zsh  # Use bash mode for compatibility
-       # Exit code MUST be 0
-   fi
-   ```
-   - **MUST** pass shellcheck if tool is available
-   - No warnings or errors from shellcheck
-
-3. **shfmt Verification (MANDATORY - if available)**:
-   ```bash
-   # Check formatting with shfmt if available
-   if command -v shfmt >/dev/null 2>&1; then
-       shfmt -d script.zsh
-       # Exit code MUST be 0 (no formatting differences)
-   fi
-   ```
-   - **MUST** be properly formatted if shfmt is available
-
-4. **Execution Verification (MANDATORY - ALWAYS REQUIRED)**:
-   ```bash
-   # CRITICAL: Test in bash FIRST (bash compatibility is mandatory)
-   bash script.zsh --help
-   # Exit code MUST be 0
-
-   # Test bash with invalid arguments (should fail gracefully)
-   bash script.zsh --invalid-arg 2>&1 || true
-   # Should not crash or produce errors
-
-   # Test script execution in zsh
-   zsh script.zsh --help
-   # Exit code MUST be 0
-
-   # Test zsh with invalid arguments (should fail gracefully)
-   zsh script.zsh --invalid-arg 2>&1 || true
-   # Should not crash or produce errors
-   ```
-   - **MUST** execute without breaking in BOTH bash and zsh
-   - **MUST** handle errors gracefully in BOTH shells
-   - **MUST** provide help/usage information in BOTH shells
-   - **MUST** produce identical output in both shells
-
-5. **Test Execution (MANDATORY - if tests exist)**:
-   ```bash
-   # Run ztst tests if available
-   if [ -f "tests/script.ztst" ]; then
-       zsh -f tests/script.ztst
-       # Exit code MUST be 0
-   fi
-
-   # Run bats tests if available
-   if [ -f "tests/script_test.sh" ]; then
-       bats tests/script_test.sh
-       # Exit code MUST be 0
-   fi
-   ```
-   - **MUST** pass all tests if tests exist
-
-6. **Post-Modification Verification (MANDATORY)**:
-   ```bash
-   # After ANY modification, ALWAYS run:
-   # 1. Bash syntax check (FIRST - most important)
-   bash -n script.zsh
-   # Exit code MUST be 0
-
-   # 2. Zsh syntax check
-   zsh -n script.zsh
-   # Exit code MUST be 0
-
-   # 3. Shellcheck (if available)
-   command -v shellcheck >/dev/null 2>&1 && shellcheck script.zsh
-   # Exit code MUST be 0
-
-   # 4. Bash execution test (FIRST - most important)
-   bash script.zsh --help
-   # Exit code MUST be 0
-
-   # 5. Zsh execution test
-   zsh script.zsh --help
-   # Exit code MUST be 0
-   ```
-
-#### Error Correction Process
-
-If verification fails:
-
-1. **Syntax Errors**:
-   - Read full error message from bash -n (check bash first)
-   - Read full error message from zsh -n
-   - Identify root cause (missing quotes, incorrect syntax, bash incompatibility)
-   - Fix the issue using bash-compatible syntax
-   - Re-verify in BOTH bash and zsh
-
-2. **Shellcheck Warnings**:
-   - Review shellcheck output
-   - Fix issues or add appropriate disable comments
-   - Re-run shellcheck
-   - Verify fixes work in both bash and zsh
-
-3. **Execution Errors**:
-   - Test script with various inputs in bash first
-   - Test script with same inputs in zsh
-   - Check error messages are meaningful in both shells
-   - Ensure graceful failure handling in both shells
-   - Fix any differences between bash and zsh behavior
-
-### B. Agent Workflow Example
-
-**Complete bash-compatible generation workflow:**
-
-1. **Generate Code Structure**:
-   ```
-   project/
-   ├── script.sh              # Use .sh extension for bash compatibility
-   ├── lib/
-   │   ├── core.sh
-   │   ├── ports.sh
-   │   └── adapters.sh
-   ├── tests/
-   │   └── script_test.sh     # Use bats for cross-shell testing
-   └── README.md
-   ```
-
-2. **Generate Initial Code**:
-   ```bash
-   #!/usr/bin/env bash
-   # CRITICAL: Use bash shebang for maximum compatibility
-   # Script works in both bash and zsh
-
-   set -euo pipefail
-
-   # Use bash-compatible syntax
-   declare -A config
-   config=(
-       [key1]="value1"
-       [key2]="value2"
-   )
-   ```
-
-3. **Verify in BOTH Shells**:
-   ```bash
-   # Bash verification (FIRST - most important)
-   bash -n script.sh
-   # ✓ Bash syntax verification successful
-
-   # Zsh verification
-   zsh -n script.sh
-   # ✓ Zsh syntax verification successful
-   ```
-
-4. **Add Tests (using bats for compatibility)**:
-   ```bash
-   # tests/script_test.sh
-   #!/usr/bin/env bats
-
-   @test "help message displays correctly in bash" {
-       run bash script.sh --help
-       [ "$status" -eq 0 ]
-   }
-
-   @test "help message displays correctly in zsh" {
-       run zsh script.sh --help
-       [ "$status" -eq 0 ]
-   }
-   ```
-
-5. **Run Tests in BOTH Shells**:
-   ```bash
-   bats tests/script_test.sh
-   # ✓ All tests pass in both bash and zsh
-   ```
-
-6. **Final Verification**:
-   ```bash
-   # Verify in bash (primary)
-   bash -n script.sh && bash script.sh --help
-   # ✓ Bash checks passed
-
-   # Verify in zsh (secondary)
-   zsh -n script.sh && zsh script.sh --help
-   # ✓ Zsh checks passed
-
-   # Shellcheck
-   shellcheck script.sh
-   # ✓ All checks passed
-   ```
-
-7. **Present Code**: Only after ALL checks pass in BOTH shells
-
-### C. Prohibited Practices
-
-**NEVER deliver code that:**
-- [ ] 🔴 **Fails bash syntax check** (CRITICAL - bash compatibility is MANDATORY)
-- [ ] 🔴 **Fails bash execution test** (CRITICAL - must work in bash)
-- [ ] 🔴 **Uses zsh-only features without bash fallback** (CRITICAL violation)
-- [ ] 🔴 **Produces different output in bash vs zsh** (CRITICAL - must be identical)
-- [ ] Fails zsh syntax check
-- [ ] Has failing tests in either shell
-- [ ] Lacks tests for business logic
-- [ ] Is not properly formatted
-- [ ] Has unsafe options (missing set -euo pipefail for bash compatibility)
-- [ ] Has unquoted variables in critical contexts
-- [ ] Uses deprecated features
-- [ ] Uses zsh-specific syntax when bash-compatible syntax exists
-- [ ] Uses zparseopts instead of getopt (unless zsh-only script)
-- [ ] Uses zsh-only parameter expansion when bash alternatives exist
-- [ ] **Fixes bugs without adding regression tests first**
-- [ ] **Writes implementation before writing tests (violates TDD)**
-- [ ] **Skips Red-Green-Refactor cycle for new features**
-
-**CRITICAL**: Bash compatibility violations are the MOST SEVERE errors. Scripts that don't work in bash MUST be rejected immediately.
+> **Forbidden**: shipping a script whose shebang lies about its dialect; relying on shellcheck to validate pure-zsh syntax; fixing a bug without a regression test first (violates `tdd.md`); hardcoding secrets in `.zshrc`.
 
 ---
 
-## 1A. The Bash Compatibility Principle (MANDATORY)
+## 3. Zsh vs Bash — the differences that bite
 
-🔴 **CRITICAL: READ THIS FIRST - THIS IS THE MOST IMPORTANT RULE** 🔴
+The single highest-value section: behaviors that silently change meaning when a bash habit meets zsh.
 
-### The Golden Rule of Shell Scripting
-
-**When faced with ANY choice between a bash-compatible approach and a zsh-specific feature, ALWAYS choose the bash-compatible approach.**
-
-### Why Bash Compatibility is Mandatory
-
-1. **Universal Execution**: Bash is installed on virtually every Unix system
-2. **Team Compatibility**: Works regardless of team members' shell preferences
-3. **CI/CD Compatibility**: Most build systems use bash by default
-4. **Future Proof**: Doesn't break when moved to different environments
-5. **Lower Maintenance**: One script for all users
-
-### Decision Matrix
-
-When writing any shell code, ask yourself:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Does this code work in bash?                                 │
-├─────────────────────────────────────────────────────────────┤
-│ ✅ YES → Use this approach                                   │
-│ ❌ NO  → Find a bash-compatible alternative                  │
-│         If none exists (rare), add bash fallback             │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Examples of Choosing Bash-Compatible Approaches
-
-#### Example 1: Array Iteration
-
-```bash
-# ❌ WRONG - Zsh-specific
-for key value in "${(@kv)config}"; do
-    echo "$key = $value"
-done
-
-# ✅ CORRECT - Bash-compatible (works in zsh too)
-for key in "${!config[@]}"; do
-    echo "$key = ${config[$key]}"
-done
-```
-
-#### Example 2: Case Conversion
-
-```bash
-# ❌ WRONG - Zsh-specific
-echo "${filename:u}"  # Uppercase
-
-# ✅ CORRECT - Bash-compatible (works in zsh too)
-echo "${filename^^}"  # Uppercase
-```
-
-#### Example 3: Argument Parsing
-
-```bash
-# ❌ WRONG - Zsh-specific
-zparseopts -D -E -F - h=help v=verbose
-
-# ✅ CORRECT - Bash-compatible (works in zsh too)
-getopt -o hv --long help,verbose -- "$@"
-```
-
-#### Example 4: File Filtering
-
-```bash
-# ❌ WRONG - Zsh-specific glob qualifiers
-files=(*.txt(.))  # Regular files only
-
-# ✅ CORRECT - Bash-compatible using find
-mapfile -t files < <(find . -type f -name "*.txt")
-```
-
-### When Zsh-Specific Features Are Acceptable (Rare)
-
-Use zsh-specific features ONLY when:
-1. Bash genuinely cannot accomplish the task (very rare)
-2. You've documented the requirement clearly
-3. You've added shell detection and helpful error messages
-4. You've considered if the task can be solved differently
-
-```bash
-# If you must use zsh-specific features
-if [[ -z ${ZSH_VERSION:-} ]]; then
-    echo "ERROR: This script requires zsh" >&2
-    echo "Please run: zsh $0" >&2
-    exit 1
-fi
-```
-
-### Summary
-
-**🔴 ALWAYS PREFER BASH-COMPATIBLE SYNTAX 🔴**
-**🔴 ZSH-SPECIFIC FEATURES ARE THE EXCEPTION, NOT THE RULE 🔴**
-
----
-
-## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
-
-**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new zsh scripts and functions.**
-
-### TDD Cycle
-
-```
-1. 🔴 RED: Write a failing test first
-   ↓
-2. 🟢 GREEN: Write minimal code to make it pass
-   ↓
-3. 🔵 REFACTOR: Improve code while keeping tests green
-   ↓
-   Repeat
-```
-
-### Example TDD Workflow for Zsh
+| Behavior | bash | zsh | Consequence |
+|---|---|---|---|
+| Array indexing | 0-based | **1-based** | `${a[1]}` is the *first* element in zsh, second in bash |
+| Unquoted `$var` with spaces | word-splits | **no split** | zsh does not word-split parameter expansions by default |
+| Unquoted glob, no match | left literal | **error** (or empty with `NULL_GLOB`) | `rm *.log` aborts if nothing matches |
+| `$var` splitting in `for` | splits on IFS | iterates as **one word** | port bash loops carefully |
+| `${a[@]}` vs `$a` | `$a` = first elem | **`$a` = whole array joined** | different scalar semantics |
+| `read a b c` | splits line | needs `read -A`/explicit | array reads differ |
 
 ```zsh
-# Step 1: RED - Write failing test first (tests/test_validator.ztst)
-%prep
-  mkdir test_dir
-  cd test_dir
-
-%test
-
-  source ../lib/validator.zsh
-  validate_email "user@example.com"
-0:validate_email returns 0 for valid email
-
-  source ../lib/validator.zsh
-  validate_email "invalid.email"
-1:validate_email returns 1 for invalid email
-
-# Run: zsh -f tests/test_validator.ztst
-# ❌ FAILS - validate_email doesn't exist yet
-
-# Step 2: GREEN - Write minimal implementation (lib/validator.zsh)
-#!/usr/bin/env zsh
-
-# Validate email address format
-# Arguments: $1 - email address
-# Returns: 0 if valid, 1 if invalid
-validate_email() {
-    local email="$1"
-    local pattern='^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-
-    if [[ "$email" =~ $pattern ]]; then
-        return 0
-    else
-        return 1
-    fi
-}
-
-# Run: zsh -f tests/test_validator.ztst
-# ✅ PASSES - tests pass
-
-# Step 3: REFACTOR - Improve using zsh features
-validate_email() {
-    # Use zsh parameter expansion and pattern matching
-    [[ $1 =~ '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$' ]]
-}
-# Tests still pass ✓
+# Get 0-based, bash-like arrays for a block of ported code:
+setopt KSH_ARRAYS              # 0-based indexing + ${a[@]} semantics like bash
+# Get bash-style word splitting where a script truly needs it:
+setopt SH_WORD_SPLIT          # opt-in only; prefer explicit arrays instead
 ```
+
+Prefer **adapting to zsh semantics** (explicit arrays, 1-based logic) over forcing bash emulation. If a script must run in both shells unmodified, write it for **bash** and keep it in a `.sh` file per [`bash.md`](guides://bash.md) — do not author a "dual-dialect" hybrid.
 
 ---
 
-## 2B. Bug Fix Protocol (MANDATORY)
+## 4. Glob qualifiers & extended globbing
 
-**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
-
-### Bug Fix Workflow
-
-```
-1. 🐛 Bug Reported/Discovered
-   ↓
-2. ✍️ Write a test that REPRODUCES the bug (test will FAIL)
-   ↓
-3. ✅ Verify the test fails for the right reason
-   ↓
-4. 🔧 Fix the bug (make the test pass)
-   ↓
-5. 🟢 Verify the test now PASSES
-   ↓
-6. 📝 Document the bug in test comments (include bug ID)
-   ↓
-7. 🚀 Deploy with confidence (regression prevented)
-```
-
-### Example Bug Fix
+Zsh's defining feature: filter and sort matches **in the glob itself**, replacing most `find`/`ls | grep` pipelines. Enable extended patterns once:
 
 ```zsh
-# Bug Report #789: parse_config fails with array values
-
-# Step 1-2: Write test that reproduces the bug (tests/test_config.ztst)
-%test
-
-  # Bug #789: parse_config "colors=(red blue green)" failed
-  # Discovered: 2026-03-11
-  # This test prevents regression
-  source ../lib/config.zsh
-  result=$(parse_config "colors=(red blue green)")
-  [[ "$result" == "red blue green" ]]
-0:parse_config handles array values - Bug #789
-
-# Run: zsh -f tests/test_config.ztst
-# ❌ FAILS - reproduces the bug ✓
-
-# Step 3: Fix the bug (lib/config.zsh)
-# Before (buggy):
-parse_config_old() {
-    local input="$1"
-    echo "${input#*=}" | cut -d'(' -f1  # BUG: cuts at parenthesis
-}
-
-# After (fixed):
-parse_config() {
-    local input="$1"
-    # FIX: Use zsh parameter expansion to handle arrays
-    local value="${input#*=}"
-    # Remove parentheses if present
-    value="${value#\(}"
-    value="${value%\)}"
-    echo "$value"
-}
-
-# Run: zsh -f tests/test_config.ztst
-# ✅ PASSES - bug fixed, regression prevented ✓
+setopt EXTENDED_GLOB NULL_GLOB        # rich patterns; empty glob → empty list, not error
 ```
+
+**Glob qualifiers** — the `(...)` suffix selects by type/permission/time/size:
+
+```zsh
+print -l *(.)            # regular files only
+print -l *(/)            # directories only
+print -l *(@)            # symlinks;  *(*) executables;  *(.x) exec-by-owner
+print -l *(.om[1])       # newest regular file (o=order, m=mtime, [1]=first)
+print -l *(.L0)          # zero-length files;  *(Lm+10) larger than 10 MB
+print -l **/*.log(.mh-24)  # *.log modified in the last 24 h, recursive (**)
+print -l *(.N)            # N = NULL_GLOB for this glob only
+files=( **/*.txt~*/node_modules/*(.) )   # recursive, regular, excluding a subtree
+```
+
+**Extended-glob operators** (need `EXTENDED_GLOB`):
+
+```zsh
+print -l ^*.txt          # everything NOT matching *.txt
+print -l *.txt~*test*    # *.txt except names containing "test"
+print -l (foo|bar)*.c    # alternation
+print -l (#i)*.PNG       # case-insensitive flag
+print -l file<1-100>.dat # numeric range
+```
+
+> These qualifiers are **zsh-only**. A portable script must use `find` instead (see [`bash.md`](guides://bash.md)) — that is a reason to keep portable scripts in bash rather than half-porting qualifiers.
 
 ---
 
-## 3. Hexagonal Architecture for Shell Scripts (MANDATORY)
+## 5. Parameter expansion flags
 
-### A. Architecture Principles
+Zsh puts transformations *inside* `${...}` via `(flag)` prefixes — no `tr`/`sed`/`awk` subprocess:
 
-**CRITICAL: All scripts MUST follow hexagonal architecture principles with clear separation of concerns AND bash compatibility.**
-
-#### Core Concepts
-
-1. **Main Script**: Orchestrates functions, minimal logic
-2. **Core Functions**: Business logic, pure functions where possible
-3. **Port Functions**: Input/output adapters (argument parsing, file I/O)
-4. **Adapter Functions**: External system interactions (API calls, commands)
-
-#### ✅ CORRECT - Hexagonal Bash-Compatible Script Structure
-
-```bash
-#!/usr/bin/env bash
-# CRITICAL: Use bash shebang for maximum compatibility
-# script.sh - Main script orchestrator
-# Purpose: Process files with hexagonal architecture
-# Compatible with: bash 5.0+, zsh 5.8+
-
-set -euo pipefail
-
-# Get script directory (bash-compatible)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Source modules from separate directory
-source "${SCRIPT_DIR}/lib/core.sh"      # Core business logic
-source "${SCRIPT_DIR}/lib/ports.sh"     # Input/output ports
-source "${SCRIPT_DIR}/lib/adapters.sh"  # External adapters
-
-# Main orchestration function
-main() {
-    # Parse arguments (port) - uses getopt for compatibility
-    local args
-    args=$(parse_arguments "$@")
-
-    # Validate input (port)
-    validate_input "$args"
-
-    # Process data (core)
-    local result
-    result=$(process_data "$args")
-
-    # Output result (port)
-    output_result "$result"
-}
-
-# Execute main
-main "$@"
+```zsh
+${(U)var}  ${(L)var}      # upper / lower case        (bash: ${var^^} ${var,,})
+${(C)var}                  # Capitalize Words
+${var:u}  ${var:l}         # modifier form of up/low
+${(j:,:)array}             # join array with ","        (bash: IFS subshell trick)
+${(s:,:)str}               # split "str" on ","          → array
+${(f)text}                 # split on newlines
+${(o)array}  ${(O)array}   # sort ascending / descending
+${(u)array}                # unique
+${(@kv)assoc}              # key,value pairs of an assoc array
+${(P)name}                 # indirect: value of the var *named* by $name (bash: ${!name})
+${(q)var}  ${(Q)var}       # shell-quote / unquote
+${#array}  ${(w)#str}      # element count / word count
+${(@)array}                # preserve empty elements (like "${a[@]}")
 ```
 
-#### ⚠️ ACCEPTABLE (if zsh-only) - Zsh-Specific Script
+Filename modifiers chain on any expansion (and on `$0`):
+
+```zsh
+${0:A}      # absolute, symlink-resolved path of the script
+${0:A:h}    # its directory   (the zsh-native SCRIPT_DIR)
+${0:t}      # tail/basename     ${file:r} root (no ext)   ${file:e} extension
+```
+
+Combine flags: `${(j:, :)$(<file)}`, `${(f)"$(< list.txt)"}`, `${(Oa)array}` (reverse). These compose where bash needs a pipeline — the core reason to write the script in zsh at all.
+
+---
+
+## 6. Completion system (compsys)
+
+Programmable completion is canonical zsh territory. Initialize once, then ship `_command` functions on `$fpath`.
+
+```zsh
+# In .zshrc — enable the modern completion system
+autoload -Uz compinit && compinit          # add -C to skip the slow security audit on trusted machines
+zstyle ':completion:*' menu select          # arrow-key menu
+zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'   # case-insensitive
+zstyle ':completion:*' use-cache on
+```
+
+A completion function lives in a file named `_mytool` on `$fpath`, first line `#compdef mytool`:
+
+```zsh
+#compdef mytool
+_mytool() {
+  _arguments -s \
+    '(-h --help)'{-h,--help}'[show help]' \
+    '-v[verbose]' \
+    '--output=[output file]:file:_files' \
+    '1:command:(build test deploy)' \
+    '*::args:->args'
+}
+_mytool "$@"
+```
+
+Key building blocks: `_arguments` (option spec + state machine), `_describe`/`_values` (tagged candidate lists), `_files`/`_path_files` (file completion), `compadd` (low-level). Put custom completions in a versioned `~/.zsh/completions` dir added to `fpath` **before** `compinit`. Regenerate the dump after changes: `rm -f ~/.zcompdump; compinit`.
+
+---
+
+## 7. Scripting idioms & error handling
+
+Strict-mode and the error *strategy* are owned by [`error-handling.md`](guides://error-handling.md); the zsh bindings:
 
 ```zsh
 #!/usr/bin/env zsh
-# ⚠️ WARNING: This script uses zsh-only features
-# Only use this pattern if bash compatibility is impossible
-# script.zsh - Zsh-only script
+emulate -L zsh                         # predictable options inside functions/libs
+setopt ERR_EXIT NO_UNSET PIPE_FAIL     # ≈ bash `set -euo pipefail`
+setopt EXTENDED_GLOB
 
-setopt ERR_EXIT NO_UNSET PIPE_FAIL
+readonly SCRIPT_DIR="${0:A:h}"         # zsh-native (no BASH_SOURCE dance)
 
-# Get script directory (zsh-only)
-SCRIPT_DIR="${0:A:h}"
+# ZERR trap: runs on any non-zero status (zsh-only)
+TRAPZERR() { print -u2 "error at ${funcfiletrace[1]}"; }
 
-# Detect if running in bash and warn
-if [[ -n ${BASH_VERSION:-} ]]; then
-    echo "ERROR: This script requires zsh. Please run with: zsh $0" >&2
-    exit 1
-fi
-
-# ... zsh-specific code with feature detection
-```
-
-#### Directory Structure
-
-```
-script/
-├── script.sh              # Main orchestrator (bash-compatible)
-├── lib/                   # Function modules
-│   ├── core.sh           # Core business logic
-│   ├── ports.sh          # Input/output ports
-│   └── adapters.sh       # External adapters
-├── tests/                 # Test files
-│   └── script_test.sh    # Bats tests (works in both shells)
-└── README.md             # Documentation
-```
-
-**File Naming Convention**:
-- Use `.sh` extension for bash-compatible scripts (preferred)
-- Use `.zsh` extension ONLY for zsh-specific scripts (discouraged)
-- Use `.sh` for all library files to indicate portability
-
-#### ❌ WRONG - Monolithic Script
-
-```zsh
-#!/usr/bin/env zsh
-# ❌ Everything in one file (1000+ lines)
-# ❌ No separation of concerns
-# ❌ Hard to test and maintain
-
-# 500+ lines of mixed logic..
-```
-
----
-
-## 4. Bash-Compatible Script Headers (MANDATORY)
-
-🔴 **CRITICAL: ALWAYS prefer bash-compatible syntax. Use zsh-specific features ONLY when absolutely necessary.**
-
-### A. Standard Script Header (Bash-Compatible)
-
-**CRITICAL: All scripts MUST use bash-compatible headers unless zsh-only features are absolutely required.**
-
-#### ✅ CORRECT - Bash-Compatible Script Header (PREFERRED)
-
-```bash
-#!/usr/bin/env bash
-# CRITICAL: Use bash shebang for maximum compatibility
-# script.sh - Script description
-# Purpose: Clear one-line description of what the script does
-# Usage: script.sh [OPTIONS] [ARGUMENTS]
-# Author: Your Name
-# Version: 1.0.0
-# Compatible with: bash 5.0+, zsh 5.8+
-
-set -euo pipefail
-IFS=$'\n\t'
-
-# Script directory (bash-compatible - works in zsh too)
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
-
-# Default values
-readonly DEFAULT_VALUE="default"
-
-# Colors for output (optional, for user-friendly messages)
-readonly RED='\033[0;31m'
-readonly GREEN='\033[0;32m'
-readonly YELLOW='\033[1;33m'
-readonly NC='\033[0m' # No Color
-```
-
-#### Safety Settings Explained (Bash-Compatible)
-
-- `set -e`: Exit immediately if a command exits with non-zero status
-- `set -u`: Treat unset variables as an error
-- `set -o pipefail`: Return value of a pipeline is the status of the last command to exit with non-zero
-- `IFS=$'\n\t'`: Set Internal Field Separator to newline and tab only (safer)
-
-#### ⚠️ DISCOURAGED - Zsh-Only Script Header
-
-**Only use this if bash compatibility is absolutely impossible:**
-
-```zsh
-#!/usr/bin/env zsh
-# ⚠️ WARNING: This script uses zsh-only features
-# Only use zsh-specific features when bash alternatives don't exist
-# script.zsh - Zsh-specific script
-
-# Detect shell and warn if not zsh
-if [[ -z ${ZSH_VERSION:-} ]]; then
-    echo "ERROR: This script requires zsh. Please run with: zsh $0" >&2
-    exit 1
-fi
-
-# Safety options (zsh-specific - equivalent to bash set -euo pipefail)
-setopt ERR_EXIT      # Exit on error (like set -e)
-setopt NO_UNSET      # Error on unset variables (like set -u)
-setopt PIPE_FAIL     # Pipeline failure detection (like set -o pipefail)
-
-# Script directory (zsh-specific)
-readonly SCRIPT_DIR="${0:A:h}"    # Absolute path to script directory
-readonly SCRIPT_NAME="${0:t}"     # Script basename
-```
-
-### B. Arrays and Associative Arrays (Bash-Compatible)
-
-**CRITICAL: Use bash-compatible array syntax for portability.**
-
-#### ✅ CORRECT - Bash-Compatible Arrays (PREFERRED)
-
-```bash
-# Regular arrays (bash-compatible - works in zsh too)
-declare -a files
-files=(file1.txt file2.txt file3.txt)
-
-# Access elements (0-based indexing - works in both bash and zsh)
-echo "${files[0]}"    # First element
-echo "${files[@]}"    # All elements
-echo "${#files[@]}"   # Array length
-
-# Iterate over array (bash-compatible)
-for file in "${files[@]}"; do
-    echo "$file"
-done
-
-# Associative arrays (bash 4.0+ - works in zsh too)
-declare -A config
-config=(
-    [host]="localhost"
-    [port]="8080"
-    [debug]="true"
-)
-
-# Access associative array (bash-compatible)
-echo "${config[host]}"      # Get value
-echo "${#config[@]}"        # Number of entries
-
-# Check if key exists (bash-compatible)
-if [[ -n ${config[host]:-} ]]; then
-    echo "host is set"
-fi
-
-# Iterate over associative array (bash-compatible)
-for key in "${!config[@]}"; do
-    echo "$key = ${config[$key]}"
-done
-```
-
-#### ❌ WRONG - Using Zsh-Only Array Features
-
-```zsh
-# ❌ Zsh-only: 1-based indexing (doesn't work in bash)
-echo "${files[1]}"    # First element in zsh, SECOND in bash!
-
-# ❌ Zsh-only: Array slicing syntax (doesn't work in bash)
-echo "${files[1,2]}"  # Doesn't work in bash
-
-# ❌ Zsh-only: Special expansion flags (doesn't work in bash)
-echo "${(k)config[@]}"      # Doesn't work in bash
-echo "${(v)config[@]}"      # Doesn't work in bash
-
-# ❌ Zsh-only: Key/value iteration (doesn't work in bash)
-for key value in "${(@kv)config}"; do
-    echo "$key = $value"
-done
-```
-
-### C. Parameter Expansion (Bash-Compatible)
-
-**CRITICAL: Use bash-compatible parameter expansion for portability.**
-
-#### ✅ CORRECT - Bash-Compatible Parameter Expansion (PREFERRED)
-
-```bash
-# Default values (bash-compatible)
-echo "${variable:-default}"      # Use default if unset
-echo "${variable:=default}"      # Assign default if unset
-echo "${variable:?error msg}"    # Error if unset
-
-# String manipulation (bash-compatible)
-filename="script.sh"
-echo "${filename%.sh}"           # Remove extension: "script"
-echo "${filename#script.}"       # Remove prefix: "sh"
-
-# Uppercase/lowercase (bash 4.0+ - works in zsh too)
-echo "${filename^^}"             # Uppercase: "SCRIPT.SH"
-echo "${filename,,}"             # Lowercase: "script.sh"
-
-# Length (bash-compatible)
-echo "${#filename}"              # String length
-
-# Pattern matching (bash-compatible)
-path="/usr/local/bin/script"
-echo "${path##*/}"               # Basename: "script"
-echo "${path%/*}"                # Dirname: "/usr/local/bin"
-
-# Array joining (bash-compatible using printf)
-declare -a items=(one two three)
-joined=$(IFS=,; echo "${items[*]}")   # Join with comma: "one,two,three"
-
-# Split strings (bash-compatible using IFS)
-string="one,two,three"
-IFS=',' read -ra parts <<< "$string"
-echo "${parts[@]}"               # "one two three"
-```
-
-#### ❌ WRONG - Using Zsh-Only Parameter Expansion
-
-```zsh
-# ❌ Zsh-only: Case conversion (doesn't work in bash)
-echo "${filename:u}"             # Doesn't work in bash
-echo "${filename:l}"             # Doesn't work in bash
-
-# ❌ Zsh-only: Substring with array syntax (doesn't work in bash)
-echo "${filename[1,6]}"          # Doesn't work in bash
-
-# ❌ Zsh-only: Array join flags (doesn't work in bash)
-echo "${(j:,:)items}"            # Doesn't work in bash
-
-# ❌ Zsh-only: Split flags (doesn't work in bash)
-parts=("${(@s:,:)string}")       # Doesn't work in bash
-```
-
-### D. File Globbing (Bash-Compatible)
-
-**CRITICAL: Use bash-compatible globbing patterns for portability. Use find for complex patterns.**
-
-#### ✅ CORRECT - Bash-Compatible Globbing (PREFERRED)
-
-```bash
-# Enable extended globbing in bash (works in zsh too)
-shopt -s globstar extglob nullglob 2>/dev/null || true  # Bash
-setopt EXTENDED_GLOB NULL_GLOB 2>/dev/null || true      # Zsh
-
-# Match all .txt files (bash-compatible)
-files=(*.txt)
-
-# Recursive globbing (bash 4.0+ with globstar)
-files=(**/*.txt)                 # All .txt files recursively
-
-# Multiple patterns (bash-compatible)
-files=(*.{txt,md,conf})          # All .txt, .md, .conf files
-
-# Exclude patterns using extglob (bash-compatible)
-shopt -s extglob
-files=(!(test)*.txt)             # All .txt except test*.txt
-
-# For complex filtering, use find (works everywhere - PREFERRED)
-mapfile -t files < <(find . -name "*.txt" -not -name "*test*")
-
-# File type filtering with find (bash-compatible - PREFERRED)
-mapfile -t regular_files < <(find . -type f -name "*.txt")     # Only regular files
-mapfile -t directories < <(find . -type d -name "*.txt")       # Only directories
-mapfile -t symlinks < <(find . -type l -name "*.txt")          # Only symbolic links
-mapfile -t large_files < <(find . -type f -size +100c)         # Files larger than 100 bytes
-mapfile -t recent_files < <(find . -mtime -1 -name "*.txt")    # Modified in last 24 hours
-```
-
-#### ❌ WRONG - Using Zsh-Only Globbing Qualifiers
-
-```zsh
-# ❌ Zsh-only: Glob qualifiers (don't work in bash)
-files=(*.txt(.))                 # Doesn't work in bash
-files=(*.txt(/))                 # Doesn't work in bash
-files=(*.txt(L+100))             # Doesn't work in bash
-files=(*.txt(mh-24))             # Doesn't work in bash
-
-# ❌ Zsh-only: Globbing flags (don't work in bash)
-files=((#i)*.TXT)                # Doesn't work in bash
-
-# ❌ Zsh-only: Exclude patterns with ~ (don't work in bash)
-files=(*.txt~*test*)             # Doesn't work in bash
-
-# CORRECT: Use find instead for portability
-mapfile -t files < <(find . -name "*.txt" -not -name "*test*")
-```
-
----
-
-## 5. Parameter Parsing with getopt (MANDATORY)
-
-🔴 **CRITICAL: Use getopt for bash compatibility. Do NOT use zparseopts.**
-
-### A. getopt for Bash-Compatible Parsing (PREFERRED)
-
-**CRITICAL: ALWAYS use getopt for parameter parsing to ensure bash compatibility.**
-
-#### ✅ CORRECT - getopt Implementation (MANDATORY)
-
-```bash
-#!/usr/bin/env bash
-# CRITICAL: Use bash shebang and getopt for compatibility
-# script.sh - Example with getopt
-
-set -euo pipefail
-
-# Default values
-VERBOSE=false
-DEBUG=false
-OUTPUT_FILE=""
-INPUT_FILE=""
-
-# Usage function
-usage() {
-    cat << EOF
-Usage: $(basename "$0") [OPTIONS] [ARGUMENTS]
-
-Description:
-    Process files with various options.
-
-Options:
-    -h, --help          Show this help message
-    -v, --verbose       Enable verbose output
-    -d, --debug         Enable debug mode
-    -o, --output FILE   Output file (required)
-    -i, --input FILE    Input file (required)
-
-Examples:
-    $(basename "$0") -i input.txt -o output.txt
-    $(basename "$0") --input input.txt --output output.txt --verbose
-
-EOF
-    exit 0
-}
-
-# Parse arguments with getopt (bash-compatible)
-parse_arguments() {
-    local short_opts="hvdo:i:"
-    local long_opts="help,verbose,debug,output:,input:"
-
-    local parsed_opts
-    parsed_opts=$(getopt -o "$short_opts" --long "$long_opts" -n "$(basename "$0")" -- "$@")
-
-    if [[ $? -ne 0 ]]; then
-        echo "Error: Invalid arguments" >&2
-        usage
-        return 1
-    fi
-
-    eval set -- "$parsed_opts"
-
-    while true; do
-        case "$1" in
-            -h|--help)
-                usage
-                ;;
-            -v|--verbose)
-                VERBOSE=true
-                shift
-                ;;
-            -d|--debug)
-                DEBUG=true
-                shift
-                ;;
-            -o|--output)
-                OUTPUT_FILE="$2"
-                shift 2
-                ;;
-            -i|--input)
-                INPUT_FILE="$2"
-                shift 2
-                ;;
-            --)
-                shift
-                break
-                ;;
-            *)
-                echo "Error: Unknown option: $1" >&2
-                usage
-                return 1
-                ;;
-        esac
-    done
-
-    # Validate required arguments
-    if [[ -z "$INPUT_FILE" ]]; then
-        echo "Error: Input file is required" >&2
-        usage
-        return 1
-    fi
-
-    if [[ -z "$OUTPUT_FILE" ]]; then
-        echo "Error: Output file is required" >&2
-        usage
-        return 1
-    fi
-}
-
-# Main function
-main() {
-    parse_arguments "$@"
-
-    if [[ "$VERBOSE" = true ]]; then
-        echo "Processing: $INPUT_FILE -> $OUTPUT_FILE"
-    fi
-
-    # Process file..
-}
-
-main "$@"
-```
-
-### B. ⚠️ DISCOURAGED: zparseopts (Zsh-Only)
-
-**WARNING: zparseopts is zsh-only and BREAKS bash compatibility. Do NOT use unless absolutely necessary.**
-
-#### ❌ WRONG - zparseopts (Zsh-Only, Not Portable)
-
-```zsh
-#!/usr/bin/env zsh
-# ❌ WARNING: This uses zparseopts which is zsh-only
-# This script will NOT work in bash
-
-setopt ERR_EXIT NO_UNSET PIPE_FAIL
-
-# ❌ zparseopts is zsh-only - doesn't work in bash
-parse_arguments() {
-    zparseopts -D -E -F - \
-        h=opt_help    -help=opt_help \
-        v=opt_verbose -verbose=opt_verbose \
-        o:=opt_output -output:=opt_output \
-        || return 1
-
-    # This syntax is also zsh-only
-    (( ${+opt_help} )) && usage
-    (( ${+opt_verbose} )) && VERBOSE=1
-}
-
-# ❌ This script will fail with "zparseopts: command not found" in bash
-```
-
-**CORRECT Approach**: Always use getopt (shown in section A) for bash compatibility.
-
----
-
-## 6. Function Organization (MANDATORY)
-
-### A. Pure Functions (Bash-Compatible)
-
-**CRITICAL: Prefer pure functions that take input and return output without side effects. Use bash-compatible syntax.**
-
-#### ✅ CORRECT - Pure Functions (Bash-Compatible)
-
-```bash
-# lib/core.sh - Core business logic functions (bash-compatible)
-
-# Pure function: calculates sum
-calculate_sum() {
-    local num1="$1"
-    local num2="$2"
-    echo $((num1 + num2))
-}
-
-# Pure function: validates email
-validate_email() {
-    local email=$1
-    local pattern='^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-
-    [[ $email =~ $pattern ]]
-}
-
-# Pure function: processes data using zsh features
-process_data() {
-    local input=$1
-
-    # Use zsh parameter expansion for uppercase
-    echo "${input:u}"
-}
-
-# Pure function: array manipulation
-filter_files() {
-    local -a input_files=("${@}")
-    local -a output_files
-
-    # Filter using zsh globbing qualifiers
-    for file in "${input_files[@]}"; do
-        # Only include regular files that exist
-        [[ -f "$file" ]] && output_files+=("$file")
-    done
-
-    echo "${output_files[@]}"
-}
-```
-
-### B. Function Documentation
-
-**CRITICAL: All functions MUST have clear documentation.**
-
-#### ✅ CORRECT - Documented Functions
-
-```zsh
-# lib/core.zsh
-
-##
-# Calculates the sum of two numbers.
-#
-# @param $1 First number
-# @param $2 Second number
-# @return Sum of the two numbers (echoed to stdout)
-# @example
-#   result=$(calculate_sum 5 3)
-#   echo "$result"  # Output: 8
-##
-calculate_sum() {
-    local num1=$1
-    local num2=$2
-    echo $((num1 + num2))
-}
-
-##
-# Validates an email address format.
-#
-# @param $1 Email address to validate
-# @return 0 if valid, 1 if invalid
-# @example
-#   if validate_email "user@example.com"; then
-#       echo "Valid email"
-#   fi
-##
-validate_email() {
-    local email=$1
-    local pattern='^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-
-    [[ $email =~ $pattern ]]
-}
-
-##
-# Merges two associative arrays.
-#
-# @param $1 Name of first associative array
-# @param $2 Name of second associative array
-# @param $3 Name of output associative array
-# @example
-#   typeset -A arr1=(a 1 b 2)
-#   typeset -A arr2=(c 3 d 4)
-#   typeset -A result
-#   merge_arrays arr1 arr2 result
-##
-merge_arrays() {
-    local arr1_name=$1
-    local arr2_name=$2
-    local result_name=$3
-
-    # Use nameref to access associative arrays by name
-    local -A arr1=("${(@Pkv)arr1_name}")
-    local -A arr2=("${(@Pkv)arr2_name}")
-
-    # Merge arrays
-    eval "$result_name=(\${(@kv)arr1} \${(@kv)arr2})"
-}
-```
-
----
-
-## 7. Error Handling (MANDATORY)
-
-### A. Explicit Error Checking
-
-**CRITICAL: Always check command exit codes and handle errors explicitly.**
-
-#### ✅ CORRECT - Proper Error Handling
-
-```zsh
-# lib/adapters.zsh - External adapter functions
-
-# Function with error handling
-download_file() {
-    local url=$1
-    local output_file=$2
-
-    # Check if curl is available
-    if ! command -v curl >/dev/null 2>&1; then
-        echo "Error: curl is not installed" >&2
-        return 1
-    fi
-
-    # Download with error checking
-    if ! curl -f -s -o "$output_file" "$url"; then
-        echo "Error: Failed to download $url" >&2
-        return 1
-    fi
-
-    # Verify file was created
-    if [[ ! -f "$output_file" ]]; then
-        echo "Error: Output file was not created" >&2
-        return 1
-    fi
-
-    return 0
-}
-
-# Function with zsh-specific error handling
-process_with_cleanup() {
-    local temp_file
-    temp_file=$(mktemp)
-
-    # Zsh-specific: trap with ZERR for errors
-    trap 'rm -f "$temp_file"' EXIT ZERR
-
-    # Process file
-    if ! process_file "$temp_file"; then
-        echo "Error: Processing failed" >&2
-        return 1
-    fi
-
-    # Success - trap will clean up
-    return 0
-}
-
-# Always block for critical operations
+# try/finally: the `always` block runs even on error (zsh-only)
 {
-    # This block will execute atomically
-    # If any command fails, the entire block fails
-    critical_operation_1 &&
-    critical_operation_2 &&
-    critical_operation_3
+  risky_step_1
+  risky_step_2
 } always {
-    # This cleanup code always runs, even on error
-    cleanup_resources
+  cleanup            # guaranteed
 }
 ```
 
-### B. Error Messages
+- **Argument parsing.** For zsh-only tools, `zparseopts` is idiomatic and the right call: `zparseopts -D -E -F - h=help v=verbose o:=output`. For anything that must also run in bash, use `getopt`/`getopts` per [`bash.md`](guides://bash.md). Choose by the script's declared dialect — not by reflex.
+- **Read a file into an array of lines:** `lines=( ${(f)"$(<file)"} )` — no loop.
+- **Associative arrays:** `typeset -A m=(host localhost port 8080)`; iterate `for k v in ${(@kv)m}; do …; done` (zsh-native key/value loop).
+- **Numeric/test context:** `(( count > 0 ))` and `[[ … ]]` work as in bash; zsh adds `[[ -o option ]]` to test `setopt` state.
+- **Modules over subprocesses:** `zmodload zsh/datetime` (`$EPOCHREALTIME`), `zsh/mathfunc`, `zsh/stat` replace `date`/`bc`/`stat` forks.
 
-**CRITICAL: Provide clear, actionable error messages.**
+---
 
-#### ✅ CORRECT - Clear Error Messages
+## 8. Interactive config (.zshrc) hygiene
+
+`.zshenv` → `.zprofile` → `.zshrc` → `.zlogin` load in that order; put PATH/env in `.zshenv` (or `.zprofile` for login-only), interactive setup (prompt, keybindings, completion, aliases) in `.zshrc`. Keep startup lean and secret-free.
 
 ```zsh
-# Function with helpful error messages
-validate_file() {
-    local file=$1
-
-    if [[ -z "$file" ]]; then
-        echo "Error: File path is required" >&2
-        return 1
-    fi
-
-    if [[ ! -e "$file" ]]; then
-        echo "Error: File does not exist: $file" >&2
-        return 1
-    fi
-
-    if [[ ! -f "$file" ]]; then
-        echo "Error: Path is not a regular file: $file" >&2
-        return 1
-    fi
-
-    if [[ ! -r "$file" ]]; then
-        echo "Error: File is not readable: $file" >&2
-        return 1
-    fi
-
-    return 0
-}
+# Profile startup cost; keep it well under ~200 ms (ZSH-RC-01)
+time zsh -ic exit
+zmodload zsh/zprof    # add `zprof` at the end of .zshrc to see per-function cost
 ```
+
+- **Plugins:** prefer a thin manager (`zinit`, `antidote`, or git submodules) over a heavyweight framework if startup matters; pin commits and vet sources (ZSH-SEC-02, see [`secure-coding.md`](guides://secure-coding.md)). The two essentials are `zsh-autosuggestions` and `zsh-syntax-highlighting` (load highlighting **last**).
+- **Prompt:** use the native `prompt` system (`autoload -Uz promptinit; promptinit`) or a prompt tool (e.g. Starship); enable substitution with `setopt PROMPT_SUBST` and keep command substitutions in `PROMPT` cheap (they run every redraw).
+- **History:** `setopt HIST_IGNORE_ALL_DUPS SHARE_HISTORY HIST_REDUCE_BLANKS`; set `HISTFILE`/`HISTSIZE`/`SAVEHIST`; add `HIST_IGNORE_SPACE` so space-prefixed commands (secrets) are never written.
+- **Never** echo tokens, run `eval "$(curl …)"`, or store credentials in any startup file — source them from a secret manager.
+- **Version-control** dotfiles (see [`git.md`](guides://git.md)); make every block idempotent so re-sourcing is safe.
 
 ---
 
-## 8. Testing with ztst (MANDATORY)
+## 9. Deployment Checklist
 
-### A. Zsh Test Framework (ztst)
+Generated from §2 — one box per requirement ID.
 
-**CRITICAL: All scripts SHOULD have tests using ztst (zsh native) or bats framework.**
-
-#### ✅ CORRECT - ztst Test File
-
-```zsh
-# tests/script.ztst - Zsh native test suite
-
-%prep
-  # Setup test environment
-  mkdir -p test_dir
-  cd test_dir
-
-  # Source the script modules
-  source ../lib/core.zsh
-  source ../lib/ports.zsh
-
-%test
-
-  # Test: calculate_sum function
-  result=$(calculate_sum 5 3)
-  [[ $result -eq 8 ]]
-0:calculate_sum adds two numbers correctly
-
-  # Test: calculate_sum with negative numbers
-  result=$(calculate_sum -5 3)
-  [[ $result -eq -2 ]]
-0:calculate_sum handles negative numbers
-
-  # Test: validate_email with valid email
-  validate_email "user@example.com"
-0:validate_email accepts valid email
-
-  # Test: validate_email with invalid email
-  validate_email "invalid-email"
-1:validate_email rejects invalid email
-
-  # Test: error handling
-  process_file "/nonexistent/file.txt"
-1:script fails gracefully on invalid input
-?(Error: File does not exist: /nonexistent/file.txt)
-
-  # Test: array manipulation
-  typeset -a files=(file1.txt file2.txt file3.txt)
-  result="${#files[@]}"
-  [[ $result -eq 3 ]]
-0:array operations work correctly
-
-  # Test: associative array
-  typeset -A config=(host localhost port 8080)
-  [[ ${config[host]} == "localhost" ]]
-  [[ ${config[port]} == "8080" ]]
-0:associative arrays work correctly
-
-%clean
-  # Cleanup test environment
-  cd ..
-  rm -rf test_dir
-```
-
-### B. Running Tests
-
-```bash
-# Run ztst tests
-zsh -f tests/script.ztst
-
-# Run with verbose output
-zsh -f -x tests/script.ztst
-
-# Run specific test
-zsh -f tests/script.ztst -t "calculate_sum*"
-```
-
-### C. Alternative: Bats Testing
-
-```bash
-#!/usr/bin/env bats
-# tests/script_test.sh - Bats test suite for zsh
-
-setup() {
-    # Create temporary directory
-    TEST_DIR=$(mktemp -d)
-    cd "$TEST_DIR"
-
-    # Source zsh modules
-    source "${BATS_TEST_DIRNAME}/../lib/core.zsh"
-}
-
-teardown() {
-    # Cleanup
-    rm -rf "$TEST_DIR"
-}
-
-@test "calculate_sum adds two numbers correctly" {
-    run zsh -c "source ${BATS_TEST_DIRNAME}/../lib/core.zsh; calculate_sum 5 3"
-    [ "$status" -eq 0 ]
-    [ "$output" = "8" ]
-}
-
-@test "validate_email accepts valid email" {
-    run zsh -c "source ${BATS_TEST_DIRNAME}/../lib/core.zsh; validate_email 'user@example.com'"
-    [ "$status" -eq 0 ]
-}
-```
+- [ ] ZSH-SYN-01/02 — `zsh -n` clean, strict-mode parse clean
+- [ ] ZSH-SHEBANG-01 — shebang matches the actual dialect
+- [ ] ZSH-LINT-01 — portable subset passes `shellcheck -s bash` (pure-zsh exempt)
+- [ ] ZSH-FMT-01 — portable code `shfmt`-clean
+- [ ] ZSH-ERR-01 — strict mode + error handling present
+- [ ] ZSH-TST-01 — tests pass; bugs have regression tests first
+- [ ] ZSH-SEC-01/02 — no secrets; plugins vetted & pinned
+- [ ] ZSH-RC-01 — startup fast, idempotent, secret-free
+- [ ] Agent ran every §2 verify command and documented any fixes
 
 ---
-
-## 9. Logging and Debug Modes (MANDATORY)
-
-### A. Structured Logging
-
-**CRITICAL: Implement structured logging with debug and verbose modes.**
-
-#### ✅ CORRECT - Logging Functions
-
-```zsh
-# lib/ports.zsh - Logging functions
-
-# Log levels
-typeset -gi LOG_LEVEL_ERROR=1
-typeset -gi LOG_LEVEL_WARN=2
-typeset -gi LOG_LEVEL_INFO=3
-typeset -gi LOG_LEVEL_DEBUG=4
-
-# Current log level (default: INFO)
-typeset -g LOG_LEVEL=${LOG_LEVEL:-$LOG_LEVEL_INFO}
-typeset -g VERBOSE=${VERBOSE:-0}
-typeset -g DEBUG=${DEBUG:-0}
-
-# Set log level based on flags
-(( VERBOSE )) && LOG_LEVEL=$LOG_LEVEL_DEBUG
-(( DEBUG )) && LOG_LEVEL=$LOG_LEVEL_DEBUG
-
-# Enable debug mode if requested
-if (( DEBUG )); then
-    setopt XTRACE       # Enable command tracing
-    setopt VERBOSE      # Print shell input lines
-fi
-
-# Logging functions
-log_error() {
-    (( LOG_LEVEL >= LOG_LEVEL_ERROR )) && echo "[ERROR] $*" >&2
-}
-
-log_warn() {
-    (( LOG_LEVEL >= LOG_LEVEL_WARN )) && echo "[WARN] $*" >&2
-}
-
-log_info() {
-    (( LOG_LEVEL >= LOG_LEVEL_INFO )) && echo "[INFO] $*"
-}
-
-log_debug() {
-    (( LOG_LEVEL >= LOG_LEVEL_DEBUG )) && echo "[DEBUG] $*" >&2
-}
-
-# Colored logging (optional)
-autoload -U colors && colors
-
-log_error_color() {
-    (( LOG_LEVEL >= LOG_LEVEL_ERROR )) && echo "${fg[red]}[ERROR]${reset_color} $*" >&2
-}
-
-log_info_color() {
-    (( LOG_LEVEL >= LOG_LEVEL_INFO )) && echo "${fg[green]}[INFO]${reset_color} $*"
-}
-
-# Usage
-log_info "Processing file: $file"
-log_debug "Variable value: $variable"
-log_error "Failed to process: $file"
-```
-
----
-
-## 10. Bash Compatibility (OPTIONAL)
-
-### A. Compatibility Considerations
-
-**CRITICAL: When bash compatibility is required, use portable constructs.**
-
-#### ✅ CORRECT - Portable Code
-
-```zsh
-#!/usr/bin/env zsh
-# Script with optional bash compatibility
-
-# Detect shell
-if [[ -n ${ZSH_VERSION:-} ]]; then
-    # Zsh-specific setup
-    setopt ERR_EXIT NO_UNSET PIPE_FAIL
-    SCRIPT_DIR="${0:A:h}"
-elif [[ -n ${BASH_VERSION:-} ]]; then
-    # Bash-specific setup
-    set -euo pipefail
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-fi
-
-# Use portable constructs
-portable_function() {
-    local arg=$1
-
-    # Works in both zsh and bash
-    if [[ -f "$arg" ]]; then
-        echo "File exists: $arg"
-    fi
-}
-
-# Use zsh features when available
-zsh_optimized_function() {
-    if [[ -n ${ZSH_VERSION:-} ]]; then
-        # Use zsh-specific features
-        echo "${1:u}"  # Uppercase
-    else
-        # Fall back to portable version
-        echo "$1" | tr '[:lower:]' '[:upper:]'
-    fi
-}
-```
-
----
-
-## 11. Complete Example: Modular Zsh Script
-
-### A. Project Structure
-
-```
-script/
-├── script.zsh             # Main orchestrator
-├── lib/                   # Function modules
-│   ├── core.zsh          # Core business logic
-│   ├── ports.zsh         # Input/output ports
-│   └── adapters.zsh      # External adapters
-├── tests/                 # Test files
-│   ├── script.ztst       # Zsh tests
-│   └── script_test.sh    # Bats tests (optional)
-├── .zshrc                 # Zsh configuration (optional)
-└── README.md             # Documentation
-```
-
-### B. Main Script
-
-```zsh
-#!/usr/bin/env zsh
-# script.zsh - File processor with hexagonal architecture
-# Purpose: Process files with validation and error handling
-# Usage: script.zsh [OPTIONS] -i INPUT -o OUTPUT
-
-setopt ERR_EXIT NO_UNSET PIPE_FAIL EXTENDED_GLOB
-
-# Script directory
-readonly SCRIPT_DIR="${0:A:h}"
-readonly SCRIPT_NAME="${0:t}"
-
-# Source modules
-source "${SCRIPT_DIR}/lib/core.zsh"
-source "${SCRIPT_DIR}/lib/ports.zsh"
-source "${SCRIPT_DIR}/lib/adapters.zsh"
-
-# Default values
-typeset -g VERBOSE=0
-typeset -g DEBUG=0
-typeset -g INPUT_FILE=""
-typeset -g OUTPUT_FILE=""
-
-# Usage function
-usage() {
-    cat << EOF
-Usage: ${SCRIPT_NAME} [OPTIONS] -i INPUT -o OUTPUT
-
-Description:
-    Process input file and write to output file.
-
-Options:
-    -h, --help          Show this help message
-    -v, --verbose       Enable verbose output
-    -d, --debug         Enable debug mode
-    -i, --input FILE    Input file (required)
-    -o, --output FILE   Output file (required)
-
-Examples:
-    ${SCRIPT_NAME} -i input.txt -o output.txt
-    ${SCRIPT_NAME} --input input.txt --output output.txt --verbose
-
-EOF
-    exit 0
-}
-
-# Parse arguments with zparseopts
-parse_arguments() {
-    zparseopts -D -E -F - \
-        h=opt_help    -help=opt_help \
-        v=opt_verbose -verbose=opt_verbose \
-        d=opt_debug   -debug=opt_debug \
-        i:=opt_input  -input:=opt_input \
-        o:=opt_output -output:=opt_output \
-        || {
-            log_error "Invalid arguments"
-            usage
-            return 1
-        }
-
-    (( ${+opt_help} )) && usage
-    (( ${+opt_verbose} )) && VERBOSE=1
-    (( ${+opt_debug} )) && DEBUG=1
-
-    if (( ${+opt_input} )); then
-        INPUT_FILE="${opt_input[2]}"
-    fi
-
-    if (( ${+opt_output} )); then
-        OUTPUT_FILE="${opt_output[2]}"
-    fi
-
-    # Validate required arguments
-    if [[ -z "$INPUT_FILE" ]]; then
-        log_error "Input file is required"
-        usage
-        return 1
-    fi
-
-    if [[ -z "$OUTPUT_FILE" ]]; then
-        log_error "Output file is required"
-        usage
-        return 1
-    fi
-}
-
-# Main function
-main() {
-    # Enable debug if requested
-    if (( DEBUG )); then
-        setopt XTRACE
-        LOG_LEVEL=$LOG_LEVEL_DEBUG
-    fi
-
-    # Set log level
-    (( VERBOSE )) && LOG_LEVEL=$LOG_LEVEL_DEBUG
-
-    # Parse arguments
-    parse_arguments "$@"
-
-    # Validate input file
-    validate_file_path "$INPUT_FILE" || exit 1
-
-    # Validate output directory
-    local output_dir="${OUTPUT_FILE:h}"
-    if [[ ! -d "$output_dir" ]]; then
-        log_info "Creating output directory: $output_dir"
-        mkdir -p "$output_dir"
-    fi
-
-    # Process file
-    log_info "Processing: $INPUT_FILE -> $OUTPUT_FILE"
-
-    if ! process_file "$INPUT_FILE" "$OUTPUT_FILE"; then
-        log_error "Failed to process file"
-        exit 1
-    fi
-
-    log_info "Processing complete"
-}
-
-# Execute main
-main "$@"
-```
-
-### C. Core Module
-
-```zsh
-# lib/core.zsh - Core business logic
-
-# Process file (core function)
-process_file() {
-    local input_file=$1
-    local output_file=$2
-
-    # Read file content
-    local content
-    content=$(<"$input_file")
-
-    # Process content using zsh features
-    local processed="${content:u}"  # Uppercase
-
-    # Write output
-    echo "$processed" > "$output_file"
-
-    return 0
-}
-
-# Process array of files
-process_files_batch() {
-    local -a input_files=("${@}")
-    local -a results
-
-    for file in "${input_files[@]}"; do
-        if [[ -f "$file" ]]; then
-            local processed
-            processed=$(process_file "$file" /dev/stdout)
-            results+=("$processed")
-        fi
-    done
-
-    echo "${results[@]}"
-}
-```
-
-### D. Ports Module
-
-```zsh
-# lib/ports.zsh - Input/output ports
-
-# Validation functions
-validate_file_path() {
-    local file=$1
-
-    if [[ -z "$file" ]]; then
-        log_error "File path is required"
-        return 1
-    fi
-
-    if [[ ! -e "$file" ]]; then
-        log_error "File does not exist: $file"
-        return 1
-    fi
-
-    if [[ ! -f "$file" ]]; then
-        log_error "Path is not a regular file: $file"
-        return 1
-    fi
-
-    if [[ ! -r "$file" ]]; then
-        log_error "File is not readable: $file"
-        return 1
-    fi
-
-    return 0
-}
-
-# (Logging functions from section 9)
-```
-
----
-
-## 12. Security & Dependency Management (MANDATORY)
-
-### A. Automated Dependency Management
-
-Zsh uses plugin managers for extensions. **Oh My Zsh** is the most common:
-
-```bash
-# Oh My Zsh: manage plugins via .zshrc
-plugins=(git docker kubectl z fzf)
-
-# Antigen: alternative plugin manager
-antigen bundle zsh-users/zsh-autosuggestions
-antigen bundle zsh-users/zsh-syntax-highlighting
-antigen apply
-
-# Zinit: high-performance plugin manager
-zinit light zsh-users/zsh-autosuggestions
-zinit light zsh-users/zsh-syntax-highlighting
-
-# List installed Oh My Zsh plugins
-ls ~/.oh-my-zsh/custom/plugins/
-
-# Update Oh My Zsh
-omz update
-```
-
-**For shell scripts** (not interactive config), manage system dependencies the same way as bash — document required commands and verify at startup.
-
-### B. Vulnerability Scanning & Security
-
-```bash
-# shellcheck: static analysis for zsh scripts (use --shell=bash for compatible scripts)
-shellcheck --shell=bash script.sh
-zsh -n script.sh                    # Zsh-native syntax check
-
-# Trivy: filesystem scan for vulnerabilities in vendored dependencies
-trivy fs --scanners vuln .
-
-# Verify Oh My Zsh plugin sources
-# ALWAYS review plugin code before installing custom plugins:
-ls ~/.oh-my-zsh/custom/plugins/<plugin>/
-cat ~/.oh-my-zsh/custom/plugins/<plugin>/*.plugin.zsh
-```
-
-**Security best practices:**
-- **Verify plugin sources** — only install Oh My Zsh / Zinit plugins from trusted, actively maintained repositories
-- **Review custom plugin code** before adding to `~/.oh-my-zsh/custom/plugins/`
-- **Avoid `curl | sh` installation patterns** — download, inspect, verify checksums, then execute
-- Always quote variables: `"$var"` not `$var` (prevents word splitting and injection)
-- Use `set -euo pipefail` in scripts for strict error handling
-- Sanitize all user input before use in commands or filenames
-- Avoid `eval` — use arrays and indirect expansion instead
-- Sign scripts with GPG for integrity verification in production
-- Never store secrets in `.zshrc` or plugin files — use environment variables or secret managers
-
-```bash
-# Input sanitization example
-sanitize_input() {
-    local input="$1"
-    # Remove dangerous characters
-    input="${input//[^a-zA-Z0-9._-]/}"
-    echo "$input"
-}
-
-# Verify integrity of Oh My Zsh installation
-cd ~/.oh-my-zsh && git log --oneline -5 && git verify-commit HEAD
-```
-
-### C. Dependency File
-
-```bash
-#!/usr/bin/env bash
-# project-deps.sh — Source this file to verify project dependencies
-# Compatible with both bash and zsh
-
-set -euo pipefail
-
-readonly REQUIRED_COMMANDS=(
-    "jq:1.6:JSON processor"
-    "curl:7.68:HTTP client"
-    "shellcheck:0.8:Shell script linter"
-    "shfmt:3.0:Shell script formatter"
-)
-
-verify_dependencies() {
-    local errors=0
-    for entry in "${REQUIRED_COMMANDS[@]}"; do
-        IFS=: read -r cmd min_ver desc <<< "$entry"
-        if ! command -v "$cmd" &>/dev/null; then
-            echo "MISSING: $cmd ($desc) — minimum version $min_ver" >&2
-            ((errors++))
-        fi
-    done
-    return "$errors"
-}
-```
-
-```bash
-# .zshrc plugin manifest (commit to dotfiles repo)
-plugins=(
-    git
-    docker
-    kubectl
-    z
-    fzf
-    zsh-autosuggestions
-    zsh-syntax-highlighting
-)
-```
-
----
-
-## 13. Deployment Checklist
-
-### Build & Syntax
-- [ ] Bash syntax check passes: `bash -n script.sh` returns exit 0 (FIRST)
-- [ ] Zsh syntax check passes: `zsh -n script.sh` returns exit 0
-- [ ] shellcheck passes: `shellcheck script.sh` reports no errors
-- [ ] shfmt formatting verified: `shfmt -d script.sh` shows no diff
-
-### Testing
-- [ ] All Bats tests pass in bash: `bash -c 'bats tests/'` returns exit 0
-- [ ] All Bats tests pass in zsh: `zsh -c 'bats tests/'` returns exit 0
-- [ ] Script executes with `--help` in both shells
-- [ ] Output is identical in bash and zsh
-
-### Security
-- [ ] No hardcoded passwords, tokens, or secrets in source
-- [ ] All user inputs validated and sanitized
-- [ ] Temporary files created with `mktemp` and cleaned up via `trap`
-- [ ] No use of `eval` on untrusted input
-
-### Agent Workflow
-- [ ] Agent verified syntax in bash FIRST, then zsh
-- [ ] Agent ran shellcheck and shfmt before delivery
-- [ ] Agent tested script execution in BOTH shells
-- [ ] No zsh-only features used (zparseopts, zsh arrays) without bash fallback
-
----
-
-## 14. Why This Configuration Works
-
-1. **Bash-First Compatibility**: Targeting bash as the primary shell ensures scripts work in CI/CD pipelines, Docker containers, minimal Linux systems, and on macOS out of the box. Zsh compatibility is verified second, giving maximum portability with zero extra effort.
-
-2. **Dual-Shell Verification Protocol**: Testing in both bash and zsh catches subtle behavioral differences (array indexing, word splitting, glob expansion) at development time rather than in production, eliminating "works on my machine" failures.
-
-3. **getopt Over zparseopts**: Using `getopt` for argument parsing keeps scripts portable across all POSIX-compatible shells, while zparseopts would lock scripts to zsh-only execution and break CI environments.
-
-4. **set -euo pipefail Safety Net**: These bash-compatible safety settings work identically in zsh, catching undefined variables, command failures, and broken pipelines immediately rather than allowing silent data corruption.
-
-5. **Hexagonal Architecture for Shell Scripts**: Separating core logic functions from I/O adapters makes shell scripts testable with Bats in isolation, enabling TDD practices that are normally associated with higher-level languages.
-
----
-
-## 15. Quick Reference
-
-### Common Commands
-
-```bash
-# Verification (MANDATORY - always check bash FIRST)
-bash -n script.sh                    # Bash syntax check (FIRST - most important)
-bash -euo pipefail -n script.sh      # Bash strict syntax check
-zsh -n script.sh                     # Zsh syntax check (verify compatibility)
-shellcheck script.sh                 # Static analysis
-shfmt -d script.sh                   # Format check
-
-# Formatting
-shfmt -w script.sh                   # Auto-format script
-
-# Testing (in both shells)
-bats tests/                          # Run bats tests (works in both)
-bash tests/script.sh                 # Test with bash
-zsh tests/script.sh                  # Test with zsh
-
-# Debugging
-bash -x script.sh                    # Debug in bash (FIRST)
-zsh -x script.sh                     # Debug in zsh
-DEBUG=true ./script.sh               # Enable script debug
-
-# Script execution (test in both shells)
-bash script.sh --help                # Run with bash
-zsh script.sh --help                 # Run with zsh
-```
-
-### Bash-Compatible Script Header Template (PREFERRED)
-
-```bash
-#!/usr/bin/env bash
-# CRITICAL: Always use bash shebang for maximum compatibility
-set -euo pipefail
-IFS=$'\n\t'
-
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
-```
-
-### Function Template (Bash-Compatible)
-
-```bash
-##
-# Brief description of function
-#
-# @param $1 Description of first argument
-# @param $2 Description of second argument (optional)
-# @return 0 on success, 1 on failure
-# @output Writes result to stdout
-##
-function_name() {
-    local arg1="$1"
-    local arg2="${2:-default}"
-
-    # Implementation
-    echo "result"
-    return 0
-}
-```
-
-### Common Patterns (Bash-Compatible)
-
-```bash
-# Associative array iteration (bash-compatible)
-declare -A config=([key1]="val1" [key2]="val2")
-for key in "${!config[@]}"; do
-    echo "$key = ${config[$key]}"
-done
-
-# Array filtering with find (portable - PREFERRED)
-mapfile -t regular_files < <(find . -type f -name "*.txt")
-mapfile -t recent_files < <(find . -mtime -1 -name "*.txt")
-
-# Safe file reading (bash-compatible)
-while IFS= read -r line; do
-    echo "$line"
-done < "$file"
-
-# Cleanup with trap (bash-compatible)
-temp_file=$(mktemp)
-trap 'rm -f "$temp_file"' EXIT ERR
-# ... use temp_file ...
-```
-
----
-
-## 16. Summary
-
-🔴 **CRITICAL Requirements for All Shell Scripts (Bash-Compatible):**
-
-**MANDATORY BASH COMPATIBILITY (TOP PRIORITY):**
-1. 🔴 **Bash Compatibility**: Scripts MUST work in BOTH bash 5.0+ and zsh 5.8+
-2. 🔴 **Bash Testing First**: ALWAYS verify in bash before zsh
-3. 🔴 **Bash Shebang**: Use `#!/usr/bin/env bash` (not `#!/usr/bin/env zsh`)
-4. 🔴 **getopt Parsing**: Use getopt for arguments (NOT zparseopts)
-5. 🔴 **Portable Syntax**: Use bash-compatible constructs (no zsh-only features)
-6. 🔴 **Dual Verification**: Test in BOTH bash and zsh - both MUST pass
-
-**CORE REQUIREMENTS:**
-7. **Script Header**: `set -euo pipefail` (bash-compatible)
-8. **Hexagonal Architecture**: Modular structure, separation of concerns
-9. **Bash-Compatible Arrays**: Use `declare -A` for associative arrays
-10. **Error Handling**: Explicit error checking, meaningful messages
-11. **Testing**: bats tests (works in both shells)
-12. **Verification**: Agent MUST test scripts in BOTH bash and zsh before delivery
-8. **Documentation**: Clear function and script documentation
-13. **TDD**: Write tests first, then implementation
-14. **Regression Tests**: Every bug gets a test before fixing
-
-**Agent Verification Protocol (BASH FIRST):**
-- 🔴 **MANDATORY**: Bash syntax check (`bash -n script.sh`) - MUST succeed (FIRST)
-- 🔴 **MANDATORY**: Bash execution test (`bash script.sh --help`) - MUST succeed (FIRST)
-- **MANDATORY**: Zsh syntax check (`zsh -n script.sh`) - MUST succeed
-- **MANDATORY**: Zsh execution test (`zsh script.sh --help`) - MUST succeed
-- **MANDATORY**: shellcheck (`shellcheck script.sh`) - MUST pass if available
-- **MANDATORY**: shfmt (`shfmt -d script.sh`) - MUST pass if available
-- **MANDATORY**: Test execution in bash - MUST pass if tests exist
-- **MANDATORY**: Test execution in zsh - MUST pass if tests exist
-- **MANDATORY**: After ANY modification, re-verify ALL steps in BOTH shells
-- Only present working, bash-compatible scripts to the user
-
-**CRITICAL PRINCIPLE:**
-🔴 **BASH COMPATIBILITY IS MANDATORY** 🔴
-- When choosing between implementations, bash-compatible ALWAYS wins
-- Use zsh-specific features ONLY when bash cannot accomplish the task
-- Always provide bash fallback if using zsh-specific features
-- Test in bash FIRST, then verify in zsh
-- Scripts MUST produce identical output in both shells
-
-**Remember**: Prioritize bash compatibility for maximum portability. Use hexagonal architecture for testability. Follow TDD for reliability. Keep it bash-compatible, keep it clean, keep it working.
-
-**End of Modern Bash-Compatible Shell Scripting Guidelines (for Zsh Users)**
+**End of Zsh Shell Scripting Guidelines**

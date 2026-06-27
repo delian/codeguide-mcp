@@ -1,1887 +1,330 @@
-# Modern JavaScript Development Guidelines
+# JavaScript Development Guidelines
+Mandatory coding standards for modern JavaScript: ESM-only, strict-mode, type-checked via JSDoc, test-covered. ES2023+, Node 22+, ESLint 9 / Biome, Vitest.
 
-Mandatory coding standards and development practices for JavaScript development. ESNext (ES2024+), JSDoc, Modern testing frameworks (Vitest/Jest), ESLint, Prettier.
+---
+name: javascript
+title: JavaScript Development Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: language
+tools: [node@22, eslint@9, biome@2, vitest@3, prettier@3]
+requires:
+  - tdd
+  - secure-coding
+  - error-handling
+recommends:
+  - typescript
+  - nodejs
+  - comments
+  - performance
+provides:
+  - modern-es
+  - esm
+  - async-await
+  - js-footguns
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide covers only what is unique to JavaScript the language.
 
 ---
 
-**Agent Profile**: The JavaScript Modernist
-**Role**: Senior JavaScript Engineer & ES2024+ Specialist
-**Objective**: Generate production-ready, clean, fully documented, minimalistic, and maintainable JavaScript code.
-**Tools**: ESNext (ES2024+), JSDoc, Modern testing frameworks (Vitest/Jest), ESLint, Prettier.
+## 0. Prerequisites & References
+
+Fetch and apply these **before** generating JavaScript code. Their rules are assumed below and not repeated.
+
+> 📎 **REQUIRED — fetch & apply first:**
+> - [`tdd.md`](guides://tdd.md) — test-first, Red-Green-Refactor, regression-test-before-fix, coverage. *(JS binding: runner is Vitest — `npx vitest run`.)*
+> - [`secure-coding.md`](guides://secure-coding.md) — supply chain, secrets, CVE policy. *(JS binding: `npm audit`, no `eval`/`Function`, prototype-pollution guards.)*
+> - [`error-handling.md`](guides://error-handling.md) — error strategy & propagation. *(JS binding: `Error`-only throws, async rejection handling, see §6.)*
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`typescript.md`](guides://typescript.md) — **strongly recommended for any non-trivial codebase**; prefer TS over plain JS + JSDoc when the project allows a build step.
+> - [`nodejs.md`](guides://nodejs.md) — runtime APIs, module resolution, package.json fields, when JS runs on Node.
+> - [`comments.md`](guides://comments.md) — doc policy *(binding: JSDoc on public exports)*.
+> - [`performance.md`](guides://performance.md) — hot-path and allocation guidance.
+
+> 📎 **SEE ALSO:** [`reactjs.md`](guides://reactjs.md) · [`deno.md`](guides://deno.md) · [`designpatterns.md`](guides://designpatterns.md) · [`semver.md`](guides://semver.md)
 
 ---
 
 ## 1. Core Philosophies: MODERN-JS-FIRST
 
-The agent must adhere to the **MODERN-JS-FIRST** principles for every JavaScript project:
+JavaScript-specific principles only. TDD, security, and error-handling strategy come from §0 — do not restate them.
 
-**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
-**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+- **M**odules: ESM exclusively (`import`/`export`). No CommonJS `require`/`module.exports` in new code.
+- **O**nly `const`/`let`: `const` by default, `let` when reassigned, **never** `var`.
+- **D**eterministic equality: `===`/`!==` only; explicit conversions; no implicit coercion footguns (§5).
+- **E**xplicit async: `async`/`await` over raw `.then()` chains; never callback-style for new I/O; never an unhandled rejection.
+- **R**euse the platform: prefer built-ins (`Array.prototype.at`, `Object.hasOwn`, `structuredClone`, `Map.groupBy`, `Intl`) over utility libraries.
+- **N**on-negotiable quality: lint clean, formatted, type-checked (JSDoc + `tsc --checkJs` or TypeScript), Vitest green at the §2 coverage gate.
 
-**Modern Standards**: Use latest ECMAScript features (ES2024+), avoid legacy patterns.
-**ESM-Only**: Use ECMAScript Modules (ESM) exclusively. No CommonJS (`require`).
-**Only const/let**: Use `const` by default, `let` when needed, NEVER `var`.
-**Standard Library First**: Prefer native features like `Array.prototype.at`, `Object.hasOwn`, and `Map.groupBy` over utility libraries.
-**Deterministic**: Predictable behavior, no implicit coercion, explicit conversions.
-**Explicit Code**: Clear intent, obvious behavior, self-documenting.
-**Reactive Async**: async/await preferred, Promises over callbacks, never callback hell.
-**No Side Effects**: Pure functions preferred, side effects clearly marked.
+> **Strongly recommended:** adopt **TypeScript** ([`typescript.md`](guides://typescript.md)) for any code beyond a small script. Plain JS below assumes you are deliberately build-free; even then, type-check with `tsc --checkJs`.
 
-**Functional First**: Prefer functional programming style - immutability, higher-order functions, composition.
-**Declarative Over Imperative**: Use map/filter/reduce instead of loops when applicable.
-
-**Just Enough**: Minimalistic code, avoid over-engineering, simple solutions first.
-**Systematic Testing**: Unit tests for all logic, 80%+ coverage, tests must pass.
-
-**Documented APIs**: JSDoc comments for all exports, auto-generated documentation.
-**Only Valid Code**: Agent MUST verify code parses and runs before delivery.
-**Clean Formatting**: Consistent style, readable code, Prettier formatted.
-**Known to Work**: All tests passing, code parsing successfully verified.
-
-**Verified Code**: Agent-generated code MUST parse, pass tests, and pass lint before delivery.
+**Verified Code**: Agent-generated JavaScript MUST pass every gate in §2 before delivery.
 
 ---
 
-## 2. Agent Code Generation Requirements (MANDATORY)
+## 2. Requirements (MANDATORY, auditable)
 
-### A. Validation Protocol
+RFC-2119 keywords. IDs `JS-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a shared rule cite its owner.
 
-**CRITICAL: Agents MUST verify that all generated code parses correctly and tests pass before presenting it to the user.**
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| JS-TST-01 | Every feature MUST be test-first (see `tdd.md`) | `npx vitest run` | exit 0, 0 skips |
+| JS-TST-02 | Each bug MUST get a regression test before the fix (see `tdd.md`) | `npx vitest run` | failing→passing |
+| JS-TST-03 | Business-logic coverage MUST meet the project gate | `npx vitest run --coverage` | ≥ threshold |
+| JS-FMT-01 | Code MUST be formatted | `npx prettier --check .` or `npx biome format .` | no diff |
+| JS-LINT-01 | Linter MUST pass clean | `npx eslint .` or `npx biome lint .` | exit 0 |
+| JS-TYP-01 | Public APIs MUST be JSDoc-typed and type-check | `npx tsc --checkJs --noEmit` | exit 0 |
+| JS-ESM-01 | Sources MUST be ESM (no `require`/`module.exports`) | `"type":"module"` + grep | no CJS in src |
+| JS-STRICT-01 | No `var`; `===` only; no `eval`/`Function` (see `secure-coding.md`) | `npx eslint .` (`no-var`,`eqeqeq`,`no-eval`) | exit 0 |
+| JS-ERR-01 | Reject/throw `Error` objects; no unhandled rejections (see `error-handling.md`) | eslint `no-throw-literal`, review | exit 0 |
+| JS-DOC-01 | Public exports documented with JSDoc (see `comments.md`) | `npx eslint .` (`jsdoc/*`) | exit 0 |
+| JS-SEC-01 | 0 high/critical CVEs in deps (see `secure-coding.md`) | `npm audit --audit-level=high` | 0 high/critical |
+| JS-DEP-01 | Lockfile in sync & verified (see `secure-coding.md`) | `npm ci` / `npm audit signatures` | installs clean |
 
-#### Pre-Delivery Checklist
-
-**Before delivering ANY JavaScript code, the agent MUST:**
-
-1. **JavaScript Parsing Check**:
-   ```bash
-   # Verify code parses without syntax errors
-   node --check filename.js
-   # OR for all files
-   find src -name "*.js" -exec node --check {} \;
-   # Exit code MUST be 0
-   ```
-
-2. **Linting Check**:
-   ```bash
-   # Run ESLint
-   npx eslint . --ext .js
-   # Fix all errors, address warnings
-   ```
-
-3. **Code Formatting**:
-   ```bash
-   # Check Prettier formatting
-   npx prettier --check "src/**/*.js"
-   # Exit code MUST be 0
-   ```
-
-4. **Test Creation (MANDATORY)**:
-   - Write unit tests for ALL new functions
-   - Write unit tests for ALL new classes
-   - Write unit tests for ALL new modules
-   - Minimum 80% code coverage
-   - Tests MUST follow best practices
-
-5. **Test Execution**:
-   ```bash
-   # Run all tests
-   npm test
-   # OR with coverage
-   npm run test:coverage
-   # Exit code MUST be 0, coverage MUST be ≥ 80%
-   ```
-
-6. **Documentation Generation**:
-   ```bash
-   # Verify JSDoc can generate documentation
-   npx jsdoc -c jsdoc.json
-   # Exit code MUST be 0
-   ```
-
-### B. Error Correction Process
-
-If verification fails:
-
-1. **Read the error message** - parse errors, test failures, lint issues
-2. **Identify the root cause** - syntax error, missing import, test logic issue
-3. **Fix the issue** in the generated code
-4. **Re-run verification** until all checks pass
-5. **Document fixes** in comments if non-obvious
-
-### C. Agent Workflow Example
-
-**Complete workflow for generating a new function:**
-
-1. **Generate function with JSDoc**:
-   ```javascript
-   /**
-    * Parses a user ID from a string.
-    * @param {string} input - The input string to parse
-    * @returns {string|null} The parsed user ID or null if invalid
-    * @example
-    * const userId = parseUserId('  user123  ');
-    * console.log(userId); // 'user123'
-    */
-   export function parseUserId(input) {
-     return input.trim() || null;
-   }
-   ```
-
-2. **Generate comprehensive tests**:
-   ```javascript
-   import { describe, it, expect } from 'vitest';
-   import { parseUserId } from './user.js';
-   
-   describe('parseUserId', () => {
-     it('returns trimmed string for valid input', () => {
-       expect(parseUserId('  user123  ')).toBe('user123');
-     });
-     
-     it('returns null for empty string', () => {
-       expect(parseUserId('')).toBeNull();
-     });
-   });
-   ```
-
-3. **Verify code parses**:
-   ```bash
-   node --check src/user.js
-   # ✓ Syntax OK
-   ```
-
-4. **Run tests**:
-   ```bash
-   npm test
-   # ✓ All tests passed (2/2)
-   ```
-
-5. **Generate documentation**:
-   ```bash
-   npx jsdoc -c jsdoc.json
-   # ✓ Documentation generated successfully
-   ```
-
-6. **Present code** - only after ALL checks pass
-
-### D. Prohibited Practices
-
-**NEVER deliver code that:**
-- ❌ Has syntax errors or doesn't parse
-- ❌ Uses `var` declarations
-- ❌ Has failing tests
-- ❌ Lacks tests for new functionality
-- ❌ Has test coverage < 80%
-- ❌ Lacks JSDoc comments for exported functions
-- ❌ Cannot generate documentation
-- ❌ Has linter errors
-- ❌ Uses callback hell instead of async/await
-- ❌ Uses Promises when async/await is clearer
-- ❌ Uses imperative for loops when map/filter/reduce would be clearer
-- ❌ Mutates data structures instead of creating new ones
-- ❌ Has hidden side effects in "pure" functions
-- ❌ **Fixes bugs without adding regression tests first**
-- ❌ **Writes implementation before writing tests (violates TDD)**
-- ❌ **Skips Red-Green-Refactor cycle for new features**
+> **Forbidden**: shipping implementation before its test (violates `tdd.md`), fixing a bug without a regression test first, `var`, `==`/`!=` (except the deliberate `== null` idiom), `eval`/`new Function`, swallowing a rejected promise, or throwing non-`Error` values.
 
 ---
 
-## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+## 3. Verification Protocol
 
-**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
-
-### TDD Cycle
-
-```
-1. 🔴 RED: Write a failing test first
-   ↓
-2. 🟢 GREEN: Write minimal code to make it pass
-   ↓
-3. 🔵 REFACTOR: Improve code while keeping tests green
-   ↓
-   Repeat
-```
-
-### Example TDD Workflow
-
-```javascript
-// Step 1: RED - Write failing test first
-import { describe, it, expect } from 'vitest';
-import { calculateShipping } from './shipping.js';
-
-describe('calculateShipping', () => {
-  it('calculates standard shipping cost', () => {
-    expect(calculateShipping(100, 'standard')).toBe(10);
-  });
-  
-  it('calculates express shipping cost', () => {
-    expect(calculateShipping(100, 'express')).toBe(20);
-  });
-  
-  it('free shipping over $200', () => {
-    expect(calculateShipping(250, 'standard')).toBe(0);
-  });
-});
-
-// Run: npm test
-// ❌ FAILS - calculateShipping doesn't exist yet
-
-// Step 2: GREEN - Write minimal implementation
-/**
- * Calculate shipping cost based on cart value and method.
- * @param {number} cartValue - Cart total value
- * @param {'standard'|'express'} method - Shipping method
- * @returns {number} Shipping cost
- */
-export function calculateShipping(cartValue, method) {
-  if (cartValue >= 200) return 0;
-  return method === 'express' ? 20 : 10;
-}
-
-// Run: npm test
-// ✅ PASSES - tests pass
-
-// Step 3: REFACTOR - Improve with constants
-const SHIPPING_COSTS = {
-  standard: 10,
-  express: 20,
-};
-const FREE_SHIPPING_THRESHOLD = 200;
-
-export function calculateShipping(cartValue, method) {
-  if (cartValue >= FREE_SHIPPING_THRESHOLD) return 0;
-  return SHIPPING_COSTS[method];
-}
-// Tests still pass ✓
-```
-
----
-
-## 2B. Bug Fix Protocol (MANDATORY)
-
-**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
-
-### Bug Fix Workflow
-
-```
-1. 🐛 Bug Reported/Discovered
-   ↓
-2. ✍️ Write a test that REPRODUCES the bug (test will FAIL)
-   ↓
-3. ✅ Verify the test fails for the right reason
-   ↓
-4. 🔧 Fix the bug (make the test pass)
-   ↓
-5. 🟢 Verify the test now PASSES
-   ↓
-6. 📝 Document the bug in test comments (include bug ID)
-   ↓
-7. 🚀 Deploy with confidence (regression prevented)
-```
-
-### Example Bug Fix
-
-```javascript
-// Bug Report #3156: parseQueryParams fails with empty string values
-
-// Step 1-2: Write test that reproduces the bug
-import { describe, it, expect } from 'vitest';
-import { parseQueryParams } from './url.js';
-
-describe('parseQueryParams - Bug #3156', () => {
-  it('handles empty string values - Bug #3156', () => {
-    // Bug: parseQueryParams('?name=&age=25') crashed
-    // Discovered: 2026-01-18
-    // This test prevents regression
-    
-    const result = parseQueryParams('?name=&age=25');
-    
-    expect(result).toEqual({
-      name: '',
-      age: '25',
-    });
-  });
-});
-
-// Run: npm test
-// ❌ FAILS - throws error on empty value
-
-// Step 3: Fix the bug
-/**
- * Parse URL query parameters into an object.
- * @param {string} queryString - Query string (with or without '?')
- * @returns {Object<string, string>} Parsed parameters
- */
-export function parseQueryParams(queryString) {
-  const params = {};
-  const query = queryString.startsWith('?') 
-    ? queryString.slice(1) 
-    : queryString;
-  
-  // FIX: Handle empty values by checking for both key and value existence
-  for (const pair of query.split('&')) {
-    const [key, value = ''] = pair.split('=');
-    if (key) {
-      params[key] = value;
-    }
-  }
-  
-  return params;
-}
-
-// Run: npm test
-// ✅ PASSES - bug fixed, regression prevented ✓
-```
-
-### Prohibited Practices for Bug Fixes
-
-**NEVER:**
-- ❌ Fix a bug without adding a regression test first
-- ❌ Write implementation before writing tests (violates TDD)
-- ❌ Skip the Red-Green-Refactor cycle
-- ❌ Commit code with failing tests
-- ❌ Remove tests to make code pass
-- ❌ Comment out failing tests
-
----
-
-## 3. Modern JavaScript Standards (Mandatory)
-
-### A. Variable Declarations
-
-```javascript
-// ✅ CORRECT - const by default
-const API_URL = 'https://api.example.com';
-const users = ['Alice', 'Bob'];
-const config = { timeout: 5000 };
-
-// ✅ CORRECT - let when reassignment needed
-let counter = 0;
-counter += 1;
-
-let currentUser = null;
-currentUser = await fetchUser();
-
-// ❌ WRONG - NEVER use var
-var x = 10; // NO!
-var message = 'test'; // NO!
-
-// ❌ WRONG - let when const works
-let constantValue = 42; // Should be const
-```
-
-### B. Latest ECMAScript Features (ES2024+)
-
-```javascript
-// ✅ CORRECT - Nullish coalescing operator
-const port = process.env.PORT ?? 3000;
-const name = user.name ?? 'Anonymous';
-
-// ✅ CORRECT - Optional chaining
-const email = user?.profile?.email;
-const firstItem = array?.[0];
-const result = fn?.();
-
-// ✅ CORRECT - Array methods
-const doubled = numbers.map(n => n * 2);
-const evens = numbers.filter(n => n % 2 === 0);
-const sum = numbers.reduce((acc, n) => acc + n, 0);
-
-// ✅ CORRECT - Object destructuring
-const { id, name, email } = user;
-const { host = 'localhost', port = 3000 } = config;
-
-// ✅ CORRECT - Array destructuring
-const [first, second, ...rest] = items;
-
-// ✅ CORRECT - Spread operator
-const newUser = { ...user, lastLogin: new Date() };
-const allItems = [...items1, ...items2];
-
-// ✅ CORRECT - Template literals
-const message = `Hello, ${user.name}!`;
-const multiline = `
-  This is a
-  multiline string
-`;
-
-// ✅ CORRECT - Arrow functions
-const square = n => n * n;
-const sum = (a, b) => a + b;
-const processUser = user => ({ ...user, processed: true });
-
-// ✅ CORRECT - Modern ES2024+ features
-// 1. Map.groupBy (ES2024)
-const inventory = [
-  { name: "asparagus", type: "vegetables", quantity: 5 },
-  { name: "bananas", type: "fruit", quantity: 0 },
-  { name: "goat", type: "meat", quantity: 23 },
-  { name: "cherries", type: "fruit", quantity: 5 },
-  { name: "fish", type: "meat", quantity: 22 },
-];
-const result = Map.groupBy(inventory, ({ type }) => type);
-
-// 2. Promise.withResolvers (ES2024)
-const { promise, resolve, reject } = Promise.withResolvers();
-
-// 3. Array.prototype.at (ES2022)
-const lastElement = array.at(-1);
-
-// 4. Object.hasOwn (ES2022)
-if (Object.hasOwn(obj, "prop")) { /* ... */ }
-
-// ❌ WRONG - Old-style syntax
-var message = 'Hello, ' + user.name; // Use template literals
-var newArray = items1.concat(items2); // Use spread
-```
-
-### C. Async/Await Pattern (PREFERRED)
-
-```javascript
-// ✅ CORRECT - async/await (MOST PREFERRED)
-async function fetchUser(userId) {
-  const response = await fetch(`/api/users/${userId}`);
-  if (!response.ok) {
-    throw new Error('User not found');
-  }
-  return await response.json();
-}
-
-// ✅ CORRECT - Sequential async operations
-async function getUserData(userId) {
-  const user = await fetchUser(userId);
-  const profile = await fetchProfile(user.profileId);
-  const settings = await fetchSettings(user.id);
-  
-  return { user, profile, settings };
-}
-
-// ✅ CORRECT - Parallel async operations
-async function getAllData(userId) {
-  const [user, posts, comments] = await Promise.all([
-    fetchUser(userId),
-    fetchUserPosts(userId),
-    fetchUserComments(userId),
-  ]);
-  
-  return { user, posts, comments };
-}
-
-// ✅ CORRECT - Error handling with try-catch
-async function safelyFetchUser(userId) {
-  try {
-    return await fetchUser(userId);
-  } catch (error) {
-    console.error('Failed to fetch user:', error);
-    return null;
-  }
-}
-
-// ⚠️ ACCEPTABLE - Promises when necessary
-function fetchWithTimeout(url, timeout = 5000) {
-  return Promise.race([
-    fetch(url),
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Timeout')), timeout)
-    ),
-  ]);
-}
-
-// ❌ WRONG - Callback hell
-function fetchUserBad(userId, callback) {
-  fetch(`/api/users/${userId}`)
-    .then(response => response.json())
-    .then(user => {
-      fetchProfile(user.profileId, (err, profile) => {
-        if (err) return callback(err);
-        fetchSettings(user.id, (err, settings) => {
-          if (err) return callback(err);
-          callback(null, { user, profile, settings });
-        });
-      });
-    })
-    .catch(callback);
-}
-
-// ❌ WRONG - .then() chains when async/await is clearer
-function getUserDataBad(userId) {
-  return fetchUser(userId)
-    .then(user => {
-      return fetchProfile(user.profileId).then(profile => {
-        return { user, profile };
-      });
-    })
-    .then(data => {
-      return fetchSettings(data.user.id).then(settings => {
-        return { ...data, settings };
-      });
-    });
-}
-```
-
-## 4. Documentation Requirements (MANDATORY)
-
-### A. JSDoc Comments for All Exports
-
-**ALL exported functions, classes, and constants MUST have comprehensive JSDoc documentation.**
-
-#### Why JSDoc?
-
-- **Auto-Generated API Docs**: JSDoc generates HTML documentation from code comments
-- **IDE Integration**: Better IntelliSense and inline help
-- **Type Hints**: Type information for better tooling (even without TypeScript)
-- **Maintenance**: Self-documenting code reduces onboarding time by 40%+
-- **Verification**: Documentation completeness can be verified
-
-### B. Function Documentation
-
-```javascript
-/**
- * Validates an email address format.
- * 
- * Checks if the provided string matches standard email format.
- * Does not verify if the email exists, only format validity.
- * 
- * @param {string} email - The email address to validate
- * @returns {boolean} True if email format is valid, false otherwise
- * 
- * @example
- * const valid = validateEmail('user@example.com');
- * console.log(valid); // true
- * 
- * @example
- * const invalid = validateEmail('not-an-email');
- * console.log(invalid); // false
- * 
- * @see {@link parseEmail} for extracting email parts
- */
-export function validateEmail(email) {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return emailRegex.test(email);
-}
-
-/**
- * Fetches user data from the API.
- * 
- * Retrieves a user by their unique identifier. Returns null if the user
- * is not found. Network errors are thrown as exceptions.
- * 
- * @async
- * @param {string} userId - The unique identifier of the user
- * @param {Object} [options] - Optional fetch configuration
- * @param {AbortSignal} [options.signal] - AbortSignal for request cancellation
- * @param {number} [options.timeout=5000] - Request timeout in milliseconds
- * @returns {Promise<Object|null>} Promise resolving to User object or null
- * @throws {Error} If network request fails
- * 
- * @example
- * try {
- *   const user = await fetchUser('user-123');
- *   if (user) {
- *     console.log('User found:', user.name);
- *   } else {
- *     console.log('User not found');
- *   }
- * } catch (error) {
- *   console.error('Failed to fetch user:', error);
- * }
- * 
- * @example Fetch with timeout
- * const user = await fetchUser('user-123', { timeout: 3000 });
- */
-export async function fetchUser(userId, options = {}) {
-  const { signal, timeout = 5000 } = options;
-  
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeout);
-  
-  try {
-    const response = await fetch(`/api/users/${userId}`, {
-      signal: signal || controller.signal,
-    });
-    
-    clearTimeout(timeoutId);
-    
-    if (!response.ok) {
-      return null;
-    }
-    
-    return await response.json();
-  } catch (error) {
-    clearTimeout(timeoutId);
-    throw error;
-  }
-}
-
-/**
- * Calculates the total price with discount applied.
- * 
- * @param {number} price - The original price
- * @param {number} discountRate - The discount rate (0-1)
- * @returns {number} The discounted price
- * @throws {Error} If price is negative or discount rate is invalid
- * 
- * @example
- * const finalPrice = calculateDiscount(100, 0.2);
- * console.log(finalPrice); // 80
- */
-export function calculateDiscount(price, discountRate) {
-  if (price < 0) {
-    throw new Error('Price cannot be negative');
-  }
-  if (discountRate < 0 || discountRate > 1) {
-    throw new Error('Discount rate must be between 0 and 1');
-  }
-  
-  return price * (1 - discountRate);
-}
-```
-
-### C. Class Documentation
-
-```javascript
-/**
- * In-memory cache with TTL support.
- * 
- * Provides a simple key-value cache with automatic expiration.
- * All operations are synchronous.
- * 
- * @example
- * const cache = new Cache();
- * 
- * // Set with 5-second TTL
- * cache.set('user-1', userData, 5000);
- * 
- * // Get within TTL
- * const user = cache.get('user-1'); // Returns userData
- * 
- * // After TTL expires
- * setTimeout(() => {
- *   const expired = cache.get('user-1'); // Returns undefined
- * }, 6000);
- */
-export class Cache {
-  /**
-   * Creates a new cache instance.
-   * 
-   * @param {number} [defaultTTL=60000] - Default time-to-live in milliseconds
-   * 
-   * @example
-   * // Cache with 10-second default TTL
-   * const cache = new Cache(10000);
-   */
-  constructor(defaultTTL = 60000) {
-    this.store = new Map();
-    this.defaultTTL = defaultTTL;
-  }
-
-  /**
-   * Stores a value in the cache.
-   * 
-   * If the key already exists, its value and TTL are updated.
-   * 
-   * @param {*} key - The cache key
-   * @param {*} value - The value to cache
-   * @param {number} [ttl] - Time-to-live in milliseconds (uses default if not provided)
-   * @returns {Cache} The cache instance for method chaining
-   * 
-   * @example
-   * cache
-   *   .set('key1', 'value1', 5000)
-   *   .set('key2', 'value2', 10000);
-   */
-  set(key, value, ttl) {
-    const expiresAt = Date.now() + (ttl ?? this.defaultTTL);
-    this.store.set(key, { value, expiresAt });
-    return this;
-  }
-
-  /**
-   * Retrieves a value from the cache.
-   * 
-   * Returns undefined if the key doesn't exist or has expired.
-   * Expired entries are automatically removed.
-   * 
-   * @param {*} key - The cache key to retrieve
-   * @returns {*} The cached value or undefined if not found/expired
-   * 
-   * @example
-   * const value = cache.get('myKey');
-   * if (value !== undefined) {
-   *   console.log('Cache hit:', value);
-   * } else {
-   *   console.log('Cache miss');
-   * }
-   */
-  get(key) {
-    const entry = this.store.get(key);
-    if (!entry) return undefined;
-
-    if (Date.now() > entry.expiresAt) {
-      this.store.delete(key);
-      return undefined;
-    }
-
-    return entry.value;
-  }
-
-  /**
-   * Removes a key from the cache.
-   * 
-   * @param {*} key - The key to remove
-   * @returns {boolean} True if the key existed and was removed
-   */
-  delete(key) {
-    return this.store.delete(key);
-  }
-
-  /**
-   * Clears all entries from the cache.
-   * 
-   * @returns {Cache} The cache instance for method chaining
-   */
-  clear() {
-    this.store.clear();
-    return this;
-  }
-
-  /**
-   * Returns the number of entries in the cache.
-   * 
-   * Note: Includes expired entries that haven't been cleaned up yet.
-   * 
-   * @type {number}
-   */
-  get size() {
-    return this.store.size;
-  }
-}
-```
-
-### D. Object Type Documentation
-
-```javascript
-/**
- * User object structure.
- * 
- * @typedef {Object} User
- * @property {string} id - Unique user identifier (UUID v4)
- * @property {string} email - User's email address (unique, validated)
- * @property {string} name - User's display name (1-100 characters)
- * @property {('admin'|'user'|'guest')} role - User's role for authorization
- * @property {string} createdAt - ISO 8601 timestamp of account creation
- * @property {string} [lastLoginAt] - ISO 8601 timestamp of last login
- * @property {Object.<string, *>} [metadata] - Additional user-defined properties
- * 
- * @example
- * const user = {
- *   id: '550e8400-e29b-41d4-a716-446655440000',
- *   email: 'user@example.com',
- *   name: 'John Doe',
- *   role: 'user',
- *   createdAt: '2026-01-17T10:00:00Z',
- *   metadata: { department: 'engineering' }
- * };
- */
-
-/**
- * Configuration options for API requests.
- * 
- * @typedef {Object} RequestOptions
- * @property {number} [timeout=5000] - Request timeout in milliseconds
- * @property {number} [retries=3] - Number of retry attempts
- * @property {AbortSignal} [signal] - Abort signal for cancellation
- * @property {Object.<string, string>} [headers] - Custom headers
- */
-
-/**
- * Result type for operations that can fail.
- * 
- * @typedef {Object} Result
- * @property {boolean} success - Whether the operation succeeded
- * @property {*} [data] - The result data (present if success is true)
- * @property {Error} [error] - The error object (present if success is false)
- * 
- * @example Success
- * const result = { success: true, data: { id: 1, name: 'John' } };
- * 
- * @example Error
- * const result = { success: false, error: new Error('Not found') };
- */
-```
-
-### E. Generating Documentation with JSDoc
-
-#### Installation
+Run, in order, before presenting code. Fix → re-run until every gate is green.
 
 ```bash
-npm install --save-dev jsdoc jsdoc-to-markdown
+npx prettier --check .            # JS-FMT-01   (or: biome format .)
+npx eslint .                      # JS-LINT-01/STRICT-01/ERR-01/DOC-01  (or: biome lint .)
+npx tsc --checkJs --noEmit        # JS-TYP-01   (ESLint does NOT type-check)
+npx vitest run --coverage         # JS-TST-01/02/03
+npm audit --audit-level=high      # JS-SEC-01
+npm ci                            # JS-DEP-01   (lockfile reproducible)
 ```
 
-#### JSDoc Configuration
+The *why* behind each gate lives in its §0 owner; do not re-derive it here.
 
-Create `jsdoc.json`:
+---
 
-```json
-{
-  "source": {
-    "include": ["src"],
-    "includePattern": ".+\\.js$",
-    "excludePattern": "(test|spec)\\.js$"
-  },
-  "opts": {
-    "destination": "./docs",
-    "recurse": true,
-    "readme": "./README.md",
-    "template": "./node_modules/docdash"
-  },
-  "plugins": [
-    "plugins/markdown"
-  ],
-  "templates": {
-    "cleverLinks": true,
-    "monospaceLinks": false,
-    "default": {
-      "outputSourceFiles": true
-    }
-  },
-  "markdown": {
-    "hardwrap": false,
-    "idInHeadings": true
-  }
-}
-```
+## 4. Project Structure
 
-#### Generating Documentation
-
-```bash
-# Generate HTML documentation
-npm run docs
-
-# Generate Markdown documentation
-npx jsdoc2md "src/**/*.js" > API.md
-
-# View documentation
-open docs/index.html  # macOS
-xdg-open docs/index.html  # Linux
-```
-
-### F. Documentation Best Practices
-
-**DO:**
-- ✅ Document all exported functions and classes
-- ✅ Include `@param` for all parameters with types
-- ✅ Include `@returns` with type and description
-- ✅ Include `@throws` for functions that can throw
-- ✅ Provide `@example` for complex APIs
-- ✅ Use `@typedef` for object structures
-- ✅ Link related items with `@see`
-- ✅ Mark async functions with `@async`
-- ✅ Generate docs as part of CI/CD
-
-**DON'T:**
-- ❌ Skip documentation for "obvious" functions
-- ❌ Write vague descriptions
-- ❌ Let documentation become outdated
-- ❌ Commit generated docs to git
-- ❌ Use `@ignore` to hide undocumented exports
-
-## 5. Functional Programming Style (PREFERRED)
-
-### A. Immutability
-
-```javascript
-// ✅ CORRECT - Immutable data transformations
-const numbers = [1, 2, 3, 4, 5];
-
-// Create new array instead of mutating
-const doubled = numbers.map(n => n * 2);
-const evens = numbers.filter(n => n % 2 === 0);
-
-// Create new object instead of mutating
-const user = { name: 'John', age: 30 };
-const updatedUser = { ...user, age: 31 };
-
-// Create new array with added item
-const items = [1, 2, 3];
-const newItems = [...items, 4];
-
-// ❌ WRONG - Mutating data
-const badDoubled = [];
-numbers.forEach(n => badDoubled.push(n * 2)); // Use map instead
-
-const badUser = user;
-badUser.age = 31; // Mutates original
-
-items.push(4); // Mutates original array
-```
-
-### B. Higher-Order Functions
-
-```javascript
-// ✅ CORRECT - Using higher-order functions
-const numbers = [1, 2, 3, 4, 5];
-
-// map - transform each element
-const doubled = numbers.map(n => n * 2);
-
-// filter - select elements
-const evens = numbers.filter(n => n % 2 === 0);
-
-// reduce - aggregate
-const sum = numbers.reduce((acc, n) => acc + n, 0);
-
-// Chaining operations
-const result = numbers
-  .filter(n => n > 2)
-  .map(n => n * 2)
-  .reduce((acc, n) => acc + n, 0);
-
-// ❌ WRONG - Imperative loops
-let doubled = [];
-for (let i = 0; i < numbers.length; i++) {
-  doubled.push(numbers[i] * 2);
-}
-
-let sum = 0;
-for (const num of numbers) {
-  sum += num;
-}
-```
-
-### C. Function Composition
-
-```javascript
-// ✅ CORRECT - Composing functions
-const toLowerCase = str => str.toLowerCase();
-const trim = str => str.trim();
-const removeSpaces = str => str.replace(/\s+/g, '');
-
-// Compose functions
-const pipe = (...fns) => x => fns.reduce((v, f) => f(v), x);
-
-const normalizeEmail = pipe(
-  trim,
-  toLowerCase,
-  removeSpaces
-);
-
-const email = normalizeEmail('  User@Example.com  ');
-// Result: 'user@example.com'
-
-// ✅ CORRECT - Partial application
-const multiply = a => b => a * b;
-const double = multiply(2);
-const triple = multiply(3);
-
-console.log(double(5)); // 10
-console.log(triple(5)); // 15
-
-// ✅ CORRECT - Currying
-const add = a => b => c => a + b + c;
-const add5 = add(5);
-const add5and10 = add5(10);
-console.log(add5and10(3)); // 18
-
-// ❌ WRONG - Imperative composition
-function normalizeBad(str) {
-  str = str.trim();
-  str = str.toLowerCase();
-  str = str.replace(/\s+/g, '');
-  return str;
-}
-```
-
-### D. Declarative Over Imperative
-
-```javascript
-// ✅ CORRECT - Declarative style
-const users = [
-  { name: 'Alice', age: 25, active: true },
-  { name: 'Bob', age: 30, active: false },
-  { name: 'Charlie', age: 35, active: true },
-];
-
-// Get names of active users
-const activeUserNames = users
-  .filter(user => user.active)
-  .map(user => user.name);
-
-// Calculate average age
-const averageAge = users.reduce((sum, user) => sum + user.age, 0) / users.length;
-
-// Group by active status
-const groupedUsers = users.reduce((acc, user) => {
-  const key = user.active ? 'active' : 'inactive';
-  return {
-    ...acc,
-    [key]: [...(acc[key] || []), user],
-  };
-}, {});
-
-// ❌ WRONG - Imperative style
-const activeNames = [];
-for (let i = 0; i < users.length; i++) {
-  if (users[i].active) {
-    activeNames.push(users[i].name);
-  }
-}
-
-let totalAge = 0;
-for (const user of users) {
-  totalAge += user.age;
-}
-const avgAge = totalAge / users.length;
-```
-
-### E. Avoiding Side Effects
-
-```javascript
-// ✅ CORRECT - Pure functions (no side effects)
-function calculateTotal(items) {
-  return items.reduce((sum, item) => sum + item.price, 0);
-}
-
-function addDiscount(price, discountRate) {
-  return price * (1 - discountRate);
-}
-
-// ✅ CORRECT - Explicitly handling side effects
-/**
- * @sideEffect Logs to console
- */
-function logAndCalculate(items) {
-  const total = calculateTotal(items);
-  console.log('Total:', total); // Side effect clearly marked
-  return total;
-}
-
-// ✅ CORRECT - Isolating side effects
-async function fetchUserData(userId) {
-  // Side effect isolated to this function
-  const response = await fetch(`/api/users/${userId}`);
-  return response.json();
-}
-
-function processUserData(data) {
-  // Pure function - no side effects
-  return {
-    ...data,
-    fullName: `${data.firstName} ${data.lastName}`,
-    age: calculateAge(data.birthDate),
-  };
-}
-
-// ❌ WRONG - Hidden side effects
-let globalCounter = 0;
-
-function calculateBad(items) {
-  globalCounter++; // Hidden side effect!
-  return items.reduce((sum, item) => sum + item.price, 0);
-}
-```
-
-### F. Working with Arrays Functionally
-
-```javascript
-// ✅ CORRECT - Functional array operations
-const numbers = [1, 2, 3, 4, 5];
-
-// Transform
-const squared = numbers.map(n => n * n);
-
-// Filter
-const odds = numbers.filter(n => n % 2 !== 0);
-
-// Find
-const firstEven = numbers.find(n => n % 2 === 0);
-
-// Every/Some
-const allPositive = numbers.every(n => n > 0);
-const hasEven = numbers.some(n => n % 2 === 0);
-
-// Reduce for complex transformations
-const stats = numbers.reduce((acc, n) => ({
-  sum: acc.sum + n,
-  count: acc.count + 1,
-  min: Math.min(acc.min, n),
-  max: Math.max(acc.max, n),
-}), { sum: 0, count: 0, min: Infinity, max: -Infinity });
-
-// flatMap for flattening and mapping
-const nested = [[1, 2], [3, 4], [5]];
-const flattened = nested.flatMap(arr => arr.map(n => n * 2));
-// Result: [2, 4, 6, 8, 10]
-
-// ❌ WRONG - Imperative approach
-const squared2 = [];
-for (let i = 0; i < numbers.length; i++) {
-  squared2.push(numbers[i] * numbers[i]);
-}
-```
-
-### G. Function Chaining and Pipelines
-
-```javascript
-// ✅ CORRECT - Method chaining
-const result = users
-  .filter(user => user.age >= 18)
-  .map(user => ({ ...user, status: 'adult' }))
-  .sort((a, b) => a.age - b.age)
-  .slice(0, 10);
-
-// ✅ CORRECT - Custom pipeline
-const pipe = (...fns) => x => fns.reduce((v, f) => f(v), x);
-
-const processData = pipe(
-  data => data.filter(x => x.value > 0),
-  data => data.map(x => ({ ...x, doubled: x.value * 2 })),
-  data => data.sort((a, b) => b.value - a.value)
-);
-
-const processed = processData(rawData);
-
-// ✅ CORRECT - Async pipeline
-const asyncPipe = (...fns) => x => 
-  fns.reduce((p, f) => p.then(f), Promise.resolve(x));
-
-const processUserPipeline = asyncPipe(
-  fetchUser,
-  enrichUserData,
-  validateUser,
-  saveUser
-);
-
-await processUserPipeline(userId);
-```
-
-### H. Recursion Over Iteration
-
-```javascript
-// ✅ CORRECT - Recursive approach for tree structures
-function sumTree(node) {
-  if (!node) return 0;
-  
-  const childrenSum = node.children
-    ? node.children.reduce((sum, child) => sum + sumTree(child), 0)
-    : 0;
-  
-  return node.value + childrenSum;
-}
-
-// ✅ CORRECT - Tail recursion (optimizable)
-function factorial(n, acc = 1) {
-  if (n <= 1) return acc;
-  return factorial(n - 1, n * acc);
-}
-
-// ✅ CORRECT - Recursion with accumulator
-function flatten(arr, result = []) {
-  for (const item of arr) {
-    if (Array.isArray(item)) {
-      flatten(item, result);
-    } else {
-      result.push(item);
-    }
-  }
-  return result;
-}
-
-// ⚠️ ACCEPTABLE - Simple iteration for performance
-// Use loops for simple cases where performance matters
-function sumArray(numbers) {
-  let sum = 0;
-  for (const num of numbers) {
-    sum += num;
-  }
-  return sum;
-}
-```
-
-### I. Point-Free Style
-
-```javascript
-// ✅ CORRECT - Point-free style (when readable)
-const numbers = [1, 2, 3, 4, 5];
-
-// Point-free
-const doubled = numbers.map(n => n * 2);
-const isEven = n => n % 2 === 0;
-const evens = numbers.filter(isEven);
-
-// Composing point-free
-const getNames = users => users.map(user => user.name);
-const sortNames = names => names.sort();
-const getSortedNames = pipe(getNames, sortNames);
-
-// ⚠️ ACCEPTABLE - Not point-free when clearer
-const activeUsers = users.filter(user => user.active);
-// More readable than: const activeUsers = users.filter(prop('active'));
-```
-
-## 6. Code Style (Minimalistic & Clean)
-
-### A. Single Responsibility
-
-```javascript
-// ✅ CORRECT - Small, focused functions
-function validateEmail(email) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
-function normalizeEmail(email) {
-  return email.toLowerCase().trim();
-}
-
-async function isEmailAvailable(email) {
-  const result = await database.checkEmailAvailability(email);
-  return result;
-}
-
-// ❌ WRONG - Function doing too much
-async function processEmail(email) {
-  const normalized = email.toLowerCase().trim();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
-    return false;
-  }
-  return await database.checkEmailAvailability(normalized);
-}
-```
-
-### B. Pure Functions Preferred
-
-```javascript
-// ✅ CORRECT - Pure function
-function calculateDiscount(price, discountRate) {
-  return price * (1 - discountRate);
-}
-
-// ✅ CORRECT - Explicitly impure (documented)
-/**
- * Saves user to database.
- * @param {User} user - User to save
- * @returns {Promise<void>}
- * @sideEffect Writes to database
- */
-async function saveUser(user) {
-  await database.save(user);
-}
-
-// ❌ WRONG - Hidden side effects
-function calculateTotal(items) {
-  logAnalytics('calculate_total', items); // Hidden!
-  return items.reduce((sum, item) => sum + item.price, 0);
-}
-```
-
-### C. Early Returns
-
-```javascript
-// ✅ CORRECT - Early returns
-function processUser(user) {
-  if (!user) return 'No user';
-  if (!user.email) return 'No email';
-  if (!validateEmail(user.email)) return 'Invalid email';
-  
-  return `User: ${user.email}`;
-}
-
-// ❌ WRONG - Nested conditions
-function processBad(user) {
-  if (user) {
-    if (user.email) {
-      if (validateEmail(user.email)) {
-        return `User: ${user.email}`;
-      } else {
-        return 'Invalid email';
-      }
-    } else {
-      return 'No email';
-    }
-  } else {
-    return 'No user';
-  }
-}
-```
-
-### D. Destructuring for Clarity
-
-```javascript
-// ✅ CORRECT - Destructuring with defaults
-function createUser({ email, name, role = 'user', sendWelcome = true }) {
-  // Implementation
-  return { id: generateId(), email, name, role };
-}
-
-// Usage
-const user = createUser({
-  email: 'user@example.com',
-  name: 'John Doe',
-  sendWelcome: false,
-});
-
-// ✅ CORRECT - Extracting object properties
-const { id, name, email } = user;
-const { host = 'localhost', port = 3000 } = config;
-
-// ❌ WRONG - Positional parameters
-function createBad(email, name, role, send) {
-  return { id: generateId(), email, name, role };
-}
-
-const badUser = createBad('user@example.com', 'John', 'user', false); // Unclear!
-```
-
-## 7. Testing Requirements (MANDATORY)
-
-### A. Test Coverage
-
-- **Minimum 80% code coverage**
-- **100% coverage** for critical paths
-- Tests MUST pass before code review
-- Tests MUST be fast (< 100ms per test)
-
-### B. Test Structure with Vitest
-
-```javascript
-// ✅ CORRECT - Comprehensive test suite
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { UserService } from './user-service.js';
-
-describe('UserService', () => {
-  let service;
-  let mockRepository;
-
-  beforeEach(() => {
-    mockRepository = {
-      findById: vi.fn(),
-      save: vi.fn(),
-      delete: vi.fn(),
-    };
-    service = new UserService(mockRepository);
-  });
-
-  describe('getUserById', () => {
-    it('returns user when found', async () => {
-      const mockUser = { id: '123', name: 'John', email: 'john@example.com' };
-      mockRepository.findById.mockResolvedValue(mockUser);
-
-      const result = await service.getUserById('123');
-
-      expect(result).toEqual(mockUser);
-      expect(mockRepository.findById).toHaveBeenCalledWith('123');
-    });
-
-    it('returns null when user not found', async () => {
-      mockRepository.findById.mockResolvedValue(null);
-
-      const result = await service.getUserById('999');
-
-      expect(result).toBeNull();
-    });
-
-    it('throws error when repository fails', async () => {
-      mockRepository.findById.mockRejectedValue(
-        new Error('Database error')
-      );
-
-      await expect(service.getUserById('123')).rejects.toThrow('Database error');
-    });
-  });
-
-  describe('validateEmail', () => {
-    it.each([
-      ['user@example.com', true],
-      ['user.name@example.co.uk', true],
-      ['invalid', false],
-      ['@example.com', false],
-      ['user@', false],
-      ['', false],
-    ])('validates "%s" as %s', (email, expected) => {
-      expect(service.validateEmail(email)).toBe(expected);
-    });
-  });
-});
-```
-
-## 8. Project Structure
+Idiomatic ESM layout. Architectural principles (dependency direction, boundaries) are owned by the project's architecture guide; below is only the JS mapping.
 
 ```
 project/
 ├── src/
-│   ├── utils/              # Utility functions
-│   │   ├── validation.js
-│   │   ├── formatting.js
-│   │   └── index.js
-│   ├── services/           # Business logic
-│   │   ├── user-service.js
-│   │   └── index.js
-│   ├── repositories/       # Data access
-│   │   ├── user-repository.js
-│   │   └── index.js
-│   └── index.js            # Main entry point
-├── tests/
-│   ├── unit/
-│   │   ├── utils.test.js
-│   │   └── services.test.js
-│   └── integration/
-│       └── api.test.js
-├── docs/                   # Generated documentation (in .gitignore)
-├── .gitignore
-├── .eslintrc.json
-├── .prettierrc.json
-├── jsdoc.json
+│   ├── domain/           # pure logic — no I/O imports
+│   ├── services/         # use cases / orchestration
+│   ├── adapters/         # http/db/fs implementations
+│   └── index.js          # entry; "exports" mapped in package.json
+├── test/                 # mirrors src/ (see tdd.md); *.test.js
+├── package.json          # "type":"module", "exports", scripts, engines
+├── eslint.config.js      # flat config (ESLint 9) — or biome.json
 ├── vitest.config.js
-├── package.json
-└── README.md
+└── package-lock.json     # committed lockfile
 ```
 
-## 9. Configuration Files
+- `package.json` MUST set `"type": "module"` and an `"engines": { "node": ">=22" }` floor.
+- Define the public surface with the `"exports"` map; avoid deep imports into internals.
+- Group by feature/domain, not by file type. No circular imports.
 
-### A. ESLint Configuration
+---
 
-`.eslintrc.json`:
+## 5. JavaScript Language Specifics
 
-```json
-{
-  "env": {
-    "es2024": true,
-    "node": true
+The unique value of this guide — language semantics that bite even experienced engineers.
+
+### A. Modules (ESM)
+ESM is static, strict-by-default, and asynchronously graph-loaded.
+
+```js
+import { readFile } from 'node:fs/promises';   // named
+import config from './config.js';              // default; extension REQUIRED in ESM
+export const VERSION = '2.0';
+export { parse } from './parse.js';            // re-export
+const mod = await import('./plugin.js');       // dynamic, code-split, lazy
+```
+
+- File extensions are mandatory in relative specifiers; `node:` prefix for built-ins.
+- ESM has no `__dirname`/`require`; use `import.meta.url` + `node:url` `fileURLToPath`.
+- Top-level `await` is allowed in modules. There is no `module.exports`/`require` interop in new code.
+
+### B. Scope, closures & the TDZ
+`let`/`const` are block-scoped and hoisted into a **temporal dead zone** — referencing before declaration throws. `const` binds the variable, not the value (objects stay mutable; freeze with `Object.freeze`/`structuredClone`).
+
+```js
+// Closure-per-iteration: `let` gives each iteration its own binding.
+const handlers = [];
+for (let i = 0; i < 3; i++) handlers.push(() => i);   // 0,1,2  (with var: 3,3,3)
+```
+
+### C. Equality, coercion & nullish (footguns)
+Use `===`. The one sanctioned loose check is `x == null` (true for `null` **and** `undefined`).
+
+```js
+0 == '';        // true   — coercion trap
+NaN === NaN;    // false  — use Number.isNaN(x)
+[] == false;    // true   — never rely on it
+typeof null;    // 'object'  (historical bug)
+0 ?? 'd';       // 0       — ?? only falls back on null/undefined
+0 || 'd';       // 'd'     — || falls back on any falsy
+a?.b?.();       // optional chaining short-circuits to undefined
+```
+
+- Compare numbers with `Number.isNaN` / `Object.is`; never `=== NaN`.
+- Reach for `??`/`?.` not `||`/`&&` when `0`/`''`/`false` are valid values.
+
+### D. Destructuring, spread & rest
+```js
+const { host = 'localhost', port = 3000, ...extra } = config;   // defaults + rest
+const [first, , third = 0] = items;                              // skip, default
+const merged = { ...base, ...override };                         // shallow merge
+fn(...args);                                                     // spread call
+const { a: { b } = {} } = obj;                                   // nested + guard
+```
+Spread is **shallow** — nested objects are shared references. Deep-copy with `structuredClone(x)`.
+
+### E. Async, promises & concurrency
+`async`/`await` for sequencing; combinators for fan-out. Always handle rejection; bind concurrency policy to [`error-handling.md`](guides://error-handling.md), perf to [`performance.md`](guides://performance.md).
+
+```js
+const [u, posts] = await Promise.all([fetchUser(id), fetchPosts(id)]);  // fail-fast
+const results = await Promise.allSettled(tasks);                        // collect all
+const { promise, resolve, reject } = Promise.withResolvers();           // ES2024
+```
+
+- Never `await` inside a `for` loop when items are independent — use `Promise.all` (perf).
+- A floating promise = silent failure. `await` it, `return` it, or `.catch()` it.
+- Cancellation is via `AbortController`/`AbortSignal`, not ad-hoc flags.
+- CPU-bound work belongs on `worker_threads`, not the event loop (see [`nodejs.md`](guides://nodejs.md), [`parallelism.md`](guides://parallelism.md)).
+
+### F. Iterators & generators
+```js
+function* range(n) { for (let i = 0; i < n; i++) yield i; }     // lazy
+async function* lines(stream) { for await (const c of stream) yield c; }  // async iter
+const set = new Set([1, 1, 2]);                                 // iterables
+```
+Any object with `[Symbol.iterator]` works in `for…of`/spread. Generators give lazy, O(1)-memory pipelines; `for await…of` consumes async iterables (streams).
+
+### G. Prototypes, classes & `this`
+Classes are prototype sugar. `this` is bound at **call time** — arrow methods or explicit `.bind` for callbacks.
+
+```js
+class Cache {
+  #store = new Map();                         // true private field
+  static from(obj) { return Object.assign(new Cache(), obj); }
+  get size() { return this.#store.size; }     // accessor
+  has = (k) => this.#store.has(k);            // arrow field → `this` always bound
+}
+```
+- Prefer `Object.hasOwn(o, k)` over `o.hasOwnProperty`; `Object.create(null)` for map-like objects to avoid prototype keys.
+- Prototype pollution is a security issue — never assign from untrusted keys to `__proto__`/`constructor`/`prototype` (see [`secure-coding.md`](guides://secure-coding.md)).
+
+### H. Strict mode & modern built-ins
+ESM and class bodies are **always** strict — no implicit globals, no silent assignment failures, no octal/`with`. Prefer current platform APIs over libraries: `structuredClone`, `Array.prototype.{at,findLast,toSorted,toReversed,with}` (ES2023, non-mutating), `Object.groupBy`/`Map.groupBy` (ES2024), `Intl.*` for i18n, `URL`/`URLSearchParams`, `fetch`, `crypto.randomUUID()`.
+
+---
+
+## 6. Errors & Documentation Bindings
+
+Strategy is owned by [`error-handling.md`](guides://error-handling.md); doc policy by [`comments.md`](guides://comments.md). JavaScript bindings only:
+
+```js
+class NotFoundError extends Error {
+  constructor(id) { super(`User ${id} not found`); this.name = 'NotFoundError'; }
+}
+try {
+  await save(user);
+} catch (err) {
+  throw new Error('save failed', { cause: err });   // ES2022 error cause — preserve chain
+}
+```
+
+- Throw/reject **`Error` instances only** (carry `name`, `message`, `cause`, `stack`); never throw strings.
+- `catch (err)` binding is `unknown`-shaped — narrow with `err instanceof X` before using.
+- JSDoc on every public export so `tsc --checkJs` and editors get types without a `.ts` file:
+
+```js
+/**
+ * @param {string} id
+ * @param {{ timeout?: number, signal?: AbortSignal }} [opts]
+ * @returns {Promise<User|null>}
+ * @throws {NotFoundError}
+ */
+export async function fetchUser(id, opts = {}) { /* … */ }
+```
+
+---
+
+## 7. Tooling & Dependencies
+
+Lint/format with **ESLint 9 (flat config)** or **Biome** (faster, lint+format in one). Security/supply-chain *policy* → [`secure-coding.md`](guides://secure-coding.md); versioning → [`semver.md`](guides://semver.md).
+
+```js
+// eslint.config.js — flat config (ESLint 9)
+import js from '@eslint/js';
+export default [
+  js.configs.recommended,
+  {
+    languageOptions: { ecmaVersion: 2023, sourceType: 'module' },
+    rules: {
+      'no-var': 'error',
+      'prefer-const': 'error',
+      eqeqeq: ['error', 'always', { null: 'ignore' }],  // allow `== null`
+      'no-eval': 'error',
+      'no-implied-eval': 'error',
+      'no-throw-literal': 'error',
+      'require-await': 'error',
+      'no-floating-promises': 'error',
+    },
   },
-  "extends": ["eslint:recommended", "prettier"],
-  "parserOptions": {
-    "ecmaVersion": "latest",
-    "sourceType": "module"
-  },
-  "rules": {
-    "no-var": "error",
-    "prefer-const": "error",
-    "prefer-arrow-callback": "error",
-    "no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
-    "eqeqeq": ["error", "always"],
-    "no-eval": "error",
-    "no-implied-eval": "error",
-    "prefer-template": "error",
-    "prefer-destructuring": ["error", {
-      "array": true,
-      "object": true
-    }],
-    "require-await": "error",
-    "no-return-await": "error",
-    "no-param-reassign": "error",
-    "no-loop-func": "error",
-    "prefer-spread": "error",
-    "prefer-rest-params": "error",
-    "no-restricted-syntax": [
-      "error",
-      {
-        "selector": "ForStatement",
-        "message": "Prefer functional methods like map, filter, reduce over for loops"
-      }
-    ]
-  }
-}
+];
 ```
-
-### B. Prettier Configuration
-
-`.prettierrc.json`:
-
-```json
-{
-  "semi": true,
-  "trailingComma": "es5",
-  "singleQuote": true,
-  "printWidth": 100,
-  "tabWidth": 2,
-  "arrowParens": "avoid"
-}
-```
-
-### C. Package Scripts
-
-```json
-{
-  "type": "module",
-  "scripts": {
-    "test": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "test:ui": "vitest --ui",
-    "lint": "eslint . --ext .js",
-    "lint:fix": "eslint . --ext .js --fix",
-    "format": "prettier --write \"src/**/*.js\"",
-    "format:check": "prettier --check \"src/**/*.js\"",
-    "check": "find src -name '*.js' -exec node --check {} \\;",
-    "docs": "jsdoc -c jsdoc.json",
-    "docs:md": "jsdoc2md \"src/**/*.js\" > API.md",
-    "verify": "npm run check && npm run lint && npm run format:check && npm test"
-  }
-}
-```
-
-## 10. Complete Example
-
-```javascript
-/**
- * @file user-service.js
- * @description User management service with validation and caching.
- */
-
-import { Cache } from './cache.js';
-
-/**
- * User service for managing user operations.
- * 
- * Provides CRUD operations with caching and validation.
- * All operations return Result objects for explicit error handling.
- * 
- * @example
- * const repository = new PrismaUserRepository();
- * const service = new UserService(repository);
- * 
- * const result = await service.getUserById(userId);
- * if (result.success) {
- *   console.log('User:', result.data.name);
- * } else {
- *   console.error('Error:', result.error.message);
- * }
- */
-export class UserService {
-  /**
-   * Creates a new user service.
-   * 
-   * @param {Object} repository - Repository for user data access
-   * @param {number} [cacheTTL=60000] - Cache TTL in milliseconds
-   */
-  constructor(repository, cacheTTL = 60000) {
-    this.repository = repository;
-    this.cache = new Cache(cacheTTL);
-  }
-
-  /**
-   * Retrieves a user by ID.
-   * 
-   * Checks cache first, then queries repository if not cached.
-   * 
-   * @async
-   * @param {string} userId - The user's unique identifier
-   * @returns {Promise<Result>} Result containing the user or error
-   * 
-   * @example
-   * const result = await service.getUserById(userId);
-   * if (result.success) {
-   *   console.log('User:', result.data.name);
-   * }
-   */
-  async getUserById(userId) {
-    try {
-      // Check cache
-      const cached = this.cache.get(userId);
-      if (cached) {
-        return { success: true, data: cached };
-      }
-
-      // Query repository
-      const user = await this.repository.findById(userId);
-      if (!user) {
-        return {
-          success: false,
-          error: new Error('User not found'),
-        };
-      }
-
-      // Cache result
-      this.cache.set(userId, user);
-
-      return { success: true, data: user };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error : new Error('Unknown error'),
-      };
-    }
-  }
-
-  /**
-   * Validates an email address format.
-   * 
-   * @param {string} email - The email to validate
-   * @returns {boolean} True if valid, false otherwise
-   * 
-   * @example
-   * if (service.validateEmail('user@example.com')) {
-   *   console.log('Valid email');
-   * }
-   */
-  validateEmail(email) {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-  }
-
-  /**
-   * Creates a new user.
-   * 
-   * Validates email format before creation.
-   * 
-   * @async
-   * @param {Object} data - User creation data
-   * @param {string} data.email - User's email address
-   * @param {string} data.name - User's display name
-   * @param {('admin'|'user'|'guest')} [data.role='user'] - User's role
-   * @returns {Promise<Result>} Result containing the created user or error
-   * 
-   * @example
-   * const result = await service.createUser({
-   *   email: 'user@example.com',
-   *   name: 'John Doe',
-   *   role: 'user'
-   * });
-   */
-  async createUser(data) {
-    const { email, name, role = 'user' } = data;
-
-    // Validate email
-    if (!this.validateEmail(email)) {
-      return {
-        success: false,
-        error: new Error('Invalid email format'),
-      };
-    }
-
-    try {
-      const user = await this.repository.create({
-        email,
-        name,
-        role,
-      });
-
-      return { success: true, data: user };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error : new Error('Unknown error'),
-      };
-    }
-  }
-}
-
-/**
- * Result type for operations that can fail.
- * 
- * @typedef {Object} Result
- * @property {boolean} success - Whether the operation succeeded
- * @property {*} [data] - The result data (if success is true)
- * @property {Error} [error] - The error object (if success is false)
- */
-```
-
-## 11. Security & Dependency Management (MANDATORY)
-
-### A. Automated Dependency Management
-
-**Use npm/yarn/pnpm to manage and lock dependencies:**
 
 ```bash
-# Install/sync dependencies
-npm install
-
-# Add a new dependency
-npm install package-name
-
-# Update dependencies
-npm update
-
-# Verify dependency integrity
-npm audit signatures
+npm ci                      # JS-DEP-01: reproducible install from lockfile
+npm install <pkg>           # add dep (updates package-lock.json)
+npm update                  # update within semver ranges
+npm audit --audit-level=high  # JS-SEC-01: CVE scan
+npm audit signatures        # registry signature verification
 ```
-
-### B. Vulnerability Scanning & Security
-
-**Mandatory security checks for ALL JavaScript projects:**
-
-1. **Vulnerability Scan**:
-   ```bash
-   # Scan for known vulnerabilities
-   npm audit
-   ```
-   - Agents MUST fix all HIGH/CRITICAL vulnerabilities before delivery.
-
-2. **Supply Chain Audit**:
-   - Verify `package-lock.json` integrity
-   - Audit licenses for compliance
-   - Use `npm audit signatures` to verify registry signatures
-
-### C. Dependency File
-
-```json
-{
-  "name": "my-project",
-  "version": "1.0.0",
-  "engines": {
-    "node": ">=20.0.0"
-  },
-  "dependencies": {
-    "express": "^4.18.0"
-  },
-  "devDependencies": {
-    "eslint": "^8.56.0",
-    "prettier": "^3.2.0",
-    "vitest": "^1.2.0"
-  }
-}
-```
+Commit `package-lock.json`. Set `"engines": { "node": ">=22" }`. Prefer zero/few-dependency native solutions to shrink the supply-chain surface.
 
 ---
 
-## 12. Deployment Checklist
-
-### Agent Code Generation (MANDATORY)
-- [ ] **Code parses successfully**: `node --check` on all files passes
-- [ ] **All exports documented**: JSDoc comments on all exported functions/classes
-- [ ] **Documentation generation works**: `npm run docs` succeeds
-- [ ] **Linting passes**: `npm run lint` returns exit code 0
-- [ ] **Code formatted**: `npm run format:check` passes
-- [ ] **All tests passing**: `npm test` returns exit code 0
-- [ ] **Test coverage ≥ 80%**: `npm run test:coverage` shows adequate coverage
-- [ ] **No `var` declarations**: Only `const` and `let` used
-- [ ] **Async/await used**: No callback hell or unnecessary Promises
-- [ ] **Functional style preferred**: map/filter/reduce over for loops where applicable
-- [ ] **Immutability practiced**: No data mutation, spread/map/filter for transformations
-- [ ] **Pure functions used**: Side effects clearly marked and isolated
-- [ ] **Modern ES features**: Latest ECMAScript syntax used
-
-### Code Quality
-- [ ] Functions have single responsibility
-- [ ] Functions are small (< 20 lines)
-- [ ] **Functional programming style preferred**: map/filter/reduce over loops
-- [ ] **Immutability practiced**: No mutation of data structures
-- [ ] **Pure functions used where possible**: Side effects clearly marked
-- [ ] **Function composition used**: Pipeline and compose patterns applied
-- [ ] Early returns for guard clauses
-- [ ] Destructuring used appropriately
-- [ ] Template literals for strings
-- [ ] Spread operator for arrays/objects
-
-### Security
-- [ ] Input validation on all external data
-- [ ] No eval or Function constructors
-- [ ] No prototype pollution vulnerabilities
-- [ ] Secrets not hardcoded
-
-## 13. Why This Configuration Works
-
-1. **Modern ECMAScript**: Latest features provide cleaner, more expressive code.
-
-2. **const/let Only**: Eliminates hoisting confusion, clearer scoping, fewer bugs.
-
-3. **Async/Await**: Dramatically improves readability, easier error handling, no callback hell.
-
-4. **Functional Programming**: Immutable data reduces bugs, pure functions are easier to test and reason about, composition enables code reuse, declarative style is more readable than imperative.
-
-5. **JSDoc Documentation**: Auto-generated docs stay in sync, reduces onboarding time by 40%+.
-
-6. **Result Types**: Explicit error handling, no hidden exceptions.
-
-7. **Pure Functions**: Easier to test, reason about, and refactor. No hidden side effects.
-
-8. **Higher-Order Functions**: map/filter/reduce are more concise and expressive than loops, chainable for complex operations, less error-prone.
-
-9. **Minimalistic Code**: Faster to understand, fewer bugs, easier maintenance.
-
-10. **Mandatory Testing**: Catches regressions, enables confident refactoring.
-
-11. **Parse Verification**: Ensures all code is syntactically valid before delivery.
-
-12. **ESLint + Prettier**: Consistent code style, catches common errors.
-
----
-
-## 14. Quick Reference
-
-### Common Commands
+## 8. Quick Reference
 
 ```bash
-# Test
-npm test
-npm run test:watch
-npm run test:coverage
-
-# Lint & Format
-npm run lint
-npm run lint:fix
-npx prettier --check .
-npx prettier --write .
-
-# Documentation
-npx jsdoc -c jsdoc.json
-
-# Type check (with JSDoc)
-npx tsc --checkJs --allowJs --noEmit
+npm ci                              # setup
+npx vitest run                      # test     (vitest --watch for TDD loop)
+npx eslint . && npx prettier -w .   # lint + format   (or: npx biome check --write .)
+npx tsc --checkJs --noEmit          # type check via JSDoc
+node src/index.js                   # run
+npm audit --audit-level=high        # CVE scan
 ```
 
-### Functional Patterns Cheat Sheet
-
-```javascript
-// Array methods
-items.map(x => x * 2);
-items.filter(x => x > 0);
-items.reduce((acc, x) => acc + x, 0);
-items.find(x => x.id === targetId);
-items.some(x => x.active);
-items.every(x => x.valid);
-
-// Immutable updates
-const updated = { ...obj, key: newValue };
-const filtered = arr.filter(x => x.id !== id);
-const added = [...arr, newItem];
-
-// Async patterns
-const results = await Promise.all(items.map(fetch));
-const settled = await Promise.allSettled(promises);
-
-// Result pattern
-const ok = value => ({ ok: true, value });
-const err = error => ({ ok: false, error });
-```
-
-### ESLint Config (.eslintrc.cjs)
-
-```javascript
-module.exports = {
-  env: { es2022: true, node: true },
-  extends: ['eslint:recommended'],
-  parserOptions: { ecmaVersion: 'latest', sourceType: 'module' },
-  rules: {
-    'no-var': 'error',
-    'prefer-const': 'error',
-    'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
-  },
-};
-```
-
-### Project Structure
-
-```
-my_project/
-├── src/
-│   ├── index.js          # Entry point
-│   ├── domain/           # Business logic
-│   ├── services/         # Application services
-│   └── utils/            # Utilities
-├── tests/
-├── .eslintrc.cjs
-├── jsdoc.json
-└── package.json
+```js
+// idiom cheat-sheet
+x ?? d;  a?.b;  arr.at(-1);  arr.toSorted();  Object.hasOwn(o,k);
+structuredClone(o);  Map.groupBy(items, fn);  Promise.allSettled(ps);
+const { a, ...rest } = obj;  [...new Set(arr)];  crypto.randomUUID();
 ```
 
 ---
 
-## References
+## 9. Deployment Checklist
 
-- [MDN Web Docs - JavaScript](https://developer.mozilla.org/en-US/docs/Web/JavaScript)
-- [JSDoc Documentation](https://jsdoc.app/)
-- [Vitest Documentation](https://vitest.dev/)
-- [ESLint Rules](https://eslint.org/docs/latest/rules/)
-- [JavaScript Best Practices](https://github.com/goldbergyoni/nodebestpractices)
+Generated from §2 — one box per requirement ID.
+
+- [ ] JS-FMT-01 — formatted, no diff
+- [ ] JS-LINT-01 — ESLint/Biome clean
+- [ ] JS-TYP-01 — `tsc --checkJs` clean (real type check, not the linter)
+- [ ] JS-ESM-01 — ESM only, `"type":"module"`, no CJS in src
+- [ ] JS-STRICT-01 — no `var`, `===` only, no `eval`/`Function`
+- [ ] JS-ERR-01 — `Error`-only throws, no unhandled rejections
+- [ ] JS-TST-01/02/03 — tests pass, bugs have regression tests, coverage ≥ gate
+- [ ] JS-DOC-01 — public exports JSDoc-documented
+- [ ] JS-SEC-01 — `npm audit` 0 high/critical CVEs
+- [ ] JS-DEP-01 — `package-lock.json` in sync & committed
+- [ ] Agent ran every §3 command and documented any fixes
 
 ---
-
-**End of Modern JavaScript Development Guidelines**
+**End of JavaScript Guidelines**

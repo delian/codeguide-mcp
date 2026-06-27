@@ -1,661 +1,248 @@
 # Semantic Versioning Guidelines
-Mandatory standards for versioning software following Semantic Versioning (SemVer) 2.0.0. semantic-release, standard-version, commitizen, lerna.
+Mandatory standards for versioning, breaking-change policy, deprecation, changelogs, and commit-driven release automation per SemVer 2.0.0. semantic-release, commitizen, changesets, conventional-changelog, lerna/nx.
+
+---
+name: semver
+title: Semantic Versioning Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: cross-cutting
+tools: [semantic-release, commitizen, changesets, conventional-changelog, lerna, nx]
+requires: []
+recommends:
+  - git
+  - ci-cd
+  - code-review
+provides:
+  - semver
+  - breaking-change-policy
+  - changelogs
+  - conventional-commits
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide owns versioning semantics, breaking-change/deprecation policy, the conventional-commits→version-bump mapping, and changelogs. It references `git.md` for tagging/branching mechanics and `ci-cd.md` for release automation.
 
 ---
 
-**Agent Profile**: The Versioning Expert
-**Role**: Senior Release Engineer & API Compatibility Specialist
-**Objective**: Generate consistent, predictable version numbers that communicate change impact clearly.
-**Tools**: semantic-release, standard-version, commitizen, lerna.
+## 0. Prerequisites & References
+
+This is a cross-cutting guide with **no hard prerequisites**. Fetch the recommended guides when the task touches them.
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`git.md`](guides://git.md) — commit-message hygiene, annotated tags, branching strategy. *(This guide owns the commit-type→version mapping; `git.md` owns the tagging/branching mechanics it triggers.)*
+> - [`ci-cd.md`](guides://ci-cd.md) — the pipeline that runs the release: build, test gate, publish, tag push. *(This guide defines **what** the release does; `ci-cd.md` defines **where/how** it runs.)*
+> - [`code-review.md`](guides://code-review.md) — reviewers gate breaking-change labels and changelog entries before merge.
+
+> 📎 **SEE ALSO:** [`github.md`](guides://github.md) · [`gitlab.md`](guides://gitlab.md) — release/tag UIs and protected-branch rules.
+
+Per-ecosystem version-range syntax and lockfile policy belong to the relevant language/datastore guide (e.g. [`nodejs.md`](guides://nodejs.md), [`python.md`](guides://python.md), [`rust.md`](guides://rust.md)) — this guide states the *policy*, not each ecosystem's `^`/`~`/`>=` spelling.
 
 ---
 
 ## 1. Core Philosophies: SEMVER-FIRST
 
-- **S**tandard: Follow SemVer 2.0.0 specification
-- **E**xplicit: Version numbers communicate meaning
-- **M**aintainable: Clear upgrade paths for users
-- **V**erifiable: Automated version determination
-- **E**volutionary: Allow growth while maintaining compatibility
-- **R**eliable: Predictable behavior across versions
+Versioning-specific principles only. CI mechanics, git tagging, and review gates come from §0.
+
+- **S**ingle source of truth: the version is **derived from the commit history**, not hand-edited. A human bumping a number by hand is a defect.
+- **E**xplicit contract: a version number is a **promise** about API compatibility. The public API (exported symbols, wire formats, CLI flags, env contract, exit codes, on-disk/DB schema) is what is versioned — not internal code.
+- **M**onotonic & immutable: a released version is never re-published with different bytes. Fix-forward with a new version; never reuse or move a tag.
+- **V**isible impact: every release ships a changelog and (for MAJOR) a migration path. If a consumer can't tell what changed from the version + changelog, the release failed.
+- **E**arly warning: nothing is removed without a prior deprecation in a MINOR release. Deprecate → warn → remove-on-MAJOR.
+- **R**eproducible: anyone can regenerate the same version and notes from the same commits; releases run in CI (see `ci-cd.md`), not from a laptop.
+
+**Verified Release**: No release ships until every gate in §2 is green.
 
 ---
 
-## 2. Version Format (MANDATORY)
+## 2. Requirements (MANDATORY, auditable)
 
-### A. Basic Structure
+RFC-2119 keywords. IDs `SEMVER-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a shared rule cite its owner.
 
-```
-MAJOR.MINOR.PATCH
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| SEMVER-VER-01 | Public version MUST be valid SemVer 2.0.0 `MAJOR.MINOR.PATCH[-prerelease][+build]` | regex `^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$` | match |
+| SEMVER-VER-02 | The released version MUST be derived from commit history, not hand-edited | `npx semantic-release --dry-run` (or tool dry-run) | computed bump == tag |
+| SEMVER-BRK-01 | A breaking public-API change MUST bump MAJOR (or MINOR while 0.y.z) | API diff vs last tag (e.g. `api-extractor`, `cargo-semver-checks`, `revapi`) | no undeclared break |
+| SEMVER-BRK-02 | Every breaking change MUST be flagged in its commit (`!` or `BREAKING CHANGE:` footer) | scan commits since last tag | breaks↔major consistent |
+| SEMVER-DEP-01 | Nothing public MAY be removed without a prior deprecation in an earlier MINOR | grep removed symbols vs prior `@deprecated`/changelog | each removal pre-deprecated |
+| SEMVER-CC-01 | Commits MUST follow Conventional Commits (see `git.md` for message hygiene) | `commitlint --from <last-tag>` | exit 0 |
+| SEMVER-CHG-01 | A changelog MUST be updated for every release, Keep-a-Changelog format | release tool generates / diff `CHANGELOG.md` | entry present |
+| SEMVER-CHG-02 | The MAJOR changelog entry MUST link a migration path for each breaking change | review `CHANGELOG.md` / release notes | link per break |
+| SEMVER-TAG-01 | Each release MUST be an **annotated, signed** tag `vMAJOR.MINOR.PATCH` (see `git.md`) | `git tag -v vX.Y.Z` | valid signature |
+| SEMVER-TAG-02 | A published version MUST NOT be re-published or its tag moved | registry immutability + `git tag` not force-updated | no overwrite |
+| SEMVER-REL-01 | Releases MUST run in CI after the test gate passes (see `ci-cd.md`) | release job in pipeline | tag→build→publish atomic |
 
-Examples:
-1.0.0
-2.4.1
-10.20.300
-```
+> **Forbidden**: hand-editing a version number, force-moving a release tag, re-publishing an existing version, removing public API without a prior deprecation, merging a breaking change without the `!`/`BREAKING CHANGE:` marker and a migration note, or releasing from a developer machine instead of CI.
 
-### B. Components
+---
 
-```markdown
-## MAJOR version (X.y.z)
-Increment when you make incompatible API changes.
+## 3. Version Semantics
 
-Examples:
-- Removing a public API method
-- Changing method signature
-- Changing behavior in incompatible way
-- Dropping support for older platform version
+`MAJOR.MINOR.PATCH` — increment the **leftmost** that applies; reset everything to its right to 0.
 
-## MINOR version (x.Y.z)
-Increment when you add functionality in a backwards compatible manner.
+| Bump | When (vs the **public API contract**) | Reset |
+|------|----------------------------------------|-------|
+| **MAJOR** `X.0.0` | Incompatible change: remove/rename a public symbol, change a signature/return type, change wire/serialization format, tighten input validation, change default behavior, drop a supported platform/runtime, raise a required dependency's floor across a major. | MINOR, PATCH → 0 |
+| **MINOR** `x.Y.0` | Backward-compatible addition: new public symbol, new **optional** parameter, new opt-in config, new supported platform, marking something **deprecated** (still works). | PATCH → 0 |
+| **PATCH** `x.y.Z` | Backward-compatible bug fix: correct wrong behavior to the documented contract, security patch with no API change, equivalent-behavior perf fix, internal refactor. | — |
 
-Examples:
-- Adding new public methods
-- Adding optional parameters
-- Adding new features
-- Deprecating functionality (without removing)
+The decision rule is one question: **"Could a consumer who upgrades without reading code be broken?"** Yes → MAJOR. New surface only → MINOR. Neither → PATCH.
 
-## PATCH version (x.y.Z)
-Increment when you make backwards compatible bug fixes.
+> A **bug fix that changes documented behavior** is still MAJOR — restoring "correct" behavior can break consumers who depend on the old one. Document the trade-off in the changelog.
 
-Examples:
-- Fixing bugs without changing API
-- Performance improvements
-- Documentation fixes
-- Security patches
-```
+### 3.A `0.y.z` — Initial development
+Anything MAY change at any time. Convention: bump **MINOR** for breaking changes, **PATCH** for everything else. Releasing `1.0.0` is the explicit commitment to stability — do it the moment the public API is something you'll stand behind. Avoid living on `0.x` indefinitely to dodge the compatibility contract.
 
-### C. Pre-release and Build Metadata
+### 3.B Pre-release & build metadata
+`-prerelease` identifiers gate stability; `+build` is metadata only.
 
 ```
-VERSION = MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]
-
-Pre-release versions:
-1.0.0-alpha
-1.0.0-alpha.1
-1.0.0-beta.2
-1.0.0-rc.1
-
-Build metadata:
-1.0.0+20240115
-1.0.0+build.123
-1.0.0-beta.1+build.456
-
-Precedence (lowest to highest):
 1.0.0-alpha < 1.0.0-alpha.1 < 1.0.0-beta < 1.0.0-rc.1 < 1.0.0
+1.0.0+20260605   1.0.0-rc.1+sha.5114f85    # build metadata is IGNORED in precedence
 ```
+- **alpha** — unstable, API may churn, internal.
+- **beta** — feature-complete, API stabilizing, external testing.
+- **rc** — release candidate; ship `X.Y.Z` if no blockers surface.
+
+Precedence rules (SemVer §11): numeric identifiers compare numerically, alphanumeric lexically; **more** identifiers > a prefix-equal set with fewer; build metadata never affects ordering and two versions differing only in build metadata are **not** distinct releases.
 
 ---
 
-## 3. Version Increment Rules (MANDATORY)
+## 4. Conventional Commits → Version Bump
 
-### A. Decision Tree
+This guide owns the **mapping**; `git.md` owns commit-message hygiene (format, scope, body wrapping, sign-off). The release tool reads the log and computes the bump — never decide it by hand.
 
-```markdown
-## When to increment MAJOR (Breaking Change)
-
-Ask: "Will this change break existing users?"
-
-Breaking changes include:
-- Removing public API
-- Renaming public API without alias
-- Changing return types
-- Changing parameter types
-- Changing default behavior
-- Removing configuration options
-- Requiring new dependencies
-- Dropping platform support
-
-## When to increment MINOR (New Feature)
-
-Ask: "Does this add new capability without breaking existing code?"
-
-New features include:
-- New public methods/classes
-- New optional parameters
-- New configuration options
-- New supported platforms
-- New functionality
-- Deprecation notices
-
-## When to increment PATCH (Bug Fix)
-
-Ask: "Does this fix a bug without adding features or breaking compatibility?"
-
-Bug fixes include:
-- Correcting incorrect behavior
-- Fixing security vulnerabilities
-- Fixing memory leaks
-- Fixing race conditions
-- Documentation corrections
-- Performance improvements (same behavior)
-```
-
-### B. Examples
-
-```javascript
-// Version 1.0.0 - Initial release
-function getUser(id) {
-  return database.findUser(id);
-}
-
-// Version 1.0.1 - PATCH: Bug fix
-function getUser(id) {
-  if (!id) throw new Error('ID required'); // Fix: was silently failing
-  return database.findUser(id);
-}
-
-// Version 1.1.0 - MINOR: New feature
-function getUser(id, options = {}) {
-  // NEW: Added options parameter (optional, backwards compatible)
-  if (!id) throw new Error('ID required');
-  return database.findUser(id, options);
-}
-
-// NEW in 1.1.0: Added new method
-function getUserByEmail(email) {
-  return database.findUserByEmail(email);
-}
-
-// Version 2.0.0 - MAJOR: Breaking change
-async function getUser(id, options = {}) {
-  // BREAKING: Changed from sync to async
-  if (!id) throw new Error('ID required');
-  return await database.findUser(id, options);
-}
-```
-
----
-
-## 4. Pre-release Versions (MANDATORY)
-
-### A. Pre-release Naming
-
-```markdown
-## Alpha (a.b.c-alpha.N)
-- Early development stage
-- APIs may change significantly
-- Not feature complete
-- For internal testing only
-
-## Beta (a.b.c-beta.N)
-- Feature complete (mostly)
-- APIs relatively stable
-- May have known bugs
-- For external testing
-
-## Release Candidate (a.b.c-rc.N)
-- Production ready candidate
-- All features complete
-- All known bugs fixed
-- Final testing before release
-```
-
-### B. Pre-release Workflow
+| Commit | Bump |
+|--------|------|
+| `fix:` , `perf:` , `revert:` | **PATCH** |
+| `feat:` | **MINOR** |
+| any type with `!` (e.g. `feat!:`, `fix!:`) **or** a `BREAKING CHANGE:` footer | **MAJOR** |
+| `docs:` `style:` `refactor:` `test:` `chore:` `ci:` `build:` | **none** (no release) |
 
 ```bash
-# Development workflow
-1.0.0-alpha.1   # First alpha
-1.0.0-alpha.2   # Second alpha (bug fixes)
-1.0.0-alpha.3   # Third alpha (more changes)
-1.0.0-beta.1    # Feature freeze, start beta
-1.0.0-beta.2    # Beta bug fixes
-1.0.0-rc.1      # Release candidate
-1.0.0-rc.2      # RC bug fixes
-1.0.0           # Stable release!
+feat(api): add cursor pagination to /users          # → MINOR
 
-# Continued development
-1.1.0-alpha.1   # Start next minor version
+fix(auth): reject empty bearer tokens                # → PATCH
+
+feat(api)!: return { data, meta } envelope           # → MAJOR
+                                                     #   (! marks the break)
+
+refactor(core): rename User → Account
+
+BREAKING CHANGE: `User` is removed; import `Account`.   # → MAJOR via footer
+Migration: see docs/migration-v3.md
 ```
+
+- The bump for a release range is the **highest** triggered across all its commits.
+- A `BREAKING CHANGE:` footer is MAJOR regardless of the commit type (even on a `fix:`).
+- Enforce the convention in CI with `commitlint` (SEMVER-CC-01) and capture messages interactively with `commitizen` (`cz`) so contributors don't guess.
 
 ---
 
-## 5. Conventional Commits Integration (MANDATORY)
+## 5. Breaking-Change & Deprecation Policy
 
-### A. Commit Types and Version Impact
+This is the heart of the contract. **Removal is a two-release process: never remove in the same release you deprecate.**
 
-```markdown
-## PATCH increment triggers:
-- fix: Bug fixes
-- perf: Performance improvements
-- revert: Reverting changes
+### 5.A Deprecation lifecycle
+1. **Deprecate (MINOR)** — keep the old API working; mark it deprecated in code, emit a one-time runtime warning, and document the replacement and the target removal version.
+2. **Sustain** — the deprecated API keeps working for the rest of that MAJOR line; CI may warn but MUST NOT fail consumers.
+3. **Remove (MAJOR)** — delete it in the next MAJOR, with a changelog entry and migration link (SEMVER-CHG-02).
 
-## MINOR increment triggers:
-- feat: New features
+Express the deprecation with each language's native idiom — `@deprecated` JSDoc/TSDoc, `warnings.warn(..., DeprecationWarning)`, `#[deprecated]`, `@Deprecated`, `Obsolete` — see the relevant language guide. Always state **what to use instead** and **when it disappears**, e.g. `@deprecated since 2.5.0 — use oauth2Auth(); removed in 3.0.0`.
 
-## MAJOR increment triggers:
-- Any commit with "BREAKING CHANGE:" in body/footer
-- Any commit with "!" after type (e.g., "feat!:", "fix!:")
+### 5.B Communicating a breaking change
+A break MUST be visible in three places, each progressively more detailed:
+- **Commit** — the `!` marker and a `BREAKING CHANGE:` footer with a one-line migration (SEMVER-BRK-02).
+- **Changelog** — under a `### BREAKING` / `### Removed` heading, with a link to the migration guide (SEMVER-CHG-02).
+- **Migration guide** — before/after for each break, in `docs/migration-vN.md` or the GitHub/GitLab release notes.
 
-## No version change:
-- docs: Documentation only
-- style: Formatting
-- refactor: Code restructuring
-- test: Adding tests
-- chore: Maintenance tasks
-- ci: CI configuration
-- build: Build system changes
-```
-
-### B. Commit Examples
-
-```bash
-# PATCH increment
-git commit -m "fix: correct null pointer exception in user lookup"
-git commit -m "perf: optimize database query for user list"
-
-# MINOR increment
-git commit -m "feat: add email notification support"
-git commit -m "feat(api): add pagination to user endpoint"
-
-# MAJOR increment (breaking change)
-git commit -m "feat!: change authentication to OAuth 2.0"
-
-git commit -m "refactor: rename User to Account
-
-BREAKING CHANGE: User class renamed to Account. Update all imports."
-
-git commit -m "feat(api): change response format
-
-BREAKING CHANGE: API now returns data in { data: ..., meta: ... } format
-instead of raw arrays."
-```
+### 5.C Reducing breakage
+Prefer additive evolution over breaks: add a new method beside the old, accept the old shape via an adapter, version the surface (e.g. `/api/v2`, a new exported entry point) rather than mutating it in place. When a break is unavoidable, batch breaks into a single MAJOR rather than dribbling them out.
 
 ---
 
-## 6. Automation (MANDATORY)
+## 6. Changelogs
 
-### A. semantic-release Configuration
-
-```json
-// package.json
-{
-  "name": "my-package",
-  "version": "0.0.0-development",
-  "release": {
-    "branches": ["main", "next"],
-    "plugins": [
-      "@semantic-release/commit-analyzer",
-      "@semantic-release/release-notes-generator",
-      "@semantic-release/changelog",
-      "@semantic-release/npm",
-      "@semantic-release/github",
-      "@semantic-release/git"
-    ]
-  }
-}
-```
-
-```javascript
-// release.config.js
-module.exports = {
-  branches: [
-    'main',
-    { name: 'beta', prerelease: true },
-    { name: 'alpha', prerelease: true }
-  ],
-  plugins: [
-    ['@semantic-release/commit-analyzer', {
-      preset: 'conventionalcommits',
-      releaseRules: [
-        { type: 'docs', scope: 'README', release: 'patch' },
-        { type: 'refactor', release: 'patch' },
-        { type: 'style', release: 'patch' },
-        { type: 'perf', release: 'patch' },
-        { breaking: true, release: 'major' }
-      ]
-    }],
-    ['@semantic-release/release-notes-generator', {
-      preset: 'conventionalcommits',
-      presetConfig: {
-        types: [
-          { type: 'feat', section: 'Features' },
-          { type: 'fix', section: 'Bug Fixes' },
-          { type: 'perf', section: 'Performance' },
-          { type: 'revert', section: 'Reverts' },
-          { type: 'docs', section: 'Documentation', hidden: false },
-          { type: 'chore', section: 'Miscellaneous', hidden: true }
-        ]
-      }
-    }],
-    '@semantic-release/changelog',
-    '@semantic-release/npm',
-    ['@semantic-release/git', {
-      assets: ['CHANGELOG.md', 'package.json'],
-      message: 'chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}'
-    }],
-    '@semantic-release/github'
-  ]
-};
-```
-
-### B. GitHub Actions Workflow
-
-```yaml
-# .github/workflows/release.yml
-name: Release
-
-on:
-  push:
-    branches: [main, beta, alpha]
-
-permissions:
-  contents: write
-  issues: write
-  pull-requests: write
-  packages: write
-
-jobs:
-  release:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run tests
-        run: npm test
-
-      - name: Release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npx semantic-release
-```
-
----
-
-## 7. Changelog Generation (MANDATORY)
-
-### A. Changelog Format
+A release without a changelog is incomplete (SEMVER-CHG-01). Use **[Keep a Changelog](https://keepachangelog.com/en/1.1.0/)** sections, generated from commits — do not write them by hand.
 
 ```markdown
 # Changelog
-
-All notable changes to this project will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+All notable changes are documented here.
+This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
+and [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-03-01
 ### Added
-- New feature in development
-
-## [2.0.0] - 2024-02-01
-
-### Added
-- OAuth 2.0 authentication support
-- New `/api/v2/users` endpoint
-
+- `oauth2Auth()` for token-based auth.
 ### Changed
-- **BREAKING:** API response format changed to `{ data, meta }` structure
-- **BREAKING:** Minimum Node.js version is now 18
-
-### Deprecated
-- `/api/v1/users` endpoint (will be removed in 3.0.0)
-
+- **BREAKING:** responses now use the `{ data, meta }` envelope.
 ### Removed
-- **BREAKING:** Removed support for Node.js 14 and 16
-
+- **BREAKING:** `basicAuth()` removed — use `oauth2Auth()`. See [migration](./docs/migration-v3.md).
 ### Fixed
-- Memory leak in connection pool
-- Race condition in batch processing
-
+- Connection-pool leak under sustained load.
 ### Security
-- Updated dependencies to patch CVE-2024-XXXX
-
-## [1.5.0] - 2024-01-15
-
-### Added
-- Pagination support for list endpoints
-- Email notification feature
-
-### Fixed
-- Incorrect timezone handling in date parsing
-
-## [1.4.1] - 2024-01-10
-
-### Fixed
-- Critical bug in payment processing
-
-### Security
-- Patched SQL injection vulnerability
+- Patched CVE-2026-XXXX in the transport dependency (see `secure-coding.md`).
 ```
+
+Sections (in order): **Added, Changed, Deprecated, Removed, Fixed, Security**. Tag breaks with **BREAKING**. Keep an `[Unreleased]` heading at the top that the release step renames to the new version. The changelog is for **consumers** — describe impact and upgrade steps, not internal refactors.
 
 ---
 
-## 8. Version Ranges (MANDATORY)
+## 7. Release Automation
 
-### A. Dependency Ranges
+The release is computed and executed by tooling in CI (SEMVER-VER-02, SEMVER-REL-01). This guide defines the policy; `ci-cd.md` owns the pipeline, and `git.md` owns the tagging mechanics.
 
-```json
+**Pick one tool per repo:**
+- **semantic-release** — fully automated: analyzes commits, bumps, generates notes/changelog, tags, publishes, creates the GitHub/GitLab release. Best for single-package, trunk-based repos.
+- **changesets** — author-declared intent (`.changeset/*.md`) batched into a release PR; excellent for monorepos with **independent** package versions.
+- **commit-and-tag-version / standard-version** — local bump + changelog + tag when you want a human to push the release.
+- **lerna / nx** — monorepo orchestration (fixed or independent versioning) layered over the above.
+
+```jsonc
+// .releaserc — semantic-release, conventional-commits preset
 {
-  "dependencies": {
-    // Exact version
-    "lodash": "4.17.21",
-
-    // Patch updates allowed (4.17.x)
-    "axios": "~1.6.0",
-
-    // Minor updates allowed (1.x.x)
-    "react": "^18.2.0",
-
-    // Any version >= 2.0.0 and < 3.0.0
-    "express": ">=2.0.0 <3.0.0",
-
-    // Latest version (not recommended for production)
-    "dev-tool": "*"
-  }
+  "branches": ["main", { "name": "next", "prerelease": "rc" }, { "name": "beta", "prerelease": true }],
+  "plugins": [
+    "@semantic-release/commit-analyzer",
+    "@semantic-release/release-notes-generator",
+    "@semantic-release/changelog",
+    "@semantic-release/npm",
+    ["@semantic-release/git", { "assets": ["CHANGELOG.md", "package.json"],
+      "message": "chore(release): ${nextRelease.version} [skip ci]" }],
+    "@semantic-release/github"
+  ]
 }
 ```
 
-### B. Range Recommendations
+Release-flow rules:
+- Branches map to channels: `main`→stable, `next`→`rc`, `beta`/`alpha`→pre-release (mirrors §3.B).
+- The release job runs **after** the test/lint/security gates pass (see `ci-cd.md`) — a failing build MUST NOT tag or publish.
+- Tag, build artifact, and registry publish are **one atomic step**; if publish fails, the tag is not pushed (SEMVER-TAG-02).
+- Run `--dry-run` in PRs to surface the computed next version for reviewers (see `code-review.md`).
+- Registries are immutable: npm/PyPI/crates/OCI reject re-publishing an existing version — rely on this rather than fighting it.
 
-```markdown
-## For Libraries (published packages)
-Use caret (^) for dependencies to allow minor updates:
-- "react": "^18.0.0" allows 18.0.0 to 18.x.x
-
-## For Applications
-Use exact versions or tilde (~) for more control:
-- "express": "4.18.2" - exact version
-- "lodash": "~4.17.0" - allows 4.17.x
-
-## For Development Dependencies
-Caret (^) is usually fine:
-- "jest": "^29.0.0"
-- "typescript": "^5.0.0"
-
-## Lock Files
-Always commit lock files:
-- package-lock.json (npm)
-- yarn.lock (yarn)
-- pnpm-lock.yaml (pnpm)
-```
+### 7.A Monorepos
+Choose **fixed** (all packages share one version — simple, over-bumps untouched packages) or **independent** (per-package versions from per-package commit scopes — accurate, more bookkeeping). With changesets/lerna/nx, a package's version reflects only the commits that touch it; a breaking change in package A forces a MAJOR for A and a compatible bump for in-repo dependents.
 
 ---
 
-## 9. Breaking Change Guidelines (MANDATORY)
+## 8. Deployment Checklist
 
-### A. Communicating Breaking Changes
+Generated from §2 — one box per requirement ID. No new requirements.
 
-```markdown
-## In Commit Messages
-feat!: remove deprecated authentication method
-
-BREAKING CHANGE: The `basicAuth` method has been removed.
-Use `oauth2Auth` instead.
-
-Migration:
-- Before: client.basicAuth(user, pass)
-- After: client.oauth2Auth({ clientId, clientSecret })
-
-## In Changelog
-### [3.0.0] - 2024-03-01
-
-### Removed
-- **BREAKING:** `basicAuth()` method removed. Use `oauth2Auth()` instead.
-  See [Migration Guide](./docs/migration-v3.md).
-
-## In Release Notes
-## Breaking Changes
-
-### Authentication Method Changed
-
-The `basicAuth` method has been removed in favor of OAuth 2.0.
-
-**Before (v2.x):**
-```javascript
-const client = new Client();
-client.basicAuth('user', 'password');
-```
-
-**After (v3.x):**
-```javascript
-const client = new Client();
-client.oauth2Auth({
-  clientId: 'your-client-id',
-  clientSecret: 'your-client-secret'
-});
-```
-
-See the [full migration guide](./docs/migration-v3.md) for details.
-```
-
-### B. Deprecation Process
-
-```javascript
-// Step 1: Deprecate in MINOR version (e.g., 2.5.0)
-/**
- * @deprecated Use newMethod() instead. Will be removed in v3.0.0.
- */
-function oldMethod() {
-  console.warn('Warning: oldMethod() is deprecated. Use newMethod() instead.');
-  return newMethod();
-}
-
-// Step 2: Keep deprecated method working through 2.x
-// Step 3: Remove in MAJOR version (3.0.0)
-```
+- [ ] SEMVER-VER-01 — version string is valid SemVer 2.0.0
+- [ ] SEMVER-VER-02 — version derived from commits (tool dry-run matches), not hand-edited
+- [ ] SEMVER-BRK-01 — API diff shows no undeclared break for the chosen bump
+- [ ] SEMVER-BRK-02 — every breaking commit carries `!` / `BREAKING CHANGE:`
+- [ ] SEMVER-DEP-01 — nothing removed without a prior MINOR deprecation
+- [ ] SEMVER-CC-01 — `commitlint` clean since last tag
+- [ ] SEMVER-CHG-01 — changelog updated (Keep a Changelog)
+- [ ] SEMVER-CHG-02 — MAJOR entries link a migration path
+- [ ] SEMVER-TAG-01 — annotated, signed `vX.Y.Z` tag (see `git.md`)
+- [ ] SEMVER-TAG-02 — no re-published version / moved tag
+- [ ] SEMVER-REL-01 — release ran in CI after the test gate (see `ci-cd.md`)
 
 ---
-
-## 10. Special Cases (MANDATORY)
-
-### A. Version 0.x.x (Initial Development)
-
-```markdown
-## 0.y.z - Initial Development Phase
-
-During initial development (0.x.x):
-- API may change at any time
-- MINOR version increments may include breaking changes
-- PATCH version for bug fixes
-
-Example progression:
-0.1.0 - Initial alpha
-0.2.0 - Major API redesign (breaking changes OK)
-0.2.1 - Bug fix
-0.3.0 - More breaking changes
-1.0.0 - First stable release (API stability commitment)
-```
-
-### B. Monorepo Versioning
-
-```json
-// lerna.json - Independent versioning
-{
-  "version": "independent",
-  "packages": ["packages/*"],
-  "command": {
-    "version": {
-      "conventionalCommits": true,
-      "message": "chore(release): publish"
-    }
-  }
-}
-
-// lerna.json - Fixed versioning
-{
-  "version": "2.0.0",
-  "packages": ["packages/*"]
-}
-```
-
----
-
-## 11. Deployment Checklist
-
-### Before Release
-- [ ] All tests passing
-- [ ] Changelog updated
-- [ ] Breaking changes documented
-- [ ] Migration guide written (if needed)
-- [ ] Version number correct
-
-### During Release
-- [ ] Tag created
-- [ ] Package published
-- [ ] Release notes published
-- [ ] Announcements made
-
-### After Release
-- [ ] Verify package installable
-- [ ] Update documentation site
-- [ ] Notify users of breaking changes
-- [ ] Monitor for issues
-
----
-
-## 12. Quick Reference
-
-```markdown
-## Version Format
-MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]
-
-## When to Increment
-MAJOR: Breaking changes
-MINOR: New features (backwards compatible)
-PATCH: Bug fixes (backwards compatible)
-
-## Commit Prefixes
-fix:  → PATCH
-feat: → MINOR
-BREAKING CHANGE: → MAJOR
-
-## Version Ranges
-^1.2.3 → 1.x.x (>=1.2.3 <2.0.0)
-~1.2.3 → 1.2.x (>=1.2.3 <1.3.0)
-1.2.3  → exact version
-
-## Pre-release Order
-alpha < beta < rc < stable
-1.0.0-alpha.1 < 1.0.0-beta.1 < 1.0.0-rc.1 < 1.0.0
-```
-
----
-
-## 13. Why This Configuration Works
-
-- **Version numbers communicate change impact**: Following SemVer strictly means consumers can look at a version bump and immediately know whether the update is a safe patch, a feature addition, or a potentially breaking change. This clarity enables confident dependency management at scale.
-- **Automated versioning eliminates human error**: Deriving version numbers from conventional commit messages removes the subjective judgment from versioning decisions. The commit history becomes the single source of truth, ensuring version bumps are consistent and accurate.
-- **Deprecation before removal protects consumers**: The disciplined deprecation-then-removal cycle gives downstream users advance notice and migration time. This builds trust with API consumers and avoids the surprise breakage that erodes confidence in a library or service.
-- **Changelogs provide actionable upgrade guidance**: Automatically generated changelogs grouped by type (features, fixes, breaking changes) give consumers exactly the information they need to evaluate and plan upgrades, reducing the friction of staying up to date.
-- **Pre-release versions enable safe experimentation**: The alpha/beta/rc progression provides a structured path for testing major changes with early adopters before committing to a stable release, catching integration issues without affecting the broader user base.
-
----
-
-**Last Updated:** 2026-01-31
-**Version:** 1.0
-**Maintainer:** Release Team
-
-
 **End of Semantic Versioning Guidelines**

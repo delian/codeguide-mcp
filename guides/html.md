@@ -1,1543 +1,392 @@
 # HTML Development Guidelines
-Mandatory coding standards and development practices for modern HTML applications. HTML5, W3C Validator, Lighthouse, axe DevTools, Semantic markup, ARIA.
+Mandatory standards for modern, semantic, accessible HTML: correct sectioning, robust forms, accurate metadata, and current platform elements. HTML Living Standard, html-validate, W3C Validator, axe-core, Prettier.
 
 ---
-Agent Profile: The Modern HTML Expert
-Role: Senior Front-End Developer & Accessibility Specialist
-Objective: Generate production-ready, semantic, accessible, performant, and maintainable HTML code.
-Tools: HTML5, W3C Validator, Lighthouse, axe DevTools, Semantic markup, ARIA.
+name: html
+title: HTML Development Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: language
+tools: [html-living-standard, html-validate@9, w3c-validator, axe-core@4, lighthouse@12, prettier@3]
+requires: []
+recommends:
+  - accessibility
+  - css
+  - ui
+  - secure-coding
+provides:
+  - semantic-html
+  - html-forms
+  - html-metadata
+  - modern-html-elements
+---
 
-## 1. Core Philosophies
-
-The agent must adhere to the "SEMANTIC-FIRST" principles for every HTML project:
-
-**Semantic Markup**: Use semantic HTML5 elements, meaningful structure, proper nesting.
-**Explicit Accessibility**: WCAG 2.1 AA compliance, ARIA labels, keyboard navigation.
-**Minimal & Clean**: No unnecessary divs, clean structure, readable formatting.
-**Accessible Forms**: Proper labels, fieldsets, error messages, focus management.
-**Named Landmarks**: Clear page structure with main, nav, aside, footer.
-**Text Alternatives**: Alt text for images, captions for media, descriptive links.
-**Internationalization Ready**: lang attributes, dir support, character encoding.
-**Content First**: Progressive enhancement, semantic structure without CSS/JS.
-
-**Fast Loading**: Optimized assets, lazy loading, critical CSS inline.
-**Independent of Styling**: Structure works without CSS, no presentation in HTML.
-**Responsive by Default**: Mobile-first, viewport meta tag, fluid layouts.
-**SEO Optimized**: Meta tags, structured data, semantic headings, meaningful content.
-**Tested & Validated**: W3C validation, accessibility testing, cross-browser compatibility.
-
-## 2. Agent Code Generation Requirements (MANDATORY)
-
-### A. Verification Protocol
-
-**CRITICAL: Agents MUST verify that all generated HTML is valid, accessible, and semantic before presenting it to the user.**
-
-#### Pre-Delivery Checklist
-
-**Before delivering ANY HTML code, the agent MUST:**
-
-1. **HTML Validation**:
-   ```bash
-   # Validate HTML with W3C validator
-   npx html-validate *.html
-   # OR use online validator
-   # https://validator.w3.org/
-   # Exit code MUST be 0, no errors
-   ```
-
-2. **Accessibility Check**:
-   ```bash
-   # Run accessibility audit
-   npx pa11y-ci *.html
-   # OR lighthouse accessibility audit
-   npx lighthouse --only-categories=accessibility index.html
-   # Score MUST be ≥ 90
-   ```
-
-3. **Semantic Structure Verification**:
-   - [ ] Uses semantic HTML5 elements (header, nav, main, article, section, aside, footer)
-   - [ ] No unnecessary divs/spans
-   - [ ] Proper heading hierarchy (h1 → h2 → h3, no skipping levels)
-   - [ ] Meaningful link text (no "click here")
-   - [ ] All images have alt text
-   - [ ] Forms have proper labels and fieldsets
-
-4. **Performance Check**:
-   ```bash
-   # Run performance audit
-   npx lighthouse --only-categories=performance index.html
-   # Score MUST be ≥ 85
-   ```
-
-5. **SEO Check**:
-   ```bash
-   # Run SEO audit
-   npx lighthouse --only-categories=seo index.html
-   # Score MUST be ≥ 90
-   ```
-
-### B. Error Correction Process
-
-If verification fails:
-
-1. **Read the error/warning message** carefully
-2. **Identify the root cause** (invalid HTML, accessibility issue, semantic error, etc.)
-3. **Fix the issue** in the generated HTML
-4. **Re-run verification** until all checks pass
-5. **Document any non-obvious decisions** in HTML comments
-
-### C. Agent Workflow Example
-
-**Complete workflow for generating an HTML page:**
-
-1. **Generate semantic HTML structure**:
-   ```html
-   <!DOCTYPE html>
-   <html lang="en">
-   <head>
-     <meta charset="UTF-8">
-     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-     <meta name="description" content="User dashboard for managing account">
-     <title>User Dashboard - MyApp</title>
-   </head>
-   <body>
-     <header>
-       <nav aria-label="Main navigation">
-         <ul>
-           <li><a href="/">Home</a></li>
-           <li><a href="/about">About</a></li>
-         </ul>
-       </nav>
-     </header>
-     
-     <main>
-       <h1>Welcome to Your Dashboard</h1>
-       <article>
-         <h2>Recent Activity</h2>
-         <p>Your recent account activity.</p>
-       </article>
-     </main>
-     
-     <footer>
-       <p>&copy; 2026 MyApp. All rights reserved.</p>
-     </footer>
-   </body>
-   </html>
-   ```
-
-2. **Verify HTML validity**:
-   ```bash
-   npx html-validate index.html
-   # ✓ No errors
-   ```
-
-3. **Check accessibility**:
-   ```bash
-   npx pa11y index.html
-   # ✓ No issues
-   ```
-
-4. **Verify semantic structure** (manual check):
-   - ✓ Proper heading hierarchy
-   - ✓ Semantic elements used
-   - ✓ ARIA labels present
-   - ✓ All images have alt text
-
-5. **Run Lighthouse audit**:
-   ```bash
-   npx lighthouse index.html
-   # ✓ Accessibility: 100
-   # ✓ SEO: 100
-   # ✓ Performance: 95
-   ```
-
-6. **Present code** to user - only after ALL checks pass
-
-### D. Prohibited Practices
-
-**NEVER deliver HTML that:**
-- ❌ Has W3C validation errors
-- ❌ Has accessibility violations (WCAG 2.1 AA)
-- ❌ Uses non-semantic markup (div soup)
-- ❌ Has missing alt text on images
-- ❌ Has forms without labels
-- ❌ Skips heading levels (h1 → h3)
-- ❌ Uses tables for layout
-- ❌ Has inline styles or presentation attributes
-- ❌ Missing DOCTYPE or meta charset
-- ❌ Has non-descriptive link text ("click here", "read more")
-- ❌ Missing lang attribute on html element
-- ❌ Uses deprecated HTML elements (font, center, marquee, etc.)
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide covers only what is unique to HTML — the document language itself.
 
 ---
 
-## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+## 0. Prerequisites & References
 
-**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new HTML development.**
+HTML has no hard prerequisites, but it is the substrate for several cross-cutting concerns. Fetch the relevant guide when the task touches it; this guide keeps only the HTML binding.
 
-### TDD Cycle for HTML
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`accessibility.md`](guides://accessibility.md) — WCAG, ARIA, keyboard, contrast, screen-reader behavior. **Semantic HTML *is* the accessibility foundation**; this guide owns the HTML binding (landmarks, `alt`, labels, heading order), and defers all ARIA depth and audit policy to the owner.
+> - [`css.md`](guides://css.md) — all styling. HTML carries structure only; presentation attributes and inline styles are forbidden (§3).
+> - [`ui.md`](guides://ui.md) — form UX, validation messaging, focus/error flows. This guide owns the markup; `ui.md` owns the interaction design.
+> - [`secure-coding.md`](guides://secure-coding.md) — sanitization of user-supplied HTML, `rel` hardening, Content-Security-Policy. Bindings appear in §3 and §10.
 
-```
-1. 🔴 RED: Write a failing test/validation first
-   ↓
-2. 🟢 GREEN: Write minimal HTML to make it pass
-   ↓
-3. 🔵 REFACTOR: Improve structure while keeping tests green
-   ↓
-   Repeat
-```
-
-### Example TDD Workflow for HTML
-
-```javascript
-// Step 1: RED - Write failing test first (tests/html.test.js)
-import { test, expect } from 'vitest';
-import { JSDOM } from 'jsdom';
-import fs from 'fs';
-
-test('page has proper semantic structure', () => {
-  const html = fs.readFileSync('src/index.html', 'utf-8');
-  const dom = new JSDOM(html);
-  const doc = dom.window.document;
-
-  expect(doc.querySelector('header')).toBeTruthy();
-  expect(doc.querySelector('main')).toBeTruthy();
-  expect(doc.querySelector('footer')).toBeTruthy();
-  expect(doc.querySelector('nav')).toBeTruthy();
-});
-
-test('all images have alt attributes', () => {
-  const html = fs.readFileSync('src/index.html', 'utf-8');
-  const dom = new JSDOM(html);
-  const images = dom.window.document.querySelectorAll('img');
-
-  images.forEach(img => {
-    expect(img.hasAttribute('alt')).toBe(true);
-  });
-});
-
-// Run: npm test
-// ❌ FAILS - HTML structure doesn't exist yet
-
-// Step 2: GREEN - Write minimal HTML
-// src/index.html
-/*
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Page Title</title>
-</head>
-<body>
-  <header><nav>...</nav></header>
-  <main>...</main>
-  <footer>...</footer>
-</body>
-</html>
-*/
-
-// Run: npm test
-// ✅ PASSES - semantic structure present
-```
+> 📎 **SEE ALSO:** [`markdown.md`](guides://markdown.md) · [`openapi.md`](guides://openapi.md) · [`e2e-testing.md`](guides://e2e-testing.md) *(DOM-level page assertions)*
 
 ---
 
-## 2B. Bug Fix Protocol (MANDATORY)
+## 1. Core Philosophies: SEMANTIC-FIRST
 
-**CRITICAL: Every HTML bug MUST receive a regression test BEFORE fixing.**
+HTML-specific principles only. Accessibility, styling, and security policy come from §0.
 
-### Bug Fix Workflow
+- **S**emantics over `div`s: every element is chosen for its *meaning*. A `<div>`/`<span>` is the element of last resort, used only when no semantic element fits.
+- **E**xpress structure, not style: HTML describes content; CSS describes appearance. No presentation attributes, no inline `style`.
+- **M**eaning is the contract: landmarks, headings, and labels form the accessibility tree — they are not decoration (binding to `accessibility.md`).
+- **A**ttributes do real work: native form validation, `autocomplete` tokens, `loading`, `type`, and `lang` replace JavaScript wherever the platform already solves it.
+- **N**ative before custom: prefer `<dialog>`, `<details>`, the popover API, and real form controls over JS re-implementations.
+- **T**est the parse tree: validity and the accessibility tree are auditable gates (§2), not opinions.
+- **I**nternationalize by default: `lang`, `dir`, and `<meta charset="utf-8">` are always present and correct.
+- **C**ontent works without CSS/JS: markup is meaningful and usable as plain HTML (progressive enhancement).
 
-```
-1. 🐛 Bug Reported/Discovered (e.g., accessibility issue)
-   ↓
-2. ✍️ Write a test that REPRODUCES the bug (test will FAIL)
-   ↓
-3. ✅ Verify the test fails for the right reason
-   ↓
-4. 🔧 Fix the bug (make the test pass)
-   ↓
-5. 🟢 Verify the test now PASSES
-   ↓
-6. 📝 Document the bug in test comments (include bug ID)
-   ↓
-7. 🚀 Deploy with confidence (regression prevented)
-```
-
-### Example Bug Fix
-
-```javascript
-// Bug Report #234: Form inputs missing labels
-
-// Step 1-2: Write test that reproduces the bug
-test('all form inputs have associated labels - Bug #234', () => {
-  // Bug: Screen readers couldn't identify form fields
-  // Discovered: 2026-01-18
-  // This test prevents regression
-
-  const html = fs.readFileSync('src/contact.html', 'utf-8');
-  const dom = new JSDOM(html);
-  const doc = dom.window.document;
-  const inputs = doc.querySelectorAll('input:not([type="hidden"]), textarea, select');
-
-  inputs.forEach(input => {
-    const id = input.getAttribute('id');
-    const label = doc.querySelector(`label[for="${id}"]`);
-    expect(label).toBeTruthy();
-  });
-});
-
-// Run: npm test
-// ❌ FAILS - inputs missing labels
-
-// Step 3: Fix the HTML
-// Before (buggy):
-// <input type="email" name="email">
-
-// After (fixed):
-// <label for="email">Email Address</label>
-// <input type="email" id="email" name="email">
-
-// Run: npm test
-// ✅ PASSES - bug fixed, regression prevented
-```
+**Verified Code**: Agent-generated HTML MUST pass every gate in §2 before delivery.
 
 ---
 
-## 3. HTML5 Document Structure (MANDATORY)
+## 2. Requirements (MANDATORY, auditable)
 
-### A. Complete HTML5 Template
+RFC-2119 keywords. IDs `HTML-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a shared rule cite its owner.
+
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| HTML-VALID-01 | Markup MUST be valid against the living standard | `npx html-validate "**/*.html"` | exit 0, 0 errors |
+| HTML-STRUCT-01 | `<!DOCTYPE html>`, `<html lang>`, `<meta charset="utf-8">` (first), and `<meta name="viewport">` MUST be present | review / html-validate | all present |
+| HTML-SEM-01 | One `<main>` and one `<h1>` per page; headings MUST NOT skip levels; landmarks used over generic `div`s | `npx html-validate` (heading-levels, no-redundant-role) | exit 0 |
+| HTML-A11Y-01 | Every `<img>` MUST have `alt`; every control a programmatic label; 0 critical axe violations (see `accessibility.md`) | `npx @axe-core/cli <url>` | 0 critical/serious |
+| HTML-FORM-01 | Inputs MUST use the correct `type`, an associated `<label>`, and an `autocomplete` token where one exists | review / html-validate (`input-missing-label`) | exit 0 |
+| HTML-SEC-01 | `target="_blank"` MUST carry `rel="noopener"`; user-supplied HTML MUST be sanitized server-side (see `secure-coding.md`) | review / grep | no bare `_blank`, sanitized |
+| HTML-FMT-01 | Markup MUST be formatted | `npx prettier --check "**/*.html"` | no diff |
+| HTML-PERF-01 | Below-the-fold media MUST set `loading="lazy"`; raster `<img>` MUST set `width`/`height` (or `aspect-ratio`) | review / lighthouse | no CLS from media |
+| HTML-SEO-01 | Each page MUST have a unique `<title>`, `<meta name="description">`, and `<link rel="canonical">` | review | present & unique |
+
+> **Forbidden**: `div`/`span` soup where a semantic element exists; presentation attributes or inline `style` (use `css.md`); placeholder used as a label; tables for layout; deprecated elements (`<font>`, `<center>`, `<marquee>`, `<acronym>`); `<meta http-equiv="X-UA-Compatible">` and `<meta name="keywords">` (both obsolete/ignored); injecting unsanitized user HTML.
+
+---
+
+## 3. Verification Protocol
+
+Run, in order, before presenting code. Fix → re-run until every gate is green.
+
+```bash
+npx prettier --check "**/*.html"     # HTML-FMT-01
+npx html-validate "**/*.html"        # HTML-VALID-01/STRUCT-01/SEM-01/FORM-01
+npx @axe-core/cli http://localhost:PORT   # HTML-A11Y-01 (serve first)
+npx lighthouse http://localhost:PORT --only-categories=performance,seo  # HTML-PERF-01/SEO-01
+```
+
+`html-validate` is configurable via `.htmlvalidate.json` (extend `html-validate:recommended`); the W3C Nu validator (`validator.w3.org` / `vnu.jar`) is the authoritative cross-check. The *why* behind accessibility and security gates lives in their §0 owners.
+
+---
+
+## 4. Document Skeleton & Metadata
+
+The canonical document. `<meta charset>` MUST be the first child of `<head>` (it must appear within the first 1024 bytes); `viewport` is required for responsive layout.
 
 ```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <!-- Character Encoding (MUST be first) -->
-  <meta charset="UTF-8">
-  
-  <!-- Viewport for Responsive Design (REQUIRED) -->
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  
-  <!-- IE Compatibility -->
-  <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  
-  <!-- Primary Meta Tags (REQUIRED) -->
-  <title>Page Title - Site Name</title>
-  <meta name="title" content="Page Title - Site Name">
-  <meta name="description" content="Concise description (150-160 characters)">
-  <meta name="keywords" content="keyword1, keyword2, keyword3">
-  <meta name="author" content="Author Name">
-  
-  <!-- Open Graph / Facebook -->
-  <meta property="og:type" content="website">
-  <meta property="og:url" content="https://example.com/">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Specific, Unique Page Title — Site Name</title>
+  <meta name="description" content="One clear sentence, ~150 chars, unique per page.">
+  <link rel="canonical" href="https://example.com/page">
+
+  <!-- Open Graph: the de-facto social/share contract (Twitter reads OG as fallback) -->
+  <meta property="og:type" content="article">
   <meta property="og:title" content="Page Title">
-  <meta property="og:description" content="Page description">
-  <meta property="og:image" content="https://example.com/image.jpg">
-  
-  <!-- Twitter -->
+  <meta property="og:description" content="Share-card description.">
+  <meta property="og:image" content="https://example.com/card.jpg">
+  <meta property="og:url" content="https://example.com/page">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:url" content="https://example.com/">
-  <meta name="twitter:title" content="Page Title">
-  <meta name="twitter:description" content="Page description">
-  <meta name="twitter:image" content="https://example.com/image.jpg">
-  
-  <!-- Favicon -->
-  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
-  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="manifest" href="/site.webmanifest">
-  
-  <!-- Stylesheets -->
+  <meta name="theme-color" content="#0b5fff">
+
   <link rel="stylesheet" href="/css/styles.css">
-  
-  <!-- Preload Critical Resources -->
-  <link rel="preload" href="/fonts/main-font.woff2" as="font" type="font/woff2" crossorigin>
-  
-  <!-- Theme Color -->
-  <meta name="theme-color" content="#ffffff">
+  <script src="/js/main.js" type="module"></script>  <!-- type=module defers by default -->
 </head>
 <body>
-  <!-- Skip to main content link (ACCESSIBILITY REQUIRED) -->
-  <a href="#main-content" class="skip-link">Skip to main content</a>
-  
-  <!-- Header -->
-  <header>
-    <nav aria-label="Main navigation">
-      <!-- Navigation content -->
-    </nav>
-  </header>
-  
-  <!-- Main Content (REQUIRED) -->
-  <main id="main-content">
-    <!-- Page content -->
-  </main>
-  
-  <!-- Footer -->
-  <footer>
-    <!-- Footer content -->
-  </footer>
-  
-  <!-- Scripts (at end of body for performance) -->
-  <script src="/js/main.js" defer></script>
+  <a class="skip-link" href="#main">Skip to main content</a>
+  <header>…</header>
+  <main id="main">…</main>
+  <footer>…</footer>
 </body>
 </html>
 ```
 
-### B. Head Section Requirements
-
-**MANDATORY meta tags:**
-```html
-<head>
-  <!-- These 3 MUST be first in this order -->
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  
-  <!-- REQUIRED -->
-  <title>Descriptive Page Title (50-60 characters)</title>
-  <meta name="description" content="Clear description (150-160 characters)">
-</head>
-```
-
-**Page Title Best Practices:**
-```html
-<!-- ✅ CORRECT - Descriptive and unique -->
-<title>User Profile Settings - MyApp Dashboard</title>
-<title>Product Name - Category - Store Name</title>
-<title>Article Title | Blog Name</title>
-
-<!-- ❌ WRONG - Too generic or vague -->
-<title>Home</title>
-<title>Page</title>
-<title>Welcome</title>
-```
+Modern notes: drop `X-UA-Compatible` and `meta name="keywords"` (ignored). Prefer a single SVG favicon plus one PNG apple-touch fallback over the old multi-size PNG pile. Use `<script type="module">` (deferred by default) or `defer`; never block parsing in `<head>`. Resource hints — `preload` (critical font/CSS/LCP image), `preconnect` (third-party origin), `prefetch` (next navigation) — are applied sparingly; over-preloading regresses performance.
 
 ---
 
-## 4. Semantic HTML5 Elements (MANDATORY)
+## 5. Semantic Structure: Landmarks, Sectioning & Headings
 
-### A. Structural Elements
+Choose the element that names the content. The result is the accessibility tree (see `accessibility.md`).
 
-**ALWAYS use semantic elements instead of generic divs:**
+| Element | Implicit landmark / role | Use for |
+|---|---|---|
+| `<header>` | `banner` (page-level) | Site/section masthead |
+| `<nav>` | `navigation` | A set of navigation links; label each: `aria-label` |
+| `<main>` | `main` (one per page) | The primary unique content |
+| `<article>` | `article` | Independently distributable unit (post, card, comment) |
+| `<section>` | `region` (if labeled) | Thematic grouping **with a heading** |
+| `<aside>` | `complementary` | Tangential content (sidebar, callout) |
+| `<footer>` | `contentinfo` (page-level) | Page/section footer |
+| `<search>` | `search` | Search form region (modern, replaces `role="search"`) |
+| `<figure>`/`<figcaption>` | — | Self-contained media with a caption |
 
 ```html
-<!-- ✅ CORRECT - Semantic structure -->
-<header>
-  <nav aria-label="Main navigation">
-    <ul>
-      <li><a href="/">Home</a></li>
-      <li><a href="/about">About</a></li>
-      <li><a href="/contact">Contact</a></li>
-    </ul>
-  </nav>
-</header>
-
-<main>
+<main id="main">
+  <h1>Page Title</h1>                      <!-- exactly one h1 -->
   <article>
     <header>
-      <h1>Article Title</h1>
-      <p>Published on <time datetime="2026-01-17">January 17, 2026</time></p>
+      <h2>Article Title</h2>
+      <p>By <a href="/u/jane" rel="author">Jane</a> ·
+         <time datetime="2026-06-05">June 5, 2026</time></p>
     </header>
-    
-    <section>
-      <h2>Section Heading</h2>
-      <p>Content paragraph.</p>
+    <section aria-labelledby="bg">
+      <h3 id="bg">Background</h3>            <!-- h1→h2→h3, no skips -->
+      <p>…</p>
     </section>
-    
-    <aside>
-      <h3>Related Information</h3>
-      <p>Sidebar content.</p>
-    </aside>
-    
-    <footer>
-      <p>Author: <a href="/authors/john">John Doe</a></p>
-    </footer>
   </article>
 </main>
-
-<aside aria-label="Sidebar">
-  <section>
-    <h2>Popular Posts</h2>
-    <ul>
-      <li><a href="/post-1">Post Title 1</a></li>
-      <li><a href="/post-2">Post Title 2</a></li>
-    </ul>
-  </section>
-</aside>
-
-<footer>
-  <nav aria-label="Footer navigation">
-    <ul>
-      <li><a href="/privacy">Privacy Policy</a></li>
-      <li><a href="/terms">Terms of Service</a></li>
-    </ul>
-  </nav>
-  <p>&copy; 2026 Company Name. All rights reserved.</p>
-</footer>
-
-
-<!-- ❌ WRONG - Div soup -->
-<div class="header">
-  <div class="nav">
-    <div class="nav-list">
-      <div class="nav-item"><a href="/">Home</a></div>
-      <div class="nav-item"><a href="/about">About</a></div>
-    </div>
-  </div>
-</div>
-
-<div class="content">
-  <div class="post">
-    <div class="post-title">Article Title</div>
-    <div class="post-content">Content here</div>
-  </div>
-</div>
 ```
 
-### B. Semantic Element Guide
-
-| Element | Purpose | Example |
-|---------|---------|---------|
-| `<header>` | Page or section header | Site header, article header |
-| `<nav>` | Navigation links | Main menu, breadcrumbs |
-| `<main>` | Main content (one per page) | Primary page content |
-| `<article>` | Self-contained content | Blog post, news article |
-| `<section>` | Thematic grouping | Chapter, tab panel |
-| `<aside>` | Tangentially related content | Sidebar, callout box |
-| `<footer>` | Page or section footer | Site footer, article footer |
-| `<figure>` | Self-contained media | Image with caption |
-| `<figcaption>` | Caption for figure | Image description |
-| `<time>` | Date/time | `<time datetime="2026-01-17">` |
-| `<mark>` | Highlighted text | Search results highlight |
-| `<details>` | Expandable content | Accordion, FAQ |
-| `<summary>` | Summary for details | Accordion title |
-
-### C. Heading Hierarchy (CRITICAL)
-
-**MUST follow proper heading order:**
-
-```html
-<!-- ✅ CORRECT - Proper hierarchy -->
-<main>
-  <h1>Main Page Title</h1>
-  
-  <section>
-    <h2>Section Title</h2>
-    <p>Content</p>
-    
-    <h3>Subsection Title</h3>
-    <p>More content</p>
-    
-    <h4>Sub-subsection</h4>
-    <p>Detailed content</p>
-  </section>
-  
-  <section>
-    <h2>Another Section</h2>
-    <p>Content</p>
-  </section>
-</main>
-
-
-<!-- ❌ WRONG - Skipped levels -->
-<main>
-  <h1>Main Title</h1>
-  <h3>Skipped h2!</h3>  <!-- BAD: Jumped from h1 to h3 -->
-  <h2>Wrong order</h2>  <!-- BAD: h2 after h3 -->
-</main>
-
-
-<!-- ❌ WRONG - Multiple h1 elements -->
-<main>
-  <h1>First Title</h1>
-  <h1>Second Title</h1>  <!-- BAD: Only one h1 per page -->
-</main>
-```
-
-**Heading Checklist:**
-- [ ] Only ONE `<h1>` per page
-- [ ] Headings follow sequential order (h1 → h2 → h3, never skip)
-- [ ] Headings describe content accurately
-- [ ] Every section has a heading
-- [ ] Headings are not used just for styling (use CSS)
+Rules: a `<section>` is only a landmark when it has an accessible name (`aria-labelledby` pointing at its heading) — otherwise prefer a plain heading + content or a `<div>`. Use multiple `<nav>`/`<header>`/`<footer>` freely, but distinguish same-type landmarks with labels. Headings convey document outline; **never pick a heading level for its font size** — that is CSS's job (`css.md`).
 
 ---
 
-## 5. Accessibility Requirements (WCAG 2.1 AA Mandatory)
+## 6. Forms
 
-### A. ARIA Labels and Landmarks
-
-```html
-<!-- ✅ CORRECT - Proper ARIA labels -->
-<nav aria-label="Main navigation">
-  <ul>
-    <li><a href="/">Home</a></li>
-    <li><a href="/products">Products</a></li>
-  </ul>
-</nav>
-
-<nav aria-label="Footer navigation">
-  <ul>
-    <li><a href="/privacy">Privacy</a></li>
-    <li><a href="/terms">Terms</a></li>
-  </ul>
-</nav>
-
-<button aria-label="Close dialog" aria-describedby="close-description">
-  <svg>...</svg>
-</button>
-<span id="close-description" class="sr-only">Closes the modal and returns to main page</span>
-
-<form role="search" aria-label="Search site">
-  <input type="search" aria-label="Search query" placeholder="Search...">
-  <button type="submit">Search</button>
-</form>
-```
-
-### B. Alternative Text for Images
+HTML forms own validation, input semantics, and labeling. UX (error copy, focus flow, inline messaging) belongs to [`ui.md`](guides://ui.md).
 
 ```html
-<!-- ✅ CORRECT - Descriptive alt text -->
-<img src="chart.png" alt="Bar chart showing sales increase of 45% in Q4 2026">
-<img src="profile.jpg" alt="Jane Doe, CEO of TechCorp">
-<img src="logo.svg" alt="Company Name">
-
-<!-- ✅ CORRECT - Decorative images (empty alt) -->
-<img src="decorative-line.svg" alt="" role="presentation">
-<img src="background-pattern.png" alt="" role="presentation">
-
-<!-- ✅ CORRECT - Complex images with longer description -->
-<figure>
-  <img src="complex-diagram.png" alt="Network architecture diagram" aria-describedby="diagram-desc">
-  <figcaption id="diagram-desc">
-    Network diagram showing three-tier architecture with load balancer,
-    application servers, and database cluster with master-slave replication.
-  </figcaption>
-</figure>
-
-<!-- ❌ WRONG - Missing or poor alt text -->
-<img src="photo.jpg">  <!-- Missing alt -->
-<img src="chart.png" alt="image">  <!-- Not descriptive -->
-<img src="button.png" alt="click here">  <!-- Not helpful -->
-```
-
-### C. Form Accessibility
-
-```html
-<!-- ✅ CORRECT - Accessible form -->
-<form method="post" action="/submit">
+<form method="post" action="/signup">
   <fieldset>
-    <legend>Personal Information</legend>
-    
-    <div class="form-group">
-      <label for="fullname">Full Name <span aria-label="required">*</span></label>
-      <input 
-        type="text" 
-        id="fullname" 
-        name="fullname" 
-        required 
-        aria-required="true"
-        aria-describedby="fullname-hint"
-      >
-      <small id="fullname-hint">Enter your first and last name</small>
+    <legend>Account</legend>
+
+    <div class="field">
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email"
+             required autocomplete="email" inputmode="email"
+             aria-describedby="email-hint">
+      <small id="email-hint">We never share it.</small>
     </div>
-    
-    <div class="form-group">
-      <label for="email">Email Address <span aria-label="required">*</span></label>
-      <input 
-        type="email" 
-        id="email" 
-        name="email" 
-        required 
-        aria-required="true"
-        aria-invalid="false"
-        aria-describedby="email-error"
-      >
-      <span id="email-error" role="alert" aria-live="polite"></span>
+
+    <div class="field">
+      <label for="pw">Password</label>
+      <input id="pw" name="pw" type="password"
+             required minlength="12" autocomplete="new-password">
     </div>
-    
-    <fieldset>
-      <legend>Notification Preferences</legend>
-      <div class="form-group">
-        <input type="checkbox" id="email-notify" name="notifications" value="email">
-        <label for="email-notify">Email notifications</label>
-      </div>
-      <div class="form-group">
-        <input type="checkbox" id="sms-notify" name="notifications" value="sms">
-        <label for="sms-notify">SMS notifications</label>
-      </div>
-    </fieldset>
-    
-    <div class="form-group">
-      <label for="country">Country</label>
-      <select id="country" name="country" required aria-required="true">
-        <option value="">Select a country</option>
-        <option value="us">United States</option>
-        <option value="uk">United Kingdom</option>
-        <option value="ca">Canada</option>
-      </select>
-    </div>
-    
-    <button type="submit">Submit Form</button>
-    <button type="reset">Reset Form</button>
   </fieldset>
+
+  <fieldset>
+    <legend>Contact preference</legend>
+    <label><input type="radio" name="contact" value="email" checked> Email</label>
+    <label><input type="radio" name="contact" value="sms"> SMS</label>
+  </fieldset>
+
+  <button type="submit">Create account</button>
 </form>
-
-
-<!-- ❌ WRONG - Inaccessible form -->
-<form>
-  Full Name: <input type="text" name="name">  <!-- No label -->
-  <input type="email" placeholder="Email">  <!-- Placeholder is not a label -->
-  <input type="checkbox" value="yes"> Subscribe  <!-- Label not associated -->
-  <div onclick="submitForm()">Submit</div>  <!-- Not a button -->
-</form>
 ```
 
-### D. Keyboard Navigation
-
-```html
-<!-- ✅ CORRECT - Keyboard accessible -->
-<button type="button" onclick="openModal()">Open Modal</button>
-
-<a href="/download.pdf" download>Download PDF</a>
-
-<div role="button" tabindex="0" onclick="doAction()" onkeydown="handleKey(event)">
-  Custom Button
-</div>
-
-<!-- Modal with focus trap -->
-<div role="dialog" aria-labelledby="modal-title" aria-modal="true">
-  <h2 id="modal-title">Modal Title</h2>
-  <button aria-label="Close" onclick="closeModal()">×</button>
-  <div>Modal content</div>
-</div>
-
-
-<!-- ❌ WRONG - Not keyboard accessible -->
-<div onclick="doAction()">Click Me</div>  <!-- No keyboard support -->
-<span onclick="submit()">Submit</span>  <!-- Should be button -->
-<a href="#" onclick="action()">Action</a>  <!-- Fake link -->
-```
-
-### E. Skip Links
-
-```html
-<!-- ✅ CORRECT - Skip link at beginning of body (REQUIRED) -->
-<body>
-  <a href="#main-content" class="skip-link">Skip to main content</a>
-  
-  <header>
-    <!-- Header content -->
-  </header>
-  
-  <main id="main-content" tabindex="-1">
-    <h1>Main Content</h1>
-    <!-- Content -->
-  </main>
-</body>
-
-<style>
-  /* Skip link visible on focus */
-  .skip-link {
-    position: absolute;
-    top: -40px;
-    left: 0;
-    background: #000;
-    color: #fff;
-    padding: 8px;
-    text-decoration: none;
-    z-index: 100;
-  }
-  
-  .skip-link:focus {
-    top: 0;
-  }
-</style>
-```
+- **Labels are mandatory.** Associate via `<label for>`/`id` (preferred) or by wrapping. `placeholder` is a hint, never a label.
+- **Use the right `type`/`inputmode`**: `email`, `tel`, `url`, `number`, `date`, `search`, `color`, `range`, `file`. These give native validation, keyboards, and pickers for free.
+- **Native validation attributes**: `required`, `min`/`max`/`step`, `minlength`/`maxlength`, `pattern`, `type`. Style state with `:invalid`/`:user-invalid` (CSS); the `:user-invalid` pseudo-class avoids flagging untouched fields.
+- **`autocomplete` vocabulary** — use the standardized tokens so browsers/password managers fill correctly: `name`, `given-name`, `family-name`, `email`, `username`, `current-password`, `new-password`, `one-time-code`, `street-address`, `address-line1`, `postal-code`, `country`, `tel`, `cc-number`, `cc-exp`. Use `autocomplete="off"` only with cause.
+- **Group** related controls with `<fieldset>`/`<legend>` (required for radio/checkbox sets). Pair `<input>`/`<textarea>`/`<select>` with `<datalist>` for suggestion lists.
+- **Buttons**: always set `type` (`submit`/`button`/`reset`); a bare `<button>` defaults to `submit`. Use a real `<button>`, never a clickable `<div>`.
 
 ---
 
-## 6. Performance Optimization (MANDATORY)
-
-### A. Image Optimization
+## 7. Media: Responsive Images, Video & Audio
 
 ```html
-<!-- ✅ CORRECT - Responsive images with lazy loading -->
-<img 
-  src="image-800.jpg"
-  srcset="
-    image-400.jpg 400w,
-    image-800.jpg 800w,
-    image-1200.jpg 1200w
-  "
-  sizes="(max-width: 600px) 400px, (max-width: 900px) 800px, 1200px"
-  alt="Description of image"
-  loading="lazy"
-  width="800"
-  height="600"
->
-
-<!-- ✅ CORRECT - Modern image formats with fallback -->
+<!-- Art direction + format negotiation -->
 <picture>
-  <source srcset="image.avif" type="image/avif">
-  <source srcset="image.webp" type="image/webp">
-  <img src="image.jpg" alt="Fallback image" loading="lazy">
+  <source srcset="hero.avif" type="image/avif">
+  <source srcset="hero.webp" type="image/webp">
+  <img src="hero.jpg" alt="Team on stage at the 2026 launch"
+       width="1200" height="630" loading="eager" fetchpriority="high">
 </picture>
 
-<!-- ✅ CORRECT - Lazy loading for off-screen images -->
-<img src="hero.jpg" alt="Hero image" loading="eager">  <!-- Above fold -->
-<img src="content.jpg" alt="Content image" loading="lazy">  <!-- Below fold -->
+<!-- Resolution switching: let the browser pick by viewport + DPR -->
+<img src="photo-800.jpg"
+     srcset="photo-400.jpg 400w, photo-800.jpg 800w, photo-1200.jpg 1200w"
+     sizes="(max-width: 600px) 100vw, 800px"
+     alt="…" width="800" height="600" loading="lazy" decoding="async">
 
-
-<!-- ❌ WRONG - No optimization -->
-<img src="huge-image-5mb.jpg" alt="Image">  <!-- Too large -->
-<img src="image.jpg">  <!-- Missing width/height causes layout shift -->
+<video controls width="640" height="360" poster="poster.jpg" preload="metadata">
+  <source src="clip.webm" type="video/webm">
+  <source src="clip.mp4" type="video/mp4">
+  <track kind="captions" src="clip.en.vtt" srclang="en" label="English" default>
+</video>
 ```
 
-### B. Resource Loading
-
-```html
-<head>
-  <!-- ✅ CORRECT - Preload critical resources -->
-  <link rel="preload" href="/fonts/main.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="/css/critical.css" as="style">
-  <link rel="preload" href="/images/hero.jpg" as="image">
-  
-  <!-- ✅ CORRECT - Prefetch next-page resources -->
-  <link rel="prefetch" href="/next-page.html">
-  <link rel="prefetch" href="/js/next-page.js">
-  
-  <!-- ✅ CORRECT - DNS prefetch for external resources -->
-  <link rel="dns-prefetch" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
-  
-  <!-- ✅ CORRECT - Critical CSS inline, rest async -->
-  <style>
-    /* Critical above-the-fold CSS */
-  </style>
-  <link rel="preload" href="/css/styles.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
-  <noscript><link rel="stylesheet" href="/css/styles.css"></noscript>
-</head>
-
-<body>
-  <!-- ✅ CORRECT - Scripts with defer or async -->
-  <script src="/js/critical.js"></script>  <!-- Blocks parsing, use sparingly -->
-  <script src="/js/analytics.js" async></script>  <!-- Doesn't block -->
-  <script src="/js/main.js" defer></script>  <!-- Waits for parsing -->
-  
-  <!-- ❌ WRONG - Blocking scripts in head -->
-  <!-- <script src="large-library.js"></script> in head -->
-</body>
-```
-
-### C. Lazy Loading
-
-```html
-<!-- ✅ CORRECT - Native lazy loading -->
-<img src="image.jpg" alt="Image" loading="lazy" width="800" height="600">
-
-<iframe 
-  src="https://www.youtube.com/embed/VIDEO_ID" 
-  loading="lazy"
-  width="560" 
-  height="315"
-  title="Video title"
-></iframe>
-
-<!-- ✅ CORRECT - Lazy load below-the-fold content -->
-<article>
-  <img src="hero.jpg" alt="Hero" loading="eager">  <!-- Load immediately -->
-  <h1>Article Title</h1>
-  <p>Introduction paragraph...</p>
-  <img src="content-1.jpg" alt="Image 1" loading="lazy">  <!-- Lazy load -->
-  <img src="content-2.jpg" alt="Image 2" loading="lazy">
-</article>
-```
+- Always set `width`/`height` (or CSS `aspect-ratio`) to reserve space and prevent layout shift (HTML-PERF-01).
+- `loading="lazy"` for below-the-fold images and iframes; `loading="eager"` + `fetchpriority="high"` for the LCP image.
+- `<picture>` for format/art-direction; bare `srcset`+`sizes` for resolution switching.
+- Decorative images take `alt=""` (empty, not missing). Video/audio MUST ship captions (`<track kind="captions">`) — accessibility binding, see `accessibility.md`.
 
 ---
 
-## 7. SEO Best Practices (MANDATORY)
+## 8. Tables, Links & Navigation
 
-### A. Structured Data (Schema.org)
+**Data tables** (never layout) carry real structure:
 
 ```html
-<!-- ✅ CORRECT - JSON-LD structured data -->
+<table>
+  <caption>Q2 revenue by region</caption>
+  <thead>
+    <tr><th scope="col">Region</th><th scope="col">Revenue</th></tr>
+  </thead>
+  <tbody>
+    <tr><th scope="row">EMEA</th><td>$1.2M</td></tr>
+    <tr><th scope="row">APAC</th><td>$0.9M</td></tr>
+  </tbody>
+  <tfoot>
+    <tr><th scope="row">Total</th><td>$2.1M</td></tr>
+  </tfoot>
+</table>
+```
+
+`<caption>`, `<th scope="col|row">`, and `<thead>`/`<tbody>`/`<tfoot>` make the table navigable by assistive tech; use `headers`/`id` for complex multi-level headers.
+
+**Links**: text MUST be self-describing out of context (no "click here"/"read more"). Use `rel="noopener"` on any `target="_blank"` (security — `secure-coding.md`), `rel="nofollow ugc"` on user-generated links, `download` for downloads, and `aria-current="page"` on the active nav item. Mark the current page in navigation; wrap link sets in a labeled `<nav>`.
+
+---
+
+## 9. Modern Platform Elements
+
+Prefer these native elements over JavaScript re-implementations.
+
+```html
+<!-- Native modal: focus trap, Esc-to-close, ::backdrop, inert background — all free -->
+<dialog id="confirm">
+  <form method="dialog">
+    <h2>Delete file?</h2>
+    <button value="cancel">Cancel</button>
+    <button value="ok">Delete</button>
+  </form>
+</dialog>
+<button onclick="document.getElementById('confirm').showModal()">Delete…</button>
+
+<!-- Disclosure widget: no JS needed -->
+<details>
+  <summary>Shipping &amp; returns</summary>
+  <p>Free returns within 30 days.</p>
+</details>
+
+<!-- Popover API: light-dismiss, top-layer, declarative trigger -->
+<button popovertarget="menu">Menu</button>
+<div id="menu" popover>
+  <ul><li><a href="/profile">Profile</a></li><li><a href="/logout">Log out</a></li></ul>
+</div>
+```
+
+- `<dialog>` + `showModal()` is the standard modal: it manages the top layer, focus, `Esc`, `::backdrop`, and inert content. `<form method="dialog">` closes it and reports the pressed button's `value`.
+- `<details>`/`<summary>` give accordions/disclosure for free; group with a shared `name` for exclusive (one-open) accordion behavior.
+- The **popover API** (`popover`, `popovertarget`) provides light-dismiss overlays (menus, tooltips, teaching UI) declaratively, with top-layer stacking and no z-index wars.
+- Other workhorses: `<output>` (live calc result), `<progress>`/`<meter>`, `<time datetime>`, `<datalist>`, `<template>` (inert, cloneable fragment), `<slot>`.
+
+**Web Components (platform basics).** Custom elements extend the platform; `<template>` + Shadow DOM + `<slot>` encapsulate markup and styles:
+
+```html
+<template id="card-tpl">
+  <style>:host { display: block; border: 1px solid #ddd; }</style>
+  <slot name="title"></slot>
+  <slot></slot>
+</template>
+<script type="module">
+  customElements.define('user-card', class extends HTMLElement {
+    constructor() {
+      super();
+      this.attachShadow({ mode: 'open' })
+        .append(document.getElementById('card-tpl').content.cloneNode(true));
+    }
+  });
+</script>
+<user-card><span slot="title">Jane</span><p>Bio…</p></user-card>
+```
+
+Custom element names MUST contain a hyphen. Keep shadow-DOM components accessible (forward ARIA, label slotted controls) — accessibility policy stays in `accessibility.md`.
+
+---
+
+## 10. Structured Data & Security Binding
+
+**Structured data** improves machine understanding and rich results. Prefer JSON-LD (decoupled from markup) over inline microdata:
+
+```html
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
   "@type": "Article",
-  "headline": "Article Headline",
-  "image": "https://example.com/image.jpg",
-  "author": {
-    "@type": "Person",
-    "name": "John Doe"
-  },
-  "publisher": {
-    "@type": "Organization",
-    "name": "Publisher Name",
-    "logo": {
-      "@type": "ImageObject",
-      "url": "https://example.com/logo.jpg"
-    }
-  },
-  "datePublished": "2026-01-17",
-  "dateModified": "2026-01-17"
-}
-</script>
-
-<!-- Product structured data -->
-<script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "Product",
-  "name": "Product Name",
-  "image": "https://example.com/product.jpg",
-  "description": "Product description",
-  "sku": "12345",
-  "offers": {
-    "@type": "Offer",
-    "url": "https://example.com/product",
-    "priceCurrency": "USD",
-    "price": "29.99",
-    "availability": "https://schema.org/InStock"
-  }
+  "headline": "The Power of Semantic HTML",
+  "author": { "@type": "Person", "name": "Jane Doe" },
+  "datePublished": "2026-06-05"
 }
 </script>
 ```
 
-### B. Meta Tags for SEO
+Inline **microdata** (`itemscope`/`itemtype`/`itemprop`) remains valid when data must live on visible elements; validate either with Google's Rich Results Test / Schema.org validator.
 
-```html
-<head>
-  <!-- ✅ CORRECT - Complete SEO meta tags -->
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Page Title - Site Name (50-60 chars)</title>
-  <meta name="description" content="Clear, compelling description (150-160 chars)">
-  <meta name="keywords" content="primary keyword, secondary keyword, tertiary keyword">
-  <meta name="author" content="Author Name">
-  <meta name="robots" content="index, follow">
-  <link rel="canonical" href="https://example.com/page">
-  
-  <!-- Open Graph -->
-  <meta property="og:type" content="website">
-  <meta property="og:url" content="https://example.com/page">
-  <meta property="og:title" content="Page Title">
-  <meta property="og:description" content="Page description">
-  <meta property="og:image" content="https://example.com/image.jpg">
-  <meta property="og:site_name" content="Site Name">
-  <meta property="og:locale" content="en_US">
-  
-  <!-- Twitter Card -->
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:site" content="@username">
-  <meta name="twitter:creator" content="@username">
-  <meta name="twitter:title" content="Page Title">
-  <meta name="twitter:description" content="Page description">
-  <meta name="twitter:image" content="https://example.com/image.jpg">
-</head>
-```
-
-### C. Semantic Links
-
-```html
-<!-- ✅ CORRECT - Descriptive link text -->
-<a href="/guide">Read our comprehensive getting started guide</a>
-<a href="/download.pdf">Download the 2026 Annual Report (PDF, 2MB)</a>
-<a href="/contact">Contact our support team</a>
-
-<!-- External links with security -->
-<a href="https://external-site.com" target="_blank" rel="noopener noreferrer">
-  Visit External Site (opens in new tab)
-</a>
-
-
-<!-- ❌ WRONG - Non-descriptive link text -->
-<a href="/guide">Click here</a>
-<a href="/more">Read more</a>
-<a href="/download.pdf">Download</a>
-<a href="https://external-site.com" target="_blank">Link</a>  <!-- Missing rel -->
-```
+**Security binding** (policy owned by [`secure-coding.md`](guides://secure-coding.md)):
+- **Never** inject unsanitized user HTML; sanitize server-side or with a vetted sanitizer, and prefer `textContent` over `innerHTML`.
+- `target="_blank"` → `rel="noopener"` (modern browsers imply it, but state it; add `noreferrer` to also strip the referrer). Add `rel="nofollow ugc"` to user-submitted links.
+- Enforce a **Content-Security-Policy** (HTTP header preferred); a strict CSP makes inline `<script>`/`onclick`/inline `style` fail — another reason to keep behavior in external modules and presentation in CSS (`css.md`).
+- Use `<iframe sandbox>` and `referrerpolicy` for embedded/third-party content; load all subresources over HTTPS.
 
 ---
 
-## 8. Clean Code Standards (MANDATORY)
-
-### A. Formatting and Indentation
-
-```html
-<!-- ✅ CORRECT - Clean, readable formatting -->
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Page Title</title>
-</head>
-<body>
-  <header>
-    <nav aria-label="Main navigation">
-      <ul>
-        <li><a href="/">Home</a></li>
-        <li><a href="/about">About</a></li>
-      </ul>
-    </nav>
-  </header>
-  
-  <main>
-    <article>
-      <h1>Article Title</h1>
-      <p>Paragraph text.</p>
-    </article>
-  </main>
-  
-  <footer>
-    <p>&copy; 2026 Company Name</p>
-  </footer>
-</body>
-</html>
-
-
-<!-- ❌ WRONG - Poor formatting -->
-<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Title</title></head>
-<body><div class="header"><div class="nav"><a href="/">Home</a><a href="/about">
-About</a></div></div><div class="content"><h1>Title</h1><p>Text</p></div></body>
-</html>
-```
-
-### B. Comments
-
-```html
-<!-- ✅ CORRECT - Helpful comments -->
-<!-- Main Navigation -->
-<nav aria-label="Main navigation">
-  <!-- Navigation items -->
-</nav>
-
-<!-- User Profile Section -->
-<section aria-labelledby="profile-heading">
-  <h2 id="profile-heading">User Profile</h2>
-  <!-- Profile content -->
-</section>
-
-<!-- TODO: Add pagination controls -->
-<!-- NOTE: This component requires JavaScript to function -->
-
-
-<!-- ❌ WRONG - Unnecessary or outdated comments -->
-<!-- div -->
-<div>Content</div>
-<!-- end div -->
-
-<!-- This is a paragraph -->
-<p>Text</p>
-```
-
-### C. Attribute Order
-
-```html
-<!-- ✅ CORRECT - Consistent attribute order -->
-<!-- 1. Class/ID, 2. type/href/src, 3. ARIA, 4. data attributes, 5. other -->
-<a 
-  class="button primary" 
-  href="/submit" 
-  role="button"
-  aria-label="Submit form"
-  data-tracking="submit-button"
-  target="_blank"
-  rel="noopener noreferrer"
->
-  Submit
-</a>
-
-<input 
-  class="form-input" 
-  type="email" 
-  id="email" 
-  name="email"
-  required
-  aria-required="true"
-  aria-invalid="false"
-  placeholder="email@example.com"
-  autocomplete="email"
->
-```
-
-### D. Minimize Nesting
-
-```html
-<!-- ✅ CORRECT - Minimal nesting with semantic elements -->
-<article>
-  <header>
-    <h1>Article Title</h1>
-    <p>Published on <time datetime="2026-01-17">January 17, 2026</time></p>
-  </header>
-  
-  <p>Article content paragraph.</p>
-  
-  <footer>
-    <p>Author: John Doe</p>
-  </footer>
-</article>
-
-
-<!-- ❌ WRONG - Excessive nesting -->
-<div class="article-wrapper">
-  <div class="article-container">
-    <div class="article-inner">
-      <div class="article-header">
-        <div class="article-title">
-          <h1>Article Title</h1>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-```
-
----
-
-## 9. Project Structure
+## 11. Project Structure
 
 ```
 project/
-├── index.html              # Homepage
-├── about.html              # About page
-├── contact.html            # Contact page
-├── css/
-│   ├── styles.css          # Main stylesheet
-│   └── critical.css        # Critical CSS
-├── js/
-│   ├── main.js             # Main JavaScript
-│   └── analytics.js        # Analytics
-├── images/
-│   ├── logo.svg
-│   ├── hero.jpg
-│   └── favicon/
-│       ├── favicon-32x32.png
-│       ├── favicon-16x16.png
-│       └── apple-touch-icon.png
-├── fonts/
-│   ├── main-font.woff2
-│   └── main-font.woff
-├── site.webmanifest        # PWA manifest
-├── robots.txt              # Robots file
-└── sitemap.xml             # XML sitemap
+├── index.html
+├── about.html
+├── css/styles.css          # all styling (see css.md)
+├── js/main.js              # behavior, ES modules
+├── assets/                 # images, fonts, video, vtt captions
+├── site.webmanifest
+├── robots.txt
+├── sitemap.xml
+└── .htmlvalidate.json      # html-validate config (extends recommended)
 ```
+
+Keep structure (HTML), presentation (CSS), and behavior (JS) in separate files. Validate every page; serve and audit before delivery.
 
 ---
 
-## 10. Deployment Checklist
+## 12. Deployment Checklist
 
-### Pre-Production Validation
+Generated from §2 — one box per requirement ID.
 
-#### HTML Validation (MANDATORY)
-- [ ] **W3C validation passes**: No errors at https://validator.w3.org/
-- [ ] **Proper DOCTYPE**: `<!DOCTYPE html>` present
-- [ ] **lang attribute**: `<html lang="en">` specified
-- [ ] **Character encoding**: `<meta charset="UTF-8">` present and first in head
-- [ ] **Viewport meta tag**: Mobile-responsive meta tag present
-- [ ] **Valid nesting**: All elements properly nested
-- [ ] **Closed tags**: All tags properly closed
-- [ ] **No deprecated elements**: No font, center, marquee, etc.
-
-#### Accessibility (MANDATORY - WCAG 2.1 AA)
-- [ ] **Accessibility score ≥ 90**: Lighthouse accessibility audit passes
-- [ ] **All images have alt text**: Including decorative images (empty alt)
-- [ ] **Proper heading hierarchy**: h1 → h2 → h3, no skipping
-- [ ] **Form labels**: All inputs have associated labels
-- [ ] **ARIA labels**: Navigation, regions properly labeled
-- [ ] **Keyboard navigation**: All interactive elements keyboard accessible
-- [ ] **Skip links**: Skip to main content link present
-- [ ] **Color contrast**: Text meets WCAG AA contrast ratios (4.5:1)
-- [ ] **Focus indicators**: Visible focus states on all interactive elements
-
-#### Semantic Structure
-- [ ] **Semantic elements**: Using header, nav, main, article, section, aside, footer
-- [ ] **One main element**: Only one `<main>` per page
-- [ ] **One h1**: Only one `<h1>` per page
-- [ ] **Meaningful landmarks**: Proper use of ARIA landmarks
-- [ ] **No div soup**: Minimal non-semantic divs/spans
-
-#### Performance
-- [ ] **Performance score ≥ 85**: Lighthouse performance audit
-- [ ] **Images optimized**: Compressed, proper formats, responsive images
-- [ ] **Lazy loading**: Images below fold use loading="lazy"
-- [ ] **Resource hints**: Preload critical resources
-- [ ] **Scripts optimized**: defer/async attributes used
-- [ ] **No render-blocking resources**: Critical CSS inline or preloaded
-
-#### SEO
-- [ ] **SEO score ≥ 90**: Lighthouse SEO audit
-- [ ] **Unique page titles**: Each page has descriptive title
-- [ ] **Meta descriptions**: Each page has unique description
-- [ ] **Canonical URLs**: Canonical links specified
-- [ ] **Structured data**: Schema.org markup present where applicable
-- [ ] **Descriptive links**: No "click here" or "read more" links
-- [ ] **Open Graph tags**: Social media meta tags present
-- [ ] **Robots.txt**: Present and properly configured
-- [ ] **Sitemap.xml**: XML sitemap available
-
-#### Security
-- [ ] **External links secure**: rel="noopener noreferrer" on target="_blank" links
-- [ ] **HTTPS URLs**: All resources loaded over HTTPS
-- [ ] **No inline JavaScript**: No onclick attributes (use event listeners)
-- [ ] **Content Security Policy**: CSP headers configured (if applicable)
-
-#### Cross-Browser Compatibility
-- [ ] **Chrome**: Tested and working
-- [ ] **Firefox**: Tested and working
-- [ ] **Safari**: Tested and working
-- [ ] **Edge**: Tested and working
-- [ ] **Mobile browsers**: Tested on iOS Safari and Chrome Android
+- [ ] HTML-VALID-01 — `html-validate` clean, 0 errors
+- [ ] HTML-STRUCT-01 — doctype, `lang`, `charset` (first), viewport present
+- [ ] HTML-SEM-01 — one `<main>`/`<h1>`, no skipped headings, landmarks over `div`s
+- [ ] HTML-A11Y-01 — all `<img>` have `alt`, controls labeled, 0 critical axe issues (see `accessibility.md`)
+- [ ] HTML-FORM-01 — correct `type`, associated labels, `autocomplete` tokens
+- [ ] HTML-SEC-01 — `_blank` links carry `rel="noopener"`, user HTML sanitized (see `secure-coding.md`)
+- [ ] HTML-FMT-01 — Prettier clean, no diff
+- [ ] HTML-PERF-01 — below-fold media lazy, images sized (no CLS)
+- [ ] HTML-SEO-01 — unique title, description, canonical per page
+- [ ] Agent ran every §3 command and documented any fixes
 
 ---
-
-## 11. Complete Example
-
-```html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <!-- Essential Meta Tags -->
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  
-  <!-- Primary Meta Tags -->
-  <title>Modern HTML5 Blog - Latest Web Development Articles</title>
-  <meta name="title" content="Modern HTML5 Blog - Latest Web Development Articles">
-  <meta name="description" content="Explore the latest articles on modern web development, HTML5, CSS3, and JavaScript best practices.">
-  <meta name="keywords" content="web development, HTML5, CSS3, JavaScript, tutorials">
-  <meta name="author" content="John Doe">
-  
-  <!-- Open Graph / Facebook -->
-  <meta property="og:type" content="website">
-  <meta property="og:url" content="https://example.com/">
-  <meta property="og:title" content="Modern HTML5 Blog">
-  <meta property="og:description" content="Latest web development articles and tutorials">
-  <meta property="og:image" content="https://example.com/images/og-image.jpg">
-  
-  <!-- Twitter -->
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Modern HTML5 Blog">
-  <meta name="twitter:description" content="Latest web development articles">
-  <meta name="twitter:image" content="https://example.com/images/twitter-image.jpg">
-  
-  <!-- Favicon -->
-  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon/favicon-32x32.png">
-  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon/favicon-16x16.png">
-  <link rel="apple-touch-icon" sizes="180x180" href="/images/favicon/apple-touch-icon.png">
-  
-  <!-- Canonical URL -->
-  <link rel="canonical" href="https://example.com/">
-  
-  <!-- Preload Critical Resources -->
-  <link rel="preload" href="/fonts/main-font.woff2" as="font" type="font/woff2" crossorigin>
-  
-  <!-- Stylesheets -->
-  <link rel="stylesheet" href="/css/styles.css">
-  
-  <!-- Theme Color -->
-  <meta name="theme-color" content="#4A90E2">
-  
-  <!-- Structured Data -->
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "Blog",
-    "name": "Modern HTML5 Blog",
-    "description": "Latest web development articles",
-    "url": "https://example.com"
-  }
-  </script>
-</head>
-<body>
-  <!-- Skip to Main Content (Accessibility) -->
-  <a href="#main-content" class="skip-link">Skip to main content</a>
-  
-  <!-- Site Header -->
-  <header>
-    <div class="logo">
-      <img src="/images/logo.svg" alt="Modern HTML5 Blog" width="200" height="50">
-    </div>
-    
-    <!-- Main Navigation -->
-    <nav aria-label="Main navigation">
-      <ul>
-        <li><a href="/" aria-current="page">Home</a></li>
-        <li><a href="/articles">Articles</a></li>
-        <li><a href="/tutorials">Tutorials</a></li>
-        <li><a href="/about">About</a></li>
-        <li><a href="/contact">Contact</a></li>
-      </ul>
-    </nav>
-  </header>
-  
-  <!-- Main Content -->
-  <main id="main-content" tabindex="-1">
-    <!-- Hero Section -->
-    <section aria-labelledby="hero-heading">
-      <h1 id="hero-heading">Latest Web Development Articles</h1>
-      <p>Stay up to date with modern web development practices and techniques.</p>
-    </section>
-    
-    <!-- Featured Article -->
-    <article>
-      <header>
-        <h2><a href="/articles/semantic-html5">The Power of Semantic HTML5</a></h2>
-        <p>
-          Published on <time datetime="2026-01-17">January 17, 2026</time> by 
-          <a href="/authors/john-doe">John Doe</a>
-        </p>
-      </header>
-      
-      <figure>
-        <img 
-          src="/images/semantic-html-800.jpg"
-          srcset="
-            /images/semantic-html-400.jpg 400w,
-            /images/semantic-html-800.jpg 800w,
-            /images/semantic-html-1200.jpg 1200w
-          "
-          sizes="(max-width: 600px) 400px, (max-width: 900px) 800px, 1200px"
-          alt="Diagram showing HTML5 semantic elements: header, nav, main, article, aside, footer"
-          loading="eager"
-          width="800"
-          height="450"
-        >
-        <figcaption>HTML5 semantic structure provides meaningful page organization</figcaption>
-      </figure>
-      
-      <p>
-        Semantic HTML5 elements provide meaning to your content structure, improving
-        accessibility, SEO, and maintainability of your web pages.
-      </p>
-      
-      <p>
-        <a href="/articles/semantic-html5">Read full article on semantic HTML5 elements</a>
-      </p>
-      
-      <footer>
-        <p>Tags: <a href="/tags/html5" rel="tag">HTML5</a>, <a href="/tags/accessibility" rel="tag">Accessibility</a></p>
-      </footer>
-    </article>
-    
-    <!-- Recent Articles -->
-    <section aria-labelledby="recent-heading">
-      <h2 id="recent-heading">Recent Articles</h2>
-      
-      <ul>
-        <li>
-          <article>
-            <h3><a href="/articles/css-grid">Modern CSS Grid Layouts</a></h3>
-            <p>Learn how to create responsive layouts with CSS Grid.</p>
-            <time datetime="2026-01-15">January 15, 2026</time>
-          </article>
-        </li>
-        
-        <li>
-          <article>
-            <h3><a href="/articles/javascript-async">Async JavaScript Patterns</a></h3>
-            <p>Master async/await and promises in JavaScript.</p>
-            <time datetime="2026-01-12">January 12, 2026</time>
-          </article>
-        </li>
-      </ul>
-    </section>
-  </main>
-  
-  <!-- Sidebar -->
-  <aside aria-label="Sidebar">
-    <section>
-      <h2>Popular Topics</h2>
-      <ul>
-        <li><a href="/topics/html5">HTML5</a></li>
-        <li><a href="/topics/css3">CSS3</a></li>
-        <li><a href="/topics/javascript">JavaScript</a></li>
-        <li><a href="/topics/accessibility">Accessibility</a></li>
-      </ul>
-    </section>
-    
-    <section>
-      <h2>Newsletter</h2>
-      <p>Subscribe to get the latest articles delivered to your inbox.</p>
-      
-      <form method="post" action="/subscribe" aria-label="Newsletter subscription">
-        <div class="form-group">
-          <label for="newsletter-email">Email Address <span aria-label="required">*</span></label>
-          <input 
-            type="email" 
-            id="newsletter-email" 
-            name="email" 
-            required 
-            aria-required="true"
-            placeholder="you@example.com"
-            autocomplete="email"
-          >
-        </div>
-        
-        <button type="submit">Subscribe</button>
-      </form>
-    </section>
-  </aside>
-  
-  <!-- Site Footer -->
-  <footer>
-    <!-- Footer Navigation -->
-    <nav aria-label="Footer navigation">
-      <ul>
-        <li><a href="/privacy">Privacy Policy</a></li>
-        <li><a href="/terms">Terms of Service</a></li>
-        <li><a href="/accessibility">Accessibility Statement</a></li>
-        <li><a href="/sitemap">Sitemap</a></li>
-      </ul>
-    </nav>
-    
-    <!-- Copyright -->
-    <p>&copy; 2026 Modern HTML5 Blog. All rights reserved.</p>
-    
-    <!-- Social Media -->
-    <ul>
-      <li><a href="https://twitter.com/username" rel="noopener noreferrer" target="_blank">Twitter (opens in new tab)</a></li>
-      <li><a href="https://github.com/username" rel="noopener noreferrer" target="_blank">GitHub (opens in new tab)</a></li>
-    </ul>
-  </footer>
-  
-  <!-- Scripts (at end for performance) -->
-  <script src="/js/main.js" defer></script>
-</body>
-</html>
-```
-
----
-
-## 12. Why This Configuration Works
-
-1. **Semantic HTML5**: Improves SEO by 30-40%, enhances accessibility, provides meaningful structure.
-
-2. **WCAG 2.1 AA Compliance**: Makes content accessible to 20%+ more users, reduces legal risk, improves UX for everyone.
-
-3. **Performance Optimization**: Lazy loading reduces initial load by 40-60%, resource hints improve perceived performance by 30%.
-
-4. **Clean Code**: Reduces maintenance time by 50%, easier onboarding, fewer bugs.
-
-5. **SEO Best Practices**: Structured data increases rich snippet chances by 300%, proper meta tags improve click-through rates by 20-30%.
-
-6. **Progressive Enhancement**: Content accessible without CSS/JS, works on all devices, future-proof.
-
-7. **Agent Verification**: Ensures all generated HTML is valid, accessible, and performant, eliminates common errors.
-
----
-
-## 13. Quick Reference
-
-### Common Commands
-
-```bash
-# Validate HTML
-npx html-validate *.html
-
-# Accessibility audit
-npx pa11y-ci *.html
-
-# Lighthouse audit (all categories)
-npx lighthouse index.html --output=html --output-path=./report.html
-
-# Lighthouse accessibility only
-npx lighthouse --only-categories=accessibility index.html
-
-# Lighthouse performance only
-npx lighthouse --only-categories=performance index.html
-
-# Lighthouse SEO only
-npx lighthouse --only-categories=seo index.html
-
-# Format HTML with Prettier
-npx prettier --write "**/*.html"
-
-# Run HTML tests
-npm test
-```
-
-### Essential HTML5 Template
-
-```html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Page description">
-  <title>Page Title - Site Name</title>
-  <link rel="stylesheet" href="/css/styles.css">
-</head>
-<body>
-  <a href="#main" class="skip-link">Skip to main content</a>
-  <header><nav aria-label="Main">...</nav></header>
-  <main id="main">...</main>
-  <footer>...</footer>
-  <script src="/js/main.js" defer></script>
-</body>
-</html>
-```
-
-### Semantic Element Quick Guide
-
-| Element | Use For |
-|---------|---------|
-| `<header>` | Page/section header |
-| `<nav>` | Navigation links |
-| `<main>` | Main content (one per page) |
-| `<article>` | Self-contained content |
-| `<section>` | Thematic grouping |
-| `<aside>` | Related sidebar content |
-| `<footer>` | Page/section footer |
-| `<figure>` | Image/media with caption |
-| `<time>` | Date/time values |
-
-### Accessibility Checklist
-
-```
-[ ] Only one <h1> per page
-[ ] Headings in order (h1→h2→h3)
-[ ] All images have alt text
-[ ] All form inputs have labels
-[ ] Skip link present
-[ ] ARIA labels on nav/regions
-[ ] Keyboard navigation works
-[ ] Color contrast ≥ 4.5:1
-```
-
-### Performance Checklist
-
-```
-[ ] Images use loading="lazy"
-[ ] Critical CSS inlined
-[ ] Scripts use defer/async
-[ ] Images have width/height
-[ ] Resources preloaded
-[ ] Modern image formats (WebP/AVIF)
-```
-
----
-
-## References
-
-- [HTML5 Specification](https://html.spec.whatwg.org/)
-- [WCAG 2.1 Guidelines](https://www.w3.org/WAI/WCAG21/quickref/)
-- [W3C HTML Validator](https://validator.w3.org/)
-- [Schema.org](https://schema.org/)
-- [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/HTML)
-- [Web Content Accessibility Guidelines](https://www.w3.org/WAI/standards-guidelines/wcag/)
-- [Google Lighthouse](https://developers.google.com/web/tools/lighthouse)
-
----
-
-**Last Updated:** 2026-01-17
-**Version:** 1.0
-**Maintainer:** Development Team
-
-
-**End of HTML Development Guidelines**
+**End of HTML Guidelines**

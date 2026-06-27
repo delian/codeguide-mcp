@@ -1,1592 +1,253 @@
-# Modern Fish Shell Scripting Guidelines
-Mandatory coding standards and development practices for modern fish shell scripts with emphasis on minimalistic, clean, readable, testable, and maintainable code using hexagonal architecture principles. Fish 3.0+, fish_indent, fishtape/littlecheck (testing frameworks).
+# Fish Shell Scripting Guidelines
+Mandatory standards for fish: deliberately non-POSIX, friendly syntax, autoloaded functions, scoped variables. fish 3.7+, fish_indent, fishtape.
+
+---
+name: fish
+title: Fish Shell Scripting Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: language
+tools: [fish@3.7, fish_indent, fishtape]
+requires:
+  - secure-coding
+  - error-handling
+recommends:
+  - bash
+  - zsh
+  - comments
+provides:
+  - fish-syntax
+  - fish-functions
+  - fish-variables
+  - fish-vs-posix
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide covers only what is unique to fish.
 
 ---
 
-**Agent Profile**: The Fish Shell Script Architect
-**Role**: Senior Fish Shell Scripting Engineer & Modern Shell Automation Specialist
-**Objective**: Generate production-ready, minimalistic, clean, readable, well-documented fish shell scripts using hexagonal architecture with focus on Fish-native features, user-friendliness, testability, and maintainability.
-**Tools**: Fish 3.0+, fish_indent (formatting), fishtape/littlecheck (testing frameworks), funced (function editor).
+## 0. Prerequisites & References
+
+Fetch and apply these **before** generating fish code. Their rules are assumed below and not repeated.
+
+> 📎 **REQUIRED — fetch & apply first:**
+> - [`secure-coding.md`](guides://secure-coding.md) — input sanitization, supply chain, secrets. *(fish binding: vet Fisher plugins, never `curl | source` untrusted code, quote/`--`-terminate command args.)*
+> - [`error-handling.md`](guides://error-handling.md) — error strategy & propagation. *(fish binding: integer `$status`, `; and` / `; or`, `return N` — see §7.)*
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`bash.md`](guides://bash.md) — **the portability counterpart. fish is NOT POSIX; any script that must run on arbitrary machines or as `/bin/sh` belongs in bash, not fish (see §1, FISH-PORT-01).**
+> - [`zsh.md`](guides://zsh.md) — the other interactive shell; contrast its bash-compatible posture with fish's clean break.
+> - [`comments.md`](guides://comments.md) — doc policy *(binding: `--description` on every function, see §6).*
+
+> 📎 **SEE ALSO:** [`tdd.md`](guides://tdd.md) (test-first; fish runner is `fishtape`) · [`hexagonal.md`](guides://hexagonal.md) (layering) · [`logging.md`](guides://logging.md)
 
 ---
 
 ## 1. Core Philosophies: FISH-FIRST
 
-The agent must adhere to the **FISH-FIRST** principles for every fish script implementation:
+fish-specific principles only. Security, error-handling, and test-first policy come from §0 — do **not** restate them here.
 
-**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
-**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+🐟 **The prime fact: fish deliberately abandons POSIX for a clean, predictable language.** It is not bash with nicer defaults — it is a different language. Do not port bash idioms; write fish.
 
-**CRITICAL FISH PRINCIPLE**:
-🐟 **Fish is NOT POSIX-compatible and has fundamentally different syntax than bash/zsh**
-🐟 **Embrace Fish's modern, user-friendly syntax and built-in features**
-🐟 **Do NOT try to make Fish scripts bash-compatible - they are different languages**
+- **F**riendly syntax: assign with `set`, never `=`; substitute with `(cmd)`, never `$(cmd)` or backticks; block with `end`, never `fi`/`done`/`esac`.
+- **I**mmutable scoping: declare the narrowest scope — `set -l` (local) by default, `-g` (global) only when shared, `-U` (universal) only for persisted user config.
+- **S**ane expansion: no word-splitting and no glob-on-expansion of variables — lists are real, so quoting gymnastics are unnecessary (but still quote untrusted data per `secure-coding.md`).
+- **H**armony with built-ins: prefer `string`, `math`, `argparse`, `path`, `count`, `contains` over `sed`/`awk`/`cut`/`expr`/external tools.
+- **Interactive-first**: choose fish for interactive use, prompts, completions, and personal tooling — **not** for portable system scripts (those go to `bash.md`).
 
-- **F**riendly Syntax: Use Fish's clean, intuitive syntax (no `$` for most variables)
-- **I**ntuitive Features: Leverage Fish's built-in features (autosuggestions, syntax highlighting)
-- **S**ane Defaults: Fish has safer defaults than bash (no word splitting, proper arrays)
-- **H**exagonal Architecture: Ports and adapters pattern
-
-- **F**unctions First: Use Fish functions instead of scripts when possible
-- **I**mmutable Variables: Use `set -l` for local, `set -g` for global, avoid pollution
-- **R**obust: Error handling with proper status codes and clear messages
-- **S**tructured: Modular organization, clear separation of concerns
-- **T**estable: Comprehensive test coverage with fishtape or littlecheck
-
-**Additional Principles:**
-
-- **Modern Features**: Use Fish 3.0+ features (command substitution, string operations)
-- **No POSIX**: Don't try to be POSIX-compatible - embrace Fish's uniqueness
-- **User-Friendly**: Fish prioritizes human-friendly syntax over backwards compatibility
-- **Built-in Tools**: Use Fish's built-in string manipulation, path handling, etc.
-
-**Verified Code**: Agent-generated scripts MUST parse, execute, and pass tests before delivery.
+**Verified Code**: Agent-generated fish MUST pass every gate in §2 before delivery.
 
 ---
 
-## 2. Agent Code Generation Requirements (MANDATORY)
+## 2. Requirements (MANDATORY, auditable)
 
-### A. Verification Protocol
+RFC-2119 keywords. IDs `FISH-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a shared rule cite its owner.
 
-**CRITICAL: Agents MUST verify that all generated/modified fish scripts parse correctly, execute without breaking, and pass all tests before presenting them to the user.**
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| FISH-SYN-01 | Script MUST parse as valid fish | `fish -n script.fish` | exit 0 |
+| FISH-FMT-01 | Code MUST be fish_indent-formatted | `fish_indent --check script.fish` | no diff |
+| FISH-PORT-01 | fish MUST NOT be used where POSIX/portability is required; use bash instead (see `bash.md`) | review: no `#!/bin/sh`/`#!/bin/bash` shebang on a `.fish`; target is interactive/personal | justified |
+| FISH-SYN-02 | MUST use fish syntax, never bash/zsh constructs (`$(...)`, `` ` ``, `[[ ]]`, `=`-assignment, `()` funcs) | `! grep -nE '\$\(|`|\[\[|\bfi\b|\bdone\b' script.fish` | no matches |
+| FISH-VAR-01 | Variables MUST use the narrowest scope (`set -l` default) | review / `grep 'set -g'` justified | scoped |
+| FISH-ERR-01 | Failures MUST propagate via `$status` / `; and` / `; or` / `return` (see `error-handling.md`) | review | no silent failure |
+| FISH-TST-01 | Logic MUST be test-first with fishtape (see `tdd.md`) | `fishtape tests/*.fish` | exit 0 |
+| FISH-TST-02 | Each bug MUST get a regression test before the fix (see `tdd.md`) | `fishtape tests/*.fish` | failing→passing |
+| FISH-DOC-01 | Public functions MUST carry `--description` (see `comments.md`) | `functions -D name` / review | present |
+| FISH-SEC-01 | No `eval`/`curl\|source` on untrusted input; inputs sanitized (see `secure-coding.md`) | `! grep -nE 'eval|curl.*\| *source' script.fish` | none / justified |
 
-#### Pre-Delivery Checklist
-
-**Before delivering ANY fish script, the agent MUST:**
-
-1. **Syntax Verification (MANDATORY - ALWAYS REQUIRED)**:
-   ```fish
-   # Check fish syntax
-   fish -n script.fish
-   # Exit code MUST be 0
-
-   # Verify with fish in private mode (no config)
-   fish --private -n script.fish
-   # Exit code MUST be 0
-   ```
-   - **MUST** parse without errors (exit code 0)
-   - **MUST** work in fish 3.0+
-   - No syntax errors or warnings
-
-2. **fish_indent Verification (MANDATORY - ALWAYS REQUIRED)**:
-   ```fish
-   # Check formatting with fish_indent
-   fish_indent --check script.fish
-   # Exit code MUST be 0 (no formatting differences)
-
-   # Or check by comparing
-   diff -u script.fish (fish_indent script.fish | psub)
-   # Should show no differences
-   ```
-   - **MUST** be properly formatted with fish_indent
-   - Fish has consistent, opinionated formatting
-
-3. **Execution Verification (MANDATORY - ALWAYS REQUIRED)**:
-   ```fish
-   # Test script execution (dry-run or help mode)
-   fish script.fish --help
-   # Exit code MUST be 0
-
-   # Test with invalid arguments (should fail gracefully)
-   fish script.fish --invalid-arg 2>&1; or true
-   # Should not crash or produce errors
-   ```
-   - **MUST** execute without breaking
-   - **MUST** handle errors gracefully
-   - **MUST** provide help/usage information
-
-4. **Test Execution (MANDATORY - if tests exist)**:
-   ```fish
-   # Run fishtape tests if available
-   if test -f tests/script.fish
-       fishtape tests/script.fish
-       # Exit code MUST be 0
-   end
-
-   # Run littlecheck tests if available
-   if test -f tests/script.test
-       littlecheck tests/script.test
-       # Exit code MUST be 0
-   end
-   ```
-   - **MUST** pass all tests if tests exist
-
-5. **Post-Modification Verification (MANDATORY)**:
-   ```fish
-   # After ANY modification, ALWAYS run:
-   # 1. Syntax check
-   fish -n script.fish
-   # Exit code MUST be 0
-
-   # 2. Format check
-   fish_indent --check script.fish
-   # Exit code MUST be 0
-
-   # 3. Execution test
-   fish script.fish --help
-   # Exit code MUST be 0
-   ```
-
-#### Error Correction Process
-
-If verification fails:
-
-1. **Syntax Errors**:
-   - Read full error message from `fish -n`
-   - Identify root cause (Fish syntax is different from bash/zsh)
-   - Fix the issue using proper Fish syntax
-   - Re-verify
-
-2. **Formatting Issues**:
-   - Run `fish_indent -w script.fish` to auto-format
-   - Review changes and ensure they're correct
-   - Re-verify
-
-3. **Execution Errors**:
-   - Test script with various inputs
-   - Check error messages are meaningful
-   - Ensure graceful failure handling
-   - Use Fish's built-in error handling
-
-### B. Agent Workflow Example
-
-**Complete fish generation workflow:**
-
-1. **Generate Code Structure**:
-   ```
-   project/
-   ├── functions/              # Fish functions directory
-   │   ├── main.fish
-   │   ├── process_data.fish
-   │   └── validate_input.fish
-   ├── conf.d/                 # Configuration scripts
-   │   └── config.fish
-   ├── completions/            # Shell completions
-   │   └── main.fish
-   ├── tests/                  # Test files
-   │   └── main.fish           # Fishtape tests
-   └── README.md
-   ```
-
-2. **Generate Initial Code**:
-   ```fish
-   #!/usr/bin/env fish
-   # Example fish script with native features
-
-   # Fish doesn't need 'set -e' - errors are handled differently
-   # Use functions for organization
-
-   function process_file
-       set -l input_file $argv[1]
-       set -l output_file $argv[2]
-
-       # Fish has built-in string manipulation
-       string upper < $input_file > $output_file
-   end
-   ```
-
-3. **Verify**:
-   ```fish
-   fish -n script.fish
-   # ✓ Syntax verification successful
-   ```
-
-4. **Format**:
-   ```fish
-   fish_indent -w script.fish
-   # ✓ Auto-formatted
-   ```
-
-5. **Add Tests**:
-   ```fish
-   # tests/script.fish
-   #!/usr/bin/env fish
-
-   @test "process_file converts to uppercase" (
-       echo "hello" | process_file /dev/stdin /dev/stdout
-   ) = "HELLO"
-   ```
-
-6. **Run Tests**:
-   ```fish
-   fishtape tests/script.fish
-   # ✓ All tests pass
-   ```
-
-7. **Final Verification**:
-   ```fish
-   fish -n script.fish; and fish_indent --check script.fish; and fish script.fish --help
-   # ✓ All checks passed
-   ```
-
-8. **Present Code**: Only after ALL checks pass
-
-### C. Prohibited Practices
-
-**NEVER deliver fish code that:**
-- [ ] 🔴 **Fails fish syntax check** (CRITICAL)
-- [ ] 🔴 **Is not formatted with fish_indent** (CRITICAL)
-- [ ] 🔴 **Uses bash/zsh syntax** (CRITICAL - Fish is different)
-- [ ] 🔴 **Uses `$var` instead of just `var` in most contexts** (Fish-specific)
-- [ ] Has failing tests
-- [ ] Lacks tests for business logic
-- [ ] Is not properly formatted
-- [ ] Has unquoted variables where quoting is needed (rare in Fish)
-- [ ] Uses deprecated Fish features
-- [ ] Uses global variables when local would suffice
-- [ ] Pollutes the global namespace
-- [ ] Uses external tools when Fish built-ins exist
-- [ ] **Fixes bugs without adding regression tests first**
-- [ ] **Writes implementation before writing tests (violates TDD)**
-- [ ] **Skips Red-Green-Refactor cycle for new features**
-
-**CRITICAL**: Fish is NOT bash/zsh. Do not try to make Fish scripts compatible with other shells.
+> **Forbidden**: shipping implementation before its test (violates `tdd.md`), fixing a bug without a regression test first, writing bash-in-fish (`$(...)`, `[[ ]]`, `=`-assignment), or reaching for `sed`/`awk` where `string` suffices.
 
 ---
 
-## 1A. The Fish Philosophy (MANDATORY)
+## 3. Verification Protocol
 
-🐟 **CRITICAL: Fish is fundamentally different from bash/zsh - embrace it!**
-
-### The Golden Rule of Fish Scripting
-
-**Fish is designed to be user-friendly and modern. Don't fight its design - work with it.**
-
-### Why Fish is Different (and Better for Interactive Use)
-
-1. **No POSIX Compatibility**: Fish intentionally breaks POSIX for better UX
-2. **Sane Defaults**: No word splitting, proper arrays, better error handling
-3. **Modern Syntax**: Clean, readable syntax without cryptic symbols
-4. **Built-in Features**: Autosuggestions, syntax highlighting, completion
-5. **User-Friendly**: Designed for humans, not just compatibility
-
-### Decision Matrix
-
-When writing Fish code, ask yourself:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Is there a Fish built-in way to do this?                    │
-├─────────────────────────────────────────────────────────────┤
-│ ✅ YES → Use the Fish built-in                              │
-│ ❌ NO  → Consider if external tool is needed                │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Fish vs Bash/Zsh Syntax Comparison
-
-#### Example 1: Variable Assignment and Usage
+Run, in order, before presenting code. Fix → re-run until every gate is green.
 
 ```fish
-# ✅ CORRECT - Fish syntax
-set my_var "hello world"
-echo $my_var              # Use $ when expanding
-echo my_var is $my_var    # $ only where needed
-
-# ❌ WRONG - Bash syntax (doesn't work in Fish)
-my_var="hello world"      # Fish requires 'set'
-echo ${my_var}            # Unnecessary braces
+fish -n script.fish                 # FISH-SYN-01  parse check
+fish_indent --check script.fish     # FISH-FMT-01  (auto-fix: fish_indent -w script.fish)
+fishtape tests/*.fish               # FISH-TST-01/02
 ```
 
-#### Example 2: Command Substitution
-
-```fish
-# ✅ CORRECT - Fish syntax (parentheses)
-set files (ls *.txt)
-set result (command_here)
-
-# ❌ WRONG - Bash syntax (doesn't work in Fish)
-files=$(ls *.txt)         # Fish uses parentheses, not $()
-result=`command_here`     # Backticks don't work
-```
-
-#### Example 3: Conditionals
-
-```fish
-# ✅ CORRECT - Fish syntax
-if test -f file.txt
-    echo "File exists"
-end
-
-# More Fish-like with brackets
-if [ -f file.txt ]
-    echo "File exists"
-end
-
-# ❌ WRONG - Bash syntax (doesn't work in Fish)
-if [[ -f file.txt ]]; then   # Double brackets don't exist
-    echo "File exists"
-fi                            # Fish uses 'end'
-```
-
-#### Example 4: Functions
-
-```fish
-# ✅ CORRECT - Fish function syntax
-function greet
-    echo "Hello, $argv[1]"
-end
-
-# ❌ WRONG - Bash syntax (doesn't work in Fish)
-greet() {                  # Fish doesn't use ()
-    echo "Hello, $1"       # Fish uses $argv[1]
-}
-```
-
-### When to Use Fish
-
-**Fish is EXCELLENT for:**
-- Interactive shell usage
-- User-facing command-line tools
-- Development environments
-- Personal automation scripts
-- Tools that benefit from modern syntax
-
-**Fish may NOT be suitable for:**
-- System administration scripts (bash more common)
-- Strict POSIX compliance requirements
-- Environments without Fish installed
-- Scripts that must run on minimal systems
-
-### Summary
-
-**🐟 EMBRACE FISH'S MODERN DESIGN 🐟**
-**🐟 DO NOT TRY TO WRITE BASH IN FISH 🐟**
-**🐟 USE FISH BUILT-INS OVER EXTERNAL TOOLS 🐟**
+`fish --no-execute` is the same as `fish -n`. Test against fish **3.7+** (`status fish-path`, `fish --version`); features like `path`, `string pad`, and `set --function` assume modern fish. The *why* behind test-first/security gates lives in their §0 owners.
 
 ---
 
-## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+## 4. Project Structure & Autoloading
 
-**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new fish scripts and functions.**
-
-### TDD Cycle
+fish's defining structural feature is **autoloading**: a function named `foo` is loaded on first use from any `foo.fish` on `$fish_function_path` (default includes `~/.config/fish/functions/`). One function per file, file named exactly after the function. `conf.d/*.fish` runs at startup (alphabetical); `completions/foo.fish` is autoloaded when `foo` is completed. Architectural layering (ports/adapters) is owned by [`hexagonal.md`](guides://hexagonal.md); below is only its fish mapping.
 
 ```
-1. 🔴 RED: Write a failing test first
-   ↓
-2. 🟢 GREEN: Write minimal code to make it pass
-   ↓
-3. 🔵 REFACTOR: Improve code while keeping tests green
-   ↓
-   Repeat
+~/.config/fish/
+├── config.fish            # interactive startup; guard machine code with `status is-interactive`
+├── conf.d/                # autoloaded at startup, alphabetical (e.g. 00-env.fish, 50-aliases.fish)
+├── functions/             # one autoloaded function per file: name.fish
+└── completions/           # one completion spec per command: cmd.fish
+
+# A standalone tool/plugin mirrors the same tree so Fisher can install it.
 ```
 
-### Example TDD Workflow for Fish
-
-```fish
-# Step 1: RED - Write failing test first (tests/test_validator.fish)
-#!/usr/bin/env fish
-
-source (dirname (status -f))/functions/validator.fish
-
-@test "validate_email returns 0 for valid email" (
-    validate_email user@example.com
-) $status -eq 0
-
-@test "validate_email returns 1 for invalid email" (
-    validate_email invalid.email
-) $status -eq 1
-
-# Run: fishtape tests/test_validator.fish
-# ❌ FAILS - validate_email doesn't exist yet
-
-# Step 2: GREEN - Write minimal implementation (functions/validator.fish)
-function validate_email
-    set -l email $argv[1]
-    set -l pattern '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-
-    if string match -qr $pattern $email
-        return 0
-    else
-        return 1
-    end
-end
-
-# Run: fishtape tests/test_validator.fish
-# ✅ PASSES - tests pass
-
-# Step 3: REFACTOR - Improve using Fish features
-function validate_email
-    # Use Fish's string matching directly
-    string match -qr '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$' $argv[1]
-end
-# Tests still pass ✓
-```
+- A standalone script gets `#!/usr/bin/env fish`; reusable logic belongs in `functions/` (autoloaded, independently testable), not in monolithic scripts.
+- Resolve a script's own dir with `set -l dir (path dirname (status filename))` (fish 3.7) or `(dirname (status filename))`.
 
 ---
 
-## 2B. Bug Fix Protocol (MANDATORY)
+## 5. Fish Specifics — the unique surface
 
-**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
-
-### Bug Fix Workflow
-
-```
-1. 🐛 Bug Reported/Discovered
-   ↓
-2. ✍️ Write a test that REPRODUCES the bug (test will FAIL)
-   ↓
-3. ✅ Verify the test fails for the right reason
-   ↓
-4. 🔧 Fix the bug (make the test pass)
-   ↓
-5. 🟢 Verify the test now PASSES
-   ↓
-6. 📝 Document the bug in test comments (include bug ID)
-   ↓
-7. 🚀 Deploy with confidence (regression prevented)
-```
-
-### Example Bug Fix
-
+### A. Syntax that breaks from POSIX (the load-bearing differences)
 ```fish
-# Bug Report #123: parse_config fails with spaces in values
+set name "Ada"                 # assignment — NOT name="Ada"
+set files (ls *.txt)           # command substitution — NOT $(...) and NOT backticks
+echo $name                     # expansion; $ only when reading
+echo "count: "(count $files)   # () inline; no word-splitting on $files
+
+if test -f $f; and test -r $f  # test / [ ; there is no [[ ]]
+    echo ok
+end                            # every block ends with `end` (not fi/done/esac)
 
-# Step 1-2: Write test that reproduces the bug
-@test "parse_config handles values with spaces - Bug #123" (
-    # Bug: parse_config "key=value with spaces" returned only "value"
-    # Discovered: 2026-03-11
-    # This test prevents regression
-
-    set result (parse_config "name=John Doe")
-    test "$result" = "John Doe"
-) $status -eq 0
-
-# Run: fishtape tests/test_config.fish
-# ❌ FAILS - reproduces the bug ✓
-
-# Step 3: Fix the bug (functions/config.fish)
-# Before (buggy):
-function parse_config_old
-    set -l input $argv[1]
-    string split -f2 '=' $input | string split -f1 ' '  # BUG: splits on space
-end
-
-# After (fixed):
-function parse_config
-    set -l input $argv[1]
-    # FIX: Use string split with max splits
-    string split -m1 '=' $input | tail -1
-end
-
-# Run: fishtape tests/test_config.fish
-# ✅ PASSES - bug fixed, regression prevented ✓
-```
-
----
-
-## 3. Hexagonal Architecture for Fish Scripts (MANDATORY)
-
-### A. Architecture Principles
-
-**CRITICAL: All fish scripts/functions MUST follow hexagonal architecture principles with clear separation of concerns.**
-
-#### Core Concepts
-
-1. **Main Function/Script**: Orchestrates functions, minimal logic
-2. **Core Functions**: Business logic, pure functions where possible
-3. **Port Functions**: Input/output adapters (argument parsing, file I/O)
-4. **Adapter Functions**: External system interactions (API calls, commands)
-
-#### ✅ CORRECT - Hexagonal Fish Script Structure
-
-```fish
-#!/usr/bin/env fish
-# main.fish - Main script orchestrator
-# Purpose: Process files with hexagonal architecture
-
-# Source functions (Fish auto-loads from functions/ directory)
-# Or explicitly source if needed
-source (dirname (status -f))/functions/core.fish
-source (dirname (status -f))/functions/ports.fish
-source (dirname (status -f))/functions/adapters.fish
-
-# Main orchestration function
-function main
-    # Parse arguments (port)
-    set -l args (parse_arguments $argv)
-
-    # Validate input (port)
-    validate_input $args
-    or return 1
-
-    # Process data (core)
-    set -l result (process_data $args)
-
-    # Output result (port)
-    output_result $result
-end
-
-# Execute main
-main $argv
-```
-
-#### Directory Structure
-
-```
-project/
-├── main.fish              # Main script
-├── functions/             # Fish functions (auto-loaded)
-│   ├── core.fish         # Core business logic
-│   ├── ports.fish        # Input/output ports
-│   └── adapters.fish     # External adapters
-├── conf.d/                # Configuration
-│   └── config.fish
-├── completions/           # Tab completions
-│   └── main.fish
-├── tests/                 # Test files
-│   └── main.fish         # Fishtape tests
-└── README.md             # Documentation
-```
-
-**Fish-Specific Organization**:
-- Functions in `functions/` are auto-loaded by Fish
-- Each function should be in its own file: `functions/function_name.fish`
-- Use `conf.d/` for initialization scripts
-- Provide completions in `completions/` for user-facing commands
-
----
-
-## 4. Fish Script Headers and Structure (MANDATORY)
-
-### A. Standard Fish Script Header
-
-**CRITICAL: All fish scripts MUST start with proper shebang and documentation.**
-
-#### ✅ CORRECT - Fish Script Header
-
-```fish
-#!/usr/bin/env fish
-# script.fish - Script description
-# Purpose: Clear one-line description of what the script does
-# Usage: script.fish [OPTIONS] [ARGUMENTS]
-# Author: Your Name
-# Version: 1.0.0
-
-# Fish doesn't need explicit error settings like bash's set -e
-# Fish has saner defaults by default
-
-# Get script directory (Fish way)
-set -l script_dir (dirname (status -f))
-set -l script_name (basename (status -f))
-
-# Default values (use -g for global, -l for local)
-set -g DEFAULT_VALUE "default"
-
-# Colors for output (Fish has built-in colors)
-set -l red (set_color red)
-set -l green (set_color green)
-set -l yellow (set_color yellow)
-set -l normal (set_color normal)
-```
-
-### B. Fish Variables and Scoping
-
-**CRITICAL: Fish has different variable scoping than bash/zsh.**
-
-#### ✅ CORRECT - Fish Variable Scoping
-
-```fish
-# Local variables (function scope)
-set -l local_var "value"
-
-# Global variables (visible everywhere)
-set -g global_var "value"
-
-# Universal variables (persist across sessions)
-set -U universal_var "value"
-
-# Export variables (available to child processes)
-set -x PATH_VAR $PATH
-
-# Query/check variables
-if set -q MY_VAR
-    echo "MY_VAR is set"
-end
-
-# Unset variables
-set -e MY_VAR
-
-# Append to variables
-set -a PATH /new/path
-```
-
-#### ❌ WRONG - Bash/Zsh Variable Syntax
-
-```fish
-# ❌ WRONG - These don't work in Fish
-local_var="value"        # Fish requires 'set'
-export GLOBAL="value"    # Use 'set -x'
-unset MY_VAR            # Use 'set -e'
-MY_VAR=${OTHER:-default} # Use Fish's or: set MY_VAR $OTHER; or set MY_VAR default
-```
-
-### C. Fish Arrays (Lists)
-
-**CRITICAL: Fish has proper arrays (lists) built-in.**
-
-#### ✅ CORRECT - Fish Lists/Arrays
-
-```fish
-# Create a list
-set -l files file1.txt file2.txt file3.txt
-
-# Access elements (1-based indexing in Fish!)
-echo $files[1]           # First element
-echo $files[2]           # Second element
-echo $files[-1]          # Last element
-
-# All elements
-echo $files
-
-# List length
-count $files
-
-# Slicing
-echo $files[1..2]        # First two elements
-echo $files[2..-1]       # All but first
-
-# Append to list
-set -a files file4.txt
-
-# Iterate over list
-for file in $files
-    echo $file
-end
-
-# Check if item in list
-if contains file1.txt $files
-    echo "Found"
-end
-```
-
-#### ❌ WRONG - Trying to Use Bash Array Syntax
-
-```fish
-# ❌ WRONG - Bash syntax doesn't work
-files=(file1 file2)      # Fish uses 'set'
-echo ${files[0]}         # Fish uses $files[1] (1-based)
-echo ${#files[@]}        # Fish uses 'count $files'
-```
-
----
-
-## 5. Fish String Manipulation (MANDATORY)
-
-### A. Built-in String Command
-
-**CRITICAL: Fish has powerful built-in `string` command - use it!**
-
-#### ✅ CORRECT - Using string Command
-
-```fish
-# String matching
-if string match -q "*.txt" $filename
-    echo "Text file"
-end
-
-# String matching with regex
-if string match -qr '^\d+$' $input
-    echo "Number"
-end
-
-# String replacement
-set result (string replace "old" "new" $text)
-
-# String splitting
-set parts (string split "," $csv_line)
-
-# String joining
-set joined (string join "," $list)
-
-# String trimming
-set trimmed (string trim $text)
-
-# Case conversion
-set upper (string upper $text)
-set lower (string lower $text)
-
-# Substring
-set sub (string sub -s 1 -l 5 $text)  # First 5 chars
-
-# String length
-set len (string length $text)
-
-# Check if string starts/ends with
-if string match -q "prefix*" $text
-    echo "Starts with prefix"
-end
-```
-
-#### ❌ WRONG - Using External Tools When string Works
-
-```fish
-# ❌ WRONG - Don't use external tools
-set upper (echo $text | tr '[:lower:]' '[:upper:]')  # Use: string upper
-
-# ❌ WRONG - Don't use sed/awk for simple operations
-set replaced (echo $text | sed 's/old/new/')  # Use: string replace
-
-# ✅ CORRECT - Use Fish built-ins
-set upper (string upper $text)
-set replaced (string replace "old" "new" $text)
-```
-
----
-
-## 6. Fish Conditionals and Loops (MANDATORY)
-
-### A. Fish Conditionals
-
-**CRITICAL: Fish uses `test` or `[` for conditionals, not `[[`.**
-
-#### ✅ CORRECT - Fish Conditionals
-
-```fish
-# Using test command
-if test -f file.txt
-    echo "File exists"
-end
-
-# Using brackets (same as test)
-if [ -f file.txt ]
-    echo "File exists"
-end
-
-# String comparison
-if test "$var" = "value"
-    echo "Match"
-end
-
-# Numeric comparison
-if test $num -gt 10
-    echo "Greater than 10"
-end
-
-# Multiple conditions with and/or
-if test -f file.txt; and test -r file.txt
-    echo "File exists and is readable"
-end
-
-# Switch statement (Fish-specific)
 switch $animal
-    case cat
-        echo "Meow"
-    case dog
-        echo "Woof"
-    case '*'
-        echo "Unknown animal"
-end
-
-# Negation
-if not test -f file.txt
-    echo "File doesn't exist"
+    case cat dog; echo pet
+    case '*';    echo other
 end
 ```
+Lists are first-class and **1-indexed**: `$files[1]`, `$files[-1]`, slices `$files[2..-1]`, `count $files`, `contains x $files`. There is no `${#arr[@]}` and no `${arr[0]}`.
 
-#### ❌ WRONG - Bash/Zsh Conditional Syntax
-
+### B. Variable scopes (a fish-defining concept)
 ```fish
-# ❌ WRONG - Double brackets don't exist in Fish
-if [[ -f file.txt ]]; then   # Fish doesn't have [[
-    echo "File exists"
-fi                            # Fish uses 'end', not 'fi'
-
-# ❌ WRONG - Bash-style conditions
-if [[ $var == "value" ]]; then  # Use 'test' or single brackets
+set -l x val      # local: this block/function only (DEFAULT — prefer this)
+set -g x val      # global: this shell session
+set -U x val      # universal: persisted across sessions & shells (use sparingly — survives restarts)
+set -x  PATH …    # exported to child processes (combine: set -gx, set -lx)
+set -a list more  # append;  set -p prepend
+set -e x          # erase;   set -q x  → status 0 if set (query)
 ```
+`-U` writes to disk immediately and is shared by every running fish — ideal for `$EDITOR`, dangerous for transient state. `$PATH`, `$fish_function_path` etc. are lists, not colon-strings.
 
-### B. Fish Loops
-
-**CRITICAL: Fish has clean loop syntax.**
-
-#### ✅ CORRECT - Fish Loops
-
+### C. Functions, `argparse`, and `$argv`
 ```fish
-# For loop over list
-for item in $list
-    echo $item
+function greet --description 'Greet by name' --argument-names who
+    set -q who[1]; or set who world
+    echo "Hello, $who"
+end
+```
+Arguments arrive in `$argv` (1-indexed). Parse options with built-in **`argparse`** — not manual loops:
+```fish
+function deploy --description 'Deploy a build'
+    argparse h/help 'e/env=' v/verbose -- $argv; or return        # `or return` on parse failure
+    set -q _flag_help; and begin; printf 'usage: deploy -e ENV [-v]\n'; return 0; end
+    set -q _flag_env;  or begin; echo 'deploy: --env required' >&2; return 2; end
+    test -n "$_flag_verbose"; and echo "env=$_flag_env argv=$argv"
+end
+```
+Each `x/long` flag sets `$_flag_x`; `=` means it takes a value. Process text with `string` (`string match -rq`, `string split`, `string replace`, `string trim`, `string pad`) and arithmetic with `math`, not external tools.
+
+### D. Abbreviations vs aliases vs functions
+- **`abbr`** — expands inline *before* execution; the real command lands in history and is editable. **Preferred for interactive shortcuts.** `abbr -a gco git checkout`; fish 3.7 supports function-driven `--function` abbreviations.
+- **`alias`** — sugar that *defines a wrapper function*; use only for genuine command wrapping (e.g. `alias ls 'ls --color=auto'`), and prefer a real autoloaded function for anything non-trivial.
+- A named function in `functions/` is the right home for multi-line logic — testable and autoloaded.
+
+### E. Event handlers & completions (fish-native extensibility)
+```fish
+function _on_pwd --on-variable PWD          # also: --on-event, --on-signal INT, --on-job-exit
+    test -f .nvmrc; and nvm use 2>/dev/null
 end
 
-# For loop with range
-for i in (seq 1 10)
-    echo $i
-end
+complete -c deploy -s e -l env -d 'Target env' -xa 'staging prod'   # completions/deploy.fish
+```
+Handlers fire on variable changes, named `emit`ted events, signals, and process/job exit — fish's substitute for trap-heavy bash patterns.
 
-# While loop
-set -l count 0
-while test $count -lt 10
-    echo $count
-    set count (math $count + 1)
-end
+### F. config.fish & startup
+Keep `config.fish` fast and idempotent. Guard interactive-only setup with `status is-interactive`; put environment/`$PATH` edits in `conf.d/` so they apply to non-interactive invocations too. Use `fish_add_path` instead of hand-editing `$PATH`.
 
-# Loop over command output
-for file in (ls *.txt)
-    process $file
-end
+### G. Common footguns → fix
+- `var=value` → `set var value`. `$(cmd)` / `` `cmd` `` → `(cmd)`.
+- `$arr[0]` → `$arr[1]` (1-indexed). `${#arr[@]}` → `count $arr`.
+- `[[ … ]]` / `&&` / `||` in conditionals → `test`/`[`, and `; and`/`; or`.
+- `set -e` (bash "exit on error") → **not a thing**; in fish `set -e` *erases a variable*. Propagate errors with `; or return` (see `error-handling.md`).
+- Splitting a captured value on spaces unexpectedly → it won't; fish doesn't word-split. Use `string split` when you *want* splitting.
+- Reading a missing `$argv[1]` → guard with `set -q argv[1]`.
 
-# Break and continue
-for item in $list
-    if test $item = "skip"
-        continue
-    end
-    if test $item = "stop"
-        break
-    end
-    echo $item
-end
+---
+
+## 6. Functions Documentation & Testing
+
+Documentation policy is owned by [`comments.md`](guides://comments.md); fish binding: every public function carries `--description` (surfaced by `functions -D`, completion, and `help`), plus a short header comment for arguments/returns when non-obvious. Test-first policy is owned by [`tdd.md`](guides://tdd.md); fish runner is **fishtape** (TAP output):
+```fish
+# tests/test_greet.fish
+source (path dirname (status filename))/../functions/greet.fish
+@test "greet defaults to world" (greet) = "Hello, world"
+@test "greet uses argument"     (greet Ada) = "Hello, Ada"
+```
+Run `fishtape tests/*.fish` (exit 0 = pass). `littlecheck` is the alternative for output-matching CLI tests. Write the test first, watch it fail, then implement (FISH-TST-01/02).
+
+---
+
+## 7. Error Handling & Tooling
+
+Strategy is owned by [`error-handling.md`](guides://error-handling.md); fish binding: every command sets integer `$status` (0 = success). Bind control flow to it — capture immediately (`set -l rc $status`) since the next command overwrites it:
+```fish
+risky; or begin; echo 'failed' >&2; return 1; end     # handle failure
+validate $f; or return $status                        # propagate
+set -l out (cmd); or set out fallback                 # default on failure
+```
+**Dependencies** use Fisher; commit `~/.config/fish/fish_plugins`. Supply-chain *policy* (vet sources, pin, never `curl | source` untrusted code) is owned by [`secure-coding.md`](guides://secure-coding.md):
+```fish
+fisher install jorgebucaran/nvm.fish    # add (review the code first)
+fisher update                           # update pinned set
+fisher list                             # audit installed plugins
 ```
 
 ---
 
-## 7. Fish Functions (MANDATORY)
-
-### A. Function Definition
-
-**CRITICAL: Fish functions are first-class citizens.**
-
-#### ✅ CORRECT - Fish Function Syntax
+## 8. Quick Reference
 
 ```fish
-# Basic function
-function greet
-    echo "Hello, $argv[1]"
-end
-
-# Function with description (shows in help)
-function greet --description "Greet a person by name"
-    echo "Hello, $argv[1]"
-end
-
-# Function with argument names (for clarity)
-function greet --argument-names name
-    echo "Hello, $name"
-end
-
-# Function with local variables
-function calculate_sum
-    set -l num1 $argv[1]
-    set -l num2 $argv[2]
-    math $num1 + $num2
-end
-
-# Function that modifies caller's variable
-function set_value
-    set -g result (some_computation)
-end
-
-# Function with multiple return values (via list)
-function get_user_info
-    echo "John Doe"  # Name
-    echo "30"        # Age
-end
-
-# Usage
-set info (get_user_info)
-set name $info[1]
-set age $info[2]
-```
-
-### B. Function Documentation
-
-**CRITICAL: Document functions with `--description` and comments.**
-
-#### ✅ CORRECT - Documented Functions
-
-```fish
-##
-# Validates an email address format.
-#
-# Arguments:
-#   $argv[1] - Email address to validate
-#
-# Returns:
-#   0 if valid, 1 if invalid
-#
-# Example:
-#   if validate_email user@example.com
-#       echo "Valid email"
-#   end
-##
-function validate_email --description "Validate email address format"
-    set -l email $argv[1]
-    set -l pattern '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-
-    string match -qr $pattern $email
-end
-
-##
-# Calculates the sum of two numbers.
-#
-# Arguments:
-#   $argv[1] - First number
-#   $argv[2] - Second number
-#
-# Output:
-#   Sum of the two numbers (to stdout)
-#
-# Example:
-#   set result (calculate_sum 5 3)
-#   echo $result  # Output: 8
-##
-function calculate_sum --description "Calculate sum of two numbers" \
-                       --argument-names num1 num2
-    math $num1 + $num2
-end
+fish -n script.fish                 # parse check          (FISH-SYN-01)
+fish_indent -w script.fish          # format               (FISH-FMT-01)
+fishtape tests/*.fish               # test                 (FISH-TST-01/02)
+fish script.fish                    # run
+set -l x v   /  set -gx PATH …      # scope / export
+argparse h/help 'e/env=' -- $argv   # parse options
+string match -rq PATTERN -- $s      # match;  math 1 + 2   # arithmetic
 ```
 
 ---
 
-## 8. Argument Parsing in Fish (MANDATORY)
+## 9. Deployment Checklist
 
-### A. Using argparse (Fish Built-in)
+Generated from §2 — one box per requirement ID.
 
-**CRITICAL: Fish has built-in `argparse` - use it for argument parsing!**
-
-#### ✅ CORRECT - Using argparse
-
-```fish
-#!/usr/bin/env fish
-# script.fish - Example with argparse
-
-function main --description "Process files with various options"
-    # Define options
-    argparse --name=script \
-        'h/help' \
-        'v/verbose' \
-        'd/debug' \
-        'o/output=' \
-        'i/input=' \
-        -- $argv
-    or return 1
-
-    # Check for help
-    if set -q _flag_help
-        echo "Usage: script.fish [OPTIONS]"
-        echo ""
-        echo "Options:"
-        echo "  -h, --help          Show this help message"
-        echo "  -v, --verbose       Enable verbose output"
-        echo "  -d, --debug         Enable debug mode"
-        echo "  -o, --output FILE   Output file (required)"
-        echo "  -i, --input FILE    Input file (required)"
-        echo ""
-        echo "Examples:"
-        echo "  script.fish -i input.txt -o output.txt"
-        echo "  script.fish --input input.txt --output output.txt --verbose"
-        return 0
-    end
-
-    # Set variables from flags
-    set -l verbose $_flag_verbose
-    set -l debug $_flag_debug
-    set -l output_file $_flag_output
-    set -l input_file $_flag_input
-
-    # Validate required arguments
-    if not set -q _flag_input
-        echo "Error: Input file is required" >&2
-        return 1
-    end
-
-    if not set -q _flag_output
-        echo "Error: Output file is required" >&2
-        return 1
-    end
-
-    # Remaining arguments are in $argv
-    echo "Remaining args: $argv"
-
-    # Process
-    if set -q _flag_verbose
-        echo "Processing: $input_file -> $output_file"
-    end
-
-    # Do work...
-end
-
-# Run main
-main $argv
-```
-
-#### ❌ WRONG - Manual Argument Parsing
-
-```fish
-# ❌ WRONG - Don't parse manually when argparse exists
-for arg in $argv
-    switch $arg
-        case -v --verbose
-            set verbose true
-        # ... lots of manual parsing
-    end
-end
-
-# ✅ CORRECT - Use argparse
-argparse 'v/verbose' -- $argv
-```
+- [ ] FISH-SYN-01 — `fish -n` parses clean
+- [ ] FISH-SYN-02 — no bash/zsh constructs (`$(...)`, `[[ ]]`, `=`-assignment, `()` funcs)
+- [ ] FISH-FMT-01 — `fish_indent --check` no diff
+- [ ] FISH-PORT-01 — fish is the right tool (interactive/personal); portable scripts went to bash
+- [ ] FISH-VAR-01 — narrowest scope used (`set -l` default)
+- [ ] FISH-ERR-01 — failures propagate via `$status`/`and`/`or`/`return`
+- [ ] FISH-TST-01/02 — fishtape green, bugs have regression tests
+- [ ] FISH-DOC-01 — public functions carry `--description`
+- [ ] FISH-SEC-01 — no `eval`/`curl|source` on untrusted input; inputs sanitized
+- [ ] Agent ran every §3 command and documented any fixes
 
 ---
-
-## 9. Error Handling in Fish (MANDATORY)
-
-### A. Fish Error Handling
-
-**CRITICAL: Fish handles errors differently than bash/zsh.**
-
-#### ✅ CORRECT - Fish Error Handling
-
-```fish
-# Fish functions return status codes
-function validate_file
-    set -l file $argv[1]
-
-    if not test -e $file
-        echo "Error: File does not exist: $file" >&2
-        return 1
-    end
-
-    if not test -f $file
-        echo "Error: Path is not a regular file: $file" >&2
-        return 1
-    end
-
-    if not test -r $file
-        echo "Error: File is not readable: $file" >&2
-        return 1
-    end
-
-    return 0
-end
-
-# Check function status
-if validate_file myfile.txt
-    echo "File is valid"
-else
-    echo "File validation failed"
-end
-
-# Chain commands with and/or
-command1; and command2; and command3
-or echo "One of the commands failed" >&2
-
-# Use 'or' for defaults/fallbacks
-set result (risky_operation); or set result "default_value"
-
-# Early return on error
-function process_file
-    set -l file $argv[1]
-
-    validate_file $file
-    or return $status
-
-    # Continue processing...
-end
-```
-
-### B. Status Code Handling
-
-```fish
-# Get last command status
-command
-set -l status_code $status
-
-# Check specific status
-if test $status -eq 0
-    echo "Success"
-end
-
-# Save and restore status
-function wrapper
-    some_command
-    set -l saved_status $status
-
-    # Do cleanup
-    cleanup
-
-    return $saved_status
-end
-```
-
----
-
-## 10. Testing with Fishtape/Littlecheck (MANDATORY)
-
-### A. Fishtape Testing
-
-**CRITICAL: Use fishtape for Fish function testing.**
-
-#### ✅ CORRECT - Fishtape Tests
-
-```fish
-#!/usr/bin/env fish
-# tests/test_functions.fish - Fishtape test suite
-
-# Source the functions to test
-source (dirname (status -f))/../functions/calculator.fish
-
-# Test: addition
-@test "calculate_sum adds two numbers correctly" (
-    calculate_sum 5 3
-) = 8
-
-@test "calculate_sum handles negative numbers" (
-    calculate_sum -5 3
-) = -2
-
-# Test: validation
-@test "validate_email accepts valid email" (
-    validate_email user@example.com
-    echo $status
-) = 0
-
-@test "validate_email rejects invalid email" (
-    validate_email invalid.email
-    echo $status
-) = 1
-
-# Test: error handling
-@test "process_file fails gracefully on missing file" (
-    process_file /nonexistent/file.txt 2>&1
-    echo $status
-) -ne 0
-```
-
-### B. Running Tests
-
-```fish
-# Run fishtape tests
-fishtape tests/*.fish
-
-# Run specific test file
-fishtape tests/test_functions.fish
-
-# Run with verbose output
-fishtape -v tests/*.fish
-```
-
----
-
-## 11. Complete Example: Modular Fish Script
-
-### A. Project Structure
-
-```
-script/
-├── main.fish              # Main script
-├── functions/             # Functions (auto-loaded by Fish)
-│   ├── core.fish
-│   ├── ports.fish
-│   └── adapters.fish
-├── conf.d/                # Configuration
-│   └── config.fish
-├── completions/           # Tab completions
-│   └── main.fish
-├── tests/                 # Tests
-│   └── test_main.fish
-└── README.md
-```
-
-### B. Main Script
-
-```fish
-#!/usr/bin/env fish
-# main.fish - File processor with hexagonal architecture
-# Purpose: Process files with validation and error handling
-# Usage: main.fish [OPTIONS] -i INPUT -o OUTPUT
-
-# Get script directory
-set -l script_dir (dirname (status -f))
-
-# Source functions
-source $script_dir/functions/core.fish
-source $script_dir/functions/ports.fish
-source $script_dir/functions/adapters.fish
-
-# Main function
-function main --description "Process input file and write to output file"
-    # Parse arguments with argparse
-    argparse --name=main \
-        'h/help' \
-        'v/verbose' \
-        'd/debug' \
-        'i/input=' \
-        'o/output=' \
-        -- $argv
-    or return 1
-
-    # Show help
-    if set -q _flag_help
-        echo "Usage: main.fish [OPTIONS] -i INPUT -o OUTPUT"
-        echo ""
-        echo "Description:"
-        echo "    Process input file and write to output file."
-        echo ""
-        echo "Options:"
-        echo "    -h, --help          Show this help message"
-        echo "    -v, --verbose       Enable verbose output"
-        echo "    -d, --debug         Enable debug mode"
-        echo "    -i, --input FILE    Input file (required)"
-        echo "    -o, --output FILE   Output file (required)"
-        echo ""
-        echo "Examples:"
-        echo "    main.fish -i input.txt -o output.txt"
-        echo "    main.fish --input input.txt --output output.txt --verbose"
-        return 0
-    end
-
-    # Validate required arguments
-    if not set -q _flag_input
-        echo "Error: Input file is required" >&2
-        return 1
-    end
-
-    if not set -q _flag_output
-        echo "Error: Output file is required" >&2
-        return 1
-    end
-
-    # Set variables
-    set -l verbose $_flag_verbose
-    set -l debug $_flag_debug
-    set -l input_file $_flag_input
-    set -l output_file $_flag_output
-
-    # Enable debug if requested
-    if set -q _flag_debug
-        set fish_trace 1
-    end
-
-    # Validate input file
-    validate_file_path $input_file
-    or return $status
-
-    # Validate output directory
-    set -l output_dir (dirname $output_file)
-    if not test -d $output_dir
-        if set -q _flag_verbose
-            echo "Creating output directory: $output_dir"
-        end
-        mkdir -p $output_dir
-    end
-
-    # Process file
-    if set -q _flag_verbose
-        echo "Processing: $input_file -> $output_file"
-    end
-
-    process_file $input_file $output_file
-    or begin
-        echo "Error: Failed to process file" >&2
-        return 1
-    end
-
-    if set -q _flag_verbose
-        echo "Processing complete"
-    end
-end
-
-# Execute main
-main $argv
-```
-
-### C. Core Module
-
-```fish
-# functions/core.fish - Core business logic
-
-function process_file --description "Process file (core function)"
-    set -l input_file $argv[1]
-    set -l output_file $argv[2]
-
-    # Read and process using Fish built-ins
-    string upper < $input_file > $output_file
-end
-```
-
-### D. Ports Module
-
-```fish
-# functions/ports.fish - Input/output ports
-
-function validate_file_path --description "Validate file path"
-    set -l file $argv[1]
-
-    if test -z $file
-        echo "Error: File path is required" >&2
-        return 1
-    end
-
-    if not test -e $file
-        echo "Error: File does not exist: $file" >&2
-        return 1
-    end
-
-    if not test -f $file
-        echo "Error: Path is not a regular file: $file" >&2
-        return 1
-    end
-
-    if not test -r $file
-        echo "Error: File is not readable: $file" >&2
-        return 1
-    end
-
-    return 0
-end
-```
-
----
-
-## 12. Security & Dependency Management (MANDATORY)
-
-### A. Automated Dependency Management
-
-Fish uses **Fisher** as the primary plugin manager:
-
-```fish
-# Install Fisher (plugin manager)
-curl -sL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source && fisher install jorgebucaran/fisher
-
-# Install plugins with Fisher
-fisher install jorgebucaran/nvm.fish
-fisher install PatrickF1/fzf.fish
-
-# List installed plugins
-fisher list
-
-# Update all plugins
-fisher update
-
-# Remove a plugin
-fisher remove jorgebucaran/nvm.fish
-```
-
-**Fisher stores its plugin list in `~/.config/fish/fish_plugins`.** Commit this file to version control for reproducibility.
-
-### B. Vulnerability Scanning & Security
-
-```fish
-# shellcheck does not natively support Fish syntax, but use fish --no-execute for syntax validation
-fish --no-execute script.fish
-
-# fish_indent for consistent formatting (reduces obfuscation risks)
-fish_indent --check script.fish
-
-# Trivy: filesystem scan for vulnerabilities in vendored dependencies
-trivy fs --scanners vuln .
-```
-
-**Security best practices:**
-- **Verify plugin sources** before installing — only use plugins from trusted repositories with active maintenance
-- **Review Fisher plugin code** before installation: `fisher install` runs arbitrary Fish code
-- **Avoid `eval`** in Fish scripts — use `command` and Fish's built-in string manipulation instead
-- **Sanitize user input** before passing to external commands:
-
-```fish
-# Input sanitization example
-function sanitize_input
-    set -l input $argv[1]
-    # Remove dangerous characters, keep only alphanumeric, dots, hyphens, underscores
-    string replace -ra '[^a-zA-Z0-9._-]' '' -- $input
-end
-
-# Safe command execution — never interpolate unsanitized input
-function safe_run
-    set -l filename (sanitize_input $argv[1])
-    if test -f "$filename"
-        cat -- "$filename"
-    end
-end
-```
-
-- **Never use `curl | source`** in production — download, inspect, verify, then source
-- **Pin plugin versions** by referencing specific Git tags or commits in `fish_plugins`
-- **Use `--` with commands** to prevent option injection (e.g., `rm -- "$file"`)
-- **Restrict `PATH`** at script start to known-safe directories
-
-### C. Dependency File
-
-```fish
-# ~/.config/fish/fish_plugins
-# Managed by Fisher — commit this to version control
-jorgebucaran/fisher
-jorgebucaran/nvm.fish
-PatrickF1/fzf.fish
-jethrokuan/z
-```
-
-```fish
-# conf.d/dependencies.fish — Verify required tools at shell startup
-function __check_dependencies --on-event fish_prompt
-    set -l required_tools jq curl git
-    for cmd in $required_tools
-        if not command -q $cmd
-            echo "WARNING: Missing dependency: $cmd" >&2
-        end
-    end
-    # Only run once
-    functions -e __check_dependencies
-end
-```
-
----
-
-## 13. Deployment Checklist
-
-### Build & Syntax
-- [ ] Fish syntax check passes: `fish -n script.fish` returns exit 0
-- [ ] fish_indent formatting verified: `fish_indent --check script.fish` returns exit 0
-- [ ] No bash/zsh syntax used (pure Fish)
-- [ ] All functions load correctly from `functions/` directory
-
-### Testing
-- [ ] All fishtape/littlecheck tests pass
-- [ ] Script executes with `--help`: `fish script.fish --help` returns exit 0
-- [ ] Edge cases tested (empty inputs, missing files, permission errors)
-- [ ] Autocompletions tested for all subcommands
-
-### Security
-- [ ] No hardcoded passwords, tokens, or secrets in source
-- [ ] All user inputs validated via `argparse`
-- [ ] No use of `eval` on untrusted input
-- [ ] Temporary files cleaned up on exit via `trap` equivalent
-
-### Agent Workflow
-- [ ] Agent verified syntax with `fish -n` before delivery
-- [ ] Agent verified formatting with `fish_indent --check`
-- [ ] Agent tested script execution with `--help` flag
-- [ ] All functions documented with `--description` flags
-
----
-
-## 14. Why This Configuration Works
-
-1. **Sane Defaults Prevent Bugs**: Fish does not perform word splitting or glob expansion on variable expansion, eliminating entire categories of shell scripting bugs that plague bash and zsh scripts. Variables behave predictably without quoting gymnastics.
-
-2. **Built-in `argparse` for Argument Parsing**: Fish's native `argparse` command provides standardized, self-documenting argument handling with automatic help generation, removing the need for external tools like getopt and reducing boilerplate code.
-
-3. **`string` Command for Text Processing**: The built-in `string` command replaces `sed`, `awk`, `cut`, and `tr` for common text operations, keeping scripts portable and reducing external dependencies while providing consistent, well-documented behavior.
-
-4. **Auto-loading Function Architecture**: Functions stored in `~/.config/fish/functions/` are loaded on demand, enabling a naturally modular architecture where each function is independently testable and the shell starts instantly regardless of how many functions exist.
-
-5. **Syntax Highlighting and Autosuggestions**: Real-time syntax highlighting catches errors before execution, and history-based autosuggestions speed up interactive workflows. These features work out of the box with no configuration required.
-
----
-
-## 15. Quick Reference
-
-### Common Commands
-
-```fish
-# Verification (MANDATORY)
-fish -n script.fish                 # Syntax check
-fish_indent --check script.fish     # Format check
-
-# Formatting
-fish_indent -w script.fish          # Auto-format script
-
-# Testing
-fishtape tests/*.fish               # Run fishtape tests
-
-# Debugging
-fish -d script.fish                 # Debug mode (categories)
-fish -d exec script.fish            # Debug execution
-set fish_trace 1                    # Enable tracing
-
-# Script execution
-fish script.fish --help             # Show help
-fish script.fish -v                 # Verbose mode
-```
-
-### Fish Script Header Template
-
-```fish
-#!/usr/bin/env fish
-# Script description
-
-set -l script_dir (dirname (status -f))
-set -l script_name (basename (status -f))
-```
-
-### Function Template
-
-```fish
-##
-# Brief description of function
-#
-# Arguments:
-#   $argv[1] - Description of first argument
-#   $argv[2] - Description of second argument (optional)
-#
-# Returns:
-#   0 on success, 1 on failure
-#
-# Output:
-#   Writes result to stdout
-##
-function function_name --description "Brief description" \
-                       --argument-names arg1 arg2
-    set -l local_var $arg1
-    set -l optional_arg $arg2; or set optional_arg "default"
-
-    # Implementation
-    echo "result"
-    return 0
-end
-```
-
-### Common Patterns
-
-```fish
-# String operations
-string match -q "*.txt" $file        # Match pattern
-string replace "old" "new" $text     # Replace
-string split "," $csv                # Split
-string join "," $list                # Join
-
-# Conditionals
-if test -f $file; and test -r $file
-    echo "File exists and is readable"
-end
-
-# Loops
-for item in $list
-    echo $item
-end
-
-# Command substitution
-set result (command args)
-
-# Error handling
-command; or return $status
-```
-
----
-
-## 16. Summary
-
-**CRITICAL Requirements for All Fish Scripts:**
-
-1. **Fish Syntax**: Use Fish syntax, NOT bash/zsh
-2. **fish_indent**: All scripts MUST be formatted with fish_indent
-3. **argparse**: Use built-in argparse for argument parsing
-4. **string Command**: Use built-in string for text manipulation
-5. **Functions**: Organize code into well-documented functions
-6. **Testing**: fishtape or littlecheck tests for all scripts
-7. **Verification**: Agent MUST test scripts before delivery
-8. **Documentation**: Clear function descriptions and comments
-9. **TDD**: Write tests first, then implementation
-10. **Regression Tests**: Every bug gets a test before fixing
-
-**Agent Verification Protocol:**
-- **MANDATORY**: Syntax check (`fish -n script.fish`) - MUST succeed
-- **MANDATORY**: Format check (`fish_indent --check script.fish`) - MUST succeed
-- **MANDATORY**: Execution test (`fish script.fish --help`) - MUST succeed
-- **MANDATORY**: Test execution - MUST pass if tests exist
-- **MANDATORY**: After ANY modification, re-verify all steps
-- Only present working, formatted, tested scripts to the user
-
-**Remember**: Fish is NOT bash. Embrace Fish's modern, user-friendly design. Use Fish built-ins over external tools. Keep it clean, keep it Fish, keep it working.
-
-**End of Modern Fish Shell Scripting Guidelines**
+**End of Fish Shell Scripting Guidelines**

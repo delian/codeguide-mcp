@@ -40,9 +40,23 @@ For each selected guide, get its full content using **either**:
 
 Both return the full markdown content of the guide. Use one or the other; no need to use both for the same guide.
 
-### Step 3: Apply the guidelines
+### Step 3: Follow references (MANDATORY)
 
-Follow the fetched guidelines as mandatory standards when writing, reviewing, or modifying code. If multiple guides apply, follow all of them. Treat the guides like project AGENTS.md or Skills.
+Guides are deliberately small: they do **not** duplicate shared content. Instead they **reference** other guides that own a cross-cutting concern (TDD, hexagonal architecture, secure coding, error handling, logging, configuration, etc.). You **MUST** follow those references — a guide is incomplete without them.
+
+When a guide you fetched contains a reference marker, act on it:
+
+- **📎 REQUIRED** — You **MUST** fetch and apply the linked guide **before writing any code**. It is a hard prerequisite; the referencing guide assumes its rules and does not restate them. Skipping it means you are violating mandatory standards.
+- **📎 RECOMMENDED** — You **MUST** fetch and apply the linked guide **if the current task touches that concern** (e.g. fetch `logging.md` when the task involves logging).
+- **📎 SEE ALSO** — Optional; fetch for additional depth when useful.
+
+Reference targets appear as `guides://<name>.md` links (e.g. `guides://tdd.md`). Resolve each one with **ReadResource** or the **`get_guide`** tool, exactly as in Step 2. Follow references **transitively** — if a referenced guide has its own REQUIRED references, fetch those too. Fetch each guide only once per task and reuse it.
+
+A guide's machine-readable prerequisites are also listed in its YAML frontmatter under `requires:` (must fetch) and `recommends:` (fetch when relevant); the `name` values map to `<name>.md`. Use these to plan which guides to pull up front.
+
+### Step 4: Apply the guidelines
+
+Follow the fetched guidelines — and every guide they REQUIRED/RECOMMENDED you to fetch — as mandatory standards when writing, reviewing, or modifying code. If multiple guides apply, follow all of them. Each guide also contains an auditable requirements table (IDs like `PY-TST-01`) with verification commands and pass/fail gates: satisfy every gate before presenting code. Treat the guides like project AGENTS.md or Skills.
 
 ---
 

@@ -1,1438 +1,325 @@
-# GraphQL Development Guidelines
-Mandatory standards for GraphQL API design, schema development, and implementation best practices. Apollo Server, GraphQL Yoga, Nexus, TypeGraphQL, GraphQL Code Generator, DataLoader.
+# GraphQL API Guidelines
+Mandatory standards for designing and implementing GraphQL APIs: schema-first design, N+1-safe resolvers, cursor pagination, and query-cost security. Apollo Server 4, GraphQL Yoga, graphql-js, DataLoader, GraphQL Code Generator, Apollo Federation.
+
+---
+name: graphql
+title: GraphQL API Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: cross-cutting
+tools: [apollo-server@4, graphql-yoga@5, graphql-js@16, dataloader@2, graphql-codegen@5, apollo-federation@2, graphql-armor]
+requires: []
+recommends:
+  - rest
+  - oauth
+  - secure-coding
+  - error-handling
+  - observability
+provides:
+  - graphql-schema-design
+  - resolvers
+  - dataloader
+  - query-security
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide owns GraphQL's unique surface — schema, resolvers, batching, pagination, and query-cost defense — and references the owners of auth, security, error strategy, and observability.
 
 ---
 
-**Agent Profile**: The GraphQL Architect
-**Role**: Senior API Engineer & GraphQL Specialist
-**Objective**: Generate well-designed, performant, and secure GraphQL APIs.
-**Tools**: Apollo Server, GraphQL Yoga, Nexus, TypeGraphQL, GraphQL Code Generator, DataLoader.
+## 0. Prerequisites & References
+
+GraphQL is an API *style*; it sits on top of cross-cutting concerns owned elsewhere. Apply those guides; this one does not repeat them.
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`oauth.md`](guides://oauth.md) — authentication & token validation. *(GraphQL binding: validate the token once in context-building; resolvers read the authenticated principal — never re-parse `Authorization` per field.)*
+> - [`secure-coding.md`](guides://secure-coding.md) — input validation, injection, secrets, dependency CVEs. *(GraphQL-specific binding owned here: query depth/complexity/introspection — see §6.)*
+> - [`error-handling.md`](guides://error-handling.md) — failure taxonomy, retries, fail-fast vs degrade. *(GraphQL binding: how that taxonomy maps onto the `errors[]` envelope — see §5.)*
+> - [`rest.md`](guides://rest.md) — when REST is the better fit (see §1, "REST vs GraphQL").
+> - [`observability.md`](guides://observability.md) — tracing/metrics. *(GraphQL binding: per-resolver spans + trace propagation through context — see §9.)*
+
+> 📎 **SEE ALSO:** [`grpc.md`](guides://grpc.md) · [`openapi.md`](guides://openapi.md) · [`websocket.md`](guides://websocket.md) *(subscription transport)* · [`designpatterns.md`](guides://designpatterns.md) · [`ci-cd.md`](guides://ci-cd.md)
 
 ---
 
 ## 1. Core Philosophies: GRAPHQL-FIRST
 
-The agent must adhere to the **GRAPHQL-FIRST** principles:
+GraphQL-specific principles only. Auth, generic security, error strategy, and tracing come from §0.
 
-- **G**raph Thinking: Design for relationships, not endpoints
-- **R**esolver Efficiency: Optimize for N+1 prevention with DataLoader
-- **A**uthorization Everywhere: Implement auth at resolver level
-- **P**agination Required: Always paginate list queries
-- **H**uman Readable: Schema is documentation; make it clear
-- **Q**uery Complexity: Limit query depth and complexity
-- **L**ayered Architecture: Separate schema, resolvers, and data sources
+- **G**raph thinking: model relationships between types, not request/response endpoints. The schema is the contract and the documentation.
+- **R**esolver efficiency: every list/relation field is N+1-prone — batch through DataLoader by default (see §3.B).
+- **A**uthorization in the data layer: enforce on the resolver/field that touches data, not at a gateway edge alone, so nested paths cannot bypass it.
+- **P**agination always: list fields MUST return a paginated Connection, never an unbounded array.
+- **H**uman-readable schema: descriptive type/field names, `description` strings, `@deprecated(reason:)` over breaking removals.
+- **Q**uery-cost ceiling: bound depth, complexity, and aliases so one request cannot DoS the server (see §6).
+- **L**ayered: keep typeDefs, resolvers, and data sources separate; resolvers orchestrate, data sources do I/O.
 
----
+**REST vs GraphQL (choose deliberately).** Prefer GraphQL when clients need flexible, nested, client-shaped reads across many related types, or to collapse many round-trips into one. Prefer REST (see [`rest.md`](guides://rest.md)) for simple CRUD, cache-by-URL/CDN semantics, file up/download, and webhooks. Do not expose both styles over the same domain without a single shared service layer beneath them.
 
-## 2. Schema Design (MANDATORY)
-
-### A. Type Definitions
-
-**CRITICAL: Resource IDs must be unpredictable with minimum 32 characters to prevent enumeration attacks.**
-
-```graphql
-# schema.graphql
-
-# Custom scalar for secure IDs (minimum 32 characters, unpredictable)
-# Implementation must validate: pattern ^[a-zA-Z0-9_-]{32,}$
-scalar SecureID
-
-# Use clear, descriptive type names
-type User {
-  # ID must be unpredictable, minimum 32 characters
-  # Examples: UUID, ULID, NanoID, CUID
-  # ❌ NEVER use sequential integers (1, 2, 3)
-  # ❌ NEVER use short IDs (< 32 chars)
-  id: ID!  # Validated as SecureID in resolvers
-  email: String!
-  displayName: String!
-  avatar: String
-  role: UserRole!
-  createdAt: DateTime!
-  updatedAt: DateTime!
-
-  # Relationships
-  posts(first: Int, after: String): PostConnection!
-  comments(first: Int, after: String): CommentConnection!
-}
-
-# Use enums for fixed sets of values
-enum UserRole {
-  ADMIN
-  MODERATOR
-  USER
-  GUEST
-}
-
-# Custom scalars for specific types
-scalar DateTime
-scalar Email
-scalar URL
-
-# Input types for mutations
-input CreateUserInput {
-  email: Email!
-  displayName: String!
-  password: String!
-  role: UserRole = USER
-}
-
-input UpdateUserInput {
-  displayName: String
-  avatar: URL
-}
-
-# Pagination - Use Relay-style connections
-type PostConnection {
-  edges: [PostEdge!]!
-  pageInfo: PageInfo!
-  totalCount: Int!
-}
-
-type PostEdge {
-  cursor: String!
-  node: Post!
-}
-
-type PageInfo {
-  hasNextPage: Boolean!
-  hasPreviousPage: Boolean!
-  startCursor: String
-  endCursor: String
-}
-```
-
-### B. Naming Conventions
-
-```graphql
-# Types: PascalCase
-type UserProfile { ... }
-
-# Fields: camelCase
-type User {
-  firstName: String!
-  lastName: String!
-  fullName: String!
-}
-
-# Enums: SCREAMING_SNAKE_CASE values
-enum OrderStatus {
-  PENDING
-  PROCESSING
-  SHIPPED
-  DELIVERED
-  CANCELLED
-}
-
-# Inputs: PascalCase with Input suffix
-input CreateOrderInput { ... }
-input UpdateOrderInput { ... }
-input OrderFilterInput { ... }
-
-# Mutations: verb + noun
-type Mutation {
-  createUser(input: CreateUserInput!): CreateUserPayload!
-  updateUser(id: ID!, input: UpdateUserInput!): UpdateUserPayload!
-  deleteUser(id: ID!): DeleteUserPayload!
-
-  # Actions
-  sendPasswordResetEmail(email: Email!): SendPasswordResetEmailPayload!
-  approveOrder(orderId: ID!): ApproveOrderPayload!
-}
-
-# Queries: noun or descriptive name
-type Query {
-  user(id: ID!): User
-  users(filter: UserFilterInput, pagination: PaginationInput): UserConnection!
-  me: User
-
-  # Search
-  searchUsers(query: String!, first: Int): UserConnection!
-}
-```
-
-### C. Mutation Payloads
-
-```graphql
-# Always return payload types from mutations
-type CreateUserPayload {
-  user: User
-  errors: [UserError!]!
-}
-
-type UserError {
-  field: String
-  message: String!
-  code: ErrorCode!
-}
-
-enum ErrorCode {
-  NOT_FOUND
-  VALIDATION_ERROR
-  UNAUTHORIZED
-  FORBIDDEN
-  CONFLICT
-  INTERNAL_ERROR
-}
-
-# Example mutation
-type Mutation {
-  createUser(input: CreateUserInput!): CreateUserPayload!
-}
-
-# Usage in resolver
-const resolvers = {
-  Mutation: {
-    createUser: async (_, { input }, context) => {
-      try {
-        const user = await context.dataSources.users.create(input);
-        return { user, errors: [] };
-      } catch (error) {
-        return {
-          user: null,
-          errors: [{ message: error.message, code: 'VALIDATION_ERROR' }]
-        };
-      }
-    }
-  }
-};
-```
+**Verified Code**: Agent-generated GraphQL MUST pass every gate in §2 before delivery.
 
 ---
 
-## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+## 2. Requirements (MANDATORY, auditable)
 
-**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+RFC-2119 keywords. IDs `GQL-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a shared rule cite its owner.
 
-### TDD Cycle
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| GQL-SCHEMA-01 | Schema MUST build without errors | `graphql-inspector validate` / `buildSchema()` test | exit 0 |
+| GQL-SCHEMA-02 | Schema changes MUST NOT break clients without a deprecation cycle | `graphql-inspector diff <old> <new>` | no `BREAKING` |
+| GQL-SCHEMA-03 | Every list field MUST be a paginated Connection (no unbounded `[T!]!` collections) | schema lint / review | no unpaginated lists |
+| GQL-SCHEMA-04 | Mutations MUST return a payload type carrying `userErrors`, not throw for expected domain failures | review / schema lint | payload pattern present |
+| GQL-RESOLVE-01 | Relation/list resolvers MUST batch via DataLoader (no per-item DB call) | N+1 test (assert query count) / `apollo` trace | no N+1 |
+| GQL-AUTHZ-01 | Every non-public field/resolver MUST enforce authorization (see `oauth.md`) | authz tests per field | unauthorized → denied |
+| GQL-SEC-01 | Query **depth** MUST be capped | depth-limit rule test with over-deep query | rejected |
+| GQL-SEC-02 | Query **complexity/cost** MUST be capped | complexity test over the limit | rejected |
+| GQL-SEC-03 | Introspection MUST be disabled in production (see `secure-coding.md`) | prod config check / introspection query | denied in prod |
+| GQL-SEC-04 | Input MUST be validated beyond scalar types (see `secure-coding.md`) | validation unit tests | invalid → rejected |
+| GQL-ERR-01 | Errors MUST use stable `extensions.code`; internals MUST NOT leak in prod (see `error-handling.md`) | `formatError` test in prod mode | no stack/SQL leaked |
+| GQL-OBS-01 | Each request MUST carry a trace id propagated to resolvers/logs (see `observability.md`) | trace span assertion | trace id present |
+| GQL-TST-01 | Schema, resolver, and authz behavior MUST be tested first (see `tdd.md`) | `<test_command>` | exit 0, 0 skips |
 
-```
-1. RED: Write a failing test first
-   ↓
-2. GREEN: Write minimal code to make it pass
-   ↓
-3. REFACTOR: Improve code while keeping tests green
-   ↓
-   Repeat
-```
+> **Forbidden**: returning unbounded lists; resolvers that issue one query per parent (N+1); enabling introspection or unbounded query depth/complexity in production; leaking internal error messages/stack traces to clients; performing auth only at the gateway and trusting it inside resolvers.
 
-### Example TDD Workflow for GraphQL
+---
+
+## 3. Resolvers & the N+1 Problem
+
+The single most important GraphQL implementation concern. A resolver is `(parent, args, context, info)`; field resolvers fire once **per parent object**, so a list of N parents naively triggers N child queries.
+
+### A. Resolver structure
+
+Resolvers stay thin: authorize, delegate to a data source or loader, shape the result. No business logic, no raw SQL inline.
 
 ```typescript
-// Step 1: RED - Write failing test
-import { createTestClient } from 'apollo-server-testing';
-import { ApolloServer, gql } from 'apollo-server';
-
-const GET_USER = gql`
-  query GetUser($id: ID!) {
-    user(id: $id) {
-      id
-      email
-      displayName
-      role
-    }
-  }
-`;
-
-describe('User Resolver', () => {
-  let server: ApolloServer;
-
-  beforeAll(() => {
-    server = new ApolloServer({
-      typeDefs,
-      resolvers,
-      context: () => createTestContext(),
-    });
-  });
-
-  it('should return user with all required fields', async () => {
-    const { query } = createTestClient(server);
-
-    const result = await query({
-      query: GET_USER,
-      variables: { id: 'user-abc123' },
-    });
-
-    expect(result.errors).toBeUndefined();
-    expect(result.data.user).toEqual({
-      id: 'user-abc123',
-      email: 'jane@example.com',
-      displayName: 'Jane Doe',
-      role: 'USER',
-    });
-  });
-});
-// FAILS - resolver not implemented yet
-
-// Step 2: GREEN - Implement the resolver
-const resolvers = {
-  Query: {
-    user: async (_, { id }, { dataSources }) => {
-      return dataSources.users.findById(id);
-    },
-  },
-};
-// PASSES
-
-// Step 3: REFACTOR - Add authorization, input validation, DataLoader
-const resolvers = {
-  Query: {
-    user: async (_, { id }, { dataSources, user }) => {
-      if (!user) throw new AuthenticationError('Not authenticated');
-      return dataSources.users.findById(id);
-    },
-  },
-};
-// All tests still PASS
-```
-
-### GraphQL-Specific TDD Practices
-
-- Test resolvers in isolation with mocked data sources and context.
-- Validate schema correctness with `buildSchema()` in dedicated schema tests.
-- Test query responses, mutation payloads, and error structures.
-- Use `createTestClient` or `supertest` for integration-level resolver testing.
-- Always verify that `result.errors` is undefined for success cases.
-
----
-
-## 2B. Bug Fix Protocol (MANDATORY)
-
-**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
-
-### Bug Fix Workflow
-
-```
-1. Bug Reported/Discovered
-   ↓
-2. Write a test that REPRODUCES the bug (test will FAIL)
-   ↓
-3. Verify the test fails for the right reason
-   ↓
-4. Fix the bug (make the test pass)
-   ↓
-5. Verify the test now PASSES
-   ↓
-6. Document the bug in test comments (include bug ID)
-   ↓
-7. Deploy with confidence (regression prevented)
-```
-
-### Example Bug Fix
-
-```typescript
-// Bug Report: BUG-3201 - User query returns null email for admin users
-// due to field-level auth incorrectly filtering admin's own email.
-
-describe('BUG-3201: Admin user email visibility', () => {
-  it('should return email when admin queries their own profile', async () => {
-    const server = new ApolloServer({
-      typeDefs,
-      resolvers,
-      context: () => ({
-        user: { id: 'admin-001', role: 'ADMIN' },
-        dataSources: createMockDataSources(),
-      }),
-    });
-
-    const { query } = createTestClient(server);
-
-    const result = await query({
-      query: gql`
-        query GetUser($id: ID!) {
-          user(id: $id) {
-            id
-            email
-          }
-        }
-      `,
-      variables: { id: 'admin-001' },
-    });
-
-    expect(result.errors).toBeUndefined();
-    // BUG-3201: email was null here before the fix
-    expect(result.data.user.email).toBe('admin@example.com');
-  });
-});
-
-// Fix: Updated field resolver to check user.id === parent.id OR user.role === 'ADMIN'
-// User: {
-//   email: (parent, _, { user }) => {
-//     if (user?.id === parent.id || user?.role === 'ADMIN') {
-//       return parent.email;
-//     }
-//     return null;
-//   },
-// },
-```
-
-### Prohibited Practices for Bug Fixes
-
-**NEVER:**
-- Fix a bug without adding a regression test first
-- Write implementation before writing tests (violates TDD)
-- Skip the Red-Green-Refactor cycle
-- Commit code with failing tests
-- Remove tests to make code pass
-- Skip validation of schema changes with `buildSchema()` or GraphQL Code Generator
-
----
-
-## 3. Resolver Implementation (MANDATORY)
-
-### A. Resolver Structure
-
-```typescript
-// resolvers/user.resolvers.ts
-import { Resolvers } from '../generated/graphql';
-import { Context } from '../context';
-
 export const userResolvers: Resolvers<Context> = {
   Query: {
-    user: async (_, { id }, { dataSources, user }) => {
-      // Authorization check
-      if (!user) throw new AuthenticationError('Not authenticated');
-
-      return dataSources.users.findById(id);
-    },
-
-    users: async (_, { filter, pagination }, { dataSources }) => {
-      return dataSources.users.findMany(filter, pagination);
-    },
-
-    me: async (_, __, { dataSources, user }) => {
-      if (!user) return null;
-      return dataSources.users.findById(user.id);
-    },
+    user: (_p, { id }, ctx) => ctx.dataSources.users.byId(id),   // authz via field on User, below
+    me: (_p, _a, ctx) => ctx.auth.userId ? ctx.loaders.user.load(ctx.auth.userId) : null,
   },
-
-  Mutation: {
-    createUser: async (_, { input }, { dataSources }) => {
-      const user = await dataSources.users.create(input);
-      return { user, errors: [] };
-    },
-
-    updateUser: async (_, { id, input }, { dataSources, user }) => {
-      // Authorization: only self or admin
-      if (user.id !== id && user.role !== 'ADMIN') {
-        throw new ForbiddenError('Not authorized');
-      }
-
-      const updatedUser = await dataSources.users.update(id, input);
-      return { user: updatedUser, errors: [] };
-    },
-  },
-
-  // Field resolvers
   User: {
-    posts: async (parent, { first, after }, { dataSources }) => {
-      return dataSources.posts.findByUserId(parent.id, { first, after });
-    },
-
-    fullName: (parent) => {
-      return `${parent.firstName} ${parent.lastName}`;
-    },
+    // Relation resolvers go through loaders — NOT direct queries.
+    posts: (user, args, ctx) => ctx.loaders.postsByAuthor.load(user.id),
   },
 };
 ```
 
-### B. DataLoader Pattern (N+1 Prevention)
+### B. DataLoader — batch + per-request cache (GQL-RESOLVE-01)
+
+DataLoader coalesces all `.load(key)` calls made in one tick into a single batch function call. **Create loaders per request** (in context-building), never module-global — a shared loader would cache across users and leak data.
 
 ```typescript
-// dataloaders/user.loader.ts
-import DataLoader from 'dataloader';
-import { User } from '../models';
+import DataLoader from "dataloader";
 
-export const createUserLoader = (db: Database) => {
-  return new DataLoader<string, User>(async (ids) => {
-    // Batch fetch all users
-    const users = await db.users.findMany({
-      where: { id: { in: ids as string[] } }
-    });
-
-    // Map results to match input order
-    const userMap = new Map(users.map(u => [u.id, u]));
-    return ids.map(id => userMap.get(id) || null);
-  });
-};
-
-// context.ts
-export interface Context {
-  user: AuthUser | null;
-  loaders: {
-    user: DataLoader<string, User>;
-    post: DataLoader<string, Post>;
-  };
-  dataSources: DataSources;
-}
-
-export const createContext = async ({ req }): Promise<Context> => {
-  const user = await authenticateRequest(req);
-
-  return {
-    user,
-    loaders: {
-      user: createUserLoader(db),
-      post: createPostLoader(db),
-    },
-    dataSources: new DataSources(db),
-  };
-};
-
-// Usage in resolver
-const resolvers = {
-  Post: {
-    author: (parent, _, { loaders }) => {
-      return loaders.user.load(parent.authorId);
-    },
-  },
-
-  Comment: {
-    author: (parent, _, { loaders }) => {
-      return loaders.user.load(parent.authorId);
-    },
-  },
-};
-```
-
----
-
-## 4. Authentication & Authorization (MANDATORY)
-
-### A. Authentication
-
-```typescript
-// middleware/auth.ts
-import { AuthenticationError } from 'apollo-server-core';
-import jwt from 'jsonwebtoken';
-
-export async function authenticateRequest(req: Request): Promise<AuthUser | null> {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader?.startsWith('Bearer ')) {
-    return null;
-  }
-
-  const token = authHeader.substring(7);
-
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    return decoded as AuthUser;
-  } catch {
-    return null;
-  }
-}
-
-// Directive-based authentication
-import { mapSchema, getDirective, MapperKind } from '@graphql-tools/utils';
-
-export function authDirectiveTransformer(schema: GraphQLSchema) {
-  return mapSchema(schema, {
-    [MapperKind.OBJECT_FIELD]: (fieldConfig) => {
-      const authDirective = getDirective(schema, fieldConfig, 'auth')?.[0];
-
-      if (authDirective) {
-        const { resolve = defaultFieldResolver } = fieldConfig;
-        const requiredRole = authDirective.requires;
-
-        fieldConfig.resolve = async (source, args, context, info) => {
-          if (!context.user) {
-            throw new AuthenticationError('Not authenticated');
-          }
-
-          if (requiredRole && context.user.role !== requiredRole) {
-            throw new ForbiddenError('Insufficient permissions');
-          }
-
-          return resolve(source, args, context, info);
-        };
-      }
-
-      return fieldConfig;
-    },
-  });
-}
-```
-
-### B. Authorization Schema
-
-```graphql
-# Directive definition
-directive @auth(requires: UserRole) on FIELD_DEFINITION
-
-type Query {
-  # Public
-  post(id: ID!): Post
-
-  # Requires authentication
-  me: User @auth
-
-  # Requires specific role
-  users: [User!]! @auth(requires: ADMIN)
-  adminDashboard: AdminDashboard! @auth(requires: ADMIN)
-}
-
-type Mutation {
-  # Requires authentication
-  createPost(input: CreatePostInput!): CreatePostPayload! @auth
-
-  # Requires admin
-  deleteUser(id: ID!): DeleteUserPayload! @auth(requires: ADMIN)
-}
-```
-
-### C. Field-Level Authorization
-
-```typescript
-// resolvers/user.resolvers.ts
-const resolvers = {
-  User: {
-    email: (parent, _, { user }) => {
-      // Only show email to self or admin
-      if (user?.id === parent.id || user?.role === 'ADMIN') {
-        return parent.email;
-      }
-      return null;
-    },
-
-    privateNotes: (parent, _, { user }) => {
-      // Only show to self
-      if (user?.id !== parent.id) {
-        throw new ForbiddenError('Not authorized to view private notes');
-      }
-      return parent.privateNotes;
-    },
-  },
-};
-```
-
----
-
-## 5. Error Handling (MANDATORY)
-
-### Protocol-Specific Design Note
-
-**Why GraphQL error format differs from REST/gRPC:**
-
-| Aspect | GraphQL | REST | gRPC |
-|--------|---------|------|------|
-| **Error format** | `errors[]` with `extensions.code` | JSON with `error`, `message` | Status codes with `errdetails` |
-| **Pagination** | Relay connections (`first`, `after`) | URL params or cursor | Request message fields |
-| **Naming** | camelCase (fields) | snake_case | snake_case (proto) |
-| **Rate limiting** | Query complexity limits | HTTP headers | Interceptor-based |
-
-These differences are **intentional and appropriate** for each protocol:
-- GraphQL returns partial data + errors in a single response
-- GraphQL uses camelCase per JavaScript/TypeScript conventions
-- Query complexity limits prevent expensive nested queries
-
-**Cross-API services** should use API gateway transformations to convert between formats.
-
----
-
-### A. Error Types
-
-```typescript
-// errors/index.ts
-import { GraphQLError } from 'graphql';
-
-export class NotFoundError extends GraphQLError {
-  constructor(resource: string, id: string) {
-    super(`${resource} with id ${id} not found`, {
-      extensions: {
-        code: 'NOT_FOUND',
-        resource,
-        id,
-      },
-    });
-  }
-}
-
-export class ValidationError extends GraphQLError {
-  constructor(message: string, field?: string) {
-    super(message, {
-      extensions: {
-        code: 'VALIDATION_ERROR',
-        field,
-      },
-    });
-  }
-}
-
-export class AuthenticationError extends GraphQLError {
-  constructor(message = 'Not authenticated') {
-    super(message, {
-      extensions: { code: 'UNAUTHENTICATED' },
-    });
-  }
-}
-
-export class ForbiddenError extends GraphQLError {
-  constructor(message = 'Not authorized') {
-    super(message, {
-      extensions: { code: 'FORBIDDEN' },
-    });
-  }
-}
-```
-
-### B. Error Formatting
-
-```typescript
-// server.ts
-import { ApolloServer } from '@apollo/server';
-
-const server = new ApolloServer({
-  typeDefs,
-  resolvers,
-  formatError: (formattedError, error) => {
-    // Log internal errors
-    if (formattedError.extensions?.code === 'INTERNAL_SERVER_ERROR') {
-      console.error('Internal error:', error);
-
-      // Don't expose internal error details in production
-      if (process.env.NODE_ENV === 'production') {
-        return {
-          message: 'An unexpected error occurred',
-          extensions: { code: 'INTERNAL_SERVER_ERROR' },
-        };
-      }
-    }
-
-    return formattedError;
-  },
+export const createLoaders = (db: Db) => ({
+  user: new DataLoader<string, User | null>(async (ids) => {
+    const rows = await db.users.whereIdIn(ids as string[]); // ONE query for all ids
+    const map = new Map(rows.map((u) => [u.id, u]));
+    return ids.map((id) => map.get(id) ?? null);            // MUST return in input order, same length
+  }),
 });
+
+// context (built once per request):
+async function context({ req }): Promise<Context> {
+  return { auth: await authenticate(req), loaders: createLoaders(db), dataSources, traceId: traceIdOf(req) };
+}
 ```
+
+Loader rules (the common footguns):
+- The batch function MUST resolve to an array **the same length and order** as `keys`; map misses to `null`/`Error`, never drop them.
+- One loader **per key shape** (`userById`, `postsByAuthorId`). A loader keyed by an object needs a `cacheKeyFn`.
+- For one-to-many relations, return arrays per key (each element is the list for that parent), e.g. `postsByAuthor.load(authorId) → Post[]`.
+- Prime the cache (`loader.prime(id, row)`) when a parent query already fetched children, to skip a redundant batch.
+
+### C. Detecting N+1
+Assert query counts in tests (`expect(db.queryCount).toBe(1)` for a list-of-N query), and inspect Apollo/Yoga traces for repeated identical resolvers. A green N+1 test is the gate for GQL-RESOLVE-01.
 
 ---
 
-## 6. Pagination (MANDATORY)
+## 4. Schema Design
 
-### A. Relay-Style Cursor Pagination
+The contract. Design it before resolvers (schema-first), validate it in CI, and evolve it without breaking clients.
+
+### A. Types, inputs, enums
 
 ```graphql
-# schema.graphql
-type Query {
-  posts(
-    first: Int
-    after: String
-    last: Int
-    before: String
-    filter: PostFilterInput
-  ): PostConnection!
-}
-
-type PostConnection {
-  edges: [PostEdge!]!
-  pageInfo: PageInfo!
-  totalCount: Int!
-}
-
-type PostEdge {
-  cursor: String!
-  node: Post!
-}
-
-type PageInfo {
-  hasNextPage: Boolean!
-  hasPreviousPage: Boolean!
-  startCursor: String
-  endCursor: String
-}
-
-input PostFilterInput {
-  authorId: ID
-  status: PostStatus
-  createdAfter: DateTime
-  search: String
-}
-```
-
-### B. Pagination Implementation
-
-```typescript
-// utils/pagination.ts
-import { Prisma } from '@prisma/client';
-
-interface PaginationArgs {
-  first?: number;
-  after?: string;
-  last?: number;
-  before?: string;
-}
-
-interface ConnectionResult<T> {
-  edges: Array<{ cursor: string; node: T }>;
-  pageInfo: {
-    hasNextPage: boolean;
-    hasPreviousPage: boolean;
-    startCursor: string | null;
-    endCursor: string | null;
-  };
-  totalCount: number;
-}
-
-export async function paginate<T extends { id: string }>(
-  model: any,
-  args: PaginationArgs,
-  where: any = {}
-): Promise<ConnectionResult<T>> {
-  const { first, after, last, before } = args;
-
-  // Validate args
-  if (first && last) {
-    throw new Error('Cannot use both first and last');
-  }
-
-  const take = first || last || 20;
-  const cursor = after || before;
-
-  // Get total count
-  const totalCount = await model.count({ where });
-
-  // Build query
-  const queryArgs: any = {
-    where,
-    take: take + 1, // Fetch one extra to check hasNextPage
-    orderBy: { createdAt: 'desc' },
-  };
-
-  if (cursor) {
-    queryArgs.cursor = { id: decodeCursor(cursor) };
-    queryArgs.skip = 1; // Skip the cursor item
-  }
-
-  if (last) {
-    queryArgs.orderBy = { createdAt: 'asc' };
-  }
-
-  let items = await model.findMany(queryArgs);
-
-  // Check for extra item (indicates more pages)
-  const hasMore = items.length > take;
-  if (hasMore) {
-    items = items.slice(0, take);
-  }
-
-  // Reverse if using last
-  if (last) {
-    items = items.reverse();
-  }
-
-  const edges = items.map((item: T) => ({
-    cursor: encodeCursor(item.id),
-    node: item,
-  }));
-
-  return {
-    edges,
-    pageInfo: {
-      hasNextPage: first ? hasMore : !!before,
-      hasPreviousPage: first ? !!after : hasMore,
-      startCursor: edges[0]?.cursor || null,
-      endCursor: edges[edges.length - 1]?.cursor || null,
-    },
-    totalCount,
-  };
-}
-
-function encodeCursor(id: string): string {
-  return Buffer.from(`cursor:${id}`).toString('base64');
-}
-
-function decodeCursor(cursor: string): string {
-  const decoded = Buffer.from(cursor, 'base64').toString('utf8');
-  return decoded.replace('cursor:', '');
-}
-```
-
----
-
-## 7. Performance Optimization (MANDATORY)
-
-### A. Query Complexity Analysis
-
-```typescript
-// plugins/complexity.ts
-import { ApolloServerPlugin } from '@apollo/server';
-import {
-  getComplexity,
-  simpleEstimator,
-  fieldExtensionsEstimator,
-} from 'graphql-query-complexity';
-
-const MAX_COMPLEXITY = 1000;
-const MAX_DEPTH = 10;
-
-export const complexityPlugin: ApolloServerPlugin = {
-  async requestDidStart() {
-    return {
-      async didResolveOperation({ request, document, schema }) {
-        const complexity = getComplexity({
-          schema,
-          operationName: request.operationName,
-          query: document,
-          variables: request.variables,
-          estimators: [
-            fieldExtensionsEstimator(),
-            simpleEstimator({ defaultComplexity: 1 }),
-          ],
-        });
-
-        if (complexity > MAX_COMPLEXITY) {
-          throw new GraphQLError(
-            `Query too complex: ${complexity}. Maximum allowed: ${MAX_COMPLEXITY}`
-          );
-        }
-      },
-    };
-  },
-};
-
-// Schema with complexity hints
-type Query {
-  users(first: Int): UserConnection! @complexity(value: 10, multipliers: ["first"])
-  user(id: ID!): User @complexity(value: 1)
-}
-
 type User {
-  posts(first: Int): PostConnection! @complexity(value: 5, multipliers: ["first"])
-}
-```
-
-### B. Depth Limiting
-
-```typescript
-// plugins/depth-limit.ts
-import depthLimit from 'graphql-depth-limit';
-
-const server = new ApolloServer({
-  typeDefs,
-  resolvers,
-  validationRules: [depthLimit(10)],
-});
-```
-
-### C. Persisted Queries
-
-```typescript
-// Apollo Client setup
-import { createPersistedQueryLink } from '@apollo/client/link/persisted-queries';
-import { sha256 } from 'crypto-hash';
-
-const link = createPersistedQueryLink({ sha256 });
-
-// Server-side allowlist
-const server = new ApolloServer({
-  typeDefs,
-  resolvers,
-  persistedQueries: {
-    cache: new KeyValueCache(),
-  },
-});
-```
-
----
-
-## 8. Subscriptions (Real-time)
-
-### A. Subscription Schema
-
-```graphql
-type Subscription {
-  # Subscribe to new messages in a channel
-  messageCreated(channelId: ID!): Message!
-
-  # Subscribe to user status changes
-  userStatusChanged(userId: ID!): UserStatus!
-
-  # Subscribe to order updates
-  orderUpdated(orderId: ID!): Order!
-}
-
-type Message {
   id: ID!
-  content: String!
-  author: User!
-  channel: Channel!
+  email: String!
+  displayName: String!
+  role: UserRole!
   createdAt: DateTime!
+  posts(first: Int, after: String): PostConnection!   # paginated relation (GQL-SCHEMA-03)
+}
+
+enum UserRole { ADMIN MODERATOR USER GUEST }
+
+scalar DateTime          # define & validate custom scalars in resolvers
+scalar Email
+
+input CreateUserInput {  # mutation args go in a single Input type
+  email: Email!
+  displayName: String!
+  role: UserRole = USER
 }
 ```
 
-### B. Subscription Implementation
+Conventions: Types/inputs `PascalCase` (inputs end `Input`), fields/args `camelCase`, enum values `SCREAMING_SNAKE_CASE`. Nullability is a design decision — mark a field `!` only when it can never legitimately be null; over-using `!` makes one failed field null the whole parent.
 
-```typescript
-// resolvers/subscription.resolvers.ts
-import { PubSub, withFilter } from 'graphql-subscriptions';
+### B. Mutations return payloads, not bare types (GQL-SCHEMA-04)
 
-const pubsub = new PubSub();
-
-// Event names
-const EVENTS = {
-  MESSAGE_CREATED: 'MESSAGE_CREATED',
-  USER_STATUS_CHANGED: 'USER_STATUS_CHANGED',
-  ORDER_UPDATED: 'ORDER_UPDATED',
-};
-
-export const subscriptionResolvers = {
-  Subscription: {
-    messageCreated: {
-      subscribe: withFilter(
-        () => pubsub.asyncIterator([EVENTS.MESSAGE_CREATED]),
-        (payload, variables, context) => {
-          // Filter: only send to subscribers of this channel
-          return payload.messageCreated.channelId === variables.channelId;
-        }
-      ),
-    },
-
-    orderUpdated: {
-      subscribe: withFilter(
-        () => pubsub.asyncIterator([EVENTS.ORDER_UPDATED]),
-        (payload, variables, context) => {
-          // Authorization: only order owner can subscribe
-          const order = payload.orderUpdated;
-          return order.id === variables.orderId &&
-                 order.userId === context.user?.id;
-        }
-      ),
-    },
-  },
-
-  Mutation: {
-    createMessage: async (_, { input }, { dataSources, user }) => {
-      const message = await dataSources.messages.create({
-        ...input,
-        authorId: user.id,
-      });
-
-      // Publish event
-      pubsub.publish(EVENTS.MESSAGE_CREATED, { messageCreated: message });
-
-      return { message, errors: [] };
-    },
-  },
-};
-```
-
----
-
-## 9. Testing (MANDATORY)
-
-### A. Schema Testing
-
-```typescript
-// __tests__/schema.test.ts
-import { buildSchema, printSchema } from 'graphql';
-import { readFileSync } from 'fs';
-
-describe('GraphQL Schema', () => {
-  const schemaString = readFileSync('./schema.graphql', 'utf8');
-
-  it('should be valid', () => {
-    expect(() => buildSchema(schemaString)).not.toThrow();
-  });
-
-  it('should have required types', () => {
-    const schema = buildSchema(schemaString);
-    expect(schema.getType('User')).toBeDefined();
-    expect(schema.getType('Query')).toBeDefined();
-    expect(schema.getType('Mutation')).toBeDefined();
-  });
-});
-```
-
-### B. Resolver Testing
-
-```typescript
-// __tests__/resolvers/user.test.ts
-import { createTestClient } from 'apollo-server-testing';
-import { ApolloServer, gql } from 'apollo-server';
-import { createTestContext } from '../test-utils';
-
-const GET_USER = gql`
-  query GetUser($id: ID!) {
-    user(id: $id) {
-      id
-      email
-      displayName
-    }
-  }
-`;
-
-describe('User Resolvers', () => {
-  let server: ApolloServer;
-
-  beforeAll(() => {
-    server = new ApolloServer({
-      typeDefs,
-      resolvers,
-      context: createTestContext,
-    });
-  });
-
-  it('should return user by id', async () => {
-    const { query } = createTestClient(server);
-
-    const result = await query({
-      query: GET_USER,
-      variables: { id: 'user-1' },
-    });
-
-    expect(result.errors).toBeUndefined();
-    expect(result.data.user).toEqual({
-      id: 'user-1',
-      email: 'test@example.com',
-      displayName: 'Test User',
-    });
-  });
-
-  it('should return null for non-existent user', async () => {
-    const { query } = createTestClient(server);
-
-    const result = await query({
-      query: GET_USER,
-      variables: { id: 'non-existent' },
-    });
-
-    expect(result.errors).toBeUndefined();
-    expect(result.data.user).toBeNull();
-  });
-});
-```
-
-### C. Integration Testing
-
-```typescript
-// __tests__/integration/auth.test.ts
-import request from 'supertest';
-import { app } from '../app';
-
-describe('Authentication Flow', () => {
-  it('should login and access protected query', async () => {
-    // Login
-    const loginResponse = await request(app)
-      .post('/graphql')
-      .send({
-        query: `
-          mutation Login($input: LoginInput!) {
-            login(input: $input) {
-              token
-              user { id email }
-            }
-          }
-        `,
-        variables: {
-          input: { email: 'test@example.com', password: 'password123' }
-        }
-      });
-
-    const { token } = loginResponse.body.data.login;
-
-    // Access protected query
-    const meResponse = await request(app)
-      .post('/graphql')
-      .set('Authorization', `Bearer ${token}`)
-      .send({
-        query: `query { me { id email } }`
-      });
-
-    expect(meResponse.body.data.me.email).toBe('test@example.com');
-  });
-});
-```
-
----
-
-## 10. Distributed Tracing (MANDATORY)
-
-**CRITICAL: GraphQL APIs MUST propagate trace IDs for observability.**
-
-### A. Trace ID in Context
-
-```typescript
-// context.ts - Include trace ID in GraphQL context
-export interface Context {
-  user: AuthUser | null;
-  loaders: DataLoaders;
-  dataSources: DataSources;
-  traceId: string;  // MANDATORY: Trace ID for distributed tracing
-  requestId: string;
-}
-
-export const createContext = async ({ req }): Promise<Context> => {
-  // Extract or generate trace ID
-  const traceId = req.headers['x-trace-id'] ||
-                  req.headers['traceparent']?.split('-')[1] ||
-                  generateTraceId();
-
-  return {
-    user: await authenticateRequest(req),
-    loaders: createLoaders(db),
-    dataSources: new DataSources(db),
-    traceId,
-    requestId: req.headers['x-request-id'] || generateRequestId(),
-  };
-};
-
-// Include trace ID in response headers
-const server = new ApolloServer({
-  typeDefs,
-  resolvers,
-  plugins: [{
-    async requestDidStart({ contextValue }) {
-      return {
-        async willSendResponse({ response }) {
-          response.http?.headers.set('x-trace-id', contextValue.traceId);
-        },
-      };
-    },
-  }],
-});
-```
-
-### B. Trace ID in Logging
-
-```typescript
-// All log entries MUST include trace ID
-function logResolver(resolverName: string, context: Context, data: any) {
-  logger.info({
-    resolver: resolverName,
-    traceId: context.traceId,  // MANDATORY
-    requestId: context.requestId,
-    userId: context.user?.id,
-    ...data,
-  });
-}
-```
-
-**Cross-reference:** See logging.md Section 5 for trace ID implementation patterns.
-
----
-
-## 11. Code Generation
-
-### A. GraphQL Code Generator
-
-```yaml
-# codegen.yml
-schema: "./schema/**/*.graphql"
-documents: "./src/**/*.graphql"
-generates:
-  ./src/generated/graphql.ts:
-    plugins:
-      - typescript
-      - typescript-resolvers
-      - typescript-operations
-    config:
-      contextType: ../context#Context
-      mappers:
-        User: ../models#UserModel
-        Post: ../models#PostModel
-      scalars:
-        DateTime: Date
-        Email: string
-        URL: string
-```
-
-### B. Generated Types Usage
-
-```typescript
-// resolvers/user.resolvers.ts
-import { Resolvers, UserResolvers } from '../generated/graphql';
-
-// Fully typed resolvers
-export const userResolvers: Resolvers = {
-  Query: {
-    user: async (_, { id }, context) => {
-      // id is typed as string
-      // return type must match User
-      return context.dataSources.users.findById(id);
-    },
-  },
-
-  User: {
-    // Field resolver with proper typing
-    posts: async (parent, args, context) => {
-      // parent is UserModel
-      // args is { first?: number, after?: string }
-      return context.dataSources.posts.findByUserId(parent.id, args);
-    },
-  },
-};
-```
-
----
-
-## 12. Security Best Practices
-
-### A. Query Allowlisting (Production)
-
-```typescript
-// Automatic Persisted Queries with allowlist
-const allowedQueries = new Map<string, DocumentNode>([
-  ['GetUser', gql`query GetUser($id: ID!) { user(id: $id) { id email } }`],
-  ['ListPosts', gql`query ListPosts($first: Int) { posts(first: $first) { edges { node { id title } } } }`],
-]);
-
-const server = new ApolloServer({
-  typeDefs,
-  resolvers,
-  plugins: [
-    {
-      async requestDidStart() {
-        return {
-          async didResolveOperation({ request }) {
-            if (process.env.NODE_ENV === 'production') {
-              const hash = request.extensions?.persistedQuery?.sha256Hash;
-              if (!hash || !allowedQueries.has(hash)) {
-                throw new ForbiddenError('Query not allowed');
-              }
-            }
-          },
-        };
-      },
-    },
-  ],
-});
-```
-
-### B. Input Validation
-
-```typescript
-// validation/user.validation.ts
-import { z } from 'zod';
-
-// Secure ID validation - minimum 32 characters, alphanumeric with - and _
-// Matches REST API and gRPC ID requirements for consistency
-export const secureIdSchema = z.string()
-  .min(32, 'ID must be at least 32 characters')
-  .max(64, 'ID must be at most 64 characters')
-  .regex(/^[a-zA-Z0-9_-]+$/, 'ID must be alphanumeric with underscores and hyphens');
-
-export const createUserSchema = z.object({
-  email: z.string().email(),
-  displayName: z.string().min(2).max(100),
-  password: z.string().min(8).regex(/[A-Z]/).regex(/[0-9]/),
-});
-
-// Validate IDs in resolvers
-export const getUserSchema = z.object({
-  id: secureIdSchema,
-});
-
-// In resolver
-const resolvers = {
-  Mutation: {
-    createUser: async (_, { input }, context) => {
-      // Validate input
-      const validation = createUserSchema.safeParse(input);
-
-      if (!validation.success) {
-        return {
-          user: null,
-          errors: validation.error.errors.map(e => ({
-            field: e.path.join('.'),
-            message: e.message,
-            code: 'VALIDATION_ERROR',
-          })),
-        };
-      }
-
-      return context.dataSources.users.create(validation.data);
-    },
-  },
-};
-```
-
----
-
-## 13. Deployment Checklist
-
-### Schema Design
-- [ ] Clear, descriptive type names
-- [ ] Consistent naming conventions
-- [ ] Proper nullability (! where appropriate)
-- [ ] Relay-style pagination for lists
-- [ ] Payload types for mutations
-
-### Security
-- [ ] Authentication implemented
-- [ ] Field-level authorization
-- [ ] Query complexity limits
-- [ ] Depth limiting
-- [ ] Input validation
-
-### Performance
-- [ ] DataLoader for N+1 prevention
-- [ ] Pagination on all list queries
-- [ ] Persisted queries in production
-- [ ] Caching strategy implemented
-
-### Testing
-- [ ] Schema validation tests
-- [ ] Resolver unit tests
-- [ ] Integration tests
-- [ ] E2E tests for critical flows
-
----
-
-## 14. Quick Reference
+Expected domain failures (validation, conflict, not-found) belong **in the payload** as `userErrors`, so a partial success is representable and clients get typed, localizable messages. Reserve thrown GraphQL errors (the top-level `errors[]`) for unexpected/transport failures (see §5).
 
 ```graphql
-# Common patterns
+type CreateUserPayload {
+  user: User
+  userErrors: [UserError!]!
+}
+type UserError { field: [String!]! message: String! code: ErrorCode! }
+enum ErrorCode { VALIDATION CONFLICT NOT_FOUND FORBIDDEN }
 
-# Pagination
-query {
-  posts(first: 10, after: "cursor") {
-    edges {
-      cursor
-      node { id title }
+type Mutation { createUser(input: CreateUserInput!): CreateUserPayload! }
+```
+
+### C. Evolution without breaking (GQL-SCHEMA-02)
+GraphQL has no URL versions — you evolve one schema. Add fields/args additively; never remove or retype a field clients use without `@deprecated(reason: "use X")` and a migration window. Gate every PR with a schema diff (`graphql-inspector diff`) that fails on `BREAKING` changes.
+
+---
+
+## 5. Errors in GraphQL
+
+Error *strategy* (taxonomy, retries, fail-fast) is owned by [`error-handling.md`](guides://error-handling.md). What is **GraphQL-specific** is the dual channel and the response envelope:
+
+- **Top-level `errors[]`** — execution/transport failures. Each carries `message`, `path`, and a stable machine code in `extensions.code` (`UNAUTHENTICATED`, `FORBIDDEN`, `BAD_USER_INPUT`, `INTERNAL_SERVER_ERROR`). A single response MAY contain **both** `data` (partial) and `errors`.
+- **Typed `userErrors` in mutation payloads** — expected domain outcomes (see §4.B). Prefer these for anything a client should branch on.
+
+```typescript
+import { GraphQLError } from "graphql";
+export const forbidden = (msg = "Not authorized") =>
+  new GraphQLError(msg, { extensions: { code: "FORBIDDEN" } });
+
+// server-side scrubbing — internals MUST NOT leak in prod (GQL-ERR-01)
+const server = new ApolloServer({
+  typeDefs, resolvers,
+  formatError: (formatted, err) => {
+    log.error({ err, code: formatted.extensions?.code });        // log full detail server-side
+    if (process.env.NODE_ENV === "production" &&
+        formatted.extensions?.code === "INTERNAL_SERVER_ERROR") {
+      return { message: "Internal error", extensions: { code: "INTERNAL_SERVER_ERROR" } };
     }
-    pageInfo {
-      hasNextPage
-      endCursor
-    }
-  }
-}
+    return formatted;
+  },
+});
+```
 
-# Mutation with payload
-mutation {
-  createPost(input: { title: "Hello", content: "World" }) {
-    post { id title }
-    errors { field message code }
-  }
-}
+Stable `extensions.code` values are part of your contract — clients branch on them. Never put SQL, stack traces, or internal hostnames in a client-facing message.
 
-# Subscription
-subscription {
-  messageCreated(channelId: "123") {
-    id
-    content
-    author { displayName }
-  }
-}
+---
+
+## 6. Query-Cost Security (the GraphQL attack surface)
+
+This is the binding that [`secure-coding.md`](guides://secure-coding.md) defers to GraphQL. A single legitimate-looking query can be exponentially expensive because clients control the shape. Defend with **all** of:
+
+- **Depth limit (GQL-SEC-01)** — reject queries nested beyond a cap (e.g. 10) to stop cyclic `friends{friends{...}}` blowups.
+- **Complexity/cost limit (GQL-SEC-02)** — assign per-field cost (list fields multiply by their `first`/limit arg) and reject over a budget. This catches wide queries that depth alone misses.
+- **Introspection off in prod (GQL-SEC-03)** — `introspection: false`; introspection hands attackers your whole schema. Keep it on in dev/staging.
+- **Pagination caps** — clamp `first`/`last` to a max (e.g. ≤ 100); a Connection arg is still attacker-controlled.
+- **Disable batching / cap aliases** — array-batched operations and aliased duplicate fields multiply cost; cap or disable.
+- **Persisted queries / allowlist (prod)** — accept only pre-registered operation hashes so arbitrary queries cannot run at all; the strongest control where the client set is known.
+- **Timeouts & rate limits** — bound resolver/request time; rate-limit by principal.
+
+```typescript
+// graphql-armor bundles depth, cost, alias, and introspection guards (Apollo/Yoga plugin)
+import { ApolloArmor } from "@escape.tech/graphql-armor";
+const armor = new ApolloArmor({
+  maxDepth: { n: 10 },
+  costLimit: { maxCost: 1000 },
+  blockFieldSuggestion: { enabled: true },   // don't hint field names on typos
+});
+const server = new ApolloServer({
+  typeDefs, resolvers,
+  introspection: process.env.NODE_ENV !== "production",   // GQL-SEC-03
+  ...armor.protect(),                                     // GQL-SEC-01/02
+});
+```
+
+Authentication (token validation) and authorization policy are owned by [`oauth.md`](guides://oauth.md); enforce authz at the field/resolver that reads data (GQL-AUTHZ-01) — a `@auth(requires:)` schema directive or a per-field guard — so nested paths cannot route around it.
+
+---
+
+## 7. Pagination — Relay Connections
+
+The owned pattern for all list fields (GQL-SCHEMA-03). Cursor-based, not offset-based: cursors stay stable when rows are inserted/deleted between pages, where offsets skip or duplicate.
+
+```graphql
+type PostConnection { edges: [PostEdge!]! pageInfo: PageInfo! totalCount: Int! }
+type PostEdge { cursor: String! node: Post! }
+type PageInfo { hasNextPage: Boolean! hasPreviousPage: Boolean! startCursor: String endCursor: String }
+```
+
+Implementation rules:
+- Forward paginate with `first`/`after`, backward with `last`/`before`; reject `first` and `last` together.
+- A cursor is an **opaque** server token (base64-encode the sort key; never expose a raw DB id/offset).
+- Over-fetch by one (`take: first + 1`) to compute `hasNextPage` without a second count query.
+- Clamp `first`/`last` to a maximum (ties into GQL-SEC-02); default a sane page size when omitted.
+- Sort on a stable, unique key (e.g. `(createdAt, id)`); keyset/seek pagination scales where `OFFSET` does not (see [`performance.md`](guides://performance.md)).
+
+---
+
+## 8. Subscriptions & Federation
+
+### A. Subscriptions (real-time)
+Use for server-pushed events (new message, status change). Transport is `graphql-ws` over WebSocket (the legacy `subscriptions-transport-ws` is unmaintained — do not use it); WebSocket concerns are owned by [`websocket.md`](guides://websocket.md). Authorize on **subscribe** and filter per event so a subscriber only receives authorized payloads; in multi-instance deployments back the PubSub with Redis/Kafka, not in-memory.
+
+```typescript
+Subscription: {
+  orderUpdated: {
+    subscribe: withFilter(
+      (_p, _a, ctx) => ctx.pubsub.asyncIterator(["ORDER_UPDATED"]),
+      (payload, vars, ctx) =>
+        payload.orderUpdated.id === vars.orderId &&
+        payload.orderUpdated.ownerId === ctx.auth.userId,   // authz in the filter
+    ),
+  },
+},
+```
+
+### B. Federation (Apollo Federation 2)
+Compose multiple subgraphs into one supergraph rather than building a hand-rolled stitched monolith. Each subgraph owns its types; `@key` declares an entity's identity and `__resolveReference` resolves it for the gateway. Keep authz and DataLoader **inside each subgraph** — the gateway does not enforce them. Validate composition in CI (`rover supergraph compose` / schema checks) before publishing.
+
+---
+
+## 9. Observability & Tooling
+
+Tracing/metrics policy is owned by [`observability.md`](guides://observability.md). GraphQL binding (GQL-OBS-01): extract/generate a trace id in context-building and propagate it to every resolver and log line; emit a span per resolver (Apollo OpenTelemetry plugin or Yoga's tracing) so you can see which field is slow. Metrics worth recording: per-operation latency, per-resolver error rate, and request complexity score.
+
+**Code generation.** Generate resolver and operation types from the schema (GraphQL Code Generator: `typescript`, `typescript-resolvers`, `typescript-operations`) so resolver signatures and client queries stay type-checked against the schema. Treat generated files as build artifacts (regenerate in CI; keep out of hand-edits).
+
+```bash
+graphql-codegen                      # regenerate types from schema + documents
+graphql-inspector validate schema.graphql
+graphql-inspector diff <base> <head> # GQL-SCHEMA-02: fail on BREAKING
 ```
 
 ---
 
-## 15. Why This Configuration Works
+## 10. Deployment Checklist
 
-1. **DataLoader for N+1 Prevention**: Batching and caching database lookups per request cycle eliminates the N+1 query problem that plagues naive resolver implementations. A single query fetches all needed records regardless of how many resolvers request the same entity type.
+Generated from §2 — one box per requirement ID. No new requirements here.
 
-2. **Relay-Style Connection Pagination**: Using cursor-based pagination with `edges`, `node`, and `pageInfo` provides stable pagination that works correctly even when data is inserted or deleted between pages, unlike offset-based pagination which skips or duplicates records.
-
-3. **Schema-as-Documentation Principle**: A well-designed GraphQL schema with descriptive type names, field descriptions, and deprecation notices serves as living API documentation. Clients can introspect the schema to discover available operations without external docs.
-
-4. **Resolver-Level Authorization**: Enforcing permissions at the resolver level rather than at the schema or gateway level ensures that every data access path is authorized, regardless of how the query is structured. This prevents authorization bypass through nested queries.
-
-5. **Query Complexity and Depth Limiting**: Setting maximum query depth and complexity scores prevents abusive queries (deeply nested or exponentially expanding) from overwhelming the server. This provides a predictable performance ceiling without restricting legitimate client usage.
+- [ ] GQL-SCHEMA-01 — schema builds clean
+- [ ] GQL-SCHEMA-02 — no breaking schema diff without deprecation
+- [ ] GQL-SCHEMA-03 — all list fields are paginated Connections
+- [ ] GQL-SCHEMA-04 — mutations return payloads with `userErrors`
+- [ ] GQL-RESOLVE-01 — relation resolvers batch via DataLoader (no N+1)
+- [ ] GQL-AUTHZ-01 — every non-public field enforces authorization
+- [ ] GQL-SEC-01/02 — depth and complexity/cost capped
+- [ ] GQL-SEC-03 — introspection disabled in production
+- [ ] GQL-SEC-04 — input validated beyond scalar types
+- [ ] GQL-ERR-01 — stable error codes; no internal leakage in prod
+- [ ] GQL-OBS-01 — trace id propagated to resolvers and logs
+- [ ] GQL-TST-01 — schema/resolver/authz tested first
+- [ ] Agent ran every verification command and documented any fixes
 
 ---
-
-**Last Updated:** 2026-01-31
-**Version:** 1.0
-**Maintainer:** API Team
-
-
-**End of GraphQL Development Guidelines**
+**End of GraphQL API Guidelines**

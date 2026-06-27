@@ -1,1257 +1,249 @@
-# Web Performance Guidelines
-Mandatory standards for building fast, efficient web applications. Lighthouse, WebPageTest, Chrome DevTools, bundlesize, webpack-bundle-analyzer.
+# Performance Engineering Guidelines
+Mandatory, language-agnostic standards for fast software: measure first, set budgets, optimize the proven bottleneck. Profilers, load generators (k6, Locust, wrk), perf budgets, p50/p95/p99 latency.
+
+---
+name: performance
+title: Performance Engineering Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: cross-cutting
+tools: [k6, locust, wrk, lighthouse-ci, async-profiler, py-spy, pprof, perf]
+requires: []
+recommends:
+  - observability
+  - parallelism
+  - error-handling
+provides:
+  - profiling
+  - perf-budgets
+  - caching-strategy
+  - load-testing
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide owns performance engineering as a discipline; it never restates concurrency, metrics/SLO, or error-budget rules owned elsewhere.
 
 ---
 
-**Agent Profile**: The Performance Expert
-**Role**: Senior Performance Engineer & Web Vitals Specialist
-**Objective**: Generate optimized, fast-loading applications that meet Core Web Vitals thresholds.
-**Tools**: Lighthouse, WebPageTest, Chrome DevTools, bundlesize, webpack-bundle-analyzer.
+## 0. Prerequisites & References
+
+This guide is language-agnostic. The numbers you optimize *toward* (SLOs, percentiles, alert thresholds) and the *mechanisms* you optimize *with* (concurrency, batching) live in the guides below — fetch them when the task touches them.
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`observability.md`](guides://observability.md) — metrics, tracing, **SLOs and percentiles** that performance targets. This guide sets the budget; observability *measures and alerts* on it. Do not redefine metric/trace plumbing here.
+> - [`parallelism.md`](guides://parallelism.md) — concurrency/async/threads for **throughput**. This guide decides *when* parallelism is the right lever; parallelism.md owns *how* to do it safely.
+> - [`error-handling.md`](guides://error-handling.md) — timeouts, retries, backoff, circuit breakers, and **error budgets** (the failure side of an SLO). Cite it for failure-mode tuning.
+
+> 📎 **SEE ALSO (technology-specific tuning lives in the owning guide, not here):**
+> - Datastores: [`postgresql.md`](guides://postgresql.md) · [`mysql-mariadb.md`](guides://mysql-mariadb.md) · [`redis.md`](guides://redis.md) · [`mongodb.md`](guides://mongodb.md) · [`sql.md`](guides://sql.md) — indexing, query plans, connection pools.
+> - Languages: [`python.md`](guides://python.md) · [`go.md`](guides://go.md) · [`rust.md`](guides://rust.md) · [`java.md`](guides://java.md) · [`javascript.md`](guides://javascript.md) — allocation, GC, profiler invocation.
+> - Frontend/web: [`reactjs.md`](guides://reactjs.md) · [`nextjs.md`](guides://nextjs.md) · [`css.md`](guides://css.md) · [`html.md`](guides://html.md) — render path, bundle splitting, Core Web Vitals binding.
+> - Infra: [`kubernetes.md`](guides://kubernetes.md) · [`docker-compose.md`](guides://docker-compose.md) · [`aws.md`](guides://aws.md) — resource limits, autoscaling, CDN/edge caching.
+> - [`ci-cd.md`](guides://ci-cd.md) — where budget gates (§9) run.
 
 ---
 
 ## 1. Core Philosophies: PERF-FIRST
 
-- **P**rioritize: Load critical resources first
-- **E**liminate: Remove unnecessary code and requests
-- **R**educe: Minimize payload sizes
-- **F**ast: Optimize for perceived and actual speed
+Performance-specific principles only. Concurrency, metrics, and error budgets come from §0.
+
+- **P**rove it: **measure before you optimize, and after.** No change ships on intuition — it ships on a before/after number from a profiler or load test. Premature optimization of un-profiled code is forbidden.
+- **E**liminate the dominant cost first: optimize the single biggest contributor (Amdahl's law). A 10× speedup of code that is 5% of runtime buys ~5%; fix the 80% first.
+- **R**ight complexity: choose the correct **algorithm and data structure** (Big-O) before micro-tuning constants. No accidental O(n²) on hot paths; no O(n) lookups where a hash/index gives O(1)/O(log n).
+- **F**lat tails: optimize for the **percentiles users feel** (p95/p99), not the mean. A good average with a fat tail is a slow product.
+- **I**n a budget: every hot path has an explicit, enforced **performance budget** (§9). Regressions fail CI, not production.
+- **R**euse, don't recompute: cache deliberately (§5) with explicit TTL/invalidation; pool expensive resources; batch I/O.
+- **S**tream, don't slurp: bound memory — process in chunks/generators; never load an unbounded result set into RAM.
+- **T**est under load: capacity is proven by a load test against budget (§7), not assumed.
+
+**Verified Code**: agent-generated code MUST pass every gate in §2 before delivery.
 
 ---
 
-## 2. Core Web Vitals (MANDATORY)
+## 2. Requirements (MANDATORY, auditable)
 
-### A. Metrics and Thresholds
+RFC-2119 keywords. IDs `PERF-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a shared rule cite its owner.
 
-```markdown
-## Largest Contentful Paint (LCP)
-Measures loading performance.
-- Good: ≤ 2.5 seconds
-- Needs Improvement: 2.5 - 4.0 seconds
-- Poor: > 4.0 seconds
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| PERF-PROF-01 | Any optimization MUST be justified by a profiler/benchmark measurement (before & after) | attach profile/bench diff to the change | both numbers present, after ≤ before |
+| PERF-PROF-02 | Hot paths MUST NOT contain unintended super-linear complexity | code review / complexity analysis on identified hot path | no accidental O(n²)+ on hot path |
+| PERF-BUD-01 | Every user-facing path MUST have a documented performance budget (latency + size) | budget file exists (`performance-budget.yml`) | budget defined for each path |
+| PERF-BUD-02 | Budgets MUST be enforced in CI; a regression fails the build (see `ci-cd.md`) | budget gate job (e.g. Lighthouse CI / k6 thresholds) | job present, fails on breach |
+| PERF-LAT-01 | Service latency MUST be tracked and asserted at p95/p99, not mean (see `observability.md`) | load-test thresholds on `p(95)`/`p(99)` | thresholds defined & met |
+| PERF-LOAD-01 | Capacity-relevant changes MUST pass a load test at target concurrency before release | `k6 run` / `locust` against budget | thresholds pass |
+| PERF-CACHE-01 | Every cache MUST have a bounded size (eviction) and explicit TTL + invalidation rule | review cache config | max-size + TTL + invalidation defined |
+| PERF-MEM-01 | Large/unbounded datasets MUST be streamed/paginated, not fully materialized | review for `fetch_all`/unbounded list returns | no unbounded materialization |
+| PERF-IO-01 | Independent I/O MUST be batched or parallelized; no N+1 and no serial-when-independent calls (see `parallelism.md`) | review / query log / trace | no N+1, independents concurrent |
+| PERF-REG-01 | No performance regression on hot paths is merged without sign-off | benchmark CI / flame-graph diff | within budget tolerance |
 
-## Interaction to Next Paint (INP)
-Measures interactivity/responsiveness.
-- Good: ≤ 200 milliseconds
-- Needs Improvement: 200 - 500 milliseconds
-- Poor: > 500 milliseconds
+> **Forbidden**: optimizing code you have not profiled; shipping a cache without eviction or invalidation; loading unbounded result sets into memory; making independent remote calls serially; asserting only on mean latency; merging a budget regression.
 
-## Cumulative Layout Shift (CLS)
-Measures visual stability.
-- Good: ≤ 0.1
-- Needs Improvement: 0.1 - 0.25
-- Poor: > 0.25
-```
+---
 
-### B. Measuring Performance
+## 3. The Optimization Loop (measure → fix → re-measure)
+
+The only sanctioned workflow. Skipping step 1 or 5 violates `PERF-PROF-01`.
+
+1. **Set the target.** A number tied to an SLO (owned by [`observability.md`](guides://observability.md)) or a budget (§9): "checkout p95 < 200 ms", "import job < 5 min for 1 M rows".
+2. **Measure the baseline.** Profile or load-test the *real* path with *representative* data. Synthetic micro-benchmarks lie about cache, I/O, and contention.
+3. **Find the dominant cost.** Read the flame graph / top-N. Optimize the widest frame first (Amdahl). Common culprits: §8.
+4. **Form one hypothesis, change one thing.** Algorithm/data structure first (§4), then I/O batching/caching (§5/§6), then constants/allocations last.
+5. **Re-measure on the same harness.** Keep the before/after delta. If it didn't move the target number, revert it — complexity without a win is a regression.
+6. **Lock it in.** Add a benchmark or budget assertion (§9) so the win can't silently regress (`PERF-REG-01`).
+
+### Profiling — pick the tool for the question
+Wall-clock vs CPU vs allocation vs lock contention are different questions; use a profiler that answers the one you have. Invocation is language-specific — see the language guide.
+
+| Question | Tool family (see language guide for exact invocation) |
+|---|---|
+| Where is CPU time spent? | sampling CPU profiler → flame graph (`py-spy`, `pprof`, `async-profiler`, `perf`) |
+| Why is wall-clock > CPU? | tracing/span profiler; check I/O waits & lock waits (see `observability.md` tracing) |
+| Where is memory allocated/retained? | heap/allocation profiler; leak = retained set grows without bound |
+| Where do requests spend time across services? | distributed tracing (owned by `observability.md`) |
+| What is the throughput ceiling? | load generator (§7) |
+
+> Profile in a **production-like** build/config (optimizations on, realistic data volume). A debug-build profile is a different program.
+
+---
+
+## 4. Algorithmic Performance (Big-O first)
+
+The largest, cheapest wins are almost always algorithmic, not micro-optimizations. Get the complexity right before touching constants.
+
+- **Know the cost of your operations.** Membership/lookup: hash set/map → O(1) avg vs list scan → O(n). Sorted-range queries: tree/B-tree index → O(log n). Avoid repeatedly scanning a collection inside a loop (the classic accidental O(n²)).
+- **Pick the data structure for the access pattern**, not by habit: dict/map for keyed lookup; set for dedup/membership; heap/priority-queue for top-k; ring buffer for bounded streams; trie/index for prefix/range.
+- **Reduce work, don't just speed it up.** Precompute, memoize pure functions, hoist invariants out of loops, short-circuit (`exists`/`any` over `count`), and prune early.
+- **Mind constant factors only after Big-O is right.** Cache locality, branch prediction, and allocation count matter on truly hot inner loops — but a better algorithm usually dominates a tuned bad one.
+- **Bound everything.** Unbounded recursion, growth, or fan-out is a latent O(∞). Cap depth, page results, and limit concurrency (limits owned by `parallelism.md`).
+
+> Database query complexity (indexes, query plans, keyset vs OFFSET pagination, EXISTS vs COUNT) is the same principle applied to data and is owned by the datastore guides ([`sql.md`](guides://sql.md), [`postgresql.md`](guides://postgresql.md)). Don't restate query tuning here — name the bottleneck and reference them.
+
+---
+
+## 5. Caching Strategy
+
+Caching trades memory and freshness for latency. **The hard part is invalidation, not lookup** — so every cache obeys `PERF-CACHE-01`: bounded size + explicit TTL + a defined invalidation rule.
+
+### Patterns
+- **Cache-aside (lazy):** app checks cache, on miss loads from source and populates. Most common; tolerate the first-request miss.
+- **Read-through / write-through:** cache sits in front of the store and handles load/write itself. Write-through keeps cache and store consistent at write cost.
+- **Write-behind:** buffer writes, flush asynchronously. Highest write throughput, weakest durability — only with a durable buffer.
+- **Tiered (L1 in-process → L2 shared → origin):** L1 (per-process, tiny TTL, fastest) backed by L2 (shared, e.g. Redis) backed by the store. Promote on L2 hit; size-cap L1.
+
+### Non-negotiables
+- **Eviction is mandatory.** An unbounded cache is a memory leak (§8). Use LRU/LFU/size or TTL eviction. (LRU is a few lines around an ordered map — name the idiom; the language guide shows the binding.)
+- **Invalidation is explicit.** On the write path, invalidate or update the key. Prefer short TTL + event-driven invalidation over hoping TTL is "short enough".
+- **Key deterministically.** Stable, collision-free keys; include the version/schema so a deploy doesn't serve stale shapes.
+- **Guard the stampede.** On expiry of a hot key, use a single-flight lock or staggered/jittered TTL so N requests don't all recompute at once.
+- **HTTP/CDN caching** (immutable hashed assets `Cache-Control: public, immutable`, `ETag`/`Last-Modified`, edge TTLs) is the same strategy at the network tier — bind it in the web/infra guides, don't reimplement it in app code.
+
+---
+
+## 6. Latency vs Throughput, and the Tail
+
+These are different goals and sometimes conflict (batching helps throughput but adds latency).
+
+- **Latency** = time for one operation. Optimize the **tail (p95/p99/p99.9)** — that's what users and SLOs feel. Tracking only the mean hides the slow requests (`PERF-LAT-01`).
+- **Throughput** = operations per unit time. Raise it with concurrency, batching, and pooling — concurrency mechanics are owned by [`parallelism.md`](guides://parallelism.md); this guide only decides *that* it's the right lever.
+- **Latency reducers:** remove serial dependencies (run independent I/O concurrently — `PERF-IO-01`), cache (§5), reduce payload/serialization, keep connections warm via pooling, fail fast with timeouts (owned by [`error-handling.md`](guides://error-handling.md)).
+- **Throughput raisers:** batch/bulk I/O (one `executemany`/`COPY` beats N inserts), pool connections (size to the workload, never one-per-request), backpressure to protect downstreams.
+- **Little's Law:** `concurrency = throughput × latency`. To hit a throughput target at a fixed latency you need a known minimum concurrency/pool size — size pools and worker counts from this, not by guessing.
+- **Tail-tolerance:** hedged requests, timeouts, and load shedding cap the tail; their policy lives in [`error-handling.md`](guides://error-handling.md).
+
+---
+
+## 7. Load & Stress Testing
+
+Capacity is proven, not assumed (`PERF-LOAD-01`). Define thresholds as the **gate** (matching the budget), ramp realistically, and assert on percentiles.
+
+- **Test types:** *load* (expected peak), *stress* (beyond peak, find the knee), *soak* (hours, find leaks/degradation), *spike* (sudden surge, test autoscaling/shedding).
+- **Model real users:** realistic ramp stages, think-time between actions, and a representative request mix — not a single endpoint hammered flat-out.
+- **Assert percentiles + error rate**, and fail the run on breach.
 
 ```javascript
-// Report Web Vitals
-import { onCLS, onINP, onLCP, onFCP, onTTFB } from 'web-vitals';
-
-function sendToAnalytics(metric) {
-  const body = JSON.stringify({
-    name: metric.name,
-    value: metric.value,
-    rating: metric.rating,
-    delta: metric.delta,
-    id: metric.id,
-    navigationType: metric.navigationType
-  });
-
-  // Use sendBeacon for reliability
-  if (navigator.sendBeacon) {
-    navigator.sendBeacon('/analytics', body);
-  } else {
-    fetch('/analytics', { body, method: 'POST', keepalive: true });
-  }
-}
-
-onCLS(sendToAnalytics);
-onINP(sendToAnalytics);
-onLCP(sendToAnalytics);
-onFCP(sendToAnalytics);
-onTTFB(sendToAnalytics);
-```
-
----
-
-## 3. Loading Performance (MANDATORY)
-
-### A. Critical Rendering Path
-
-```html
-<!-- ✅ CORRECT: Optimized resource loading -->
-<!DOCTYPE html>
-<html>
-<head>
-  <!-- Critical CSS inline -->
-  <style>
-    /* Above-the-fold critical styles */
-    body { margin: 0; font-family: system-ui; }
-    .header { height: 60px; background: #fff; }
-    .hero { min-height: 400px; }
-  </style>
-
-  <!-- Preload critical resources -->
-  <link rel="preload" href="/fonts/main.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="/images/hero.webp" as="image">
-
-  <!-- Preconnect to required origins -->
-  <link rel="preconnect" href="https://api.example.com">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-
-  <!-- DNS prefetch for likely origins -->
-  <link rel="dns-prefetch" href="https://analytics.example.com">
-
-  <!-- Non-critical CSS loaded asynchronously -->
-  <link rel="preload" href="/css/main.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
-  <noscript><link rel="stylesheet" href="/css/main.css"></noscript>
-</head>
-<body>
-  <!-- Content... -->
-
-  <!-- JavaScript at end or with defer -->
-  <script src="/js/main.js" defer></script>
-</body>
-</html>
-```
-
-### B. Code Splitting
-
-```typescript
-// ✅ CORRECT: Route-based code splitting
-import { lazy, Suspense } from 'react';
-
-const Dashboard = lazy(() => import('./pages/Dashboard'));
-const Settings = lazy(() => import('./pages/Settings'));
-const Reports = lazy(() =>
-  import('./pages/Reports').then(module => ({
-    default: module.Reports
-  }))
-);
-
-function App() {
-  return (
-    <Suspense fallback={<LoadingSpinner />}>
-      <Routes>
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/settings" element={<Settings />} />
-        <Route path="/reports" element={<Reports />} />
-      </Routes>
-    </Suspense>
-  );
-}
-
-// ✅ CORRECT: Component-level code splitting
-const HeavyChart = lazy(() => import('./components/HeavyChart'));
-
-function Analytics() {
-  const [showChart, setShowChart] = useState(false);
-
-  return (
-    <div>
-      <button onClick={() => setShowChart(true)}>Show Chart</button>
-      {showChart && (
-        <Suspense fallback={<ChartSkeleton />}>
-          <HeavyChart />
-        </Suspense>
-      )}
-    </div>
-  );
-}
-
-// ✅ CORRECT: Prefetch on hover/focus
-function NavLink({ to, children }) {
-  const prefetch = () => {
-    const link = document.createElement('link');
-    link.rel = 'prefetch';
-    link.href = to;
-    document.head.appendChild(link);
-  };
-
-  return (
-    <a
-      href={to}
-      onMouseEnter={prefetch}
-      onFocus={prefetch}
-    >
-      {children}
-    </a>
-  );
-}
-```
-
-### C. Resource Hints
-
-```html
-<!-- Preload: Critical resources for current page -->
-<link rel="preload" href="/critical.js" as="script">
-<link rel="preload" href="/hero.webp" as="image" type="image/webp">
-<link rel="preload" href="/font.woff2" as="font" type="font/woff2" crossorigin>
-
-<!-- Prefetch: Resources for likely next navigation -->
-<link rel="prefetch" href="/next-page.js">
-<link rel="prefetch" href="/next-page-data.json">
-
-<!-- Prerender: Entire page for likely navigation -->
-<link rel="prerender" href="/likely-next-page">
-
-<!-- Preconnect: Establish early connection -->
-<link rel="preconnect" href="https://api.example.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-
-<!-- DNS Prefetch: Resolve DNS early -->
-<link rel="dns-prefetch" href="https://third-party.com">
-```
-
----
-
-## 4. Image Optimization (MANDATORY)
-
-### A. Modern Image Formats
-
-```html
-<!-- ✅ CORRECT: Responsive images with modern formats -->
-<picture>
-  <!-- AVIF for browsers that support it -->
-  <source
-    type="image/avif"
-    srcset="
-      /images/hero-400.avif 400w,
-      /images/hero-800.avif 800w,
-      /images/hero-1200.avif 1200w
-    "
-    sizes="(max-width: 600px) 100vw, 50vw"
-  >
-  <!-- WebP fallback -->
-  <source
-    type="image/webp"
-    srcset="
-      /images/hero-400.webp 400w,
-      /images/hero-800.webp 800w,
-      /images/hero-1200.webp 1200w
-    "
-    sizes="(max-width: 600px) 100vw, 50vw"
-  >
-  <!-- JPEG fallback -->
-  <img
-    src="/images/hero-800.jpg"
-    srcset="
-      /images/hero-400.jpg 400w,
-      /images/hero-800.jpg 800w,
-      /images/hero-1200.jpg 1200w
-    "
-    sizes="(max-width: 600px) 100vw, 50vw"
-    alt="Hero image description"
-    loading="lazy"
-    decoding="async"
-    width="1200"
-    height="600"
-  >
-</picture>
-```
-
-### B. Lazy Loading
-
-```tsx
-// ✅ CORRECT: Native lazy loading
-<img
-  src="/image.jpg"
-  loading="lazy"
-  decoding="async"
-  alt="Description"
-  width="800"
-  height="600"
-/>
-
-// ✅ CORRECT: Intersection Observer for advanced lazy loading
-function LazyImage({ src, alt, placeholder }) {
-  const [isLoaded, setIsLoaded] = useState(false);
-  const [isInView, setIsInView] = useState(false);
-  const imgRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setIsInView(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: '200px' } // Start loading 200px before viewport
-    );
-
-    if (imgRef.current) {
-      observer.observe(imgRef.current);
-    }
-
-    return () => observer.disconnect();
-  }, []);
-
-  return (
-    <div ref={imgRef} className="image-container">
-      {placeholder && !isLoaded && (
-        <img src={placeholder} alt="" className="placeholder" />
-      )}
-      {isInView && (
-        <img
-          src={src}
-          alt={alt}
-          onLoad={() => setIsLoaded(true)}
-          className={isLoaded ? 'loaded' : 'loading'}
-        />
-      )}
-    </div>
-  );
-}
-```
-
-### C. Image Dimensions
-
-```html
-<!-- ✅ CORRECT: Always specify dimensions to prevent CLS -->
-<img src="/image.jpg" width="800" height="600" alt="Description">
-
-<!-- ✅ CORRECT: Aspect ratio for responsive images -->
-<style>
-.image-container {
-  aspect-ratio: 16 / 9;
-  width: 100%;
-}
-
-.image-container img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-</style>
-
-<!-- ❌ WRONG: No dimensions causes layout shift -->
-<img src="/image.jpg" alt="Description">
-```
-
----
-
-## 5. JavaScript Performance (MANDATORY)
-
-### A. Bundle Optimization
-
-```javascript
-// webpack.config.js
-module.exports = {
-  optimization: {
-    splitChunks: {
-      chunks: 'all',
-      cacheGroups: {
-        // Separate vendor chunks
-        vendor: {
-          test: /[\\/]node_modules[\\/]/,
-          name(module) {
-            const packageName = module.context.match(
-              /[\\/]node_modules[\\/](.*?)([\\/]|$)/
-            )[1];
-            return `vendor.${packageName.replace('@', '')}`;
-          },
-        },
-        // Common chunks used across pages
-        common: {
-          minChunks: 2,
-          priority: -10,
-          reuseExistingChunk: true,
-        },
-      },
-    },
-    // Enable tree shaking
-    usedExports: true,
-    sideEffects: true,
-  },
-  // Minification
-  mode: 'production',
-};
-
-// package.json - Mark side-effect free
-{
-  "sideEffects": [
-    "*.css",
-    "*.scss"
-  ]
-}
-```
-
-### B. Avoid Main Thread Blocking
-
-```typescript
-// ✅ CORRECT: Break up long tasks
-async function processLargeArray(items: Item[]) {
-  const CHUNK_SIZE = 100;
-
-  for (let i = 0; i < items.length; i += CHUNK_SIZE) {
-    const chunk = items.slice(i, i + CHUNK_SIZE);
-
-    // Process chunk
-    chunk.forEach(item => processItem(item));
-
-    // Yield to main thread between chunks
-    await new Promise(resolve => setTimeout(resolve, 0));
-
-    // Or use requestIdleCallback for non-urgent work
-    // await new Promise(resolve => requestIdleCallback(resolve));
-  }
-}
-
-// ✅ CORRECT: Use Web Workers for heavy computation
-// worker.ts
-self.onmessage = (e) => {
-  const result = heavyComputation(e.data);
-  self.postMessage(result);
-};
-
-// main.ts
-const worker = new Worker(new URL('./worker.ts', import.meta.url));
-
-worker.onmessage = (e) => {
-  console.log('Result:', e.data);
-};
-
-worker.postMessage(data);
-
-// ✅ CORRECT: Debounce expensive operations
-function debounce<T extends (...args: any[]) => void>(
-  fn: T,
-  delay: number
-): T {
-  let timeoutId: NodeJS.Timeout;
-
-  return ((...args: Parameters<T>) => {
-    clearTimeout(timeoutId);
-    timeoutId = setTimeout(() => fn(...args), delay);
-  }) as T;
-}
-
-const handleSearch = debounce((query: string) => {
-  performSearch(query);
-}, 300);
-```
-
-### C. Efficient Event Handling
-
-```typescript
-// ✅ CORRECT: Event delegation
-document.getElementById('list')?.addEventListener('click', (e) => {
-  const target = e.target as HTMLElement;
-  const listItem = target.closest('li');
-
-  if (listItem) {
-    handleItemClick(listItem.dataset.id);
-  }
-});
-
-// ✅ CORRECT: Passive event listeners for scroll/touch
-window.addEventListener('scroll', handleScroll, { passive: true });
-element.addEventListener('touchstart', handleTouch, { passive: true });
-
-// ✅ CORRECT: Throttle scroll handlers
-function throttle<T extends (...args: any[]) => void>(
-  fn: T,
-  limit: number
-): T {
-  let inThrottle = false;
-
-  return ((...args: Parameters<T>) => {
-    if (!inThrottle) {
-      fn(...args);
-      inThrottle = true;
-      setTimeout(() => inThrottle = false, limit);
-    }
-  }) as T;
-}
-
-const handleScroll = throttle(() => {
-  // Scroll handling logic
-}, 100);
-```
-
----
-
-## 6. CSS Performance (MANDATORY)
-
-### A. Critical CSS
-
-```javascript
-// Extract critical CSS with critical package
-const critical = require('critical');
-
-critical.generate({
-  base: 'dist/',
-  src: 'index.html',
-  target: {
-    html: 'index-critical.html',
-    css: 'critical.css',
-  },
-  width: 1300,
-  height: 900,
-  inline: true,
-});
-```
-
-### B. Efficient Selectors
-
-```css
-/* ✅ CORRECT: Simple, efficient selectors */
-.button { }
-.nav-item { }
-.card-title { }
-
-/* ❌ WRONG: Overly specific selectors */
-body div.container ul.nav li.nav-item a.nav-link { }
-
-/* ❌ WRONG: Universal selector in key position */
-.container * { }
-
-/* ✅ CORRECT: Avoid expensive properties in animations */
-.animate {
-  /* Use transform and opacity for smooth animations */
-  transform: translateX(100px);
-  opacity: 0.5;
-}
-
-/* ❌ WRONG: Animating expensive properties */
-.animate {
-  left: 100px;  /* Triggers layout */
-  width: 200px; /* Triggers layout */
-  box-shadow: 0 0 10px rgba(0,0,0,0.5); /* Triggers paint */
-}
-```
-
-### C. Contain and Content-Visibility
-
-```css
-/* ✅ CORRECT: Use CSS containment */
-.card {
-  contain: layout style paint;
-}
-
-/* ✅ CORRECT: Content-visibility for off-screen content */
-.below-fold-section {
-  content-visibility: auto;
-  contain-intrinsic-size: 0 500px; /* Estimated height */
-}
-
-/* ✅ CORRECT: Will-change for known animations */
-.will-animate {
-  will-change: transform;
-}
-
-/* Remove will-change after animation */
-.will-animate.done {
-  will-change: auto;
-}
-```
-
----
-
-## 7. Network Optimization (MANDATORY)
-
-### A. HTTP/2 and HTTP/3
-
-```nginx
-# Enable HTTP/2
-server {
-    listen 443 ssl http2;
-
-    # Enable HTTP/3 (QUIC)
-    listen 443 quic reuseport;
-    add_header Alt-Svc 'h3=":443"; ma=86400';
-
-    # Enable server push (use sparingly)
-    http2_push /css/critical.css;
-    http2_push /js/main.js;
-}
-```
-
-### B. Caching Strategy
-
-```nginx
-# nginx caching configuration
-location /static/ {
-    # Immutable assets with hash in filename
-    location ~* \.[a-f0-9]{8,}\.(js|css|woff2)$ {
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-    }
-
-    # Images
-    location ~* \.(jpg|jpeg|png|webp|avif|gif|svg|ico)$ {
-        expires 30d;
-        add_header Cache-Control "public";
-    }
-
-    # HTML - no cache
-    location ~* \.html$ {
-        expires -1;
-        add_header Cache-Control "no-store, must-revalidate";
-    }
-}
-```
-
-```javascript
-// Service Worker caching
-const CACHE_NAME = 'app-v1';
-const STATIC_ASSETS = [
-  '/',
-  '/css/main.css',
-  '/js/main.js',
-  '/images/logo.svg'
-];
-
-self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(STATIC_ASSETS))
-  );
-});
-
-self.addEventListener('fetch', (event) => {
-  event.respondWith(
-    caches.match(event.request)
-      .then(response => response || fetch(event.request))
-  );
-});
-```
-
-### C. Compression
-
-```nginx
-# Enable Brotli (preferred) and gzip compression
-brotli on;
-brotli_comp_level 6;
-brotli_types text/plain text/css application/json application/javascript text/xml application/xml;
-
-gzip on;
-gzip_comp_level 6;
-gzip_types text/plain text/css application/json application/javascript text/xml application/xml;
-```
-
----
-
-## 8. Font Performance (MANDATORY)
-
-### A. Font Loading Strategy
-
-```css
-/* ✅ CORRECT: Font display strategy */
-@font-face {
-  font-family: 'CustomFont';
-  src: url('/fonts/custom.woff2') format('woff2');
-  font-display: swap; /* Show fallback immediately, swap when loaded */
-  font-weight: 400;
-  font-style: normal;
-}
-
-/* For critical text, use optional to avoid layout shift */
-@font-face {
-  font-family: 'HeadingFont';
-  src: url('/fonts/heading.woff2') format('woff2');
-  font-display: optional; /* Use only if already cached */
-}
-```
-
-### B. Subset Fonts
-
-```bash
-# Subset fonts to include only needed characters
-pyftsubset font.ttf \
-  --output-file=font-subset.woff2 \
-  --flavor=woff2 \
-  --layout-features='*' \
-  --unicodes="U+0000-00FF,U+2000-206F"
-```
-
-### C. System Font Stack
-
-```css
-/* ✅ CORRECT: Use system fonts for better performance */
-body {
-  font-family:
-    -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    Roboto,
-    Oxygen,
-    Ubuntu,
-    Cantarell,
-    'Fira Sans',
-    'Droid Sans',
-    'Helvetica Neue',
-    sans-serif;
-}
-
-code {
-  font-family:
-    ui-monospace,
-    SFMono-Regular,
-    SF Mono,
-    Menlo,
-    Consolas,
-    Liberation Mono,
-    monospace;
-}
-```
-
----
-
-## 9. Backend Performance Patterns (MANDATORY)
-
-### A. Caching Strategies
-
-```python
-# Python: Multi-layer caching pattern
-import functools
-import hashlib
-import json
-import time
-from typing import Optional, Any
-import redis
-
-redis_client = redis.Redis(host='localhost', port=6379, decode_responses=True)
-
-class MultiLayerCache:
-    """L1: In-process memory, L2: Redis, L3: Database."""
-
-    def __init__(self):
-        self._local_cache: dict[str, tuple[Any, float]] = {}  # key -> (value, expiry)
-        self._local_max_size = 1000
-
-    def get(self, key: str) -> Optional[Any]:
-        # L1: Check local memory (fastest)
-        if key in self._local_cache:
-            value, expiry = self._local_cache[key]
-            if time.time() < expiry:
-                return value
-            del self._local_cache[key]
-
-        # L2: Check Redis
-        cached = redis_client.get(f"cache:{key}")
-        if cached is not None:
-            value = json.loads(cached)
-            # Promote to L1
-            self._set_local(key, value, ttl=60)
-            return value
-
-        return None
-
-    def set(self, key: str, value: Any, ttl: int = 300):
-        # Set in both layers
-        self._set_local(key, value, ttl=min(ttl, 60))  # L1: shorter TTL
-        redis_client.setex(f"cache:{key}", ttl, json.dumps(value))
-
-    def _set_local(self, key: str, value: Any, ttl: int):
-        if len(self._local_cache) >= self._local_max_size:
-            # Evict expired entries first, then oldest
-            now = time.time()
-            self._local_cache = {
-                k: (v, e) for k, (v, e) in self._local_cache.items() if e > now
-            }
-        self._local_cache[key] = (value, time.time() + ttl)
-
-    def invalidate(self, key: str):
-        self._local_cache.pop(key, None)
-        redis_client.delete(f"cache:{key}")
-
-cache = MultiLayerCache()
-
-# Cache-aside pattern decorator
-def cached(ttl: int = 300, key_prefix: str = ""):
-    def decorator(func):
-        @functools.wraps(func)
-        async def wrapper(*args, **kwargs):
-            cache_key = f"{key_prefix}{func.__name__}:{hashlib.md5(json.dumps({'a': args[1:], 'k': kwargs}, sort_keys=True, default=str).encode()).hexdigest()}"
-
-            result = cache.get(cache_key)
-            if result is not None:
-                return result
-
-            result = await func(*args, **kwargs)
-            cache.set(cache_key, result, ttl=ttl)
-            return result
-        return wrapper
-    return decorator
-
-# Usage
-class ProductService:
-    @cached(ttl=600, key_prefix="products:")
-    async def get_product(self, product_id: str) -> dict:
-        return await self.db.fetch_one("SELECT * FROM products WHERE id = $1", product_id)
-
-    async def update_product(self, product_id: str, data: dict):
-        await self.db.execute("UPDATE products SET ... WHERE id = $1", product_id)
-        cache.invalidate(f"products:get_product:{product_id}")  # Invalidate on write
-```
-
-### B. Connection Pooling
-
-```python
-# Python: Database connection pool with health checks
-import asyncpg
-import asyncio
-from contextlib import asynccontextmanager
-
-class DatabasePool:
-    """Properly configured connection pool with monitoring."""
-
-    def __init__(self, dsn: str):
-        self.dsn = dsn
-        self.pool: Optional[asyncpg.Pool] = None
-
-    async def initialize(self):
-        self.pool = await asyncpg.create_pool(
-            self.dsn,
-            min_size=5,          # Keep 5 connections warm
-            max_size=20,         # Never exceed 20 connections
-            max_inactive_connection_lifetime=300,  # Close idle after 5 min
-            command_timeout=30,  # Query timeout
-            statement_cache_size=100,  # Cache prepared statements
-        )
-
-    @asynccontextmanager
-    async def acquire(self):
-        """Acquire a connection with timeout and error handling."""
-        try:
-            async with self.pool.acquire(timeout=5) as conn:
-                yield conn
-        except asyncpg.exceptions.TooManyConnectionsError:
-            # Log and raise a clear error
-            logger.error("connection_pool_exhausted",
-                pool_size=self.pool.get_size(),
-                free_size=self.pool.get_idle_size(),
-            )
-            raise
-        except asyncio.TimeoutError:
-            logger.error("connection_pool_timeout",
-                pool_size=self.pool.get_size(),
-                free_size=self.pool.get_idle_size(),
-            )
-            raise
-
-    async def health_check(self) -> bool:
-        try:
-            async with self.acquire() as conn:
-                await conn.fetchval("SELECT 1")
-            return True
-        except Exception:
-            return False
-```
-
-```go
-// Go: HTTP client connection pool tuning
-package main
-
-import (
-    "net"
-    "net/http"
-    "time"
-)
-
-func newHTTPClient() *http.Client {
-    transport := &http.Transport{
-        // Connection pool settings
-        MaxIdleConns:        100,              // Total idle connections
-        MaxIdleConnsPerHost: 10,               // Per-host idle connections
-        MaxConnsPerHost:     50,               // Max connections per host
-        IdleConnTimeout:     90 * time.Second, // Close idle after 90s
-
-        // Timeouts for connection establishment
-        DialContext: (&net.Dialer{
-            Timeout:   5 * time.Second,  // TCP connect timeout
-            KeepAlive: 30 * time.Second, // TCP keepalive interval
-        }).DialContext,
-
-        TLSHandshakeTimeout:   5 * time.Second,
-        ResponseHeaderTimeout: 10 * time.Second,
-        ExpectContinueTimeout: 1 * time.Second,
-
-        // Enable HTTP/2
-        ForceAttemptHTTP2: true,
-    }
-
-    return &http.Client{
-        Transport: transport,
-        Timeout:   30 * time.Second, // Overall request timeout
-    }
-}
-
-// IMPORTANT: Reuse the client, do NOT create one per request
-var httpClient = newHTTPClient()
-```
-
-### C. Query Optimization Patterns
-
-```sql
--- Common query anti-patterns and their fixes
-
--- ❌ WRONG: SELECT * when you only need specific columns
-SELECT * FROM orders WHERE user_id = 123;
-
--- ✅ CORRECT: Select only needed columns
-SELECT id, status, total, created_at FROM orders WHERE user_id = 123;
-
-
--- ❌ WRONG: N+1 query pattern
--- Code: for order in orders: get_items(order.id)
-SELECT * FROM orders WHERE user_id = 123;
-SELECT * FROM order_items WHERE order_id = 1;
-SELECT * FROM order_items WHERE order_id = 2;
--- ... repeats N times
-
--- ✅ CORRECT: Single JOIN or batched query
-SELECT o.id, o.status, o.total, oi.product_id, oi.quantity
-FROM orders o
-JOIN order_items oi ON o.id = oi.order_id
-WHERE o.user_id = 123;
-
-
--- ❌ WRONG: Missing index on frequently filtered/joined columns
-SELECT * FROM orders WHERE status = 'pending' AND created_at > NOW() - INTERVAL '1 day';
-
--- ✅ CORRECT: Add composite index matching query pattern
-CREATE INDEX idx_orders_status_created ON orders(status, created_at);
-
-
--- ❌ WRONG: Using OFFSET for pagination (scans all skipped rows)
-SELECT * FROM products ORDER BY created_at DESC LIMIT 20 OFFSET 10000;
-
--- ✅ CORRECT: Keyset/cursor pagination (constant performance)
-SELECT * FROM products
-WHERE created_at < '2024-01-15T10:30:00Z'
-ORDER BY created_at DESC
-LIMIT 20;
-
-
--- ❌ WRONG: Counting all rows for "has any" check
-SELECT COUNT(*) FROM notifications WHERE user_id = 123 AND read = false;
-
--- ✅ CORRECT: EXISTS is faster when you only need boolean
-SELECT EXISTS(SELECT 1 FROM notifications WHERE user_id = 123 AND read = false);
-
-
--- ❌ WRONG: OR conditions that prevent index usage
-SELECT * FROM users WHERE email = 'a@b.com' OR phone = '555-1234';
-
--- ✅ CORRECT: UNION ALL uses indexes on both columns
-SELECT * FROM users WHERE email = 'a@b.com'
-UNION ALL
-SELECT * FROM users WHERE phone = '555-1234' AND email != 'a@b.com';
-```
-
-### D. Memory Profiling Techniques
-
-```python
-# Python: Memory profiling with tracemalloc
-import tracemalloc
-import linecache
-
-def profile_memory(func):
-    """Decorator to profile memory usage of a function."""
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        tracemalloc.start()
-
-        result = func(*args, **kwargs)
-
-        snapshot = tracemalloc.take_snapshot()
-        top_stats = snapshot.statistics('lineno')
-
-        print(f"\n--- Memory profile for {func.__name__} ---")
-        print(f"Top 10 memory allocations:")
-        for stat in top_stats[:10]:
-            print(f"  {stat}")
-
-        current, peak = tracemalloc.get_traced_memory()
-        print(f"Current memory: {current / 1024:.1f} KB")
-        print(f"Peak memory: {peak / 1024:.1f} KB")
-
-        tracemalloc.stop()
-        return result
-    return wrapper
-
-# Usage
-@profile_memory
-def process_large_dataset():
-    # ❌ WRONG: Loading entire dataset into memory
-    # data = db.fetch_all("SELECT * FROM events")  # Could be millions of rows
-
-    # ✅ CORRECT: Process in chunks using a generator
-    for chunk in db.fetch_chunks("SELECT * FROM events", chunk_size=1000):
-        for record in chunk:
-            process_record(record)
-```
-
-```javascript
-// Node.js: Memory leak detection
-// Run with: node --inspect app.js
-// Then use Chrome DevTools to take heap snapshots
-
-// Common memory leak patterns and fixes:
-
-// ❌ WRONG: Unbounded event listener accumulation
-class Leaky {
-  constructor() {
-    // Each instance adds a listener, never removed
-    process.on('message', this.handleMessage.bind(this));
-  }
-}
-
-// ✅ CORRECT: Clean up listeners
-class NotLeaky {
-  constructor() {
-    this._handler = this.handleMessage.bind(this);
-    process.on('message', this._handler);
-  }
-  destroy() {
-    process.removeListener('message', this._handler);
-  }
-}
-
-// ❌ WRONG: Unbounded cache without eviction
-const cache = new Map(); // Grows forever!
-function lookup(key) {
-  if (!cache.has(key)) {
-    cache.set(key, expensiveComputation(key));
-  }
-  return cache.get(key);
-}
-
-// ✅ CORRECT: LRU cache with max size
-class LRUCache {
-  constructor(maxSize = 1000) {
-    this.maxSize = maxSize;
-    this.cache = new Map();
-  }
-
-  get(key) {
-    if (!this.cache.has(key)) return undefined;
-    // Move to end (most recently used)
-    const value = this.cache.get(key);
-    this.cache.delete(key);
-    this.cache.set(key, value);
-    return value;
-  }
-
-  set(key, value) {
-    if (this.cache.has(key)) this.cache.delete(key);
-    this.cache.set(key, value);
-    if (this.cache.size > this.maxSize) {
-      // Delete oldest entry (first key)
-      const oldestKey = this.cache.keys().next().value;
-      this.cache.delete(oldestKey);
-    }
-  }
-}
-```
-
-### E. Load Testing with k6
-
-```javascript
-// k6 load test script: load-test.js
-// Run: k6 run --vus 50 --duration 5m load-test.js
+// k6 — gate on tail latency and error rate (run: k6 run --vus 50 --duration 5m load.js)
 import http from 'k6/http';
-import { check, sleep, group } from 'k6';
-import { Rate, Trend } from 'k6/metrics';
-
-// Custom metrics
-const errorRate = new Rate('errors');
-const orderDuration = new Trend('order_processing_time');
+import { check, sleep } from 'k6';
 
 export const options = {
-  // Ramp-up pattern
   stages: [
-    { duration: '1m', target: 10 },   // Warm up
-    { duration: '3m', target: 50 },   // Normal load
-    { duration: '2m', target: 100 },  // Peak load
-    { duration: '1m', target: 0 },    // Cool down
+    { duration: '1m', target: 10 },   // warm up
+    { duration: '3m', target: 50 },   // expected peak
+    { duration: '2m', target: 100 },  // stress past peak
+    { duration: '1m', target: 0 },    // cool down
   ],
-  thresholds: {
-    http_req_duration: ['p(95)<500', 'p(99)<1000'],  // 95% under 500ms
-    http_req_failed: ['rate<0.01'],                    // Error rate under 1%
-    errors: ['rate<0.05'],                             // Custom error rate
+  thresholds: {                       // these ARE the gate (PERF-LAT-01 / PERF-LOAD-01)
+    http_req_duration: ['p(95)<200', 'p(99)<500'],
+    http_req_failed:   ['rate<0.01'],
   },
 };
 
-const BASE_URL = __ENV.BASE_URL || 'http://localhost:3000';
-
 export default function () {
-  group('Browse Products', () => {
-    const res = http.get(`${BASE_URL}/api/products`);
-    check(res, {
-      'status is 200': (r) => r.status === 200,
-      'response time < 200ms': (r) => r.timings.duration < 200,
-      'has products': (r) => JSON.parse(r.body).length > 0,
-    });
-    errorRate.add(res.status !== 200);
-  });
-
-  sleep(1); // Think time between actions
-
-  group('Place Order', () => {
-    const payload = JSON.stringify({
-      productId: 'PROD-001',
-      quantity: 1,
-    });
-
-    const params = {
-      headers: { 'Content-Type': 'application/json' },
-    };
-
-    const start = Date.now();
-    const res = http.post(`${BASE_URL}/api/orders`, payload, params);
-    orderDuration.add(Date.now() - start);
-
-    check(res, {
-      'order created': (r) => r.status === 201,
-      'has order id': (r) => JSON.parse(r.body).orderId !== undefined,
-    });
-    errorRate.add(res.status !== 201);
-  });
-
-  sleep(Math.random() * 3); // Random think time 0-3s
+  const res = http.get(`${__ENV.BASE_URL}/api/products`);
+  check(res, { 'status 200': (r) => r.status === 200 });
+  sleep(Math.random() * 3);           // think time
 }
 ```
 
-### F. Common Performance Anti-Patterns
-
-```yaml
-anti_patterns:
-  synchronous_external_calls:
-    problem: "Calling external APIs sequentially when they are independent"
-    impact: "Total latency = sum of all call latencies"
-    fix: "Use Promise.all / asyncio.gather for independent calls"
-    example_bad: |
-      const user = await getUser(id);       // 100ms
-      const orders = await getOrders(id);   // 150ms
-      const prefs = await getPreferences(id); // 80ms
-      // Total: 330ms
-    example_good: |
-      const [user, orders, prefs] = await Promise.all([
-        getUser(id),         // 100ms
-        getOrders(id),       // 150ms
-        getPreferences(id),  // 80ms
-      ]);
-      // Total: 150ms (max of all three)
-
-  missing_database_indexes:
-    problem: "Full table scans on large tables"
-    impact: "Query time grows linearly with table size"
-    fix: "Add indexes for columns used in WHERE, JOIN, ORDER BY"
-    detection: |
-      -- PostgreSQL: Find slow queries
-      SELECT query, mean_exec_time, calls
-      FROM pg_stat_statements
-      ORDER BY mean_exec_time DESC
-      LIMIT 20;
-
-      -- Find missing indexes
-      SELECT relname, seq_scan, seq_tup_read,
-             idx_scan, idx_tup_fetch
-      FROM pg_stat_user_tables
-      WHERE seq_scan > 1000
-      ORDER BY seq_tup_read DESC;
-
-  unbatched_operations:
-    problem: "Inserting/updating records one at a time in a loop"
-    impact: "1000 individual INSERTs vs 1 batch INSERT: 50x slower"
-    fix: "Use batch/bulk operations"
-    example_bad: |
-      for item in items:
-          db.execute("INSERT INTO events (data) VALUES ($1)", item)
-    example_good: |
-      db.executemany("INSERT INTO events (data) VALUES ($1)", items)
-      # Or better: COPY for PostgreSQL bulk inserts
-
-  no_pagination:
-    problem: "Returning unbounded result sets from APIs"
-    impact: "Memory exhaustion, slow responses, network timeouts"
-    fix: "Always paginate with a max page size"
-
-  serializing_too_much:
-    problem: "Converting entire ORM objects to JSON including all relations"
-    impact: "Excessive memory, CPU, and bandwidth usage"
-    fix: "Use explicit serialization schemas / DTOs with only needed fields"
-```
+> The metrics this emits feed the dashboards/alerts owned by [`observability.md`](guides://observability.md); the latency targets should equal the service SLO. Don't define the SLO here — reference it.
 
 ---
 
-## 10. Performance Budgets (MANDATORY)
+## 8. Common Bottlenecks & Anti-Patterns
 
-### A. Defining and Enforcing Budgets
+The usual suspects, ranked by how often they dominate a flame graph. Each has a one-line fix; the deep fix lives in the named owner guide.
+
+- **N+1 queries / chatty I/O** — a query (or RPC) per row in a loop. Fix: one JOIN or batched/`IN` query. *(query tuning → datastore guides.)*
+- **Serial independent calls** — `await a; await b; await c` when they don't depend on each other. Fix: run concurrently (`Promise.all`/`gather`); mechanics → [`parallelism.md`](guides://parallelism.md). Total latency drops from sum to max.
+- **Missing/incorrect index** — full scan whose cost grows with table size. Fix: index the WHERE/JOIN/ORDER BY columns → datastore guide.
+- **Unbatched writes** — N single INSERTs instead of one bulk/`COPY`. Fix: batch.
+- **No pagination** — unbounded result set → memory blowup and timeouts. Fix: keyset pagination + max page size (`PERF-MEM-01`).
+- **Over-serialization** — dumping entire ORM graphs (all relations) to JSON. Fix: explicit DTO/schema with only needed fields.
+- **Unbounded cache / listener / buffer = memory leak** — set that only grows. Fix: bounded LRU/TTL; remove listeners on teardown (`PERF-CACHE-01`).
+- **Main-thread / event-loop blocking** — long synchronous CPU work stalls everything. Fix: chunk + yield, or offload to a worker/thread (→ [`parallelism.md`](guides://parallelism.md)).
+- **Connection churn** — opening a new connection/client per request. Fix: a reused, size-bounded pool.
+- **Premature/unmeasured optimization** — clever code with no profile behind it. Fix: §3; revert if it didn't move the target.
+
+---
+
+## 9. Performance Budgets
+
+A budget is a contract per path, enforced in CI (`PERF-BUD-01/02`) so performance can't erode commit by commit. Set tighter budgets for conversion-/revenue-critical paths.
 
 ```yaml
-# performance-budget.yml
-# Define budgets for different page types
-
+# performance-budget.yml — backend services + web pages share one file
 budgets:
-  homepage:
-    lcp: 2500           # ms
-    inp: 200             # ms
+  api.checkout:                 # tightest: revenue path
+    p50_latency_ms: 50
+    p95_latency_ms: 200
+    p99_latency_ms: 500
+    error_rate_pct: 0.1
+    max_response_kb: 200
+  api.product_list:
+    p95_latency_ms: 200
+    max_response_kb: 500
+  web.homepage:                 # Core Web Vitals (thresholds owned by web guides)
+    lcp_ms: 2500
+    inp_ms: 200
     cls: 0.1
-    total_js: 200        # KB (compressed)
-    total_css: 60        # KB (compressed)
-    total_images: 500    # KB
-    total_requests: 30
-    total_weight: 1000   # KB
-    time_to_interactive: 3500  # ms
-
-  product_page:
-    lcp: 2000
-    inp: 150
-    cls: 0.05
-    total_js: 180
-    total_css: 50
-    total_images: 800
-    total_weight: 1200
-
-  checkout:
-    lcp: 1500            # Fastest for conversion-critical pages
-    inp: 100
-    cls: 0.02
-    total_js: 150
-    total_css: 40
-    total_images: 200
-    total_weight: 600
-
-  api_endpoints:
-    p50_latency: 50      # ms
-    p95_latency: 200     # ms
-    p99_latency: 500     # ms
-    error_rate: 0.1      # percent
-    max_response_size: 500  # KB
+    total_js_kb: 200            # compressed
+    total_weight_kb: 1000
 ```
 
+**Enforce in CI** (gate job per `ci-cd.md`):
+- **Backend:** k6/Locust thresholds (§7) fail the pipeline on breach.
+- **Web:** Lighthouse CI assertions on LCP/INP/CLS + bundle-size limits (`bundlesize`/`size-limit`). The Core Web Vitals *thresholds and frontend tuning* (critical CSS, code splitting, image/font optimization, resource hints) are owned by the web guides — this guide owns the *budget-and-gate discipline*, not the CSS.
+
 ```javascript
-// Enforce budgets in CI with Lighthouse CI
-// lighthouserc.js
+// lighthouserc.js — web budget gate (assertions = the gate)
 module.exports = {
   ci: {
-    collect: {
-      numberOfRuns: 5,  // Multiple runs for stability
-      url: [
-        'http://localhost:3000/',
-        'http://localhost:3000/products/1',
-        'http://localhost:3000/checkout',
-      ],
-      settings: {
-        preset: 'desktop',
-      },
-    },
+    collect: { numberOfRuns: 5, url: ['http://localhost:3000/', 'http://localhost:3000/checkout'] },
     assert: {
       assertions: {
-        'categories:performance': ['error', { minScore: 0.9 }],
         'largest-contentful-paint': ['error', { maxNumericValue: 2500 }],
-        'cumulative-layout-shift': ['error', { maxNumericValue: 0.1 }],
-        'interactive': ['error', { maxNumericValue: 3500 }],
-        'total-byte-weight': ['warning', { maxNumericValue: 1000000 }],
-        'mainthread-work-breakdown': ['warning', { maxNumericValue: 4000 }],
-        'dom-size': ['warning', { maxNumericValue: 1500 }],
+        'cumulative-layout-shift':  ['error', { maxNumericValue: 0.1 }],
+        'interactive':              ['error', { maxNumericValue: 3500 }],
         'resource-summary:script:size': ['error', { maxNumericValue: 200000 }],
       },
     },
@@ -1259,172 +251,26 @@ module.exports = {
 };
 ```
 
----
-
-## 11. Frontend Monitoring and Budgets (MANDATORY)
-
-### A. Frontend Performance Budgets
-
-```json
-// bundlesize configuration
-{
-  "files": [
-    {
-      "path": "dist/js/main.*.js",
-      "maxSize": "150 kB"
-    },
-    {
-      "path": "dist/js/vendor.*.js",
-      "maxSize": "250 kB"
-    },
-    {
-      "path": "dist/css/main.*.css",
-      "maxSize": "50 kB"
-    }
-  ]
-}
-```
-
-```javascript
-// Lighthouse CI configuration
-module.exports = {
-  ci: {
-    collect: {
-      numberOfRuns: 3,
-      url: ['http://localhost:3000/'],
-    },
-    assert: {
-      assertions: {
-        'categories:performance': ['error', { minScore: 0.9 }],
-        'first-contentful-paint': ['error', { maxNumericValue: 2000 }],
-        'largest-contentful-paint': ['error', { maxNumericValue: 2500 }],
-        'cumulative-layout-shift': ['error', { maxNumericValue: 0.1 }],
-        'total-blocking-time': ['error', { maxNumericValue: 300 }],
-      },
-    },
-    upload: {
-      target: 'lhci',
-      serverBaseUrl: 'https://lhci.example.com',
-    },
-  },
-};
-```
-
-### B. Real User Monitoring
-
-```typescript
-// Performance observer for real user metrics
-const observer = new PerformanceObserver((list) => {
-  for (const entry of list.getEntries()) {
-    // Send to analytics
-    sendMetric({
-      name: entry.name,
-      value: entry.startTime,
-      type: entry.entryType
-    });
-  }
-});
-
-observer.observe({
-  entryTypes: ['navigation', 'resource', 'paint', 'largest-contentful-paint']
-});
-
-// Long task monitoring
-const longTaskObserver = new PerformanceObserver((list) => {
-  for (const entry of list.getEntries()) {
-    if (entry.duration > 50) {
-      console.warn('Long task detected:', entry.duration, 'ms');
-      sendMetric({
-        name: 'long-task',
-        value: entry.duration
-      });
-    }
-  }
-});
-
-longTaskObserver.observe({ entryTypes: ['longtask'] });
-```
+> Measure real users too: capture field metrics (RUM / `PerformanceObserver`, Web Vitals) and compare against the budget — but the *collection, dashboards, and alerting* are owned by [`observability.md`](guides://observability.md). Budgets define the line; observability watches it.
 
 ---
 
-## 12. Deployment Checklist
+## 10. Deployment Checklist
 
-### Build
-- [ ] JavaScript minified and tree-shaken
-- [ ] CSS minified and purged
-- [ ] Images optimized (WebP/AVIF)
-- [ ] Fonts subsetted
-- [ ] Source maps generated (not deployed)
+Generated from §2 — one box per requirement ID. No new requirements.
 
-### Loading
-- [ ] Critical CSS inlined
-- [ ] Resources preloaded/prefetched
-- [ ] Code split by route
-- [ ] Third-party scripts deferred
-
-### Caching
-- [ ] Cache headers configured
-- [ ] Service worker implemented
-- [ ] Asset filenames hashed
-
-### Backend
-- [ ] Database queries optimized (no N+1, proper indexes)
-- [ ] Connection pooling configured
-- [ ] Caching strategy implemented (application + HTTP)
-- [ ] Pagination on all list endpoints
-- [ ] Load tested with realistic traffic patterns
-
-### Monitoring
-- [ ] Core Web Vitals tracked
-- [ ] Performance budgets enforced in CI
-- [ ] RUM configured
-- [ ] Alerts set up
-- [ ] Backend latency percentiles tracked (p50, p95, p99)
+- [ ] PERF-PROF-01 — change backed by before/after profile or benchmark
+- [ ] PERF-PROF-02 — hot paths free of accidental super-linear complexity
+- [ ] PERF-BUD-01 — every user-facing path has a documented budget
+- [ ] PERF-BUD-02 — budgets enforced in CI; regression fails the build (see `ci-cd.md`)
+- [ ] PERF-LAT-01 — latency asserted at p95/p99, not mean (see `observability.md`)
+- [ ] PERF-LOAD-01 — capacity changes pass a load test at target concurrency
+- [ ] PERF-CACHE-01 — every cache bounded with TTL + invalidation rule
+- [ ] PERF-MEM-01 — large datasets streamed/paginated, never fully materialized
+- [ ] PERF-IO-01 — no N+1; independent I/O batched/parallelized (see `parallelism.md`)
+- [ ] PERF-REG-01 — no hot-path regression merged without sign-off
+- [ ] Agent ran the §3 optimization loop and attached the measurement delta
 
 ---
 
-## 13. Quick Reference
-
-```html
-<!-- Resource hints -->
-<link rel="preload" href="..." as="...">
-<link rel="prefetch" href="...">
-<link rel="preconnect" href="...">
-<link rel="dns-prefetch" href="...">
-
-<!-- Image optimization -->
-<img loading="lazy" decoding="async" width="..." height="...">
-<picture><source type="image/avif"><source type="image/webp"><img></picture>
-
-<!-- Script loading -->
-<script defer src="..."></script>
-<script async src="..."></script>
-<script type="module" src="..."></script>
-```
-
-```css
-/* Performance CSS */
-content-visibility: auto;
-contain: layout style paint;
-will-change: transform;
-font-display: swap;
-```
-
----
-
-## 14. Why This Configuration Works
-
-- **Core Web Vitals alignment with real user experience**: Optimizing for LCP, INP, and CLS ensures improvements target what users actually perceive rather than synthetic benchmarks. These metrics directly correlate with user satisfaction, engagement, and conversion rates.
-- **Performance budgets prevent gradual degradation**: Enforcing bundle size limits and Lighthouse score thresholds in CI/CD catches performance regressions at the pull request stage, before they accumulate into a slow application that is expensive to optimize retroactively.
-- **Progressive loading prioritizes perceived speed**: Techniques like critical CSS inlining, resource hints, and code splitting ensure users see meaningful content as quickly as possible, even while the full application continues loading in the background.
-- **Image optimization delivers the largest payload savings**: Images are typically the heaviest assets on a page. Modern formats (AVIF, WebP), responsive srcsets, and lazy loading together can reduce image transfer sizes by 50-80%, producing the single largest performance improvement for most sites.
-- **Caching strategy minimizes redundant transfers**: Content-hash-based immutable caching for static assets combined with service worker caching eliminates repeat downloads for returning visitors, reducing both load times and server costs.
-
----
-
-**Last Updated:** 2026-01-31
-**Version:** 1.0
-**Maintainer:** Performance Team
-
-
-**End of Web Performance Guidelines**
+**End of Performance Engineering Guidelines**

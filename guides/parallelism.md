@@ -1,1442 +1,261 @@
-# Parallel and Concurrent Programming Guidelines
-Mandatory principles and best practices for parallel, concurrent, and asynchronous programming with emphasis on safety, correctness, performance, and maintainability. Language-agnostic principles for multiprocess, multithreaded, and async programming.
+# Concurrency & Parallelism Guidelines
+Mandatory, language-agnostic standards for safe, correct concurrent and parallel code: concurrency models, race conditions, synchronization, deadlock avoidance, and structured concurrency. Tool-agnostic; language primitives live in the language guides.
+
+---
+name: parallelism
+title: Concurrency & Parallelism Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: cross-cutting
+tools: []
+requires: []
+recommends:
+  - performance
+  - error-handling
+  - observability
+provides:
+  - concurrency-models
+  - race-conditions
+  - synchronization
+  - structured-concurrency
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide owns concurrency & parallelism as a cross-cutting concern; it names idioms and defers concrete primitives to the language guides.
 
 ---
 
-**Agent Profile**: The Concurrency Architect
-**Role**: Senior Parallel Computing Engineer & Concurrency Specialist
-**Objective**: Generate safe, correct, efficient concurrent and parallel code following best practices for race condition prevention, deadlock avoidance, and optimal resource utilization. Prioritize async/await over threads, threads over multiprocessing.
-**Tools**: Language-agnostic concurrency patterns, async/await, threads, locks, lock-free structures, atomic operations, memory models.
+## 0. Prerequisites & References
+
+This guide is the canonical owner of concurrency & parallelism. It defines the models, hazards, and discipline; it does **not** restate performance theory, error strategy, or per-language syntax.
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`performance.md`](guides://performance.md) — concurrency is a *perf lever*: measure before parallelizing, model throughput/latency, contention budgets.
+> - [`error-handling.md`](guides://error-handling.md) — cancellation, timeouts, propagation of failures across tasks, retry/backoff policy.
+> - [`observability.md`](guides://observability.md) — tracing across task/thread boundaries, contention/queue-depth metrics.
+
+> 📎 **SEE ALSO — language-specific concurrency primitives (fetch the one(s) you target):**
+> - [`go.md`](guides://go.md) — goroutines, channels, `select`, `sync`, `context`, the race detector.
+> - [`rust.md`](guides://rust.md) — `Send`/`Sync`, ownership-enforced freedom from data races, `tokio`/`async`, `Arc<Mutex<…>>`, `rayon`.
+> - [`java.md`](guides://java.md) — `java.util.concurrent`, virtual threads (Project Loom), `CompletableFuture`, `StructuredTaskScope`, the JMM.
+> - [`python.md`](guides://python.md) — `asyncio`, `concurrent.futures`, `multiprocessing`, the GIL and free-threaded builds.
+> - [`cpp.md`](guides://cpp.md) · [`c.md`](guides://c.md) — `std::atomic`, memory orderings, `std::jthread`, threads + sanitizers.
+> - [`kotlin.md`](guides://kotlin.md) · [`elixir.md`](guides://elixir.md) · [`scala.md`](guides://scala.md) — coroutines / BEAM actors / effect systems.
 
 ---
 
-## 1. Core Philosophies: ASYNC-FIRST
+## 1. Core Philosophies
 
-The agent must adhere to the **ASYNC-FIRST** principles for every concurrent/parallel implementation:
+Concurrency-specific principles only. Performance theory, error strategy, and language syntax come from the §0 references.
 
-**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
-**Regression Shield**: EVERY concurrency bug MUST receive a test BEFORE fixing to prevent regression.
+- **Don't, until you must.** Sequential code has no races. Parallelize only when profiling proves the need (see `performance.md`); concurrency is a cost, not a feature.
+- **Make races impossible by design, not by careful coding.** Prefer immutability, ownership, and message passing so that the *type system or structure* forbids the bug — review and luck do not scale.
+- **Climb the hierarchy as little as possible.** Choose the highest-level model that meets the need (§3). Lower levels (raw locks, lock-free, multiprocessing) are progressively more dangerous.
+- **Share by communicating.** Move ownership through channels/queues rather than sharing mutable memory behind locks.
+- **Structure task lifetimes.** Every spawned task lives inside a scope that owns its cancellation and cleanup — no orphaned tasks/threads/goroutines.
+- **Bound everything.** Bounded queues, bounded pools, timeouts on every blocking call. Unbounded concurrency is a latent OOM and a DoS vector.
+- **Correctness over speed.** A safe, slightly slower design beats a fast one with a non-deterministic data race.
 
-**CRITICAL CONCURRENCY PRINCIPLES**:
-🔴 **Concurrent code is harder to test, debug, and reason about - keep it simple**
-🔴 **Prefer async/await over threads, threads over processes**
-🔴 **Make race conditions impossible by design, not by careful coding**
-🔴 **Immutability and message passing prevent most concurrency bugs**
-
-- **A**sync First: Prefer async/await and event loops over OS threads
-- **S**afe by Design: Make race conditions impossible, not just unlikely
-- **Y**ield Control: Cooperative scheduling over preemptive when possible
-- **N**o Shared Mutable State: Immutability and message passing by default
-- **C**lear Ownership: Well-defined data ownership prevents races
-
-- **F**unctional Core: Pure functions, immutable data, no side effects
-- **I**solation: Isolate concurrent operations from sequential logic
-- **R**ace-Free: Design to prevent races, not just detect them
-- **S**ynchronization Minimal: Minimize critical sections, prefer lock-free
-- **T**estable: Concurrent code MUST be thoroughly tested
-
-**Additional Principles:**
-
-- **Correctness Over Performance**: Safe code is more important than fast code
-- **Simplicity Over Cleverness**: Simple concurrent code is maintainable
-- **Message Passing Over Shared Memory**: Communicate by sharing channels, not memory
-- **Backpressure Handling**: Always handle flow control and resource limits
-
-**Verified Code**: Agent-generated concurrent code MUST be race-free, deadlock-free, and tested before delivery.
+**Verified Code**: Agent-generated concurrent code MUST pass every gate in §2 (race detector clean, deadlock-free, bounded, tested) before delivery.
 
 ---
 
-## 1A. The Concurrency Hierarchy (MANDATORY)
+## 2. Requirements (MANDATORY, auditable)
 
-🔴 **CRITICAL: Follow the concurrency hierarchy - always prefer higher levels**
+RFC-2119 keywords. IDs `PAR-<TOPIC>-<NN>`. Binary gates; rows binding a shared rule cite its owner. Verification is largely language-tool-driven — bind these to the concrete tool in the relevant language guide.
 
-### The Golden Rule of Concurrency
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| PAR-STRUCT-01 | Concurrency MUST only be introduced after a sequential baseline is profiled and shown insufficient (see `performance.md`) | profile/benchmark attached to change | baseline recorded |
+| PAR-STRUCT-02 | The chosen concurrency level MUST be the highest in the §3 hierarchy that meets the need, and documented | design note / PR description | level justified |
+| PAR-RACE-01 | Code MUST be free of data races | language race detector (e.g. `go test -race`, TSan, `cargo`+Miri/loom) | 0 races |
+| PAR-RACE-02 | Shared mutable state MUST be immutable, owned by one task, or fully synchronized — never partially locked across a read-modify-write | review / static analysis | no torn RMW |
+| PAR-SYNC-01 | All locks acquired in >1 site MUST follow one documented global ordering (no lock inversion) | review / lock-order linter | single order |
+| PAR-SYNC-02 | Every blocking/awaiting call MUST have a timeout or be cancellation-bound (see `error-handling.md`) | review / grep for unbounded `wait`/`join`/`recv` | no infinite waits |
+| PAR-STRUCT-03 | Spawned tasks MUST be scoped (structured concurrency); no detached/orphaned tasks | review / leak test | 0 leaked tasks |
+| PAR-BOUND-01 | Queues and worker pools MUST be bounded; producers experience backpressure | review / config | finite limits set |
+| PAR-SEC-01 | Concurrent file/resource access MUST avoid TOCTOU; locks MUST NOT be held across I/O (see `secure-coding.md`) | review | atomic ops, no lock-over-I/O |
+| PAR-TST-01 | Concurrent logic MUST have stress tests (high task counts, repeated runs) and a CI race-detector job (see `tdd.md`) | CI job | race job green |
+| PAR-TST-02 | Each concurrency bug MUST get a deterministic regression test before the fix (see `tdd.md`) | test run | failing→passing |
+| PAR-OBS-01 | Contention, queue depth, and task latency SHOULD be observable (see `observability.md`) | metrics present | dashboards/metrics exist |
 
-**Always choose the highest level of abstraction that meets your needs. Lower levels are more dangerous and harder to get right.**
-
-### Concurrency Hierarchy (Prefer Higher → Lower)
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Level 1: Sequential Code (SAFEST)                           │
-│   ↓ Only parallelize if proven necessary                    │
-│ Level 2: Async/Await (Cooperative Concurrency)              │
-│   ↓ Use when I/O-bound or need many concurrent operations   │
-│ Level 3: Thread Pools with Immutable Data                   │
-│   ↓ Use when CPU-bound with independent work units          │
-│ Level 4: Threads with Message Passing                       │
-│   ↓ Use when threads need to communicate                    │
-│ Level 5: Threads with Locks (DANGEROUS)                     │
-│   ↓ Use only when absolutely necessary                      │
-│ Level 6: Lock-Free Algorithms (EXPERT ONLY)                 │
-│   ↓ Use only when proven bottleneck and expert available    │
-│ Level 7: Multiprocessing (HIGHEST OVERHEAD)                 │
-│   ↓ Use when need memory isolation or true parallelism      │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### When to Use Each Level
-
-#### Level 1: Sequential Code (Default)
-```
-WHEN:
-- Performance is adequate
-- Problem is inherently sequential
-- Code simplicity is critical
-
-WHY:
-- No race conditions possible
-- Easy to test and debug
-- Predictable behavior
-
-EXAMPLE USE CASE:
-- Single-threaded processing
-- Command-line tools
-- Simple scripts
-```
-
-#### Level 2: Async/Await (Preferred for I/O)
-```
-WHEN:
-- I/O-bound operations (network, disk, database)
-- Need many concurrent operations (thousands)
-- Operations spend most time waiting
-
-WHY:
-- No race conditions with proper design
-- Very low overhead per operation
-- Cooperative scheduling prevents many bugs
-- Easy to reason about execution order
-
-EXAMPLE USE CASE:
-- Web servers handling many requests
-- Concurrent API calls
-- Database connection pools
-- WebSocket servers
-
-ADVANTAGES:
-✅ Single-threaded execution (mostly)
-✅ No data races on single-threaded runtime
-✅ Low memory overhead
-✅ Explicit control flow
-
-DISADVANTAGES:
-❌ Doesn't use multiple CPU cores
-❌ Requires async ecosystem/libraries
-❌ One blocking operation blocks entire runtime
-```
-
-#### Level 3: Thread Pools with Immutable Data (Preferred for CPU)
-```
-WHEN:
-- CPU-bound operations
-- Independent work units
-- All data is immutable or copied
-
-WHY:
-- Uses multiple CPU cores
-- No synchronization needed
-- Predictable performance
-- Limited number of threads (pool)
-
-EXAMPLE USE CASE:
-- Parallel map/reduce operations
-- Image processing (per-pixel operations)
-- Mathematical computations
-- Batch processing
-
-ADVANTAGES:
-✅ Uses multiple cores
-✅ No data races (immutable data)
-✅ Controlled resource usage (pool size)
-
-DISADVANTAGES:
-❌ Memory overhead for copying data
-❌ Thread creation/destruction cost (mitigated by pool)
-```
-
-#### Level 4: Threads with Message Passing (When Threads Must Communicate)
-```
-WHEN:
-- Threads need to communicate
-- Can use channels/queues for communication
-- State can be isolated
-
-WHY:
-- No shared mutable state
-- Clear data ownership
-- Easier to reason about than locks
-
-EXAMPLE USE CASE:
-- Producer-consumer patterns
-- Pipeline processing
-- Actor model systems
-
-ADVANTAGES:
-✅ No explicit locking needed
-✅ Clear data flow
-✅ Easier to reason about
-
-DISADVANTAGES:
-❌ Message passing overhead
-❌ Potential deadlocks (channel-based)
-❌ Complex error handling
-```
-
-#### Level 5: Threads with Locks (Use Sparingly)
-```
-WHEN:
-- Must share mutable state
-- Message passing is impractical
-- No higher-level alternative exists
-
-WHY:
-- Sometimes unavoidable
-- Can be efficient when done right
-- Legacy systems may require it
-
-EXAMPLE USE CASE:
-- Shared caches
-- Counter increments
-- Complex shared data structures
-
-ADVANTAGES:
-✅ Direct memory access (fast)
-✅ Fine-grained control
-
-DISADVANTAGES:
-❌ Race conditions likely
-❌ Deadlocks possible
-❌ Hard to test
-❌ Hard to debug
-❌ Performance bottlenecks (lock contention)
-```
-
-#### Level 6: Lock-Free Algorithms (Expert Only)
-```
-WHEN:
-- Proven performance bottleneck
-- Lock contention is demonstrated issue
-- Expert programmer available
-- Extensive testing possible
-
-WHY:
-- Highest performance
-- No blocking
-- Progress guarantees
-
-EXAMPLE USE CASE:
-- High-performance queues
-- Memory allocators
-- Performance-critical libraries
-
-ADVANTAGES:
-✅ No blocking
-✅ Very high performance
-✅ Good scalability
-
-DISADVANTAGES:
-❌ Extremely complex
-❌ Easy to get wrong
-❌ Hard to debug
-❌ Platform-specific
-❌ Requires deep expertise
-```
-
-#### Level 7: Multiprocessing (Highest Isolation)
-```
-WHEN:
-- Need memory isolation
-- Running untrusted code
-- Must bypass GIL (Python, Ruby)
-- Fault isolation required
-
-WHY:
-- Complete isolation
-- No shared memory races
-- Fault tolerance (process crash isolation)
-
-EXAMPLE USE CASE:
-- Parallel Python processing (GIL bypass)
-- Sandboxed execution
-- Distributed computing
-
-ADVANTAGES:
-✅ Complete memory isolation
-✅ No race conditions across processes
-✅ Fault isolation
-
-DISADVANTAGES:
-❌ Highest overhead
-❌ Slow inter-process communication
-❌ Large memory footprint
-❌ Process creation cost
-```
-
-### Decision Flowchart
-
-```
-Start: Need concurrency?
-  ↓
-NO → Use sequential code
-  ↓
-YES → Is it I/O-bound?
-  ↓                    ↓
-YES                   NO
-  ↓                    ↓
-Use async/await    Is it CPU-bound?
-                       ↓
-                     YES
-                       ↓
-                Can data be immutable?
-                  ↓              ↓
-                YES             NO
-                  ↓              ↓
-          Thread pool      Message passing?
-                                 ↓
-                               YES  → Use channels/queues
-                                 ↓
-                               NO   → Must use locks
-                                      (minimize scope!)
-```
+> **Forbidden**: shipping concurrent code with a dirty race detector; holding a lock across network/disk I/O; unbounded task spawning; `join`/`await`/`recv` without a timeout or cancellation; "fixing" a race by adding `sleep`; double-checked locking outside a language's blessed safe pattern.
 
 ---
 
-## 2. Async/Await Patterns (PREFERRED)
+## 3. The Concurrency Hierarchy (choose the highest level that fits)
 
-### A. Async/Await Best Practices
+Always choose the highest level of abstraction that meets your needs; each step down adds danger and cost. Map the chosen level to the concrete primitive in your language guide (§0 SEE ALSO).
 
-**CRITICAL: Async/await is the preferred concurrency model for I/O-bound operations.**
+| Lvl | Model | Use when | Why / caveat |
+|----|-------|----------|--------------|
+| 1 | **Sequential** | Performance is adequate; problem is inherently serial | No races possible. Default. |
+| 2 | **Async / await** (cooperative) | I/O-bound; thousands of concurrent ops mostly *waiting* | Low overhead, mostly single-threaded → few data races. One blocking call stalls the loop; doesn't use multiple cores. |
+| 3 | **Thread pool + immutable/copied data** | CPU-bound, independent work units | Uses all cores, no synchronization needed. Cost: data copying, pool tuning. |
+| 4 | **Threads/tasks + message passing** | Workers must communicate | Channels give clear ownership; no explicit locks. Cost: channel deadlocks, error plumbing. |
+| 5 | **Threads + locks** | Must share mutable state, message passing impractical | Last resort. Races, deadlocks, contention; hard to test. Minimize critical sections. |
+| 6 | **Lock-free / atomics** | Proven contention bottleneck, expert present | Highest throughput, no blocking. Extremely error-prone, platform-subtle — gate behind benchmarks. |
+| 7 | **Multiprocessing** | Memory isolation, fault isolation, GIL bypass | Complete isolation. Highest overhead, slow IPC, large footprint. |
 
-#### ✅ CORRECT - Async/Await Usage
+**Decision sketch:** need concurrency? → no: stay sequential. → I/O-bound? → async/await. → CPU-bound + data can be immutable/copied? → thread pool. → workers must talk? → channels. → must share mutable state? → locks (minimize scope) → contention proven? → lock-free. → need isolation / bypass a global lock? → processes.
 
-```pseudocode
-// Conceptual async/await pattern (language-agnostic)
-
-// 1. Use async functions for I/O operations
-async function fetch_user_data(user_id):
-    // Await suspends this function, allowing other work
-    user = await database.query("SELECT * FROM users WHERE id = ?", user_id)
-    posts = await database.query("SELECT * FROM posts WHERE user_id = ?", user_id)
-    return {user: user, posts: posts}
-
-// 2. Run independent operations concurrently
-async function fetch_multiple_users(user_ids):
-    // Launch all requests concurrently
-    promises = user_ids.map(id => fetch_user_data(id))
-
-    // Wait for all to complete
-    results = await Promise.all(promises)
-    return results
-
-// 3. Handle errors properly
-async function safe_fetch(url):
-    try:
-        response = await http.get(url)
-        return {success: true, data: response}
-    catch error:
-        log_error(error)
-        return {success: false, error: error}
-
-// 4. Set timeouts to prevent indefinite waiting
-async function fetch_with_timeout(url, timeout_ms):
-    timeout_promise = sleep(timeout_ms).then(() => {
-        throw new TimeoutError("Request timed out")
-    })
-
-    fetch_promise = http.get(url)
-
-    // Race between fetch and timeout
-    return await Promise.race([fetch_promise, timeout_promise])
-
-// 5. Implement backpressure
-async function process_stream(stream, max_concurrent):
-    semaphore = new Semaphore(max_concurrent)
-
-    for item in stream:
-        await semaphore.acquire()
-
-        // Process in background, release semaphore when done
-        spawn async {
-            try:
-                await process_item(item)
-            finally:
-                semaphore.release()
-        }
-```
-
-#### ❌ WRONG - Async/Await Anti-Patterns
-
-```pseudocode
-// ❌ WRONG - Sequential async calls (not concurrent)
-async function slow_fetch():
-    user = await fetch_user()      // Wait
-    posts = await fetch_posts()    // Wait
-    comments = await fetch_comments()  // Wait
-    // These could run concurrently!
-
-// ✅ CORRECT - Concurrent async calls
-async function fast_fetch():
-    // Launch all concurrently
-    [user, posts, comments] = await Promise.all([
-        fetch_user(),
-        fetch_posts(),
-        fetch_comments()
-    ])
-
-// ❌ WRONG - Blocking the event loop
-async function bad_async():
-    await some_async_operation()
-    // Don't do CPU-intensive work here!
-    for i in range(1_000_000_000):
-        heavy_computation()  // Blocks event loop!
-
-// ✅ CORRECT - Move CPU work to thread pool
-async function good_async():
-    await some_async_operation()
-    // Offload to thread pool
-    result = await run_in_thread_pool(heavy_computation)
-
-// ❌ WRONG - Forgetting to await
-async function forgot_await():
-    fetch_data()  // Returns promise, doesn't wait!
-    // Data won't be ready
-
-// ✅ CORRECT - Always await async operations
-async function remembered_await():
-    await fetch_data()  // Actually waits
-```
-
-### B. Async Error Handling
-
-```pseudocode
-// Error handling in async code
-
-// 1. Always use try/catch with await
-async function safe_operation():
-    try:
-        result = await risky_operation()
-        return result
-    catch error:
-        // Handle or log error
-        log_error(error)
-        return default_value
-
-// 2. Handle multiple concurrent errors
-async function handle_multiple():
-    results = await Promise.allSettled([
-        operation1(),
-        operation2(),
-        operation3()
-    ])
-
-    // Check each result
-    for result in results:
-        if result.status == "rejected":
-            log_error(result.reason)
-
-// 3. Cleanup with finally
-async function with_cleanup():
-    resource = await acquire_resource()
-    try:
-        await use_resource(resource)
-    finally:
-        await release_resource(resource)  // Always executes
-```
+**Pool sizing:** CPU-bound ≈ `num_cores` (or `-1`); I/O-bound ≈ `num_cores × (1 + wait/compute)`; mixed → separate pools for CPU vs I/O work so a slow I/O task can't starve compute (tune empirically — see `performance.md`).
 
 ---
 
-## 3. Thread Safety Principles (MANDATORY)
+## 4. Async / Await (the preferred model for I/O)
 
-### A. Shared Mutable State (Avoid When Possible)
+Cooperative concurrency on an event loop: a task yields control at each `await`, so one OS thread serves thousands of waiting operations. Bind to your runtime (`asyncio`, `tokio`, JS event loop, virtual threads) via the language guide.
 
-**CRITICAL: Shared mutable state is the root cause of most concurrency bugs.**
+**Idioms to apply:**
+- **Launch independent work concurrently, then join.** Sequential `await a; await b;` when `a` and `b` are independent is the #1 async anti-pattern — gather/`join!`/`Promise.all` them instead.
+- **Never block the loop.** CPU-heavy work or a synchronous blocking call inside an async task freezes every other task → offload to a thread/process pool (`run_in_executor`, `spawn_blocking`).
+- **Always `await`.** A fire-and-forget call that returns an un-awaited future runs detached or never — violates PAR-STRUCT-03.
+- **Timeout / cancel everything.** Wrap awaits in a timeout; propagate cancellation. Failure-aggregation (`Promise.allSettled`, `join_all` with results) so one failure doesn't silently drop siblings — policy in `error-handling.md`.
+- **Backpressure with a semaphore.** Cap in-flight operations rather than spawning one task per input.
 
-#### The Four Rules of Shared State
-
-1. **No Shared State** (Best): Each thread owns its data
-2. **Shared Immutable State** (Good): Read-only data can be freely shared
-3. **Shared Mutable State with Message Passing** (OK): Change ownership through channels
-4. **Shared Mutable State with Locks** (Last Resort): Protect with synchronization
-
-#### ✅ CORRECT - Avoiding Shared Mutable State
-
-```pseudocode
-// Pattern 1: No shared state (BEST)
-function process_items_parallel(items):
-    // Each thread gets its own copy
-    thread_pool.map(items, item => {
-        result = process_item(item)  // No sharing
-        return result
-    })
-
-// Pattern 2: Shared immutable state (GOOD)
-immutable config = {
-    max_connections: 100,
-    timeout: 5000
-}
-
-function worker_thread(config):
-    // Can read config safely, can't modify
-    connect(config.max_connections)
-
-// Pattern 3: Message passing (OK)
-channel = new Channel()
-
-// Producer thread
-function producer():
-    for item in data:
-        channel.send(item)  // Transfer ownership
-    channel.close()
-
-// Consumer thread
-function consumer():
-    while item = channel.receive():
-        process(item)  // Now owns the item
-
-// Pattern 4: Thread-local storage (GOOD)
-thread_local cache = new Map()
-
-function worker():
-    // Each thread has its own cache
-    cache.put(key, value)  // No synchronization needed
-```
-
-#### ❌ WRONG - Dangerous Shared Mutable State
-
-```pseudocode
-// ❌ WRONG - Unsynchronized shared mutable state
-global counter = 0  // Shared
-
-function worker_thread():
-    for i in range(1000):
-        counter = counter + 1  // RACE CONDITION!
-        // Multiple threads read-modify-write concurrently
-
-// ❌ WRONG - Partial synchronization
-global data = {}
-lock = new Lock()
-
-function dangerous_update():
-    lock.acquire()
-    value = data.get(key)  // Protected
-    lock.release()
-
-    // DANGER: Data could change here!
-    new_value = compute(value)
-
-    lock.acquire()
-    data.set(key, new_value)  // Protected
-    lock.release()
-    // RACE CONDITION between reads!
-
-// ✅ CORRECT - Complete critical section
-function safe_update():
-    lock.acquire()
-    try:
-        value = data.get(key)
-        new_value = compute(value)
-        data.set(key, new_value)  // All protected together
-    finally:
-        lock.release()
-```
-
-### B. Lock Ordering and Deadlock Prevention
-
-**CRITICAL: Deadlocks occur when threads wait for each other in a cycle.**
-
-#### Four Conditions for Deadlock (Break at Least One)
-
-1. **Mutual Exclusion**: Resources cannot be shared
-2. **Hold and Wait**: Thread holds resources while waiting for others
-3. **No Preemption**: Resources cannot be forcibly taken
-4. **Circular Wait**: Circular chain of threads waiting for resources
-
-#### ✅ CORRECT - Deadlock Prevention
-
-```pseudocode
-// Strategy 1: Lock ordering (prevent circular wait)
-// Always acquire locks in the same global order
-
-global lock_A = new Lock()
-global lock_B = new Lock()
-
-function thread_1():
-    lock_A.acquire()  // Always A before B
-    lock_B.acquire()
-    // Do work
-    lock_B.release()
-    lock_A.release()
-
-function thread_2():
-    lock_A.acquire()  // Same order: A before B
-    lock_B.acquire()
-    // Do work
-    lock_B.release()
-    lock_A.release()
-
-// Strategy 2: Try-lock with timeout (detect and recover)
-function try_acquire_both(lock_A, lock_B, timeout):
-    start_time = now()
-
-    while now() - start_time < timeout:
-        if lock_A.try_acquire(timeout=100):
-            if lock_B.try_acquire(timeout=100):
-                return true  // Got both locks
-            else:
-                lock_A.release()  // Release A, try again
-
-        sleep(random(1, 10))  // Random backoff
-
-    return false  // Timeout
-
-// Strategy 3: Acquire all locks atomically
-function atomic_acquire(locks):
-    // Either acquire all or none
-    all_locks = new Lock()
-    all_locks.acquire()
-
-    for lock in locks:
-        lock.acquire()
-
-    all_locks.release()
-    return locks
-
-// Strategy 4: Use higher-level abstractions
-// Message passing avoids explicit locks
-channel = new Channel()
-
-function producer():
-    channel.send(data)  // No locks
-
-function consumer():
-    data = channel.receive()  // No locks
-```
-
-#### ❌ WRONG - Deadlock Prone Code
-
-```pseudocode
-// ❌ WRONG - Inconsistent lock ordering
-lock_A = new Lock()
-lock_B = new Lock()
-
-function thread_1():
-    lock_A.acquire()
-    lock_B.acquire()  // Order: A then B
-    // ...
-    lock_B.release()
-    lock_A.release()
-
-function thread_2():
-    lock_B.acquire()  // Order: B then A (OPPOSITE!)
-    lock_A.acquire()  // DEADLOCK POSSIBLE
-    // ...
-    lock_A.release()
-    lock_B.release()
-
-// ❌ WRONG - Nested lock acquisition without ordering
-function transfer(from_account, to_account, amount):
-    from_account.lock.acquire()
-    to_account.lock.acquire()  // Deadlock if two threads transfer in opposite directions
-    // ...
-    to_account.lock.release()
-    from_account.lock.release()
-
-// ✅ CORRECT - Use consistent ordering
-function safe_transfer(from_account, to_account, amount):
-    // Always lock accounts in ID order
-    first, second = sort_by_id(from_account, to_account)
-
-    first.lock.acquire()
-    second.lock.acquire()
-    // Do transfer
-    second.lock.release()
-    first.lock.release()
-```
+> Cancellation, timeout, and retry/backoff *policy* is owned by [`error-handling.md`](guides://error-handling.md); this guide only mandates that async tasks be cancellation-bound (PAR-SYNC-02).
 
 ---
 
-## 4. Memory Models and Synchronization (MANDATORY)
+## 5. Shared State & Race Conditions
 
-### A. Memory Visibility
+**Shared mutable state is the root cause of most concurrency bugs.** In priority order:
 
-**CRITICAL: Without synchronization, changes made by one thread may not be visible to others.**
+1. **No shared state** — each task owns its data (best; impossible to race).
+2. **Shared immutable state** — read-only data is freely shareable.
+3. **Message passing** — transfer ownership through a channel; one owner at a time.
+4. **Shared mutable + synchronization** — last resort; protect with a lock/atomic.
 
-#### Memory Visibility Rules
+**Race-condition taxonomy and the fix:**
 
-```pseudocode
-// Modern processors and compilers reorder operations for performance
-// Without synchronization, you get UNDEFINED BEHAVIOR
+| Hazard | Fix |
+|--------|-----|
+| Check-then-act (e.g. `if not exists: create`) | Atomic compare-and-swap, or hold the lock across both steps |
+| Read-modify-write (`x = x + 1`) | Atomic `fetch_add`, or one lock around the whole RMW (PAR-RACE-02) |
+| Lazy initialization | `once` / `call_once` / lazy-static idiom |
+| Partial critical section | Make the entire invariant-preserving operation one critical section — releasing mid-sequence reintroduces the race |
 
-// ❌ WRONG - Assuming immediate visibility
-shared flag = false
-shared data = 0
+A critical section MUST cover the *whole* read-compute-write that preserves an invariant; locking the read and the write separately (releasing in between) is still a race. Prefer thread-local storage when per-worker state suffices — no synchronization needed.
 
-function writer_thread():
-    data = 42           // Write data
-    flag = true         // Set flag
-
-function reader_thread():
-    while not flag:     // Wait for flag
-        pass
-    print(data)         // Might print 0! Not guaranteed to see 42
-
-// ✅ CORRECT - Use proper synchronization
-
-// Option 1: Locks (guarantee visibility)
-lock = new Lock()
-shared data = 0
-
-function writer():
-    lock.acquire()
-    data = 42
-    lock.release()  // All writes visible after release
-
-function reader():
-    lock.acquire()  // See all writes before acquire
-    print(data)     // Guaranteed to see 42
-    lock.release()
-
-// Option 2: Atomic variables (lighter weight)
-atomic flag = Atomic(false)
-shared data = 0
-
-function writer():
-    data = 42
-    flag.store(true, memory_order_release)  // Release semantics
-
-function reader():
-    while not flag.load(memory_order_acquire):  // Acquire semantics
-        pass
-    print(data)  // Guaranteed to see 42
-
-// Option 3: Memory barriers/fences
-shared data = 0
-shared flag = false
-
-function writer():
-    data = 42
-    memory_fence_release()  // Ensure data write visible
-    flag = true
-
-function reader():
-    while not flag:
-        pass
-    memory_fence_acquire()  // Ensure we see data write
-    print(data)
-```
-
-### B. Atomic Operations
-
-**CRITICAL: Atomic operations are indivisible - they cannot be interrupted.**
-
-#### ✅ CORRECT - Atomic Operations
-
-```pseudocode
-// Atomic operations for simple cases
-
-// 1. Atomic counter increment
-atomic counter = Atomic(0)
-
-function increment_counter():
-    // Atomic read-modify-write
-    counter.fetch_add(1)  // Thread-safe, no lock needed
-
-// 2. Compare-and-swap (CAS) for lock-free algorithms
-atomic value = Atomic(0)
-
-function try_update(old_value, new_value):
-    // Atomically: if value == old_value, set to new_value
-    return value.compare_and_swap(old_value, new_value)
-
-// 3. Atomic flags for signaling
-atomic ready = Atomic(false)
-
-function producer():
-    // Do work
-    ready.store(true)
-
-function consumer():
-    while not ready.load():
-        spin_or_yield()
-    // Proceed
-
-// 4. Atomic pointers for lock-free structures
-atomic head = Atomic(null)
-
-function push_lock_free(item):
-    loop:
-        old_head = head.load()
-        item.next = old_head
-        if head.compare_and_swap(old_head, item):
-            break  // Success
-        // Retry if CAS failed
-```
-
-#### When to Use Atomic vs Locks
-
-```
-Use Atomics When:
-✅ Single variable update
-✅ Simple read-modify-write
-✅ Minimal contention expected
-✅ Need wait-free guarantees
-
-Use Locks When:
-✅ Multiple variables must stay consistent
-✅ Complex operations
-✅ Code clarity is important
-✅ Moderate contention is OK
-```
+> Ownership-based languages (Rust) push much of this into the compiler (`Send`/`Sync`); GC/JVM/CLR languages rely on the memory model + `concurrent` collections — see the language guide.
 
 ---
 
-## 5. Common Concurrency Patterns (MANDATORY)
+## 6. Synchronization Primitives & Memory Visibility
 
-### A. Producer-Consumer Pattern
+Pick the lightest primitive that expresses the constraint; map it to the language API in §0.
 
-```pseudocode
-// Thread-safe queue with backpressure
+| Primitive | Purpose |
+|-----------|---------|
+| Mutex / Lock | Exclusive access to a resource |
+| RWLock | Many readers **or** one writer |
+| Semaphore | Cap concurrent access count (backpressure) |
+| Condition variable | Wait until a predicate becomes true (always re-check in a `while`) |
+| Atomic | Lock-free single-variable RMW / flags / CAS |
+| Channel / Queue | Message passing, ownership transfer |
+| Barrier | Rendezvous N tasks at a point |
 
-class BoundedQueue:
-    function __init__(max_size):
-        this.queue = []
-        this.max_size = max_size
-        this.lock = new Lock()
-        this.not_full = new Condition(this.lock)
-        this.not_empty = new Condition(this.lock)
+**Memory visibility:** without synchronization, one thread's writes may never become visible to another, and the compiler/CPU may reorder them — this is undefined behavior, not "eventually consistent." Establish *happens-before* via a lock (release→acquire), an atomic with acquire/release ordering, or a memory fence. Never busy-wait on a plain (non-atomic) flag.
 
-    function put(item):
-        this.lock.acquire()
-        try:
-            // Wait if queue is full (backpressure)
-            while len(this.queue) >= this.max_size:
-                this.not_full.wait()
-
-            this.queue.append(item)
-            this.not_empty.notify()  // Wake up consumers
-        finally:
-            this.lock.release()
-
-    function get():
-        this.lock.acquire()
-        try:
-            // Wait if queue is empty
-            while len(this.queue) == 0:
-                this.not_empty.wait()
-
-            item = this.queue.pop(0)
-            this.not_full.notify()  // Wake up producers
-            return item
-        finally:
-            this.lock.release()
-
-// Usage
-queue = new BoundedQueue(100)
-
-function producer():
-    for item in data_source:
-        queue.put(item)  // Blocks if queue full
-
-function consumer():
-    while true:
-        item = queue.get()  // Blocks if queue empty
-        process(item)
-```
-
-### B. Thread Pool Pattern
-
-```pseudocode
-// Reusable thread pool for CPU-bound work
-
-class ThreadPool:
-    function __init__(num_threads):
-        this.task_queue = new BoundedQueue(1000)
-        this.threads = []
-        this.shutdown_flag = Atomic(false)
-
-        // Start worker threads
-        for i in range(num_threads):
-            thread = new Thread(this.worker)
-            thread.start()
-            this.threads.append(thread)
-
-    function worker():
-        while not this.shutdown_flag.load():
-            try:
-                task = this.task_queue.get(timeout=1)
-                result = task.execute()
-                task.set_result(result)
-            catch TimeoutError:
-                continue  // Check shutdown flag
-            catch error:
-                task.set_error(error)
-
-    function submit(task):
-        if this.shutdown_flag.load():
-            throw Error("Pool is shut down")
-        this.task_queue.put(task)
-        return task.future
-
-    function shutdown():
-        this.shutdown_flag.store(true)
-        for thread in this.threads:
-            thread.join()
-
-// Usage
-pool = new ThreadPool(num_cpus())
-
-futures = []
-for item in data:
-    future = pool.submit(Task(process_item, item))
-    futures.append(future)
-
-// Wait for all results
-results = futures.map(f => f.get())
-pool.shutdown()
-```
-
-### C. Read-Write Lock Pattern
-
-```pseudocode
-// Allow multiple readers OR one writer
-
-class ReadWriteLock:
-    function __init__():
-        this.lock = new Lock()
-        this.readers = 0
-        this.writer = false
-        this.reader_cond = new Condition(this.lock)
-        this.writer_cond = new Condition(this.lock)
-
-    function acquire_read():
-        this.lock.acquire()
-        try:
-            // Wait while writer is active
-            while this.writer:
-                this.reader_cond.wait()
-            this.readers += 1
-        finally:
-            this.lock.release()
-
-    function release_read():
-        this.lock.acquire()
-        try:
-            this.readers -= 1
-            if this.readers == 0:
-                this.writer_cond.notify()  // Wake up waiting writer
-        finally:
-            this.lock.release()
-
-    function acquire_write():
-        this.lock.acquire()
-        try:
-            // Wait while readers or writer active
-            while this.readers > 0 or this.writer:
-                this.writer_cond.wait()
-            this.writer = true
-        finally:
-            this.lock.release()
-
-    function release_write():
-        this.lock.acquire()
-        try:
-            this.writer = false
-            this.reader_cond.notify_all()  // Wake up all waiting readers
-            this.writer_cond.notify()       // Wake up one waiting writer
-        finally:
-            this.lock.release()
-
-// Usage: Shared cache
-cache = {}
-rw_lock = new ReadWriteLock()
-
-function read_cache(key):
-    rw_lock.acquire_read()
-    try:
-        return cache.get(key)
-    finally:
-        rw_lock.release_read()
-
-function write_cache(key, value):
-    rw_lock.acquire_write()
-    try:
-        cache.set(key, value)
-    finally:
-        rw_lock.release_write()
-```
+**Atomics vs locks:** use atomics for a single variable / simple RMW / low contention / wait-free needs; use a lock when multiple variables must stay mutually consistent, the operation is complex, or clarity matters. Detailed memory-ordering semantics (`acquire`/`release`/`seq_cst`) belong to `cpp.md`/`rust.md`.
 
 ---
 
-## 6. Testing Concurrent Code (MANDATORY)
+## 7. Deadlock & Liveness
 
-### A. Testing Strategies
+A deadlock needs all four Coffman conditions simultaneously — **break at least one**: mutual exclusion, hold-and-wait, no-preemption, circular wait.
 
-**CRITICAL: Concurrent bugs are non-deterministic - extensive testing required.**
+**Prevention (in preference order):**
+1. **Eliminate locks** — message passing / immutability has no lock cycle.
+2. **Global lock ordering** — always acquire locks in one documented order (e.g. by resource ID). This breaks *circular wait* and is mandated by PAR-SYNC-01. The classic `transfer(from, to)` bug is fixed by locking the two accounts in ID order, not argument order.
+3. **Try-lock with timeout + backoff** — acquire-or-release-and-retry breaks *hold-and-wait*; pair with randomized backoff to avoid livelock.
+4. **Single coarse lock** — when contention is low, one lock can't deadlock.
 
-#### Testing Approaches
-
-```pseudocode
-// 1. Stress testing - expose race conditions
-function stress_test_counter():
-    counter = new AtomicCounter()
-    num_threads = 10
-    increments_per_thread = 10000
-
-    threads = []
-    for i in range(num_threads):
-        thread = new Thread(() => {
-            for j in range(increments_per_thread):
-                counter.increment()
-        })
-        threads.append(thread)
-        thread.start()
-
-    for thread in threads:
-        thread.join()
-
-    expected = num_threads * increments_per_thread
-    actual = counter.get()
-
-    assert(actual == expected, f"Race condition! Expected {expected}, got {actual}")
-
-// 2. Property-based testing
-function test_queue_fifo_property():
-    queue = new ConcurrentQueue()
-    items = [1, 2, 3, 4, 5]
-
-    // Producer thread
-    producer = new Thread(() => {
-        for item in items:
-            queue.enqueue(item)
-    })
-
-    // Consumer thread
-    received = []
-    consumer = new Thread(() => {
-        for i in range(len(items)):
-            item = queue.dequeue()
-            received.append(item)
-    })
-
-    producer.start()
-    consumer.start()
-    producer.join()
-    consumer.join()
-
-    // Property: Items should be in FIFO order
-    assert(received == items, "FIFO property violated!")
-
-// 3. Invariant checking
-class BankAccount:
-    invariant: balance >= 0
-
-    function transfer(to_account, amount):
-        // Check invariant before
-        assert(this.balance >= 0)
-        assert(to_account.balance >= 0)
-
-        this.lock.acquire()
-        to_account.lock.acquire()
-        try:
-            if this.balance >= amount:
-                this.balance -= amount
-                to_account.balance += amount
-            else:
-                throw InsufficientFundsError()
-        finally:
-            to_account.lock.release()
-            this.lock.release()
-
-        // Check invariant after
-        assert(this.balance >= 0)
-        assert(to_account.balance >= 0)
-
-// 4. Happens-before testing
-function test_happens_before():
-    shared_value = 0
-    barrier = new Barrier(2)
-
-    function writer():
-        shared_value = 42
-        barrier.wait()  // Synchronization point
-
-    function reader():
-        barrier.wait()  // Synchronization point
-        // After barrier, write MUST be visible
-        assert(shared_value == 42)
-
-    thread1 = new Thread(writer)
-    thread2 = new Thread(reader)
-    thread1.start()
-    thread2.start()
-    thread1.join()
-    thread2.join()
-
-// 5. Thread sanitizer / race detector
-// Many languages provide tools to detect races
-// Example: Run with -race flag (Go), ThreadSanitizer (C/C++)
-//
-// These tools instrument code to detect:
-// - Data races
-// - Deadlocks
-// - Lock order violations
-```
-
-### B. Concurrency Testing Best Practices
-
-```
-1. Test with Different Thread Counts
-   - Test with 1, 2, 4, 8, 16+ threads
-   - Expose different race conditions
-
-2. Repeat Tests Many Times
-   - Race conditions are non-deterministic
-   - Run test 1000+ times to increase confidence
-
-3. Add Random Delays
-   - Sleep random amounts to vary timing
-   - Expose races that only occur with specific timing
-
-4. Use Thread Sanitizers
-   - Enable race detectors in CI/CD
-   - Fail builds on detected races
-
-5. Test Under Load
-   - Test with high CPU usage
-   - Test with memory pressure
-   - Test with I/O contention
-
-6. Test Shutdown/Cleanup
-   - Ensure threads terminate cleanly
-   - No resource leaks
-   - Proper error propagation
-
-7. Test Error Paths
-   - What happens on timeout?
-   - What happens on exception?
-   - Ensure resources are released
-```
+Also guard against **livelock** (threads busy but not progressing — add backoff/jitter), **starvation** (use fair locks / queues), and **lost wakeups** (signal under the lock, wait in a loop).
 
 ---
 
-## 7. Security Considerations (MANDATORY)
+## 8. Structured Concurrency
 
-### A. Concurrency-Related Security Issues
+Bind every task's lifetime to a lexical scope that owns its children: the scope does not exit until all child tasks complete or are cancelled, and a child failure cancels its siblings and propagates upward. This makes leaks impossible (PAR-STRUCT-03) and turns "where did this task go?" into a structural guarantee.
 
-**CRITICAL: Concurrent code can introduce security vulnerabilities.**
+- Use the language's scope construct: Go `errgroup`/`context`, Kotlin `coroutineScope`, Java `StructuredTaskScope`, Trio/`asyncio.TaskGroup` nurseries, Swift `withTaskGroup`.
+- Cancellation flows down the scope tree via a cancellation token / `context`; tasks MUST check it cooperatively (never hard-kill threads — that leaves locks/resources in an undefined state).
+- On scope exit (normal, error, or cancel) all resources acquired inside are released. This is the concurrency analogue of RAII / `try/finally`.
 
-#### Time-of-Check Time-of-Use (TOCTOU) Races
-
-```pseudocode
-// ❌ WRONG - TOCTOU vulnerability
-function unsafe_file_operation(filename):
-    // Check if file exists
-    if file_exists(filename):  // TIME OF CHECK
-        // DANGER: File could be replaced here by attacker!
-        // With a symlink to sensitive file
-
-        content = read_file(filename)  // TIME OF USE
-        // Might read sensitive file!
-
-// ✅ CORRECT - Atomic operations
-function safe_file_operation(filename):
-    // Open file atomically with appropriate flags
-    file = open_file(filename, flags=O_RDONLY | O_NOFOLLOW)
-    // O_NOFOLLOW prevents symlink attacks
-
-    content = read_file(file)
-    close_file(file)
-```
-
-#### Resource Exhaustion Attacks
-
-```pseudocode
-// ❌ WRONG - Unbounded concurrency
-async function handle_request(request):
-    // No limit on concurrent operations!
-    spawn async {
-        // Attacker can create unlimited async tasks
-        await process_request(request)
-    }
-
-// ✅ CORRECT - Bounded concurrency with semaphore
-semaphore = new Semaphore(MAX_CONCURRENT_REQUESTS)
-
-async function handle_request(request):
-    // Limit concurrent operations
-    if not await semaphore.try_acquire(timeout=100):
-        return error("Service busy, try again later")
-
-    try:
-        await process_request(request)
-    finally:
-        semaphore.release()
-```
-
-#### Denial of Service via Locks
-
-```pseudocode
-// ❌ WRONG - Lock held during I/O
-lock = new Lock()
-
-function vulnerable_operation():
-    lock.acquire()
-    try:
-        // DANGER: Holding lock during I/O
-        data = read_from_network()  // Can block indefinitely!
-        process(data)
-    finally:
-        lock.release()
-    // Attacker can DoS by making network slow
-
-// ✅ CORRECT - Minimize lock scope
-lock = new Lock()
-
-function safe_operation():
-    // Do I/O without lock
-    data = read_from_network_with_timeout(timeout=5)
-
-    // Only lock for memory operations
-    lock.acquire()
-    try:
-        process(data)
-    finally:
-        lock.release()
-```
+> The *failure* semantics (what to do when a child errors — retry, fail-fast, partial result) are policy from [`error-handling.md`](guides://error-handling.md); structured concurrency is the *mechanism* that guarantees cleanup and cancellation reach every task.
 
 ---
 
-## 8. Performance Optimization (MANDATORY)
+## 9. Concurrency Patterns
 
-### A. Avoiding Common Performance Pitfalls
+Name the pattern; implement with the lightest §6 primitive in your language.
 
-```pseudocode
-// PITFALL 1: Lock Contention
-// ❌ WRONG - Single lock for everything
-global_lock = new Lock()
-data = {}
+- **Producer–Consumer** — a *bounded* queue between producers and consumers; full queue blocks producers (backpressure), empty queue blocks consumers. Bounding is mandatory (PAR-BOUND-01).
+- **Fan-Out / Fan-In** — distribute work to N workers, then merge results (parallel map/reduce). Ideal at hierarchy Level 3 with immutable inputs.
+- **Pipeline** — stages connected by channels; each stage is single-purpose and can scale independently. Watch the slowest stage (the bottleneck).
+- **Worker Pool** — fixed workers pulling tasks from a shared queue; caps resource usage and amortizes thread creation.
+- **Actor Model** — isolated state per actor, mutated only via its mailbox; no shared memory, so no data races by construction (BEAM/Akka/etc.).
+- **Read-Write Lock** — many concurrent readers or one writer for read-mostly shared data; beware writer starvation.
 
-function get(key):
-    global_lock.acquire()
-    value = data.get(key)
-    global_lock.release()
-    return value
-
-// ✅ CORRECT - Sharded locks
-NUM_SHARDS = 16
-locks = [new Lock() for i in range(NUM_SHARDS)]
-data = [{} for i in range(NUM_SHARDS)]
-
-function get_shard(key):
-    return hash(key) % NUM_SHARDS
-
-function get(key):
-    shard = get_shard(key)
-    locks[shard].acquire()
-    value = data[shard].get(key)
-    locks[shard].release()
-    return value
-
-// PITFALL 2: False Sharing
-// ❌ WRONG - Adjacent data accessed by different threads
-struct SharedCounters:
-    counter1: int  // CPU cache line
-    counter2: int  // Same cache line!
-    // Threads modifying counter1 and counter2 fight over cache line
-
-// ✅ CORRECT - Pad to separate cache lines
-CACHE_LINE_SIZE = 64
-
-struct PaddedCounter:
-    counter: int
-    padding: byte[CACHE_LINE_SIZE - sizeof(int)]
-
-counters = [PaddedCounter() for i in range(num_threads)]
-// Each counter in its own cache line
-
-// PITFALL 3: Excessive Synchronization
-// ❌ WRONG - Lock per operation
-function sum_array(array):
-    total = 0
-    lock = new Lock()
-
-    parallel_for element in array:
-        lock.acquire()
-        total += element  // Synchronize each addition!
-        lock.release()
-
-    return total
-
-// ✅ CORRECT - Per-thread accumulation
-function sum_array(array):
-    num_threads = num_cpus()
-    partial_sums = [0 for i in range(num_threads)]
-
-    parallel_for (i, element) in enumerate(array):
-        thread_id = i % num_threads
-        // No synchronization needed!
-        partial_sums[thread_id] += element
-
-    // Single reduction at end
-    return sum(partial_sums)
-```
+> For the general GoF patterns these compose with, see [`designpatterns.md`](guides://designpatterns.md); show only the concurrency binding.
 
 ---
 
-## 9. Summary
+## 10. Concurrency-Related Security
 
-**CRITICAL Requirements for All Concurrent Code:**
+Concurrency opens specific vulnerability classes (full policy in [`secure-coding.md`](guides://secure-coding.md); here are the concurrency-specific bindings — PAR-SEC-01):
 
-**CONCURRENCY HIERARCHY (PREFER HIGHER → LOWER):**
-1. 🟢 **Sequential Code**: Default choice (safest)
-2. 🟢 **Async/Await**: Preferred for I/O-bound work
-3. 🟡 **Thread Pool + Immutable Data**: Good for CPU-bound work
-4. 🟡 **Message Passing**: Good when threads must communicate
-5. 🟠 **Locks**: Use sparingly, minimize critical sections
-6. 🔴 **Lock-Free**: Expert only, when proven bottleneck
-7. 🔴 **Multiprocessing**: When isolation needed, highest overhead
-
-**CORE PRINCIPLES:**
-- **Immutability**: Prefer immutable data over locks
-- **Message Passing**: Share by communicating, not memory
-- **Minimize Scope**: Keep critical sections small
-- **Lock Ordering**: Prevent deadlocks with consistent order
-- **Testing**: Test extensively with race detectors
-- **Backpressure**: Always handle resource limits
-- **Timeouts**: Never wait indefinitely
-
-**SAFETY CHECKLIST:**
-- [ ] No shared mutable state (or properly synchronized)
-- [ ] No race conditions possible
-- [ ] No deadlock possible (lock ordering)
-- [ ] Memory visibility guaranteed (proper synchronization)
-- [ ] Bounded resource usage (no DoS)
-- [ ] Timeout on all blocking operations
-- [ ] Clean shutdown implemented
-- [ ] Error handling in all threads
-- [ ] Thoroughly tested with thread sanitizers
-
-**REMEMBER:**
-🔴 **Make races impossible by design, not careful coding**
-🔴 **Prefer async/await for I/O, thread pools for CPU work**
-🔴 **Test concurrent code extensively - bugs are non-deterministic**
-🔴 **Correctness > Performance - safe code first**
+- **TOCTOU** — a check then a use, with an attacker-controllable gap (file replaced/symlinked in between). Fix: operate on a single atomic handle (open with `O_NOFOLLOW`, `openat`, fd-based checks) rather than re-resolving a path.
+- **Resource-exhaustion / DoS** — unbounded task or connection spawning lets an attacker exhaust threads/memory. Fix: bound with a semaphore/pool and shed load when full (ties to PAR-BOUND-01).
+- **Lock-based DoS** — holding a lock across slow I/O lets a slow client stall every other thread. Fix: do I/O outside the lock; lock only the in-memory mutation.
 
 ---
 
-## 10. Implementation Checklist
+## 11. Testing Concurrent Code
 
-### Design Phase
-- [ ] Confirmed sequential implementation is insufficient (profiled first)
-- [ ] Selected appropriate concurrency level from hierarchy (async > threads > processes)
-- [ ] Identified shared state and ownership boundaries
-- [ ] Designed for immutability and message passing where possible
-- [ ] Documented concurrency model and data flow
+Concurrency bugs are non-deterministic, so testing is probabilistic — design for detection (binds PAR-TST-01/02; test-first policy from [`tdd.md`](guides://tdd.md)).
 
-### Safety
-- [ ] No shared mutable state without proper synchronization
-- [ ] Lock ordering defined and documented (prevents deadlocks)
-- [ ] All blocking operations have timeouts
-- [ ] Bounded queues and thread pools (prevents resource exhaustion)
-- [ ] Clean shutdown path implemented (signal handling, cancellation tokens)
-- [ ] Backpressure handling for producer-consumer patterns
-
-### Error Handling
-- [ ] Exceptions in threads/tasks are caught and propagated
-- [ ] Failed tasks do not leave shared state in an inconsistent state
-- [ ] Circuit breakers for external service calls
-- [ ] Retry logic with exponential backoff and jitter
-
-### Testing
-- [ ] Unit tests for concurrent logic with deterministic scheduling
-- [ ] Stress tests with high thread/task counts
-- [ ] Thread sanitizer (TSan) or race detector enabled in CI
-- [ ] Deadlock detection tests with timeout assertions
-- [ ] Memory leak detection under concurrent load
-
-### Performance
-- [ ] Thread pool sizes tuned for workload (CPU-bound: N cores, I/O-bound: N * multiplier)
-- [ ] Contention measured and minimized (lock-free where proven necessary)
-- [ ] False sharing avoided (cache line padding for hot variables)
-- [ ] Batch size tuned for throughput vs. latency tradeoff
+- **Race / sanitizer job in CI** — TSan, `go test -race`, Helgrind, Rust `loom`/Miri. A dirty detector fails the build (PAR-RACE-01).
+- **Stress tests** — many threads × many iterations; assert the invariant (e.g. final counter == expected). Vary thread counts (1, 2, 4, 8, 16+) to surface different interleavings.
+- **Repeat + jitter** — run hot tests hundreds/thousands of times; inject random delays to perturb timing.
+- **Invariant & happens-before checks** — assert pre/post invariants around critical sections; use barriers to assert visibility after a synchronization point.
+- **Deadlock detection** — every blocking test has a timeout; a hang is a failure, not a hang.
+- **Shutdown & error paths** — verify clean termination, no leaked tasks, resources released on timeout/exception (ties to PAR-STRUCT-03).
+- **Regression-first** — reproduce a reported race deterministically (model-checker like `loom`, or controlled scheduling) before fixing it (PAR-TST-02).
 
 ---
 
-## 11. Why This Configuration Works
+## 12. Performance of Concurrent Code
 
-1. **Async-First Hierarchy**: Defaulting to async/await for I/O-bound work avoids thread overhead and context switching, handling thousands of concurrent operations on a single thread.
+Concurrency is a performance lever, not free speed — measure, don't assume (full methodology in [`performance.md`](guides://performance.md)). Concurrency-specific pitfalls:
 
-2. **Immutability by Default**: Immutable data structures eliminate data races by definition, removing the need for locks in the majority of concurrent code paths.
+- **Lock contention** — a single global lock serializes everything. Shard locks by key, or go lock-free, only when contention is *measured*.
+- **False sharing** — independent variables on the same cache line ping-pong between cores. Pad hot per-thread data to cache-line boundaries.
+- **Over-synchronization** — locking each step of a parallel reduce destroys the parallelism. Accumulate per-thread, reduce once at the end.
+- **Amdahl's law** — the serial fraction caps speedup; shrinking critical sections matters more than adding threads. (Theory: `performance.md`.)
+- **Oversubscription** — more threads than cores adds context-switch overhead without throughput; size pools per §3.
 
-3. **Message Passing over Shared Memory**: Communicating via channels isolates state to a single owner, making concurrency bugs visible as protocol violations rather than subtle data corruption.
-
-4. **Structured Concurrency**: Binding task lifetimes to scopes (structured concurrency) prevents leaked goroutines/tasks/threads and ensures cleanup on cancellation.
-
-5. **Lock Ordering Convention**: Establishing a global lock acquisition order makes deadlocks impossible by construction rather than requiring runtime detection.
-
-6. **Bounded Resources**: Fixed-size thread pools and bounded queues convert unbounded load into backpressure, preventing OOM kills and thread exhaustion under spike traffic.
-
-7. **Thread Sanitizer in CI**: Running tests with TSan/race detectors catches data races that manual review misses, especially in code paths exercised only under contention.
-
-8. **Functional Core, Imperative Shell**: Keeping pure computation separate from concurrent orchestration means the complex logic is easily testable without threading.
-
-9. **Timeout on Every Blocking Call**: Universal timeouts prevent indefinite hangs from network partitions, deadlocks, or unresponsive dependencies.
-
-10. **Cooperative Cancellation**: Using cancellation tokens instead of thread interruption provides clean shutdown without leaving resources in an undefined state.
+> Surface contention, queue depth, and per-task latency as metrics so regressions are visible in production (see `observability.md`, PAR-OBS-01).
 
 ---
 
-## 12. Quick Reference
+## Deployment Checklist
 
-```
-CONCURRENCY HIERARCHY (prefer higher):
-  1. Sequential code        - Default, safest
-  2. Async/Await            - I/O-bound, cooperative
-  3. Thread pool + immutable - CPU-bound, independent tasks
-  4. Threads + channels     - Communication between threads
-  5. Threads + locks        - Shared mutable state (minimize)
-  6. Lock-free algorithms   - Expert only, proven bottleneck
-  7. Multiprocessing        - Memory isolation, highest overhead
+Generated from §2 — one box per requirement ID. No new requirements.
 
-THREAD POOL SIZING:
-  CPU-bound:  num_cores (or num_cores - 1)
-  I/O-bound:  num_cores * (1 + wait_time / compute_time)
-  Mixed:      Separate pools for CPU and I/O work
+- [ ] PAR-STRUCT-01 — sequential baseline profiled before parallelizing
+- [ ] PAR-STRUCT-02 — concurrency level chosen from §3 hierarchy and justified
+- [ ] PAR-STRUCT-03 — all tasks scoped (structured concurrency); no orphans
+- [ ] PAR-RACE-01 — race detector clean
+- [ ] PAR-RACE-02 — shared mutable state immutable/owned/fully synchronized
+- [ ] PAR-SYNC-01 — single documented global lock order
+- [ ] PAR-SYNC-02 — every blocking/awaiting call has a timeout or is cancellation-bound
+- [ ] PAR-BOUND-01 — queues and pools bounded; backpressure present
+- [ ] PAR-SEC-01 — no TOCTOU; no lock held across I/O
+- [ ] PAR-TST-01 — stress tests + CI race-detector job green
+- [ ] PAR-TST-02 — each concurrency bug has a regression test before its fix
+- [ ] PAR-OBS-01 — contention / queue depth / latency observable
 
-SYNCHRONIZATION PRIMITIVES:
-  Mutex / Lock       - Exclusive access to shared resource
-  RWLock             - Multiple readers OR one writer
-  Semaphore          - Limit concurrent access count
-  Condition Variable - Wait for a condition to become true
-  Atomic             - Lock-free single-variable operations
-  Channel / Queue    - Message passing between threads
-  Barrier            - Synchronize N threads at a point
-
-COMMON PATTERNS:
-  Producer-Consumer  - Bounded queue between producer/consumer threads
-  Fan-Out/Fan-In     - Distribute work, collect results
-  Pipeline           - Chain of processing stages
-  Worker Pool        - Fixed threads pulling from work queue
-  Actor Model        - Isolated state, message-driven
-
-DEADLOCK PREVENTION:
-  1. Lock ordering     - Always acquire locks in same global order
-  2. Lock timeout      - Use try_lock with timeout
-  3. Single lock       - Reduce to one lock if possible
-  4. Lock-free design  - Eliminate locks entirely
-
-RACE CONDITION CHECKLIST:
-  - Check-then-act    → Use atomic compare-and-swap
-  - Read-modify-write → Use atomic operations or lock
-  - Lazy initialization → Use once/call_once
-  - Double-checked lock → Use language-specific safe pattern
-
-TESTING TOOLS:
-  ThreadSanitizer (TSan)  - Compile-time race detection
-  Helgrind (Valgrind)     - Runtime race detection
-  Go race detector        - go test -race
-  stress / stress-ng      - Load testing
-```
-
-**End of Parallel and Concurrent Programming Guidelines**
+---
+**End of Concurrency & Parallelism Guidelines**

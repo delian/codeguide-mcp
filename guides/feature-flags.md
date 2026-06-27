@@ -1,1033 +1,197 @@
 # Feature Flags Guidelines
-Mandatory standards for implementing and managing feature flags in production systems. LaunchDarkly, Split.io, Unleash, Flagsmith, custom implementations.
+Mandatory standards for designing, operating, and retiring feature flags: typed short-lived toggles, progressive rollout, kill switches, and disciplined cleanup. Vendor-agnostic (LaunchDarkly, Split, Unleash, Flagsmith, OpenFeature) or custom.
+
+---
+name: feature-flags
+title: Feature Flags Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: cross-cutting
+tools: []
+requires: []
+recommends:
+  - env-config
+  - ci-cd
+  - observability
+  - tdd
+provides:
+  - flag-types
+  - flag-lifecycle
+  - progressive-rollout
+  - flag-cleanup
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide owns feature-flag taxonomy, lifecycle, rollout, and cleanup; configuration, delivery pipelines, monitoring, and test strategy are referenced.
 
 ---
 
-**Agent Profile**: The Feature Flags Expert
-**Role**: Senior Release Engineer & Product Delivery Specialist
-**Objective**: Generate safe, scalable feature flag implementations that enable progressive delivery and experimentation.
-**Tools**: LaunchDarkly, Split.io, Unleash, Flagsmith, custom implementations.
+## 0. Prerequisites & References
+
+Feature flags sit on top of several owned concerns. Fetch the relevant owners; this guide adds only the flag-specific specialization.
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`env-config.md`](guides://env-config.md) — config layering, secrets, env separation. *(Flag binding: flags are the **top, runtime-mutable precedence layer** above static config; they override but never replace layered config.)*
+> - [`ci-cd.md`](guides://ci-cd.md) — pipelines & progressive delivery. *(Flag binding: flags **decouple deploy from release** so the pipeline ships dark code and rollout is a flag change, not a deploy.)*
+> - [`observability.md`](guides://observability.md) — metrics, tracing, alerting. *(Flag binding: every flag rollout MUST be gated on owner-defined SLOs; emit the served variation as an event/attribute.)*
+> - [`tdd.md`](guides://tdd.md) — test-first, coverage. *(Flag binding: both flag states are tested; the flag is part of the test matrix, not an excuse to skip a path.)*
+
+> 📎 **SEE ALSO:** [`secure-coding.md`](guides://secure-coding.md) (permission flags are **not** an authorization mechanism) · [`logging.md`](guides://logging.md) · [`code-review.md`](guides://code-review.md) · [`git.md`](guides://git.md) (trunk-based development pairs with flags)
 
 ---
 
 ## 1. Core Philosophies: FLAGS-FIRST
 
-- **F**lexible: Enable runtime configuration changes
-- **L**imited: Flags have a lifecycle, remove when done
-- **A**uditable: Track all flag changes and usage
-- **G**radual: Roll out features incrementally
-- **S**afe: Kill switches for instant rollback
+Flag-specific principles only. Pipeline, config, and monitoring rules come from §0.
+
+- **F**lag-driven, not branch-driven: integrate to trunk behind a flag instead of holding a long-lived feature branch. Deploy ≠ release.
+- **L**ifecycle-bound: every flag is born with a type, an owner, and (for short-lived types) an expiry. A flag with no removal plan is technical debt at creation.
+- **A**uditable: every flag change (create, target, rollout %, kill, delete) is recorded with who/when/why.
+- **G**radual & reversible: ship to 0%, ramp through rings/percentages, and keep the off-path working until the flag is removed.
+- **S**afe-by-default: the default/fallback variation is the **safe** behavior (usually "old path"); evaluation failures fall back to it; kill switches flip in seconds without a deploy.
+
+**Verified Flags**: any flagged change MUST satisfy every gate in §2 before delivery.
 
 ---
 
-## 2. Flag Types (MANDATORY)
+## 2. Requirements (MANDATORY, auditable)
 
-### A. Flag Categories
+RFC-2119 keywords. IDs `FF-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a shared rule cite its owner.
 
-```typescript
-// Define clear flag types
-enum FlagType {
-  // Release flags: Control feature rollout
-  // Short-lived, should be removed after full rollout
-  RELEASE = 'release',
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| FF-STRUCT-01 | Every flag MUST declare a type (release/experiment/ops/permission) | flag registry / metadata schema | type set, schema-valid |
+| FF-STRUCT-02 | Every flag MUST have a named owner | registry field | owner non-empty |
+| FF-STRUCT-03 | Short-lived flags (release, experiment) MUST carry an expiry date | registry field | expiry set & in future |
+| FF-STRUCT-04 | Default/fallback variation MUST be the safe path; eval errors MUST return it | code review / fallback unit test | safe default returned on miss/error |
+| FF-TST-01 | Both flag states MUST be tested (see `tdd.md`) | test suite covers on AND off | both branches exercised |
+| FF-TST-02 | Targeting/rollout logic MUST have deterministic-bucketing tests | unit test on hash bucketing | stable assignment asserted |
+| FF-OBS-01 | Rollouts MUST be gated on SLOs; served variation emitted (see `observability.md`) | dashboard/alert wired; event has `flag`+`variation` | metric present, alert armed |
+| FF-OPS-01 | Critical paths MUST have a tested kill switch defaulting to enabled | kill-switch drill in staging | flip works, < deploy latency |
+| FF-SEC-01 | Permission/entitlement decisions MUST be enforced server-side, not by a client flag (see `secure-coding.md`) | code review | no client-trusted gating |
+| FF-CLEAN-01 | Stale/expired flags MUST be removed (code + config) | CI staleness audit | 0 expired flags past grace |
+| FF-CLEAN-02 | Flag removal MUST delete the dead branch, not leave the loser dangling | PR review / dead-code lint | no orphaned variation code |
+| FF-AUDIT-01 | All flag mutations MUST be auditable (who/when/why) | audit log query | every change attributed |
 
-  // Experiment flags: A/B testing
-  // Time-boxed, removed after experiment concludes
-  EXPERIMENT = 'experiment',
-
-  // Ops flags: Operational controls
-  // Can be long-lived, for system behavior tuning
-  OPS = 'ops',
-
-  // Permission flags: Entitlement-based features
-  // Long-lived, tied to pricing/plans
-  PERMISSION = 'permission',
-
-  // Kill switch: Emergency disable
-  // Always present, default to enabled
-  KILL_SWITCH = 'kill_switch'
-}
-
-interface FeatureFlag {
-  key: string;
-  type: FlagType;
-  description: string;
-  owner: string;
-  createdAt: Date;
-  expiresAt?: Date; // Required for RELEASE and EXPERIMENT
-  defaultValue: boolean | string | number | object;
-  tags: string[];
-}
-
-// Example flag definitions
-const flags: FeatureFlag[] = [
-  {
-    key: 'new-checkout-flow',
-    type: FlagType.RELEASE,
-    description: 'New streamlined checkout experience',
-    owner: 'checkout-team',
-    createdAt: new Date('2024-01-15'),
-    expiresAt: new Date('2024-03-15'), // 2 month max
-    defaultValue: false,
-    tags: ['checkout', 'frontend']
-  },
-  {
-    key: 'pricing-experiment-v2',
-    type: FlagType.EXPERIMENT,
-    description: 'Test new pricing display format',
-    owner: 'growth-team',
-    createdAt: new Date('2024-01-20'),
-    expiresAt: new Date('2024-02-20'), // 1 month experiment
-    defaultValue: 'control',
-    tags: ['pricing', 'experiment']
-  },
-  {
-    key: 'rate-limit-threshold',
-    type: FlagType.OPS,
-    description: 'Requests per minute limit',
-    owner: 'platform-team',
-    createdAt: new Date('2024-01-01'),
-    defaultValue: 100,
-    tags: ['ops', 'rate-limiting']
-  },
-  {
-    key: 'payments-enabled',
-    type: FlagType.KILL_SWITCH,
-    description: 'Kill switch for payment processing',
-    owner: 'payments-team',
-    createdAt: new Date('2024-01-01'),
-    defaultValue: true, // Enabled by default
-    tags: ['payments', 'critical']
-  }
-];
-```
+> **Forbidden**: a flag with no type/owner/expiry; using a client-evaluated flag as an authorization boundary; shipping a flagged change tested in only one state; leaving an expired flag in code "just in case"; nesting flags so a code path requires N flags in a specific combination to reach.
 
 ---
 
-## 3. Implementation Patterns (MANDATORY)
+## 3. Flag Taxonomy (owned)
 
-### A. Client SDK
+Pick the **type at creation** — it dictates lifetime, default, and cleanup policy. Misclassifying a release flag as "ops" is the root cause of most stale-flag debt.
 
-```typescript
-// feature-flags.ts
-interface FlagContext {
-  userId?: string;
-  email?: string;
-  userAttributes?: Record<string, any>;
-  sessionId?: string;
-  environment: 'development' | 'staging' | 'production';
-}
+| Type | Purpose | Lifetime | Safe default | Cleanup trigger |
+|------|---------|----------|--------------|-----------------|
+| **Release** | Decouple deploy from release; ramp a new feature | Days–weeks (cap ~2 months) | `false` (old path) | Remove once at 100% and stable |
+| **Experiment** | A/B / multivariate measurement | Bounded by experiment window (cap ~1 month) | control | Remove when experiment concludes & decision made |
+| **Ops** | Runtime operational control (circuit breakers, rate-limit thresholds, degradation modes) | Long-lived / permanent | the conservative/protective value | Review quarterly; keep only if still actuated |
+| **Permission / entitlement** | Gate features by plan/tier/role | Long-lived (until plan model changes) | least-privilege | Tied to product packaging, not code rollout |
 
-interface FlagValue<T> {
-  value: T;
-  variation: string;
-  reason: string;
-}
+- **Kill switch** is a property, not a fifth type: any release/ops flag controlling a critical path MUST expose an instant off (`FF-OPS-01`), defaulting to enabled in normal operation.
+- Each flag's metadata record (key, type, owner, description, created, expiry, tags, default) lives in the flag system / registry, **not** scattered in code. Treat the registry as the source of truth.
 
-class FeatureFlagClient {
-  private flags: Map<string, any> = new Map();
-  private context: FlagContext;
-  private eventQueue: FlagEvaluationEvent[] = [];
-
-  constructor(config: { apiKey: string; context: FlagContext }) {
-    this.context = config.context;
-    this.initialize(config.apiKey);
-  }
-
-  private async initialize(apiKey: string): Promise<void> {
-    // Fetch initial flag values
-    const response = await fetch('/api/flags', {
-      headers: { 'Authorization': `Bearer ${apiKey}` }
-    });
-    const data = await response.json();
-    data.flags.forEach((flag: any) => {
-      this.flags.set(flag.key, flag);
-    });
-
-    // Set up real-time updates (SSE or WebSocket)
-    this.subscribeToUpdates(apiKey);
-  }
-
-  // Boolean flag evaluation
-  isEnabled(flagKey: string, defaultValue: boolean = false): boolean {
-    return this.evaluate(flagKey, defaultValue).value;
-  }
-
-  // String variation evaluation
-  getVariation(flagKey: string, defaultValue: string = 'control'): string {
-    return this.evaluate(flagKey, defaultValue).value;
-  }
-
-  // Numeric flag evaluation
-  getNumber(flagKey: string, defaultValue: number = 0): number {
-    return this.evaluate(flagKey, defaultValue).value;
-  }
-
-  // JSON flag evaluation
-  getJSON<T>(flagKey: string, defaultValue: T): T {
-    return this.evaluate(flagKey, defaultValue).value;
-  }
-
-  private evaluate<T>(flagKey: string, defaultValue: T): FlagValue<T> {
-    const flag = this.flags.get(flagKey);
-
-    if (!flag) {
-      this.trackEvaluation(flagKey, 'not-found', defaultValue);
-      return {
-        value: defaultValue,
-        variation: 'default',
-        reason: 'FLAG_NOT_FOUND'
-      };
-    }
-
-    // Evaluate targeting rules
-    const result = this.evaluateRules(flag, this.context);
-
-    this.trackEvaluation(flagKey, result.variation, result.value);
-
-    return result;
-  }
-
-  private evaluateRules<T>(flag: any, context: FlagContext): FlagValue<T> {
-    // Check kill switch
-    if (flag.killed) {
-      return {
-        value: flag.offVariation,
-        variation: 'off',
-        reason: 'KILLED'
-      };
-    }
-
-    // Check user targeting
-    if (flag.targets && context.userId) {
-      for (const target of flag.targets) {
-        if (target.userIds.includes(context.userId)) {
-          return {
-            value: target.variation,
-            variation: target.name,
-            reason: 'TARGETED'
-          };
-        }
-      }
-    }
-
-    // Check percentage rollout
-    if (flag.rollout && context.userId) {
-      const bucket = this.hashUser(context.userId, flag.key) % 100;
-      if (bucket < flag.rollout.percentage) {
-        return {
-          value: flag.onVariation,
-          variation: 'on',
-          reason: 'ROLLOUT'
-        };
-      }
-    }
-
-    // Default variation
-    return {
-      value: flag.defaultVariation,
-      variation: 'default',
-      reason: 'DEFAULT'
-    };
-  }
-
-  private hashUser(userId: string, flagKey: string): number {
-    // Consistent hashing for stable bucketing
-    const str = `${flagKey}:${userId}`;
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      hash = ((hash << 5) - hash) + str.charCodeAt(i);
-      hash = hash & hash;
-    }
-    return Math.abs(hash);
-  }
-
-  private trackEvaluation(flagKey: string, variation: string, value: any): void {
-    this.eventQueue.push({
-      flagKey,
-      variation,
-      value,
-      userId: this.context.userId,
-      timestamp: new Date()
-    });
-
-    // Batch send events
-    if (this.eventQueue.length >= 10) {
-      this.flushEvents();
-    }
-  }
-
-  private async flushEvents(): Promise<void> {
-    const events = [...this.eventQueue];
-    this.eventQueue = [];
-
-    await fetch('/api/flags/events', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ events })
-    });
-  }
-}
-
-// Usage
-const flags = new FeatureFlagClient({
-  apiKey: process.env.FLAG_API_KEY!,
-  context: {
-    userId: currentUser.id,
-    email: currentUser.email,
-    environment: 'production'
-  }
-});
-
-if (flags.isEnabled('new-checkout-flow')) {
-  renderNewCheckout();
-} else {
-  renderLegacyCheckout();
-}
-```
-
-### B. Server-Side Implementation
-
-```typescript
-// flag-service.ts
-import Redis from 'ioredis';
-
-interface TargetingRule {
-  attribute: string;
-  operator: 'equals' | 'contains' | 'in' | 'gt' | 'lt';
-  values: any[];
-  variation: string;
-}
-
-interface FlagConfig {
-  key: string;
-  enabled: boolean;
-  defaultVariation: string;
-  variations: Record<string, any>;
-  rules: TargetingRule[];
-  rollout?: {
-    percentage: number;
-    variation: string;
-  };
-  killSwitch: boolean;
-}
-
-class FeatureFlagService {
-  private redis: Redis;
-  private localCache: Map<string, FlagConfig> = new Map();
-  private cacheExpiry: number = 60000; // 1 minute
-  private lastRefresh: number = 0;
-
-  constructor(redisUrl: string) {
-    this.redis = new Redis(redisUrl);
-    this.startCacheRefresh();
-  }
-
-  async evaluate(
-    flagKey: string,
-    context: Record<string, any>,
-    defaultValue: any = null
-  ): Promise<any> {
-    const flag = await this.getFlag(flagKey);
-
-    if (!flag) {
-      return defaultValue;
-    }
-
-    // Kill switch check
-    if (flag.killSwitch) {
-      return flag.variations[flag.defaultVariation];
-    }
-
-    // Not enabled
-    if (!flag.enabled) {
-      return flag.variations[flag.defaultVariation];
-    }
-
-    // Evaluate targeting rules
-    for (const rule of flag.rules) {
-      if (this.matchesRule(rule, context)) {
-        return flag.variations[rule.variation];
-      }
-    }
-
-    // Percentage rollout
-    if (flag.rollout && context.userId) {
-      const inRollout = this.isInRollout(
-        context.userId,
-        flagKey,
-        flag.rollout.percentage
-      );
-      if (inRollout) {
-        return flag.variations[flag.rollout.variation];
-      }
-    }
-
-    // Default
-    return flag.variations[flag.defaultVariation];
-  }
-
-  private matchesRule(rule: TargetingRule, context: Record<string, any>): boolean {
-    const value = context[rule.attribute];
-
-    switch (rule.operator) {
-      case 'equals':
-        return value === rule.values[0];
-      case 'contains':
-        return String(value).includes(rule.values[0]);
-      case 'in':
-        return rule.values.includes(value);
-      case 'gt':
-        return value > rule.values[0];
-      case 'lt':
-        return value < rule.values[0];
-      default:
-        return false;
-    }
-  }
-
-  private isInRollout(userId: string, flagKey: string, percentage: number): boolean {
-    const hash = this.consistentHash(`${flagKey}:${userId}`);
-    return hash % 100 < percentage;
-  }
-
-  private consistentHash(str: string): number {
-    let hash = 5381;
-    for (let i = 0; i < str.length; i++) {
-      hash = ((hash << 5) + hash) + str.charCodeAt(i);
-    }
-    return Math.abs(hash);
-  }
-
-  private async getFlag(key: string): Promise<FlagConfig | null> {
-    // Try local cache first
-    if (this.localCache.has(key) && Date.now() - this.lastRefresh < this.cacheExpiry) {
-      return this.localCache.get(key)!;
-    }
-
-    // Fetch from Redis
-    const data = await this.redis.get(`flag:${key}`);
-    if (data) {
-      const flag = JSON.parse(data);
-      this.localCache.set(key, flag);
-      return flag;
-    }
-
-    return null;
-  }
-
-  private startCacheRefresh(): void {
-    // Subscribe to flag updates
-    const subscriber = this.redis.duplicate();
-    subscriber.subscribe('flag-updates');
-    subscriber.on('message', (channel, message) => {
-      const { key, flag } = JSON.parse(message);
-      this.localCache.set(key, flag);
-    });
-
-    // Periodic full refresh
-    setInterval(() => {
-      this.refreshAllFlags();
-    }, 60000);
-  }
-
-  private async refreshAllFlags(): Promise<void> {
-    const keys = await this.redis.keys('flag:*');
-    const pipeline = this.redis.pipeline();
-    keys.forEach(key => pipeline.get(key));
-    const results = await pipeline.exec();
-
-    results?.forEach((result, index) => {
-      if (result[1]) {
-        const flag = JSON.parse(result[1] as string);
-        this.localCache.set(flag.key, flag);
-      }
-    });
-    this.lastRefresh = Date.now();
-  }
-
-  // Admin API
-  async updateFlag(key: string, updates: Partial<FlagConfig>): Promise<void> {
-    const flag = await this.getFlag(key);
-    if (!flag) throw new Error(`Flag ${key} not found`);
-
-    const updated = { ...flag, ...updates };
-    await this.redis.set(`flag:${key}`, JSON.stringify(updated));
-    await this.redis.publish('flag-updates', JSON.stringify({ key, flag: updated }));
-  }
-
-  async setRolloutPercentage(key: string, percentage: number): Promise<void> {
-    await this.updateFlag(key, {
-      rollout: { percentage, variation: 'on' }
-    });
-  }
-
-  async enableKillSwitch(key: string): Promise<void> {
-    await this.updateFlag(key, { killSwitch: true });
-  }
-}
-```
+> Permission flags express **product packaging**, not security. The actual authorization check MUST be enforced server-side per [`secure-coding.md`](guides://secure-coding.md) (`FF-SEC-01`) — a UI flag may hide a button, but the server still validates entitlement.
 
 ---
 
-## 4. Rollout Strategies (MANDATORY)
+## 4. Flag-Driven Development (owned)
 
-### A. Percentage Rollout
+Flags are the alternative to long-lived branches; they make trunk-based development with [`git.md`](guides://git.md) safe.
 
-```typescript
-// Gradual rollout example
-class RolloutManager {
-  constructor(private flagService: FeatureFlagService) {}
-
-  // Progressive rollout schedule
-  async executeRollout(flagKey: string, schedule: RolloutSchedule): Promise<void> {
-    for (const stage of schedule.stages) {
-      // Set percentage
-      await this.flagService.setRolloutPercentage(flagKey, stage.percentage);
-
-      // Wait and monitor
-      await this.waitAndMonitor(flagKey, stage.duration, stage.criteria);
-
-      // Check if we should proceed
-      const metrics = await this.getMetrics(flagKey);
-      if (!this.meetsSuccessCriteria(metrics, stage.criteria)) {
-        // Rollback
-        await this.flagService.setRolloutPercentage(flagKey, 0);
-        throw new Error(`Rollout failed at ${stage.percentage}%`);
-      }
-    }
-  }
-
-  private async waitAndMonitor(
-    flagKey: string,
-    duration: number,
-    criteria: SuccessCriteria
-  ): Promise<void> {
-    const startTime = Date.now();
-    while (Date.now() - startTime < duration) {
-      const metrics = await this.getMetrics(flagKey);
-
-      // Check for critical failures
-      if (metrics.errorRate > criteria.maxErrorRate) {
-        throw new Error('Error rate exceeded threshold');
-      }
-
-      await sleep(60000); // Check every minute
-    }
-  }
-}
-
-// Usage
-const rollout = new RolloutManager(flagService);
-
-await rollout.executeRollout('new-feature', {
-  stages: [
-    { percentage: 1, duration: 3600000, criteria: { maxErrorRate: 0.01 } },   // 1% for 1 hour
-    { percentage: 10, duration: 86400000, criteria: { maxErrorRate: 0.01 } }, // 10% for 1 day
-    { percentage: 50, duration: 86400000, criteria: { maxErrorRate: 0.01 } }, // 50% for 1 day
-    { percentage: 100, duration: 0, criteria: { maxErrorRate: 0.01 } }        // 100%
-  ]
-});
-```
-
-### B. Ring-Based Rollout
-
-```typescript
-// Deploy to groups in sequence
-interface RolloutRing {
-  name: string;
-  targeting: {
-    attribute: string;
-    values: string[];
-  };
-  duration: number;
-}
-
-const rolloutRings: RolloutRing[] = [
-  {
-    name: 'internal',
-    targeting: { attribute: 'email', values: ['@company.com'] },
-    duration: 86400000 // 1 day
-  },
-  {
-    name: 'beta-users',
-    targeting: { attribute: 'tier', values: ['beta'] },
-    duration: 259200000 // 3 days
-  },
-  {
-    name: 'early-adopters',
-    targeting: { attribute: 'signupDate', values: ['<2023-01-01'] },
-    duration: 604800000 // 1 week
-  },
-  {
-    name: 'all-users',
-    targeting: { attribute: 'any', values: ['*'] },
-    duration: 0
-  }
-];
-
-async function ringRollout(flagKey: string, rings: RolloutRing[]): Promise<void> {
-  for (const ring of rings) {
-    console.log(`Rolling out to ${ring.name}`);
-
-    // Add targeting rule for this ring
-    await flagService.addTargetingRule(flagKey, {
-      attribute: ring.targeting.attribute,
-      operator: ring.targeting.attribute === 'email' ? 'contains' : 'in',
-      values: ring.targeting.values,
-      variation: 'on'
-    });
-
-    // Wait and monitor
-    if (ring.duration > 0) {
-      await monitorRollout(flagKey, ring.duration);
-    }
-  }
-}
-```
+- **Branch by abstraction, then flag the implementation.** Introduce a seam (interface/strategy), land the new implementation behind a flag at 0%, ramp, then delete the old one. The flag selects *which* concrete behavior runs.
+- **Ship dark.** New code reaches production deactivated; the CI/CD pipeline ([`ci-cd.md`](guides://ci-cd.md)) deploys it, the flag releases it. A bad release is a flag flip, not a rollback deploy.
+- **Keep the seam thin.** Evaluate the flag once at a single decision point and pass the resulting behavior down; do not sprinkle `if isEnabled(...)` across many layers. Deeply scattered checks are the main driver of cleanup cost (`FF-CLEAN-02`).
+- **Never AND flags.** A path that requires flag A *and* flag B *and* flag C creates a combinatorial test matrix and untestable states. Compose at most independent, orthogonal flags.
+- **Fail safe.** Wrap evaluation so a missing flag, SDK timeout, or parse error returns the safe default (`FF-STRUCT-04`) — the system degrades to known-good behavior, never to an unguarded new path.
 
 ---
 
-## 5. A/B Testing (MANDATORY)
+## 5. Targeting & Progressive Rollout (owned)
 
-### A. Experiment Configuration
+Rollout is the controlled exposure of a variation to growing audiences. The *pipeline* mechanics are owned by [`ci-cd.md`](guides://ci-cd.md) (progressive delivery, canary); this section owns the *flag-side* rules.
 
-```typescript
-interface Experiment {
-  key: string;
-  name: string;
-  hypothesis: string;
-  startDate: Date;
-  endDate: Date;
-  trafficPercentage: number;
-  variations: {
-    key: string;
-    name: string;
-    weight: number; // Percentage of traffic
-  }[];
-  metrics: {
-    primary: string;
-    secondary: string[];
-  };
-  minimumSampleSize: number;
-}
+### A. Deterministic bucketing
+Assignment MUST be a stable hash of `(flagKey, unitId)` so a given user/account sees the **same** variation across sessions and devices (`FF-TST-02`). Hashing the flag key into the seed keeps buckets independent across flags (no correlated rollouts). Choose the bucketing unit deliberately — user, account, session, or device — and keep it consistent for the flag's life.
 
-const experiment: Experiment = {
-  key: 'checkout-button-color',
-  name: 'Checkout Button Color Test',
-  hypothesis: 'A green checkout button will increase conversion by 5%',
-  startDate: new Date('2024-02-01'),
-  endDate: new Date('2024-02-14'),
-  trafficPercentage: 100,
-  variations: [
-    { key: 'control', name: 'Blue Button', weight: 50 },
-    { key: 'treatment', name: 'Green Button', weight: 50 }
-  ],
-  metrics: {
-    primary: 'checkout_conversion_rate',
-    secondary: ['cart_abandonment_rate', 'revenue_per_visitor']
-  },
-  minimumSampleSize: 10000
-};
+### B. Rollout strategies
+- **Percentage ramp** — 1% → 5% → 25% → 50% → 100%, advancing only when SLOs hold (`FF-OBS-01`). Each step dwells long enough to observe.
+- **Ring-based** — internal → dogfood/beta → early adopters → general. Each ring is a targeting rule on an attribute (email domain, tier, opt-in).
+- **Targeting rules** — attribute predicates (`equals`/`in`/`contains`/`gt`/`lt`) that pin specific cohorts on/off regardless of percentage. Rule order matters: explicit targets override the percentage ramp; the safe default is the last fallthrough.
+- **Automatic rollback** — wire the ramp to the same alerts as [`observability.md`](guides://observability.md): when an SLO/error-budget threshold trips, the controller resets to 0% (or flips the kill switch) before paging a human.
 
-class ExperimentService {
-  async assignVariation(
-    experimentKey: string,
-    userId: string
-  ): Promise<string> {
-    const experiment = await this.getExperiment(experimentKey);
-
-    // Check if experiment is active
-    if (!this.isExperimentActive(experiment)) {
-      return 'control';
-    }
-
-    // Consistent assignment based on user ID
-    const hash = this.hashUser(userId, experimentKey);
-
-    // Check if user is in experiment traffic
-    if (hash % 100 >= experiment.trafficPercentage) {
-      return 'control'; // Not in experiment
-    }
-
-    // Assign to variation based on weights
-    const variationHash = this.hashUser(userId, `${experimentKey}:variation`);
-    let cumulative = 0;
-    for (const variation of experiment.variations) {
-      cumulative += variation.weight;
-      if (variationHash % 100 < cumulative) {
-        return variation.key;
-      }
-    }
-
-    return 'control';
-  }
-
-  async trackConversion(
-    experimentKey: string,
-    userId: string,
-    metricName: string,
-    value: number = 1
-  ): Promise<void> {
-    const variation = await this.assignVariation(experimentKey, userId);
-
-    await this.analytics.track({
-      event: 'experiment_conversion',
-      properties: {
-        experiment: experimentKey,
-        variation,
-        metric: metricName,
-        value,
-        userId
-      }
-    });
-  }
-
-  async getResults(experimentKey: string): Promise<ExperimentResults> {
-    const experiment = await this.getExperiment(experimentKey);
-    const results: ExperimentResults = {
-      experiment: experimentKey,
-      variations: {}
-    };
-
-    for (const variation of experiment.variations) {
-      const metrics = await this.calculateMetrics(experimentKey, variation.key);
-      results.variations[variation.key] = {
-        sampleSize: metrics.sampleSize,
-        conversionRate: metrics.conversionRate,
-        confidence: metrics.confidence,
-        improvement: metrics.improvement
-      };
-    }
-
-    // Statistical significance calculation
-    results.isSignificant = this.calculateSignificance(results);
-
-    return results;
-  }
-}
-```
+### C. Experiments
+For experiment flags, fix the unit of assignment, the variation weights, the primary metric, and the minimum sample size **before** launch. Do not stop an experiment the moment it looks significant (peeking inflates false positives); honor the pre-declared duration/sample size. Emit assignment + conversion events to the analytics path described in [`observability.md`](guides://observability.md).
 
 ---
 
-## 6. Lifecycle Management (MANDATORY)
+## 6. Lifecycle & Cleanup (owned)
 
-### A. Flag Cleanup
+Stale flags are the dominant cost of a flag system: they fork every code path, multiply the test matrix, and hide which behavior is actually live. Treat removal as part of "done."
 
-```typescript
-// flag-lifecycle.ts
-interface FlagMetadata {
-  key: string;
-  type: FlagType;
-  createdAt: Date;
-  expiresAt?: Date;
-  lastEvaluated?: Date;
-  evaluationCount: number;
-  owner: string;
-  status: 'active' | 'stale' | 'expired';
-}
+### A. States
+`planned → active → ramping → fully-rolled-out → archived/removed`. A release flag at 100% for the agreed grace period (e.g. 14 days stable) is **done** and MUST be removed (`FF-CLEAN-01`).
 
-class FlagLifecycleManager {
-  async auditFlags(): Promise<FlagAuditReport> {
-    const flags = await this.getAllFlags();
-    const report: FlagAuditReport = {
-      total: flags.length,
-      active: [],
-      stale: [],
-      expired: [],
-      recommendations: []
-    };
+### B. Staleness detection in CI
+Run an automated audit in the pipeline ([`ci-cd.md`](guides://ci-cd.md)) that fails when a flag is:
+- past its expiry (`FF-STRUCT-03`),
+- at 100% (or 0%) beyond the grace window,
+- not evaluated in N days (dead in production), or
+- referenced in code but absent from the registry (or vice-versa — orphaned).
 
-    for (const flag of flags) {
-      const status = this.assessFlagStatus(flag);
+The audit's output is the cleanup backlog; expired flags past grace are a hard gate, not a warning.
 
-      switch (status) {
-        case 'active':
-          report.active.push(flag.key);
-          break;
-        case 'stale':
-          report.stale.push(flag.key);
-          report.recommendations.push({
-            flag: flag.key,
-            action: 'review',
-            reason: `Not evaluated in ${this.daysSince(flag.lastEvaluated!)} days`
-          });
-          break;
-        case 'expired':
-          report.expired.push(flag.key);
-          report.recommendations.push({
-            flag: flag.key,
-            action: 'remove',
-            reason: `Expired on ${flag.expiresAt?.toISOString()}`
-          });
-          break;
-      }
-    }
+### C. Removing a flag
+1. Decide the winner (the live variation).
+2. Inline that variation; **delete the losing branch entirely** (`FF-CLEAN-02`) — do not leave the dead path commented or behind a constant.
+3. Delete the flag's tests for the now-impossible state; keep behavior tests for the surviving path.
+4. Remove the flag from the registry/provider **after** the code change is deployed (avoid evaluating a deleted flag).
+5. Record the removal in the audit log (`FF-AUDIT-01`).
 
-    return report;
-  }
-
-  private assessFlagStatus(flag: FlagMetadata): 'active' | 'stale' | 'expired' {
-    // Check expiration
-    if (flag.expiresAt && new Date() > flag.expiresAt) {
-      return 'expired';
-    }
-
-    // Check staleness (no evaluations in 30 days)
-    if (flag.lastEvaluated && this.daysSince(flag.lastEvaluated) > 30) {
-      return 'stale';
-    }
-
-    // Release flags at 100% for 14 days should be removed
-    if (flag.type === FlagType.RELEASE) {
-      const rollout = this.getRolloutPercentage(flag.key);
-      if (rollout === 100 && this.daysSince(flag.lastEvaluated!) > 14) {
-        return 'expired';
-      }
-    }
-
-    return 'active';
-  }
-
-  async cleanupFlag(flagKey: string): Promise<void> {
-    // 1. Document the removal
-    await this.documentFlagRemoval(flagKey);
-
-    // 2. Remove from code (generate PR)
-    await this.generateCleanupPR(flagKey);
-
-    // 3. Archive flag data
-    await this.archiveFlag(flagKey);
-
-    // 4. Delete flag configuration
-    await this.deleteFlag(flagKey);
-  }
-
-  private async generateCleanupPR(flagKey: string): Promise<void> {
-    // Find all usages in code
-    const usages = await this.findFlagUsages(flagKey);
-
-    // Generate code changes
-    const changes = usages.map(usage => ({
-      file: usage.file,
-      line: usage.line,
-      before: usage.code,
-      after: this.generateCleanedCode(usage)
-    }));
-
-    // Create PR
-    await this.createPullRequest({
-      title: `Remove feature flag: ${flagKey}`,
-      description: `
-        ## Flag Removal
-
-        Removing feature flag \`${flagKey}\` as it has been at 100% rollout for 14+ days.
-
-        ### Files Changed
-        ${changes.map(c => `- ${c.file}`).join('\n')}
-
-        ### Verification
-        - [ ] All tests pass
-        - [ ] No runtime errors in staging
-        - [ ] Monitoring shows no issues
-      `,
-      changes
-    });
-  }
-}
-```
-
-### B. Flag Documentation
-
-```typescript
-// Generate flag documentation
-async function generateFlagDocumentation(): Promise<string> {
-  const flags = await flagService.getAllFlags();
-
-  let doc = '# Feature Flags\n\n';
-
-  // Group by type
-  const grouped = groupBy(flags, 'type');
-
-  for (const [type, typeFlags] of Object.entries(grouped)) {
-    doc += `## ${type} Flags\n\n`;
-
-    for (const flag of typeFlags as FlagMetadata[]) {
-      doc += `### ${flag.key}\n\n`;
-      doc += `**Description:** ${flag.description}\n`;
-      doc += `**Owner:** ${flag.owner}\n`;
-      doc += `**Created:** ${flag.createdAt.toISOString()}\n`;
-      if (flag.expiresAt) {
-        doc += `**Expires:** ${flag.expiresAt.toISOString()}\n`;
-      }
-      doc += `**Default:** ${JSON.stringify(flag.defaultValue)}\n`;
-      doc += '\n';
-    }
-  }
-
-  return doc;
-}
-```
+Cleanup is itself a flag-driven change: ship the inlined code, verify in staging, then delete the flag config. Automating step 2's mechanical edits (codemod / cleanup PR) is encouraged but the dead-branch deletion MUST be reviewed.
 
 ---
 
-## 7. React Integration
+## 7. Testing with Flags
 
-```tsx
-// feature-flag-provider.tsx
-import React, { createContext, useContext, useEffect, useState } from 'react';
+The strategy (test-first, coverage, regression-before-fix) is owned by [`tdd.md`](guides://tdd.md). Flag-specific obligations:
 
-interface FlagContextType {
-  isEnabled: (key: string) => boolean;
-  getVariation: (key: string) => string;
-  loading: boolean;
-}
-
-const FlagContext = createContext<FlagContextType | null>(null);
-
-export function FeatureFlagProvider({
-  children,
-  userId
-}: {
-  children: React.ReactNode;
-  userId: string;
-}) {
-  const [flags, setFlags] = useState<Record<string, any>>({});
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    async function loadFlags() {
-      const response = await fetch(`/api/flags?userId=${userId}`);
-      const data = await response.json();
-      setFlags(data.flags);
-      setLoading(false);
-    }
-    loadFlags();
-  }, [userId]);
-
-  const value: FlagContextType = {
-    isEnabled: (key) => flags[key]?.enabled ?? false,
-    getVariation: (key) => flags[key]?.variation ?? 'control',
-    loading
-  };
-
-  return (
-    <FlagContext.Provider value={value}>
-      {children}
-    </FlagContext.Provider>
-  );
-}
-
-export function useFeatureFlag(key: string): boolean {
-  const context = useContext(FlagContext);
-  if (!context) throw new Error('Must be used within FeatureFlagProvider');
-  return context.isEnabled(key);
-}
-
-export function useVariation(key: string): string {
-  const context = useContext(FlagContext);
-  if (!context) throw new Error('Must be used within FeatureFlagProvider');
-  return context.getVariation(key);
-}
-
-// Component wrapper
-export function Feature({
-  flag,
-  children,
-  fallback = null
-}: {
-  flag: string;
-  children: React.ReactNode;
-  fallback?: React.ReactNode;
-}) {
-  const enabled = useFeatureFlag(flag);
-  return <>{enabled ? children : fallback}</>;
-}
-
-// Usage
-function App() {
-  return (
-    <FeatureFlagProvider userId={currentUser.id}>
-      <Feature flag="new-dashboard" fallback={<OldDashboard />}>
-        <NewDashboard />
-      </Feature>
-    </FeatureFlagProvider>
-  );
-}
-```
+- **Both states, always.** Every flagged path is tested on **and** off (`FF-TST-01`); a flag never reduces coverage of either branch.
+- **Pin the flag in tests.** Inject the flag client / override the evaluation so tests are deterministic — never let a test read live rollout percentages.
+- **Test the fallback.** Assert that a missing flag, an SDK error/timeout, and an unknown variation all resolve to the safe default (`FF-STRUCT-04`).
+- **Test bucketing.** Assert stable assignment for a fixed `(flagKey, unitId)` and a roughly uniform distribution across buckets (`FF-TST-02`).
+- **Integration matrix.** For orthogonal flags, cover the combinations that are actually reachable — and rely on §4's "never AND flags" rule to keep that matrix small.
 
 ---
 
-## 8. Deployment Checklist
+## 8. Implementation Notes (technology-agnostic)
 
-### Flag Design
-- [ ] Clear naming convention followed
-- [ ] Type and lifecycle defined
-- [ ] Owner assigned
-- [ ] Expiration date set (for release/experiment)
-- [ ] Default value is safe
+This guide is language-neutral; bind these idioms to the project's stack rather than copying an SDK.
 
-### Implementation
-- [ ] Server-side evaluation for security-sensitive flags
-- [ ] Consistent hashing for stable assignment
-- [ ] Caching with appropriate TTL
-- [ ] Fallback values defined
-
-### Operations
-- [ ] Monitoring dashboard set up
-- [ ] Kill switch tested
-- [ ] Audit logging enabled
-- [ ] Cleanup process scheduled
-
-### Testing
-- [ ] Both flag states tested
-- [ ] Integration tests include flag variations
-- [ ] Performance impact measured
+- **Evaluate server-side for anything sensitive.** Client-side flags can be inspected and forged — security/entitlement decisions are server-enforced (`FF-SEC-01`).
+- **Cache with bounded staleness + streaming updates.** Read from a local cache for latency; subscribe to push updates (SSE/stream) or refresh on a short TTL so a kill switch propagates in seconds, not minutes.
+- **Prefer a standard interface.** Use the OpenFeature API (or the vendor SDK behind a thin port) so the provider — LaunchDarkly, Split, Unleash, Flagsmith, or custom — is swappable. The application depends on `isEnabled(key, ctx)` / `getVariation(key, ctx)`, not on a vendor type.
+- **UI frameworks**: expose flags through the framework's idiomatic context/provider and a single `Feature`/`useFlag` seam; keep the evaluation decision at the boundary (§4), not scattered through components.
+- **Config layering**: flags override layered config but secrets and base config remain owned by [`env-config.md`](guides://env-config.md) — do not smuggle secrets through flag values.
 
 ---
 
-## 9. Quick Reference
+## 9. Deployment Checklist
 
-```typescript
-// Common patterns
-flags.isEnabled('feature-key')
-flags.getVariation('experiment-key')
-flags.getNumber('rate-limit')
-flags.getJSON('config')
+Generated from §2 — one box per requirement ID.
 
-// Targeting
-{ attribute: 'email', operator: 'contains', values: ['@company.com'] }
-{ attribute: 'tier', operator: 'in', values: ['premium', 'enterprise'] }
-{ attribute: 'signupDate', operator: 'lt', values: ['2024-01-01'] }
-
-// Rollout percentages
-1%   → Internal testing
-10%  → Early adopters
-50%  → Half traffic
-100% → Full rollout
-
-// Flag lifecycle
-RELEASE    → 2 months max
-EXPERIMENT → 1 month max
-OPS        → Review quarterly
-PERMISSION → Permanent (until plan changes)
-```
+- [ ] FF-STRUCT-01 — flag has a declared type
+- [ ] FF-STRUCT-02 — flag has a named owner
+- [ ] FF-STRUCT-03 — short-lived flags have a future expiry
+- [ ] FF-STRUCT-04 — safe default; eval errors fall back to it
+- [ ] FF-TST-01 — both flag states tested (see `tdd.md`)
+- [ ] FF-TST-02 — deterministic bucketing tested
+- [ ] FF-OBS-01 — rollout gated on SLOs; served variation emitted (see `observability.md`)
+- [ ] FF-OPS-01 — kill switch present, tested, defaults enabled
+- [ ] FF-SEC-01 — entitlement enforced server-side (see `secure-coding.md`)
+- [ ] FF-CLEAN-01 — no expired/stale flags past grace (CI audit)
+- [ ] FF-CLEAN-02 — losing branch deleted on removal
+- [ ] FF-AUDIT-01 — all flag mutations attributed (who/when/why)
+- [ ] Agent ran the CI staleness audit and resolved any findings
 
 ---
-
-## 10. Why This Configuration Works
-
-- **Progressive delivery reduces deployment risk**: Percentage-based rollouts and ring-based deployment allow teams to expose new features to small user populations first, catching issues before they affect the entire user base. This turns risky big-bang releases into controlled, reversible experiments.
-- **Kill switches enable instant rollback**: Having pre-configured kill switches for critical features means any production issue can be mitigated in seconds without a code deployment, dramatically reducing incident duration.
-- **Typed flag categories enforce lifecycle discipline**: Classifying flags as release, experiment, ops, or permission types with explicit expiration dates prevents the accumulation of stale flags that create technical debt and make code increasingly difficult to reason about.
-- **Consistent hashing ensures stable user experience**: Using deterministic hash-based bucketing ensures individual users always see the same flag variation across sessions and page loads, preventing confusing experience inconsistencies during rollouts.
-- **Automated cleanup keeps the codebase clean**: The lifecycle management process with audit reports, automated cleanup PRs, and staleness detection ensures feature flags remain a temporary deployment mechanism rather than a permanent source of branching complexity.
-
----
-
-**Last Updated:** 2026-01-31
-**Version:** 1.0
-**Maintainer:** Platform Team
-
-
 **End of Feature Flags Guidelines**

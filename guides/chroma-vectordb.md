@@ -1,2361 +1,298 @@
-# Chroma Vector Database Development Guidelines
-Mandatory coding standards and development practices for Chroma vector database development. Chroma 0.5.x+, Python/JS clients, embedding models, OpenAI/Sentence Transformers.
+# Chroma Vector Database Guidelines
+Mandatory standards for building embedding/RAG systems on Chroma: consistent embeddings, tuned ANN indexes, metadata-aware retrieval. Chroma 0.5.x/1.0, Python/JS clients, HNSW; pgvector/Qdrant/Weaviate/Milvus for scale.
+
+---
+name: chroma-vectordb
+title: Chroma Vector Database Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: datastore
+tools: [chromadb@1.0, sentence-transformers, hnswlib, openai-embeddings@v3, pip-audit]
+requires:
+  - secure-coding
+  - error-handling
+recommends:
+  - python
+  - mlops
+  - performance
+  - env-config
+provides:
+  - vector-search
+  - embeddings
+  - ann-hnsw
+  - rag-patterns
+  - metadata-filtering
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide covers only what is unique to vector databases and Chroma.
 
 ---
 
-**Agent Profile**: The Chroma Vector DB Expert
-**Role**: Senior ML/Embeddings Engineer & Vector Store Specialist
-**Objective**: Generate production-ready, efficient and maintainable embedding and RAG solutions.
-**Tools**: Chroma 0.5.x+, Python/JS clients, embedding models, OpenAI/Sentence Transformers
+## 0. Prerequisites & References
 
----
+Fetch and apply these **before** generating Chroma code. Their rules are assumed below and not repeated.
 
-**Version:** 1.0 | **Last Updated:** February 2026 | **Target Version:** Chroma 0.5.x+
+> 📎 **REQUIRED — fetch & apply first:**
+> - [`secure-coding.md`](guides://secure-coding.md) — secrets, supply-chain, CVE policy. *(Binding: embedding-API keys via env/secrets manager; `pip-audit`/`npm audit` on `chromadb`; PII-in-vectors handling; auth on server mode.)*
+> - [`error-handling.md`](guides://error-handling.md) — error strategy & propagation. *(Binding: embedding-API timeouts/retries, dimension-mismatch and empty-result handling.)*
 
-## Table of Contents
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`python.md`](guides://python.md) — the primary client language: `uv`, typing, `pytest`, packaging.
+> - [`mlops.md`](guides://mlops.md) — embedding-model lifecycle, versioning, retrieval **evaluation** (recall@k / nDCG), reproducibility.
+> - [`performance.md`](guides://performance.md) — latency/throughput method behind HNSW recall tuning.
+> - [`env-config.md`](guides://env-config.md) — config layering for paths, hosts, model names.
 
-1. [Core Philosophies: VECTOR-FIRST](#1-core-philosophies-vector-first)
-2. [Architecture and Fundamentals](#2-architecture-and-fundamentals)
-3. [Installation and Setup](#3-installation-and-setup)
-4. [Collections and Documents](#4-collections-and-documents)
-5. [Embedding Functions](#5-embedding-functions)
-6. [Querying and Similarity Search](#6-querying-and-similarity-search)
-7. [Metadata Filtering](#7-metadata-filtering)
-8. [Distance Metrics](#8-distance-metrics)
-9. [Performance Optimization](#9-performance-optimization)
-10. [Data Persistence](#10-data-persistence)
-11. [Client Libraries](#11-client-libraries)
-12. [LLM Integration](#12-llm-integration)
-13. [RAG (Retrieval Augmented Generation)](#13-rag-retrieval-augmented-generation)
+> 📎 **SEE ALSO:** [`postgresql.md`](guides://postgresql.md) *(pgvector alternative)* · [`rest.md`](guides://rest.md) *(server-mode API)*
 
 ---
 
 ## 1. Core Philosophies: VECTOR-FIRST
 
-The agent must adhere to the **VECTOR-FIRST** principles for every Chroma implementation:
+Vector-DB-specific principles only. TDD, security, error handling, and performance method come from §0.
 
-**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
-**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+- **V**ector-native data model: embeddings are high-dimensional vectors; retrieval is **approximate nearest-neighbor (ANN)** by distance, not keyword match. Design for similarity, not `WHERE text LIKE`.
+- **E**mbedding consistency: the **same model + version + preprocessing** indexes and queries a collection. A mismatch silently returns garbage — there is no error.
+- **C**hunk before you embed: retrieval quality is dominated by the upstream chunking decision; the index can only rank what you stored.
+- **T**une the accuracy/speed tradeoff explicitly: HNSW `M` / `ef_construction` / `ef_search` and the distance metric are deliberate choices measured against a recall target.
+- **O**bservable retrieval: validate with a labeled eval set (recall@k / nDCG, see `mlops.md`), not vibes.
+- **R**ight tool for the scale: Chroma for local/prototyping/small-to-mid; graduate to pgvector/Qdrant/Weaviate/Milvus past that (see §9).
 
-- **V**ector-native: Model data as embeddings; use similarity search, not keyword-only.
-- **E**mbedding consistency: Use the same model and config for indexing and querying.
-- **C**ollections and metadata: Design collections and metadata filters for your query patterns.
-- **T**est with real embeddings: Validate distance metrics and thresholds with representative data.
-- **O**ptimize retrieval: Use metadata filtering and appropriate n_results; consider reranking for RAG.
-- **R**eproducible: Pin embedding model and Chroma version; persist and backup collections.
-
-**Verified Code**: Agent-generated code MUST use consistent embedding functions, run similarity tests, and validate RAG flows before delivery.
+**Verified Code**: Agent-generated code MUST pass every gate in §2 before delivery.
 
 ---
 
-## 2. Architecture and Fundamentals
+## 2. Requirements (MANDATORY, auditable)
 
-### What is Chroma?
+RFC-2119 keywords. IDs `CHROMA-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a shared rule cite its owner.
 
-**Chroma** is an **open-source embedding database** designed for building AI applications with embeddings:
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| CHROMA-TST-01 | Retrieval logic MUST be test-first with ephemeral `chromadb.Client()` (see `tdd.md` via `python.md`) | `uv run pytest` | exit 0, 0 skips |
+| CHROMA-TST-02 | Each retrieval bug MUST get a regression test before the fix (see `tdd.md`) | `uv run pytest` | failing→passing |
+| CHROMA-EMB-01 | Embedding model name+version MUST be pinned and identical for index & query | grep config / review | one pinned model per collection |
+| CHROMA-EMB-02 | Query embedding dimensionality MUST match the collection's | integration test | no dimension-mismatch error |
+| CHROMA-DIST-01 | Distance metric MUST match the embedding model's training objective (cosine for most text) | review `hnsw:space` | metric justified |
+| CHROMA-IDX-01 | HNSW params MUST be set deliberately and measured against a recall target (see `performance.md`) | recall@k eval | recall ≥ target |
+| CHROMA-EVAL-01 | Retrieval quality MUST be measured on a labeled set, not assumed (see `mlops.md`) | eval script | recall@k/nDCG recorded |
+| CHROMA-SEC-01 | Embedding-API keys & server tokens MUST come from env/secrets, never source (see `secure-coding.md`) | `grep -ri "sk-\|api_key=" src/` | 0 hits |
+| CHROMA-SEC-02 | Server mode MUST be authenticated and network-restricted (see `secure-coding.md`) | config/network review | not public + unauth |
+| CHROMA-SEC-03 | 0 known CVEs in `chromadb` & deps (see `secure-coding.md`) | `uv run pip-audit` | 0 vulnerabilities |
+| CHROMA-ERR-01 | Embedding-API calls MUST handle timeout/rate-limit/retry; empty results handled (see `error-handling.md`) | review / test | no unguarded calls |
+| CHROMA-PERSIST-01 | Production data MUST use a persisted client/path with a tested backup+restore | restore drill | data recovered |
 
-- ✅ **Vector storage** (embeddings from text, images, etc.)
-- ✅ **Similarity search** (find semantically similar items)
-- ✅ **Metadata filtering** (combine vector search with filters)
-- ✅ **Built-in embedding functions** (OpenAI, Sentence Transformers, etc.)
-- ✅ **Simple API** (Python and JavaScript clients)
-- ✅ **Persistent storage** (DuckDB and Parquet)
-- ✅ **Open source** (Apache 2.0 license)
-
-### Core Concepts
-
-**Embeddings:**
-```
-Text: "The cat sat on the mat"
-         ↓ Embedding Model
-Embedding: [0.23, -0.45, 0.67, ..., 0.12]  # 384-1536 dimensions
-
-Embeddings capture semantic meaning as vectors
-Similar texts → Similar vectors
-```
-
-**Vector Similarity:**
-```
-Query: "Where did the cat sit?"
-Embedding: [0.21, -0.43, 0.69, ...]
-
-Distance calculation (cosine similarity):
-query_vector · document_vector
-───────────────────────────────
-||query_vector|| × ||document_vector||
-
-Higher similarity → More relevant result
-```
-
-### Architecture Overview
-
-```
-┌─────────────────────────────────────────────┐
-│         Chroma Client (Python/JS)           │
-└─────────────────┬───────────────────────────┘
-                  │
-                  ▼
-┌─────────────────────────────────────────────┐
-│              Chroma Server                  │
-│  ┌────────────────────────────────────────┐ │
-│  │      Collection Manager               │ │
-│  └────────────────────────────────────────┘ │
-│  ┌────────────────────────────────────────┐ │
-│  │      Embedding Functions              │ │
-│  │  - OpenAI                             │ │
-│  │  - Sentence Transformers              │ │
-│  │  - Custom                             │ │
-│  └────────────────────────────────────────┘ │
-│  ┌────────────────────────────────────────┐ │
-│  │      Vector Index (HNSW)              │ │
-│  └────────────────────────────────────────┘ │
-│  ┌────────────────────────────────────────┐ │
-│  │      Persistent Storage               │ │
-│  │      (DuckDB + Parquet)               │ │
-│  └────────────────────────────────────────┘ │
-└─────────────────────────────────────────────┘
-```
-
-### Key Components
-
-**Collection:**
-- Stores documents and embeddings
-- Has a name and configuration
-- Uses an embedding function
-- Supports metadata filtering
-
-**Document:**
-- Text content to be embedded
-- Associated metadata (optional)
-- Unique ID
-- Automatically embedded on insert
-
-**Embedding Function:**
-- Converts text to vector
-- Can be default or custom
-- Examples: OpenAI, Sentence Transformers, Cohere
-
-**Vector Index (HNSW):**
-- Hierarchical Navigable Small World graph
-- Fast approximate nearest neighbor search
-- Configurable parameters (M, ef_construction, ef_search)
-
-### When to Use Chroma
-
-**✅ Excellent For:**
-
-1. **Semantic Search:**
-   - Document search by meaning (not keywords)
-   - Q&A over documents
-   - Finding similar content
-
-2. **RAG (Retrieval Augmented Generation):**
-   - Provide context to LLMs
-   - Reduce hallucinations
-   - Knowledge base for chatbots
-
-3. **Recommendation Systems:**
-   - Similar products/content
-   - Personalized recommendations
-   - Content discovery
-
-4. **AI Applications:**
-   - LangChain integration
-   - LlamaIndex integration
-   - Custom AI workflows
-
-5. **Knowledge Management:**
-   - Internal documentation search
-   - Research paper discovery
-   - Code search by functionality
-
-**❌ Not Recommended For:**
-
-1. **Traditional Database Needs:**
-   - Use PostgreSQL, MySQL for relational data
-   - Not a replacement for OLTP databases
-
-2. **Pure Keyword Search:**
-   - Use Elasticsearch for traditional full-text search
-   - Combine both for hybrid search
-
-3. **Real-Time Streaming:**
-   - Optimized for batch operations
-   - Not designed for high-frequency updates
-
-4. **Large-Scale Production (>100M vectors):**
-   - Consider Pinecone, Weaviate, Milvus for massive scale
-   - Chroma excellent for 1M-10M vectors
+> **Forbidden**: querying a collection with a different embedding model than it was built with; hardcoding API keys; exposing an unauthenticated Chroma server to the internet; shipping retrieval changes without a recall eval; using ephemeral `Client()` for production data.
 
 ---
 
-## 2A. TDD Protocol (Red-Green-Refactor)
+## 3. Verification Protocol
 
-EVERY new feature or module MUST follow the Red-Green-Refactor cycle. No production code without a failing test first.
+Run before presenting code. Fix → re-run until green. (Python toolchain owned by [`python.md`](guides://python.md).)
 
-### Workflow
-
-1. **RED** -- Write a failing test that defines the expected behavior.
-2. **GREEN** -- Write the minimum production code to make the test pass.
-3. **REFACTOR** -- Clean up while keeping tests green.
-
-### Concrete Example -- Testing Collection CRUD and Similarity Search
-
-**Step 1 -- RED (Python `pytest` with ChromaDB):**
-
-```python
-# tests/test_chroma_collection.py
-import pytest
-import chromadb
-
-@pytest.fixture
-def client():
-    """Ephemeral in-memory ChromaDB client for isolated tests."""
-    return chromadb.Client()
-
-@pytest.fixture
-def collection(client):
-    """Create a test collection with cosine distance."""
-    coll = client.create_collection(
-        name="test_docs",
-        metadata={"hnsw:space": "cosine"},
-    )
-    yield coll
-    client.delete_collection("test_docs")
-
-def test_add_and_get_documents(collection):
-    """Documents added to a collection are retrievable by ID."""
-    collection.add(
-        ids=["doc1", "doc2", "doc3"],
-        documents=["Python is great for ML", "Java is enterprise-ready", "Rust is memory-safe"],
-        metadatas=[{"lang": "python"}, {"lang": "java"}, {"lang": "rust"}],
-    )
-
-    result = collection.get(ids=["doc1", "doc3"])
-    assert len(result["ids"]) == 2
-    assert "doc1" in result["ids"]
-    assert "doc3" in result["ids"]
-
-def test_similarity_search_returns_relevant_docs(collection):
-    """Querying with a related phrase returns the most similar document first."""
-    collection.add(
-        ids=["ml", "web", "systems"],
-        documents=[
-            "Machine learning with neural networks and deep learning",
-            "Building REST APIs with web frameworks",
-            "Operating systems and kernel development",
-        ],
-    )
-
-    results = collection.query(
-        query_texts=["deep learning and AI models"],
-        n_results=2,
-    )
-    assert results["ids"][0][0] == "ml", "Most similar doc should be 'ml'"
-    assert len(results["ids"][0]) == 2
-
-def test_collection_count(collection):
-    """Collection count reflects the number of added documents."""
-    assert collection.count() == 0
-    collection.add(
-        ids=["a", "b"],
-        documents=["first doc", "second doc"],
-    )
-    assert collection.count() == 2
-
-def test_delete_document(collection):
-    """Deleted documents are no longer retrievable."""
-    collection.add(ids=["x"], documents=["to be deleted"])
-    assert collection.count() == 1
-
-    collection.delete(ids=["x"])
-    assert collection.count() == 0
-    result = collection.get(ids=["x"])
-    assert len(result["ids"]) == 0
-```
-
-**Step 2 -- GREEN:** Implement the service layer that wraps ChromaDB operations.
-
-```python
-# myapp/vector_store.py
-import chromadb
-
-class VectorStore:
-    def __init__(self, client: chromadb.Client, collection_name: str):
-        self.collection = client.get_or_create_collection(collection_name)
-
-    def add_documents(self, ids: list[str], texts: list[str], metadata: list[dict] | None = None):
-        self.collection.add(ids=ids, documents=texts, metadatas=metadata)
-
-    def search(self, query: str, top_k: int = 5) -> list[dict]:
-        results = self.collection.query(query_texts=[query], n_results=top_k)
-        return [{"id": id_, "document": doc} for id_, doc in zip(results["ids"][0], results["documents"][0])]
-
-    def delete(self, ids: list[str]):
-        self.collection.delete(ids=ids)
-```
-
-**Step 3 -- REFACTOR:**
-
-- Extract the `client` and `collection` fixtures into `conftest.py`.
-- Parameterize distance metric tests across `cosine`, `l2`, and `ip`.
-- Add assertion on distance scores to verify ordering.
-
-### TDD Rules for ChromaDB
-
-- Use `chromadb.Client()` (ephemeral in-memory) for unit tests -- no persistence needed.
-- Always clean up collections in fixture teardown.
-- Test similarity search with documents that have clear semantic differences.
-- Verify `count()` after every add/delete to catch silent failures.
-- Test metadata filtering in combination with similarity search.
-
----
-
-## 2B. Bug Fix Protocol (Regression Testing)
-
-EVERY bug fix MUST include a regression test that fails before the fix and passes after.
-
-### Workflow
-
-1. **Reproduce** -- Write a test that triggers the exact bug.
-2. **Verify RED** -- Confirm the test fails on the current code.
-3. **Fix** -- Apply the minimal code change.
-4. **Verify GREEN** -- Confirm the test (and all others) pass.
-5. **Document** -- Reference the bug/ticket in the test docstring.
-
-### Concrete Example -- Metadata Filter Returns Wrong Results After Update
-
-**Bug report:** After updating a document's metadata, queries with the old metadata value still return the document because the application calls `add()` instead of `update()`.
-
-**Step 1 -- Regression test:**
-
-```python
-# tests/test_bug_metadata_stale.py
-import pytest
-import chromadb
-
-@pytest.fixture
-def collection():
-    client = chromadb.Client()
-    coll = client.create_collection("test_bug_meta")
-    yield coll
-    client.delete_collection("test_bug_meta")
-
-def test_updated_metadata_not_returned_by_old_filter(collection):
-    """Regression: BUG-8833 -- after metadata update, old filter values
-    must not match the updated document."""
-    collection.add(
-        ids=["report1"],
-        documents=["Q4 financial report"],
-        metadatas=[{"status": "draft"}],
-    )
-
-    # Update status from 'draft' to 'published'
-    collection.update(
-        ids=["report1"],
-        metadatas=[{"status": "published"}],
-    )
-
-    # Query with old filter -- must return zero results
-    results = collection.get(
-        where={"status": "draft"},
-    )
-    assert len(results["ids"]) == 0, \
-        "BUG-8833: Document with updated metadata still matched old filter"
-
-    # Query with new filter -- must return the document
-    results = collection.get(
-        where={"status": "published"},
-    )
-    assert len(results["ids"]) == 1
-    assert results["ids"][0] == "report1"
-```
-
-**Step 2 -- Verify the test fails** (application used `add()` which created a duplicate instead of updating).
-
-**Step 3 -- Fix** (use `collection.update()` instead of `collection.add()` in the application's update path).
-
-**Step 4 -- Verify GREEN** -- metadata filter returns correct results after update.
-
-### Regression Test Rules for ChromaDB
-
-- Name test files `test_bug_<description>.py` or `test_regression_<ticket>.py`.
-- Include the ticket/issue number in the docstring.
-- Regression tests are NEVER deleted.
-- Test both `get()` with `where` filters and `query()` with `where` filters after mutations.
-
----
-
-## 3. Installation and Setup
-
-### Python Installation
-
-**Install Chroma:**
 ```bash
-pip install chromadb
-
-# With extras
-pip install chromadb[server]  # Server mode
-pip install chromadb[openai]  # OpenAI embeddings
+uv run pytest                 # CHROMA-TST-01/02  (ephemeral client unit tests)
+uv run python eval/recall.py  # CHROMA-IDX-01/EVAL-01  (recall@k vs target)
+grep -ri "api_key=\|sk-" src/ # CHROMA-SEC-01  (expect no hits)
+uv run pip-audit              # CHROMA-SEC-03
 ```
 
-### Basic Setup
-
-**In-Memory (Development):**
-```python
-import chromadb
-
-# Ephemeral in-memory client
-client = chromadb.Client()
-
-# Create collection
-collection = client.create_collection(name="my_collection")
-```
-
-**Persistent Storage (Recommended):**
-```python
-import chromadb
-
-# Persistent client with local storage
-client = chromadb.PersistentClient(path="/path/to/data")
-
-# Create or get collection
-collection = client.get_or_create_collection(name="my_collection")
-```
-
-**Client-Server Mode:**
-```python
-import chromadb
-from chromadb.config import Settings
-
-# Start server: chroma run --path /path/to/data
-
-# Connect to server
-client = chromadb.HttpClient(
-    host="localhost",
-    port=8000,
-    settings=Settings(allow_reset=False)
-)
-
-collection = client.get_or_create_collection(name="my_collection")
-```
-
-### JavaScript/TypeScript Setup
-
-**Install:**
-```bash
-npm install chromadb
-# or
-yarn add chromadb
-```
-
-**Basic Usage:**
-```javascript
-import { ChromaClient } from 'chromadb';
-
-// Connect to Chroma server
-const client = new ChromaClient({
-  path: 'http://localhost:8000'
-});
-
-// Get or create collection
-const collection = await client.getOrCreateCollection({
-  name: 'my_collection'
-});
-```
-
-### Docker Setup
-
-**Run Chroma Server:**
-```bash
-# Run Chroma in Docker
-docker run -d \
-  --name chroma \
-  -p 8000:8000 \
-  -v chroma-data:/chroma/chroma \
-  chromadb/chroma:latest
-
-# With custom config
-docker run -d \
-  --name chroma \
-  -p 8000:8000 \
-  -v chroma-data:/chroma/chroma \
-  -e CHROMA_SERVER_AUTH_CREDENTIALS="admin:password" \
-  -e CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.basic.BasicAuthServerProvider" \
-  chromadb/chroma:latest
-```
-
-**Docker Compose:**
-```yaml
-version: '3.8'
-
-services:
-  chroma:
-    image: chromadb/chroma:latest
-    container_name: chroma
-    ports:
-      - "8000:8000"
-    volumes:
-      - chroma-data:/chroma/chroma
-    environment:
-      - IS_PERSISTENT=TRUE
-      - CHROMA_SERVER_AUTH_CREDENTIALS=admin:password
-      - CHROMA_SERVER_AUTH_PROVIDER=chromadb.auth.basic.BasicAuthServerProvider
-    restart: unless-stopped
-
-volumes:
-  chroma-data:
-    driver: local
-```
+The *why* behind each gate lives in its §0 owner; do not re-derive it here.
 
 ---
 
-## 4. Collections and Documents
+## 4. The Vector Database Model
 
-### Creating Collections
+A vector DB stores **embeddings** — dense float vectors (typically 384–3072 dims) produced by a model that maps semantically similar inputs to nearby points. Retrieval finds the **k nearest neighbors** of a query vector by a distance metric. This powers **semantic search**, **RAG** (feeding retrieved context to an LLM), and **recommendations** (item-to-item similarity).
 
-**Basic Collection:**
+Chroma's core objects:
+
+- **Collection** — a named set of vectors sharing one embedding function, distance metric, and HNSW index. One collection per *(embedding model + domain + version)*; naming e.g. `docs_minilm_v2`.
+- **Document** — text (or any input) stored with a unique **id**, optional **metadata**, and its **embedding** (auto-computed on `add`, or supplied pre-computed).
+- **Embedding function** — converts inputs → vectors. Built-in: default `all-MiniLM-L6-v2` (Sentence Transformers, 384d), OpenAI `text-embedding-3-{small,large}`, Cohere, HuggingFace; or a custom `EmbeddingFunction.__call__`. **It is part of the collection's identity** — changing it invalidates the index.
+
 ```python
 import chromadb
-
-client = chromadb.PersistentClient(path="./chroma_data")
-
-# Create collection with default embedding function
-collection = client.create_collection(name="documents")
-
-# Create with custom embedding function
-from chromadb.utils import embedding_functions
-
-openai_ef = embedding_functions.OpenAIEmbeddingFunction(
-    api_key="your-api-key",
-    model_name="text-embedding-3-small"
+client = chromadb.PersistentClient(path="./chroma_data")   # persistent (prod)
+col = client.get_or_create_collection(
+    name="docs_minilm_v2",
+    metadata={"hnsw:space": "cosine"},   # metric is fixed at creation
 )
-
-collection = client.create_collection(
-    name="documents",
-    embedding_function=openai_ef,
-    metadata={"description": "Document collection"}
-)
+col.add(ids=["d1"], documents=["The cat sat on the mat"],
+        metadatas=[{"source": "wiki"}])
+res = col.query(query_texts=["where did the cat sit?"], n_results=5)
+# res["ids"], res["documents"], res["distances"] (lower = closer), res["metadatas"]
 ```
 
-**Get or Create Collection:**
-```python
-# Idempotent operation
-collection = client.get_or_create_collection(
-    name="my_collection",
-    embedding_function=openai_ef
-)
-```
+Client modes: `chromadb.Client()` (ephemeral, in-memory — **tests only**); `PersistentClient(path=...)` (embedded + on-disk, single process); `HttpClient(host, port, headers=...)` (client/server, shared/scaled). JS/TS: `new ChromaClient({ path })` then `getOrCreateCollection` — same model, async API.
 
-**List Collections:**
-```python
-# List all collections
-collections = client.list_collections()
-for col in collections:
-    print(f"Collection: {col.name}, Count: {col.count()}")
-```
-
-**Delete Collection:**
-```python
-# Delete collection
-client.delete_collection(name="my_collection")
-```
-
-### Adding Documents
-
-**Add Single Document:**
-```python
-collection.add(
-    documents=["This is a document about cats"],
-    metadatas=[{"category": "animals", "source": "wiki"}],
-    ids=["doc1"]
-)
-```
-
-**Add Multiple Documents:**
-```python
-collection.add(
-    documents=[
-        "The cat sat on the mat",
-        "The dog played in the park",
-        "Python is a programming language"
-    ],
-    metadatas=[
-        {"category": "animals", "type": "sentence"},
-        {"category": "animals", "type": "sentence"},
-        {"category": "programming", "type": "sentence"}
-    ],
-    ids=["id1", "id2", "id3"]
-)
-```
-
-**Add with Pre-Computed Embeddings:**
-```python
-import numpy as np
-
-# Your own embeddings (e.g., from custom model)
-embeddings = [
-    [0.1, 0.2, 0.3, ...],  # 384 dimensions
-    [0.4, 0.5, 0.6, ...],
-    [0.7, 0.8, 0.9, ...]
-]
-
-collection.add(
-    embeddings=embeddings,
-    documents=["doc1", "doc2", "doc3"],  # Optional
-    metadatas=[{"key": "value"}] * 3,
-    ids=["id1", "id2", "id3"]
-)
-```
-
-**Batch Insert (Efficient):**
-```python
-def batch_add_documents(collection, documents, batch_size=100):
-    """Add documents in batches for better performance"""
-    for i in range(0, len(documents), batch_size):
-        batch = documents[i:i + batch_size]
-        collection.add(
-            documents=[doc["text"] for doc in batch],
-            metadatas=[doc["metadata"] for doc in batch],
-            ids=[doc["id"] for doc in batch]
-        )
-        print(f"Processed {min(i + batch_size, len(documents))}/{len(documents)}")
-
-# Usage
-documents = [
-    {"id": f"doc{i}", "text": f"Document {i}", "metadata": {"index": i}}
-    for i in range(10000)
-]
-
-batch_add_documents(collection, documents)
-```
-
-### Updating Documents
-
-**Update Documents:**
-```python
-# Update document text and metadata
-collection.update(
-    ids=["id1"],
-    documents=["Updated document text"],
-    metadatas=[{"category": "updated", "version": 2}]
-)
-
-# Update only metadata
-collection.update(
-    ids=["id2"],
-    metadatas=[{"status": "reviewed"}]
-)
-```
-
-**Upsert (Insert or Update):**
-```python
-# Upsert: insert if not exists, update if exists
-collection.upsert(
-    ids=["id1", "id4"],
-    documents=["Document 1 updated", "New document 4"],
-    metadatas=[{"updated": True}, {"new": True}]
-)
-```
-
-### Deleting Documents
-
-**Delete by ID:**
-```python
-# Delete specific documents
-collection.delete(ids=["id1", "id2"])
-
-# Delete by metadata filter
-collection.delete(
-    where={"category": "outdated"}
-)
-```
-
-### Getting Documents
-
-**Get by ID:**
-```python
-# Get specific documents
-results = collection.get(
-    ids=["id1", "id2"],
-    include=["documents", "metadatas", "embeddings"]
-)
-
-print(results['documents'])
-print(results['metadatas'])
-```
-
-**Get All Documents:**
-```python
-# Get all documents (with limit)
-results = collection.get(
-    limit=100,
-    include=["documents", "metadatas"]
-)
-```
-
-**Get with Metadata Filter:**
-```python
-# Get documents matching metadata
-results = collection.get(
-    where={"category": "animals"},
-    limit=10
-)
-```
+> Idempotent setup uses `get_or_create_collection`. Mutations: `add` (insert), `update` (existing only), `upsert` (insert-or-update), `delete(ids=... | where=...)`. Using `add` where `update` was meant creates duplicates — a classic regression-test target.
 
 ---
 
-## 5. Embedding Functions
-
-### Built-in Embedding Functions
-
-**Default Embedding Function:**
-```python
-import chromadb
-
-# Uses Sentence Transformers by default
-client = chromadb.PersistentClient(path="./data")
-
-collection = client.create_collection(
-    name="default_embeddings"
-    # Uses 'all-MiniLM-L6-v2' by default (384 dimensions)
-)
-```
-
-**Sentence Transformers:**
-```python
-from chromadb.utils import embedding_functions
-
-# Sentence Transformers
-sentence_transformer_ef = embedding_functions.SentenceTransformerEmbeddingFunction(
-    model_name="all-MiniLM-L6-v2"  # 384 dimensions, fast
-)
-
-# Larger, more accurate model
-mpnet_ef = embedding_functions.SentenceTransformerEmbeddingFunction(
-    model_name="all-mpnet-base-v2"  # 768 dimensions
-)
-
-# Multilingual model
-multilingual_ef = embedding_functions.SentenceTransformerEmbeddingFunction(
-    model_name="paraphrase-multilingual-MiniLM-L12-v2"
-)
-
-collection = client.create_collection(
-    name="st_collection",
-    embedding_function=sentence_transformer_ef
-)
-```
-
-**OpenAI Embeddings:**
-```python
-from chromadb.utils import embedding_functions
-import os
-
-openai_ef = embedding_functions.OpenAIEmbeddingFunction(
-    api_key=os.environ.get("OPENAI_API_KEY"),
-    model_name="text-embedding-3-small"  # 1536 dimensions
-)
-
-# Or larger model
-openai_large_ef = embedding_functions.OpenAIEmbeddingFunction(
-    api_key=os.environ.get("OPENAI_API_KEY"),
-    model_name="text-embedding-3-large"  # 3072 dimensions
-)
-
-collection = client.create_collection(
-    name="openai_collection",
-    embedding_function=openai_ef
-)
-```
-
-**Cohere Embeddings:**
-```python
-cohere_ef = embedding_functions.CohereEmbeddingFunction(
-    api_key=os.environ.get("COHERE_API_KEY"),
-    model_name="embed-english-v3.0"
-)
-
-collection = client.create_collection(
-    name="cohere_collection",
-    embedding_function=cohere_ef
-)
-```
-
-**Hugging Face Embeddings:**
-```python
-huggingface_ef = embedding_functions.HuggingFaceEmbeddingFunction(
-    api_key=os.environ.get("HUGGINGFACE_API_KEY"),
-    model_name="sentence-transformers/all-MiniLM-L6-v2"
-)
-
-collection = client.create_collection(
-    name="hf_collection",
-    embedding_function=huggingface_ef
-)
-```
-
-### Custom Embedding Functions
-
-**Custom Embedding Function:**
-```python
-from chromadb import Documents, EmbeddingFunction, Embeddings
-from typing import List
-import numpy as np
-
-class MyEmbeddingFunction(EmbeddingFunction):
-    def __call__(self, input: Documents) -> Embeddings:
-        # Your custom embedding logic
-        embeddings = []
-        for text in input:
-            # Example: Simple hash-based embedding (not recommended for production!)
-            embedding = np.random.rand(384).tolist()
-            embeddings.append(embedding)
-        return embeddings
-
-# Use custom embedding function
-custom_ef = MyEmbeddingFunction()
-collection = client.create_collection(
-    name="custom_collection",
-    embedding_function=custom_ef
-)
-```
-
-**Wrapper for External Model:**
-```python
-import openai
-from chromadb import EmbeddingFunction, Documents, Embeddings
-
-class CustomOpenAIEmbedding(EmbeddingFunction):
-    def __init__(self, api_key: str, model: str = "text-embedding-3-small"):
-        self.client = openai.OpenAI(api_key=api_key)
-        self.model = model
-
-    def __call__(self, input: Documents) -> Embeddings:
-        response = self.client.embeddings.create(
-            input=input,
-            model=self.model
-        )
-        return [data.embedding for data in response.data]
-
-# Usage
-embedding_fn = CustomOpenAIEmbedding(api_key="your-key")
-collection = client.create_collection(
-    name="custom_openai",
-    embedding_function=embedding_fn
-)
-```
-
-### Embedding Function Comparison
-
-| Model | Dimensions | Speed | Quality | Use Case |
-|-------|------------|-------|---------|----------|
-| all-MiniLM-L6-v2 | 384 | ⚡⚡⚡ Fast | Good | General purpose, speed priority |
-| all-mpnet-base-v2 | 768 | ⚡⚡ Medium | Better | Quality over speed |
-| OpenAI text-embedding-3-small | 1536 | ⚡ API call | Excellent | Production, high quality |
-| OpenAI text-embedding-3-large | 3072 | ⚡ API call | Best | Maximum quality |
-| multilingual-MiniLM | 384 | ⚡⚡⚡ Fast | Good | Multilingual support |
-
----
-
-## 6. Querying and Similarity Search
-
-### Basic Query
-
-**Query by Text:**
-```python
-# Find similar documents
-results = collection.query(
-    query_texts=["What is a cat?"],
-    n_results=5
-)
-
-print(results['documents'])
-print(results['distances'])  # Lower = more similar
-print(results['metadatas'])
-```
-
-**Query with Pre-Computed Embedding:**
-```python
-# Your query embedding
-query_embedding = [0.1, 0.2, 0.3, ...]  # Same dimensions as collection
-
-results = collection.query(
-    query_embeddings=[query_embedding],
-    n_results=10
-)
-```
-
-### Multi-Query
-
-**Multiple Queries:**
-```python
-# Query multiple texts at once
-results = collection.query(
-    query_texts=[
-        "Tell me about cats",
-        "What are dogs?",
-        "Explain Python programming"
-    ],
-    n_results=3
-)
-
-# results['documents'][0] = top 3 for query 1
-# results['documents'][1] = top 3 for query 2
-# results['documents'][2] = top 3 for query 3
-```
-
-### Query with Filters
-
-**Metadata Filtering:**
-```python
-# Query with metadata filter
-results = collection.query(
-    query_texts=["animals"],
-    n_results=5,
-    where={"category": "animals"}
-)
-
-# Complex filter
-results = collection.query(
-    query_texts=["recent articles"],
-    n_results=10,
-    where={
-        "$and": [
-            {"category": "news"},
-            {"year": {"$gte": 2023}}
-        ]
-    }
-)
-```
-
-**Document Content Filtering:**
-```python
-# Filter by document content (contains)
-results = collection.query(
-    query_texts=["programming"],
-    n_results=5,
-    where_document={"$contains": "python"}
-)
-```
-
-### Include/Exclude Fields
-
-**Control Returned Fields:**
-```python
-# Only return documents and distances
-results = collection.query(
-    query_texts=["search query"],
-    n_results=5,
-    include=["documents", "distances"]
-)
-
-# All fields (default)
-results = collection.query(
-    query_texts=["search query"],
-    n_results=5,
-    include=["documents", "metadatas", "distances", "embeddings"]
-)
-```
-
-### Similarity Threshold
-
-**Filter by Distance:**
-```python
-# Get results, then filter by distance
-results = collection.query(
-    query_texts=["cat"],
-    n_results=100
-)
-
-# Filter by similarity threshold (distance < 0.5)
-filtered_results = [
-    (doc, dist)
-    for doc, dist in zip(results['documents'][0], results['distances'][0])
-    if dist < 0.5
-]
-```
-
-### Pagination
-
-**Offset-Based Pagination:**
-```python
-def paginated_query(collection, query_text, page=0, page_size=10):
-    """Paginate query results"""
-    total_results = page_size * (page + 1) + 100  # Get extra results
-
-    results = collection.query(
-        query_texts=[query_text],
-        n_results=total_results
-    )
-
-    # Return specific page
-    start_idx = page * page_size
-    end_idx = start_idx + page_size
-
-    return {
-        'documents': results['documents'][0][start_idx:end_idx],
-        'metadatas': results['metadatas'][0][start_idx:end_idx],
-        'distances': results['distances'][0][start_idx:end_idx]
-    }
-
-# Usage
-page_1 = paginated_query(collection, "machine learning", page=0)
-page_2 = paginated_query(collection, "machine learning", page=1)
-```
-
----
-
-## 7. Metadata Filtering
-
-### Filter Operators
-
-**Comparison Operators:**
-```python
-# Equals
-where={"category": "news"}
-
-# Not equals
-where={"category": {"$ne": "spam"}}
-
-# Greater than
-where={"year": {"$gt": 2022}}
-
-# Greater than or equal
-where={"year": {"$gte": 2023}}
-
-# Less than
-where={"price": {"$lt": 100}}
-
-# Less than or equal
-where={"price": {"$lte": 50}}
-
-# In list
-where={"category": {"$in": ["news", "sports", "tech"]}}
-
-# Not in list
-where={"status": {"$nin": ["draft", "deleted"]}}
-```
-
-**Logical Operators:**
-```python
-# AND
-where={
-    "$and": [
-        {"category": "tech"},
-        {"year": {"$gte": 2023}}
-    ]
-}
-
-# OR
-where={
-    "$or": [
-        {"category": "tech"},
-        {"category": "science"}
-    ]
-}
-
-# NOT
-where={
-    "$not": {
-        "category": "spam"
-    }
-}
-
-# Complex nested
-where={
-    "$and": [
-        {
-            "$or": [
-                {"category": "tech"},
-                {"category": "science"}
-            ]
-        },
-        {"year": {"$gte": 2023}},
-        {"verified": True}
-    ]
-}
-```
-
-### Document Content Filters
-
-**Text Matching:**
-```python
-# Contains substring
-where_document={"$contains": "python"}
-
-# Not contains
-where_document={"$not_contains": "deprecated"}
-
-# Combined with metadata filter
-results = collection.query(
-    query_texts=["programming tutorial"],
-    n_results=10,
-    where={"category": "tutorial"},
-    where_document={"$contains": "beginner"}
-)
-```
-
-### Advanced Filtering Examples
-
-**Date Range Filter:**
-```python
-# Assuming metadata has 'timestamp' as Unix epoch
-import time
-
-one_week_ago = int(time.time()) - (7 * 24 * 60 * 60)
-
-results = collection.query(
-    query_texts=["recent news"],
-    n_results=20,
-    where={
-        "$and": [
-            {"timestamp": {"$gte": one_week_ago}},
-            {"category": "news"}
-        ]
-    }
-)
-```
-
-**Multi-Field Filter:**
-```python
-# Complex real-world filter
-results = collection.query(
-    query_texts=["best practices"],
-    n_results=10,
-    where={
-        "$and": [
-            {"language": "en"},
-            {"type": "article"},
-            {
-                "$or": [
-                    {"category": "engineering"},
-                    {"category": "devops"}
-                ]
-            },
-            {"rating": {"$gte": 4.0}},
-            {"status": {"$ne": "archived"}}
-        ]
-    },
-    where_document={"$contains": "production"}
-)
-```
-
----
-
-## 8. Distance Metrics
-
-### Supported Distance Functions
-
-**Cosine Similarity (Default):**
-```python
-# L2 normalization + inner product
-# Best for: Text embeddings, semantic similarity
-# Range: 0 (identical) to 2 (opposite)
-
-collection = client.create_collection(
-    name="cosine_collection",
-    metadata={"hnsw:space": "cosine"}  # Default
-)
-```
-
-**L2 Distance (Euclidean):**
-```python
-# Euclidean distance
-# Best for: Spatial data, absolute magnitude matters
-# Range: 0 (identical) to ∞
-
-collection = client.create_collection(
-    name="l2_collection",
-    metadata={"hnsw:space": "l2"}
-)
-```
-
-**Inner Product (IP):**
-```python
-# Dot product (not normalized)
-# Best for: Pre-normalized vectors, maximum similarity
-# Range: -∞ to ∞ (higher = more similar)
-
-collection = client.create_collection(
-    name="ip_collection",
-    metadata={"hnsw:space": "ip"}
-)
-```
-
-### Distance Metric Comparison
+## 5. ANN Indexing & the Accuracy/Speed Tradeoff
+
+Chroma indexes vectors with **HNSW** (Hierarchical Navigable Small World) — a graph giving sub-linear *approximate* search. Approximate means **recall < 100%**: you trade exactness for speed. Brute-force (exact) is only viable for tiny collections. Tune three parameters and **measure recall** (see [`performance.md`](guides://performance.md) for the method):
+
+| Param (`metadata` key) | Phase | Higher value → | Default |
+|---|---|---|---|
+| `hnsw:M` | build | better recall, more memory, slower build | 16 |
+| `hnsw:construction_ef` | build | better graph quality, slower indexing | 100 |
+| `hnsw:search_ef` | query | better recall, slower queries | 10 |
 
 ```python
-import numpy as np
-
-# Example vectors
-vec1 = np.array([1.0, 0.0, 0.0])
-vec2 = np.array([0.7, 0.7, 0.0])
-vec3 = np.array([-1.0, 0.0, 0.0])
-
-# Cosine similarity
-def cosine_distance(a, b):
-    return 1 - np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
-
-# L2 distance
-def l2_distance(a, b):
-    return np.linalg.norm(a - b)
-
-# Inner product
-def inner_product_distance(a, b):
-    return -np.dot(a, b)  # Negative for "distance"
-
-print(f"Cosine (vec1, vec2): {cosine_distance(vec1, vec2):.3f}")
-print(f"L2 (vec1, vec2): {l2_distance(vec1, vec2):.3f}")
-print(f"IP (vec1, vec2): {inner_product_distance(vec1, vec2):.3f}")
-```
-
-### When to Use Each Metric
-
-| Metric | Use Case | Pros | Cons |
-|--------|----------|------|------|
-| **Cosine** | Text embeddings, semantic search | Magnitude-independent, good for normalized vectors | Slower than IP |
-| **L2** | Image embeddings, spatial data | Considers absolute magnitude | Sensitive to vector length |
-| **IP** | Pre-normalized vectors, max similarity | Fastest | Requires normalized inputs |
-
-### HNSW Index Configuration
-
-**Configure HNSW Parameters:**
-```python
-collection = client.create_collection(
-    name="optimized_collection",
+col = client.create_collection(
+    name="tuned",
     metadata={
         "hnsw:space": "cosine",
-        "hnsw:construction_ef": 200,  # Higher = better quality, slower build
-        "hnsw:search_ef": 50,         # Higher = better recall, slower search
-        "hnsw:M": 16                  # Connections per node (8-64 typical)
-    }
-)
-```
-
-**Parameter Tuning:**
-```
-M (connections per layer):
-- Low (8-16): Less memory, faster build, lower recall
-- High (32-64): More memory, slower build, higher recall
-- Default: 16
-
-construction_ef (build-time):
-- Low (100): Fast indexing
-- High (400): Better index quality
-- Default: 100
-
-search_ef (query-time):
-- Low (10-50): Fast search, lower recall
-- High (100-500): Slower search, higher recall
-- Default: 10
-```
-
----
-
-## 9. Performance Optimization
-
-### Batch Operations
-
-**Batch Insert:**
-```python
-def batch_upsert(collection, documents, batch_size=500):
-    """Efficient batch upsert"""
-    total = len(documents)
-
-    for i in range(0, total, batch_size):
-        batch = documents[i:i+batch_size]
-
-        collection.upsert(
-            ids=[doc['id'] for doc in batch],
-            documents=[doc['text'] for doc in batch],
-            metadatas=[doc['metadata'] for doc in batch]
-        )
-
-        if (i + batch_size) % 5000 == 0:
-            print(f"Processed {min(i + batch_size, total)}/{total}")
-
-# Usage
-documents = [
-    {
-        'id': f'doc{i}',
-        'text': f'Document text {i}',
-        'metadata': {'index': i}
-    }
-    for i in range(100000)
-]
-
-batch_upsert(collection, documents)
-```
-
-### Query Optimization
-
-**Cache Common Queries:**
-```python
-from functools import lru_cache
-import hashlib
-
-class CachedQueryCollection:
-    def __init__(self, collection):
-        self.collection = collection
-
-    @lru_cache(maxsize=1000)
-    def query_cached(self, query_text, n_results=10):
-        """Cache query results"""
-        return tuple(self.collection.query(
-            query_texts=[query_text],
-            n_results=n_results
-        )['documents'][0])
-
-# Usage
-cached_col = CachedQueryCollection(collection)
-results = cached_col.query_cached("common query")
-```
-
-**Limit Result Fields:**
-```python
-# Only fetch what you need
-results = collection.query(
-    query_texts=["query"],
-    n_results=10,
-    include=["documents", "distances"]  # Skip metadatas, embeddings
-)
-```
-
-### Indexing Performance
-
-**Optimize HNSW for Speed:**
-```python
-# Fast indexing, acceptable recall
-fast_collection = client.create_collection(
-    name="fast_index",
-    metadata={
-        "hnsw:construction_ef": 100,  # Lower = faster
-        "hnsw:M": 8                   # Lower = less memory
-    }
-)
-
-# High quality indexing
-quality_collection = client.create_collection(
-    name="quality_index",
-    metadata={
-        "hnsw:construction_ef": 400,  # Higher = better quality
-        "hnsw:M": 32                  # Higher = better recall
-    }
-)
-```
-
-### Memory Management
-
-**Collection Size Monitoring:**
-```python
-def get_collection_stats(collection):
-    """Get collection statistics"""
-    count = collection.count()
-
-    # Estimate memory usage (rough)
-    # Assuming 384 dimensions, 4 bytes per float
-    embedding_size = 384 * 4
-    estimated_memory_mb = (count * embedding_size) / (1024 * 1024)
-
-    print(f"Documents: {count}")
-    print(f"Estimated embedding memory: {estimated_memory_mb:.2f} MB")
-
-    return {
-        'count': count,
-        'estimated_memory_mb': estimated_memory_mb
-    }
-
-stats = get_collection_stats(collection)
-```
-
-### Embedding Model Selection
-
-**Performance vs Quality:**
-```python
-# Fast, lower quality (development)
-from chromadb.utils import embedding_functions
-
-fast_ef = embedding_functions.SentenceTransformerEmbeddingFunction(
-    model_name="all-MiniLM-L6-v2"  # 384 dims, ~50ms per text
-)
-
-# Balanced (production)
-balanced_ef = embedding_functions.OpenAIEmbeddingFunction(
-    api_key="key",
-    model_name="text-embedding-3-small"  # 1536 dims, API latency
-)
-
-# High quality (critical applications)
-quality_ef = embedding_functions.OpenAIEmbeddingFunction(
-    api_key="key",
-    model_name="text-embedding-3-large"  # 3072 dims, higher cost
-)
-```
-
----
-
-## 10. Data Persistence
-
-### Persistent Storage
-
-**Local Persistent Storage:**
-```python
-import chromadb
-
-# Data stored in ./chroma_data
-client = chromadb.PersistentClient(path="./chroma_data")
-
-collection = client.get_or_create_collection("my_collection")
-
-# Data persists across sessions
-collection.add(documents=["doc1"], ids=["id1"])
-
-# Close and reopen
-client = chromadb.PersistentClient(path="./chroma_data")
-collection = client.get_collection("my_collection")
-print(collection.count())  # Data still there
-```
-
-### Backup and Export
-
-**Export Collection:**
-```python
-def export_collection(collection, output_file):
-    """Export collection to JSON"""
-    import json
-
-    # Get all documents
-    results = collection.get(
-        include=["documents", "metadatas", "embeddings"]
-    )
-
-    export_data = {
-        'ids': results['ids'],
-        'documents': results['documents'],
-        'metadatas': results['metadatas'],
-        'embeddings': results['embeddings']
-    }
-
-    with open(output_file, 'w') as f:
-        json.dump(export_data, f)
-
-    print(f"Exported {len(results['ids'])} documents")
-
-# Usage
-export_collection(collection, "backup.json")
-```
-
-**Import Collection:**
-```python
-def import_collection(client, collection_name, input_file, embedding_function=None):
-    """Import collection from JSON"""
-    import json
-
-    with open(input_file, 'r') as f:
-        data = json.load(f)
-
-    collection = client.get_or_create_collection(
-        name=collection_name,
-        embedding_function=embedding_function
-    )
-
-    # Import in batches
-    batch_size = 500
-    total = len(data['ids'])
-
-    for i in range(0, total, batch_size):
-        collection.add(
-            ids=data['ids'][i:i+batch_size],
-            documents=data['documents'][i:i+batch_size],
-            metadatas=data['metadatas'][i:i+batch_size],
-            embeddings=data['embeddings'][i:i+batch_size]
-        )
-
-        print(f"Imported {min(i+batch_size, total)}/{total}")
-
-# Usage
-import_collection(client, "restored_collection", "backup.json")
-```
-
-### Snapshot Strategy
-
-**File System Backup:**
-```bash
-# Stop Chroma server
-docker stop chroma
-
-# Backup data directory
-tar -czf chroma-backup-$(date +%Y%m%d).tar.gz ./chroma_data
-
-# Restart server
-docker start chroma
-
-# Restore
-tar -xzf chroma-backup-20260206.tar.gz
-```
-
-### Cloud Storage Integration
-
-**S3 Backup Script:**
-```python
-import boto3
-import tarfile
-import os
-from datetime import datetime
-
-def backup_to_s3(chroma_path, s3_bucket, s3_prefix):
-    """Backup Chroma data to S3"""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_name = f"chroma_backup_{timestamp}.tar.gz"
-
-    # Create tarball
-    with tarfile.open(backup_name, "w:gz") as tar:
-        tar.add(chroma_path, arcname="chroma_data")
-
-    # Upload to S3
-    s3 = boto3.client('s3')
-    s3_key = f"{s3_prefix}/{backup_name}"
-
-    s3.upload_file(backup_name, s3_bucket, s3_key)
-    print(f"Backup uploaded to s3://{s3_bucket}/{s3_key}")
-
-    # Cleanup local backup
-    os.remove(backup_name)
-
-# Usage
-backup_to_s3("./chroma_data", "my-backups", "chroma")
-```
-
----
-
-## 11. Client Libraries
-
-### Python Client
-
-**Basic Python Usage:**
-```python
-import chromadb
-from chromadb.config import Settings
-
-# In-memory
-client = chromadb.Client()
-
-# Persistent
-client = chromadb.PersistentClient(path="./data")
-
-# HTTP client
-client = chromadb.HttpClient(
-    host="localhost",
-    port=8000,
-    ssl=False,
-    headers={"Authorization": "Bearer token"}
-)
-
-# Collection operations
-collection = client.get_or_create_collection("docs")
-
-collection.add(
-    documents=["text1", "text2"],
-    ids=["id1", "id2"]
-)
-
-results = collection.query(
-    query_texts=["search"],
-    n_results=5
-)
-```
-
-### JavaScript/TypeScript Client
-
-**Basic JavaScript Usage:**
-```javascript
-import { ChromaClient } from 'chromadb';
-
-// Connect to server
-const client = new ChromaClient({
-  path: 'http://localhost:8000'
-});
-
-// Get collection
-const collection = await client.getOrCreateCollection({
-  name: 'documents'
-});
-
-// Add documents
-await collection.add({
-  ids: ['id1', 'id2'],
-  documents: ['text 1', 'text 2'],
-  metadatas: [{ key: 'value1' }, { key: 'value2' }]
-});
-
-// Query
-const results = await collection.query({
-  queryTexts: ['search query'],
-  nResults: 5
-});
-
-console.log(results);
-```
-
-**TypeScript with Types:**
-```typescript
-import { ChromaClient, Collection } from 'chromadb';
-
-interface DocumentMetadata {
-  category: string;
-  source: string;
-  timestamp: number;
-}
-
-const client = new ChromaClient({ path: 'http://localhost:8000' });
-
-const collection: Collection = await client.getOrCreateCollection({
-  name: 'typed_collection'
-});
-
-await collection.add({
-  ids: ['doc1'],
-  documents: ['Sample document'],
-  metadatas: [{
-    category: 'tech',
-    source: 'blog',
-    timestamp: Date.now()
-  }] as DocumentMetadata[]
-});
-
-const results = await collection.query({
-  queryTexts: ['tech articles'],
-  nResults: 10,
-  where: { category: 'tech' }
-});
-```
-
-### Advanced Python Patterns
-
-**Context Manager:**
-```python
-from contextlib import contextmanager
-
-@contextmanager
-def get_chroma_client(path="./data"):
-    """Context manager for Chroma client"""
-    client = chromadb.PersistentClient(path=path)
-    try:
-        yield client
-    finally:
-        # Cleanup if needed
-        pass
-
-# Usage
-with get_chroma_client() as client:
-    collection = client.get_collection("docs")
-    results = collection.query(query_texts=["search"])
-```
-
-**Async Operations (Workaround):**
-```python
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
-
-class AsyncChromaClient:
-    def __init__(self, client):
-        self.client = client
-        self.executor = ThreadPoolExecutor(max_workers=4)
-
-    async def query_async(self, collection_name, query_text, n_results=10):
-        """Async wrapper for query"""
-        loop = asyncio.get_event_loop()
-        collection = self.client.get_collection(collection_name)
-
-        result = await loop.run_in_executor(
-            self.executor,
-            lambda: collection.query(
-                query_texts=[query_text],
-                n_results=n_results
-            )
-        )
-        return result
-
-# Usage
-async def main():
-    client = chromadb.PersistentClient(path="./data")
-    async_client = AsyncChromaClient(client)
-
-    results = await async_client.query_async("docs", "search query")
-    print(results)
-
-asyncio.run(main())
-```
-
----
-
-## 12. LLM Integration
-
-### LangChain Integration
-
-**Basic LangChain Usage:**
-```python
-from langchain.vectorstores import Chroma
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.document_loaders import TextLoader
-
-# Load documents
-loader = TextLoader("document.txt")
-documents = loader.load()
-
-# Split text
-text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1000,
-    chunk_overlap=200
-)
-texts = text_splitter.split_documents(documents)
-
-# Create embeddings
-embeddings = OpenAIEmbeddings(api_key="your-key")
-
-# Create Chroma vector store
-vectorstore = Chroma.from_documents(
-    documents=texts,
-    embedding=embeddings,
-    persist_directory="./chroma_langchain"
-)
-
-# Similarity search
-results = vectorstore.similarity_search("query", k=5)
-for doc in results:
-    print(doc.page_content)
-
-# Similarity search with score
-results_with_scores = vectorstore.similarity_search_with_score("query", k=5)
-for doc, score in results_with_scores:
-    print(f"Score: {score}, Content: {doc.page_content[:100]}")
-```
-
-**LangChain with Metadata Filtering:**
-```python
-# Create vector store with metadata
-vectorstore = Chroma.from_documents(
-    documents=texts,
-    embedding=embeddings,
-    collection_name="filtered_docs",
-    persist_directory="./chroma_data"
-)
-
-# Query with metadata filter
-results = vectorstore.similarity_search(
-    "machine learning",
-    k=5,
-    filter={"category": "tech"}
-)
-```
-
-### LlamaIndex Integration
-
-**LlamaIndex with Chroma:**
-```python
-from llama_index import VectorStoreIndex, SimpleDirectoryReader
-from llama_index.vector_stores import ChromaVectorStore
-from llama_index.storage.storage_context import StorageContext
-import chromadb
-
-# Create Chroma client
-chroma_client = chromadb.PersistentClient(path="./chroma_llamaindex")
-
-# Create collection
-chroma_collection = chroma_client.get_or_create_collection("documents")
-
-# Create vector store
-vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
-
-# Load documents
-documents = SimpleDirectoryReader("./documents").load_data()
-
-# Create storage context
-storage_context = StorageContext.from_defaults(vector_store=vector_store)
-
-# Create index
-index = VectorStoreIndex.from_documents(
-    documents,
-    storage_context=storage_context
-)
-
-# Query
-query_engine = index.as_query_engine()
-response = query_engine.query("What is machine learning?")
-print(response)
-```
-
-### Direct OpenAI Integration
-
-**Custom RAG with OpenAI:**
-```python
-import openai
-import chromadb
-from chromadb.utils import embedding_functions
-
-# Setup
-openai.api_key = "your-key"
-client = chromadb.PersistentClient(path="./data")
-
-openai_ef = embedding_functions.OpenAIEmbeddingFunction(
-    api_key=openai.api_key,
-    model_name="text-embedding-3-small"
-)
-
-collection = client.get_or_create_collection(
-    name="knowledge_base",
-    embedding_function=openai_ef
-)
-
-def query_knowledge_base(question, n_results=3):
-    """Query vector DB and generate answer"""
-
-    # Get relevant context
-    results = collection.query(
-        query_texts=[question],
-        n_results=n_results
-    )
-
-    context = "\n\n".join(results['documents'][0])
-
-    # Generate answer with GPT
-    response = openai.chat.completions.create(
-        model="gpt-4",
-        messages=[
-            {
-                "role": "system",
-                "content": "Answer questions based on the provided context. If the context doesn't contain the answer, say so."
-            },
-            {
-                "role": "user",
-                "content": f"Context:\n{context}\n\nQuestion: {question}"
-            }
-        ]
-    )
-
-    return {
-        'answer': response.choices[0].message.content,
-        'sources': results['documents'][0],
-        'distances': results['distances'][0]
-    }
-
-# Usage
-result = query_knowledge_base("What is semantic search?")
-print(f"Answer: {result['answer']}")
-print(f"\nSources: {result['sources']}")
-```
-
----
-
-## 13. RAG (Retrieval Augmented Generation)
-
-### Basic RAG Implementation
-
-**Simple RAG System:**
-```python
-import chromadb
-from chromadb.utils import embedding_functions
-import openai
-from typing import List, Dict
-
-class RAGSystem:
-    def __init__(self, chroma_path: str, openai_key: str):
-        self.client = chromadb.PersistentClient(path=chroma_path)
-        self.openai_key = openai_key
-        openai.api_key = openai_key
-
-        self.embedding_fn = embedding_functions.OpenAIEmbeddingFunction(
-            api_key=openai_key,
-            model_name="text-embedding-3-small"
-        )
-
-        self.collection = self.client.get_or_create_collection(
-            name="rag_knowledge",
-            embedding_function=self.embedding_fn
-        )
-
-    def add_documents(self, documents: List[Dict]):
-        """Add documents to knowledge base"""
-        self.collection.add(
-            ids=[doc['id'] for doc in documents],
-            documents=[doc['text'] for doc in documents],
-            metadatas=[doc.get('metadata', {}) for doc in documents]
-        )
-
-    def query(self, question: str, n_results: int = 5) -> Dict:
-        """RAG query: retrieve + generate"""
-
-        # Step 1: Retrieve relevant documents
-        results = self.collection.query(
-            query_texts=[question],
-            n_results=n_results
-        )
-
-        # Step 2: Format context
-        context = "\n\n".join([
-            f"[Source {i+1}]: {doc}"
-            for i, doc in enumerate(results['documents'][0])
-        ])
-
-        # Step 3: Generate answer
-        response = openai.chat.completions.create(
-            model="gpt-4",
-            messages=[
-                {
-                    "role": "system",
-                    "content": """You are a helpful assistant that answers questions based on the provided context.
-                    Always cite which source number you used for your answer.
-                    If the context doesn't contain enough information, say so."""
-                },
-                {
-                    "role": "user",
-                    "content": f"Context:\n{context}\n\nQuestion: {question}\n\nAnswer:"
-                }
-            ],
-            temperature=0.1
-        )
-
-        return {
-            'answer': response.choices[0].message.content,
-            'sources': results['documents'][0],
-            'metadatas': results['metadatas'][0],
-            'distances': results['distances'][0]
-        }
-
-# Usage
-rag = RAGSystem(chroma_path="./rag_data", openai_key="your-key")
-
-# Add knowledge
-documents = [
-    {
-        'id': 'doc1',
-        'text': 'Paris is the capital of France.',
-        'metadata': {'topic': 'geography'}
+        "hnsw:M": 32,                 # 8–16 speed/memory · 32–64 high recall
+        "hnsw:construction_ef": 200,  # raise for index quality
+        "hnsw:search_ef": 100,        # raise until recall@k hits target
     },
-    {
-        'id': 'doc2',
-        'text': 'The Eiffel Tower is located in Paris.',
-        'metadata': {'topic': 'landmarks'}
-    }
-]
-rag.add_documents(documents)
-
-# Query
-result = rag.query("Where is the Eiffel Tower?")
-print(f"Answer: {result['answer']}")
+)
 ```
 
-### Advanced RAG with Reranking
+Tuning loop: fix `M` and `construction_ef` at build; sweep `search_ef` at query time against a labeled eval set until recall@k meets target at acceptable p95 latency. `M`/`construction_ef` are **build-time** — changing them requires a rebuild.
 
-**RAG with Cross-Encoder Reranking:**
+### Distance metrics — must match the embedding model
+
+The metric is set at creation (`hnsw:space`) and **must align with what the model was trained for** — otherwise scores are meaningless.
+
+| `hnsw:space` | Use when | Notes |
+|---|---|---|
+| `cosine` | most text embeddings (direction matters, magnitude doesn't) | default; safe choice for sentence-transformers/OpenAI |
+| `l2` | Euclidean / spatial / image embeddings where magnitude matters | sensitive to vector length |
+| `ip` (inner product) | vectors already L2-normalized; max-similarity | fastest; wrong if inputs aren't normalized |
+
+Check the model card: OpenAI `text-embedding-3-*` and most sentence-transformers are tuned for cosine.
+
+### Embedding model choice & dimensions
+
+| Model | Dims | Tradeoff |
+|---|---|---|
+| `all-MiniLM-L6-v2` (default) | 384 | fast, local, good baseline |
+| `all-mpnet-base-v2` | 768 | higher quality, slower |
+| OpenAI `text-embedding-3-small` | 1536 | strong quality, API latency/cost |
+| OpenAI `text-embedding-3-large` | 3072 | best quality, highest cost/memory |
+| `paraphrase-multilingual-MiniLM-L12-v2` | 384 | multilingual |
+
+More dimensions ≠ always better: they raise memory, index size, and query cost. Pick the smallest model that hits your recall target on your eval set. Model selection, versioning, and evaluation are owned by [`mlops.md`](guides://mlops.md).
+
+---
+
+## 6. Metadata Filtering
+
+Combine semantic search with structured predicates. **Pre-filtering** (filter the candidate set, then ANN-rank) is what `where=` does in Chroma and is preferred — it narrows the search space and keeps results relevant. **Post-filtering** (retrieve k, then drop non-matching in app code) wastes the ANN budget and can return fewer than k usable hits; avoid it.
+
+```python
+res = col.query(
+    query_texts=["best practices"],
+    n_results=10,
+    where={                       # metadata predicate (pre-filter)
+        "$and": [
+            {"lang": "en"},
+            {"year": {"$gte": 2023}},
+            {"$or": [{"category": "engineering"}, {"category": "devops"}]},
+        ]
+    },
+    where_document={"$contains": "production"},   # raw-text predicate
+    include=["documents", "distances", "metadatas"],   # fetch only what you need
+)
+```
+
+Operators: `$eq $ne $gt $gte $lt $lte` (scalars), `$in $nin` (lists), `$and $or` (logical); `where_document`: `$contains` / `$not_contains`. Design the metadata schema around **query patterns**, not source structure — indexable fields you filter on most. After mutating metadata, old filters must not match the updated doc (use `update`/`upsert`, not `add`).
+
+---
+
+## 7. Chunking — the upstream decision that dominates retrieval
+
+The index can only return what you stored, so chunking is the highest-leverage knob. Too small loses context; too large dilutes relevance and blows the LLM context budget.
+
+- **Target** ~200–500 tokens/chunk; **overlap** 10–20% to preserve context across boundaries.
+- Prefer **structure-aware** splitting (headings, paragraphs, sentences) over fixed-length cuts — e.g. LangChain `RecursiveCharacterTextSplitter(separators=["\n\n","\n",". "," ",""])`.
+- Carry provenance in metadata (`source_doc`, `chunk_index`, `total_chunks`) so retrieved chunks are traceable and re-assemblable.
+- Validate chunking on representative data before bulk ingest — it is expensive to redo after embedding millions of vectors.
+
+Batch ingestion: `upsert` in batches of ~500–1000 (avoid >5000/call); embedding is the bottleneck, so batch the embedding API calls too.
+
+---
+
+## 8. RAG Patterns
+
+Pipeline: **chunk → embed → store → retrieve top-k → (rerank) → prompt LLM with context**. Keep retrieval and generation decoupled and individually testable.
+
+**Two-stage retrieval + reranking** — fast bi-encoder ANN recall, then a precise cross-encoder reorders. The standard quality win when raw top-k is noisy:
+
 ```python
 from sentence_transformers import CrossEncoder
-import chromadb
+reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-12-v2")
 
-class AdvancedRAG:
-    def __init__(self, chroma_path: str, openai_key: str):
-        self.client = chromadb.PersistentClient(path=chroma_path)
-        self.openai_key = openai_key
-
-        # Initial retrieval with bi-encoder
-        self.collection = self.client.get_or_create_collection(
-            name="advanced_rag"
-        )
-
-        # Reranking with cross-encoder (more accurate)
-        self.reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-12-v2')
-
-    def query_with_reranking(self, question: str, initial_k: int = 20, final_k: int = 5):
-        """Two-stage retrieval: bi-encoder + cross-encoder"""
-
-        # Stage 1: Fast retrieval with bi-encoder
-        results = self.collection.query(
-            query_texts=[question],
-            n_results=initial_k
-        )
-
-        # Stage 2: Rerank with cross-encoder
-        pairs = [[question, doc] for doc in results['documents'][0]]
-        scores = self.reranker.predict(pairs)
-
-        # Sort by reranker scores
-        ranked_indices = scores.argsort()[::-1][:final_k]
-
-        reranked_docs = [results['documents'][0][i] for i in ranked_indices]
-        reranked_scores = [scores[i] for i in ranked_indices]
-
-        return {
-            'documents': reranked_docs,
-            'reranker_scores': reranked_scores
-        }
+hits = col.query(query_texts=[q], n_results=20)          # stage 1: recall (cheap)
+docs = hits["documents"][0]
+scores = reranker.predict([[q, d] for d in docs])        # stage 2: precision
+top = [docs[i] for i in scores.argsort()[::-1][:5]]      # rerank → final k
 ```
 
-### Document Chunking Strategies
+**Hybrid search** — combine **dense** (embedding/ANN) with **sparse/keyword** (BM25/full-text) retrieval and fuse the rankings (e.g. Reciprocal Rank Fusion). Dense captures meaning; sparse nails exact terms, codes, and rare tokens. Chroma is dense-only; for production hybrid, run a keyword index alongside (or use a store with built-in hybrid like Qdrant/Weaviate/Elasticsearch).
 
-**Smart Text Chunking:**
-```python
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+**Grounding the LLM** — pass retrieved chunks as context with explicit instructions to answer only from context and cite sources; this is what reduces hallucination. The LLM/provider-specific prompting, token budgeting, and model choice are out of scope here.
 
-def chunk_documents(documents: List[str], chunk_size: int = 1000, overlap: int = 200):
-    """Chunk documents with overlap"""
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=overlap,
-        separators=["\n\n", "\n", ". ", " ", ""]
-    )
+Frameworks: LangChain (`Chroma.from_documents`, `similarity_search`) and LlamaIndex (`ChromaVectorStore`) wrap these steps — use them for glue, but the chunking/metric/eval rules above still govern quality.
 
-    chunks = []
-    for i, doc in enumerate(documents):
-        doc_chunks = splitter.split_text(doc)
-        for j, chunk in enumerate(doc_chunks):
-            chunks.append({
-                'id': f'doc{i}_chunk{j}',
-                'text': chunk,
-                'metadata': {
-                    'source_doc': i,
-                    'chunk_index': j,
-                    'total_chunks': len(doc_chunks)
-                }
-            })
+---
 
-    return chunks
+## 9. When Chroma Fits — and When to Graduate
 
-# Usage
-documents = ["Long document text...", "Another long document..."]
-chunks = chunk_documents(documents)
+**Chroma is the right call for:** local development and prototyping; embedded single-process apps; collections roughly up to low-millions of vectors; fast iteration with minimal ops. Its simple API and persistent/embedded mode make it ideal for getting a RAG system working.
 
-# Add to Chroma
-collection.add(
-    ids=[c['id'] for c in chunks],
-    documents=[c['text'] for c in chunks],
-    metadatas=[c['metadata'] for c in chunks]
-)
-```
+**Graduate to another store when** you need horizontal scale (tens of millions+ vectors), high write throughput/streaming, built-in hybrid search, multi-tenancy, or managed HA:
 
-### Conversational RAG
+| Alternative | Pick it for |
+|---|---|
+| **pgvector** (Postgres) | you already run Postgres and want vectors next to relational data (see `postgresql.md`) |
+| **Qdrant** | high-performance ANN, payload filtering, built-in hybrid, self-host or cloud |
+| **Weaviate** | hybrid search + modules, GraphQL, schema-rich workloads |
+| **Milvus** | very large scale (billions), GPU indexing, distributed |
 
-**Chat with Memory:**
-```python
-class ConversationalRAG:
-    def __init__(self, collection, openai_key):
-        self.collection = collection
-        self.openai_key = openai_key
-        self.chat_history = []
+This is an honest fit decision, not a deficiency of Chroma — start simple, migrate when a concrete scaling/feature limit is hit. Keep the embedding/chunking/eval layer portable so the store is swappable.
 
-    def chat(self, message: str, n_results: int = 3):
-        """Conversational RAG with history"""
+---
 
-        # Retrieve relevant context
-        results = self.collection.query(
-            query_texts=[message],
-            n_results=n_results
-        )
+## 10. Persistence, Operations & Security Binding
 
-        context = "\n".join(results['documents'][0])
+- **Persistence**: `PersistentClient(path=...)` for embedded prod; server mode (`chroma run --path ...` / Docker `chromadb/chroma`) for shared access. Set `IS_PERSISTENT=TRUE`. Never use ephemeral `Client()` for data you must keep.
+- **Backup/restore**: snapshot the data directory (stop or quiesce writes first), or export via `collection.get(include=[...])` → re-`add`. **Test restore**, not just backup (CHROMA-PERSIST-01).
+- **Security** (policy owned by [`secure-coding.md`](guides://secure-coding.md)): API keys (OpenAI/Cohere/HF) and Chroma tokens from env/secrets, never source; in server mode require auth headers and restrict network exposure (VPC/firewall — never public+unauth); scope collections per app/tenant; validate untrusted input before embedding (prompt-injection/PII); pin model versions so vectors don't silently shift; `pip-audit`/`npm audit` in CI.
+- **Errors** (policy owned by [`error-handling.md`](guides://error-handling.md)): embedding-API calls need timeout + retry/backoff on rate limits; handle empty/insufficient query results explicitly; surface dimension-mismatch early.
 
-        # Build messages with history
-        messages = [
-            {
-                "role": "system",
-                "content": f"Answer based on this context:\n{context}"
-            }
-        ]
-        messages.extend(self.chat_history)
-        messages.append({"role": "user", "content": message})
+---
 
-        # Generate response
-        response = openai.chat.completions.create(
-            model="gpt-4",
-            messages=messages
-        )
+## 11. Quick Reference
 
-        answer = response.choices[0].message.content
-
-        # Update history
-        self.chat_history.append({"role": "user", "content": message})
-        self.chat_history.append({"role": "assistant", "content": answer})
-
-        # Keep last 10 messages
-        self.chat_history = self.chat_history[-10:]
-
-        return answer
-
-# Usage
-rag_chat = ConversationalRAG(collection, "your-key")
-print(rag_chat.chat("What is machine learning?"))
-print(rag_chat.chat("Can you give an example?"))  # Uses context from previous
+```text
+CLIENT MODES   Client() ephemeral(tests) · PersistentClient(path) · HttpClient(host,port)
+CORE OPS       create_collection · get_or_create_collection · add · query · update · upsert · delete
+METRIC         hnsw:space = cosine(text,default) | l2(spatial) | ip(normalized)  — match the model
+HNSW           M(16) build·recall/mem · construction_ef(100) build · search_ef(10) query·recall
+FILTER         where{$eq $ne $gt $gte $lt $lte $in $nin $and $or} · where_document{$contains}
+CHUNKING       200–500 tokens · 10–20% overlap · structure-aware · carry provenance metadata
+RAG            chunk→embed→store→retrieve k→rerank(cross-encoder)→prompt; hybrid = dense+sparse(RRF)
+SCALE          Chroma: proto/local/≤low-millions · pgvector/Qdrant/Weaviate/Milvus: scale/hybrid/HA
 ```
 
 ---
 
-*[Continuing with sections 13-20 following the same comprehensive detail...]*
+## 12. Deployment Checklist
+
+Generated from §2 — one box per requirement ID. No new requirements here.
+
+- [ ] CHROMA-TST-01/02 — retrieval tests pass (ephemeral client), bugs have regression tests
+- [ ] CHROMA-EMB-01/02 — model pinned, identical for index & query, dimensions match
+- [ ] CHROMA-DIST-01 — `hnsw:space` matches the embedding model
+- [ ] CHROMA-IDX-01 — HNSW params set deliberately, recall@k meets target
+- [ ] CHROMA-EVAL-01 — retrieval measured on a labeled set (recall@k/nDCG recorded)
+- [ ] CHROMA-SEC-01/02/03 — no keys in source, server authed+restricted, `pip-audit` clean
+- [ ] CHROMA-ERR-01 — embedding-API timeouts/retries and empty results handled
+- [ ] CHROMA-PERSIST-01 — persisted storage with a tested backup+restore
+- [ ] Agent ran every §3 command and documented any fixes
 
 ---
-
-## 14. Security & Dependency Management (MANDATORY)
-
-### A. Client Library Vulnerability Scanning
-
-Chroma is consumed as a client library. Scan dependencies using the appropriate language tool:
-
-**Python (pip-audit):**
-```bash
-# Install pip-audit
-pip install pip-audit
-
-# Scan all installed packages including chromadb
-pip-audit
-
-# Scan with JSON output for CI
-pip-audit --format=json --output=audit-report.json
-```
-
-**JavaScript/TypeScript (npm audit):**
-```bash
-# Scan for vulnerabilities
-npm audit
-
-# Fix automatically where possible
-npm audit fix
-
-# Fail CI on high+ severity
-npm audit --audit-level=high
-```
-
-- Run scans in CI on every PR and at least weekly on the main branch
-- Keep `chromadb` and its transitive dependencies up to date
-
-### B. API Key Management
-
-- NEVER hardcode API keys (OpenAI, Cohere, HuggingFace) in source code
-- Use environment variables or a secrets manager:
-
-```python
-import os
-from chromadb.utils import embedding_functions
-
-# Load API key from environment - NEVER hardcode
-openai_key = os.environ["OPENAI_API_KEY"]
-
-embedding_fn = embedding_functions.OpenAIEmbeddingFunction(
-    api_key=openai_key,
-    model_name="text-embedding-3-small"
-)
-```
-
-```bash
-# .gitignore
-.env
-.env.*
-```
-
-- For Chroma server mode, authenticate API access with tokens:
-
-```python
-import chromadb
-
-client = chromadb.HttpClient(
-    host="chroma-server",
-    port=8000,
-    headers={"Authorization": f"Bearer {os.environ['CHROMA_API_TOKEN']}"}
-)
-```
-
-### C. Data Access Controls
-
-- In server/cloud mode, enforce authentication on all endpoints
-- Restrict collection access by application or user scope
-- Never expose the Chroma HTTP API to the public internet without authentication
-- Use network-level controls (VPC, firewall rules) to limit access to the Chroma server
-
-### D. Embedding Model Security
-
-- Pin embedding model versions to prevent silent changes in vector representations
-- Validate that input data does not contain prompt injection payloads before embedding
-- Monitor embedding API costs and set rate limits to prevent abuse
-- When using local models, verify checksums of downloaded model weights
-
-### E. Security Checklist
-
-- [ ] `pip-audit` or `npm audit` configured in CI
-- [ ] No API keys or tokens in source code or version control
-- [ ] Chroma server access authenticated and network-restricted
-- [ ] Embedding model versions pinned
-- [ ] `.env` files excluded from version control
-- [ ] Collection access scoped per application
-- [ ] Input data validated before embedding
-- [ ] Dependencies updated at least monthly
-
----
-
-## 15. Deployment Checklist
-
-### Data Pipeline
-- [ ] **Embedding model pinned**: Model name and version locked in config (no `latest` tags)
-- [ ] **Chunking strategy validated**: Document splitting tested with representative data
-- [ ] **Metadata schema documented**: All metadata fields and types defined
-- [ ] **Ingestion pipeline tested**: End-to-end pipeline runs against staging data successfully
-- [ ] **Deduplication in place**: Duplicate document detection configured before embedding
-
-### Collection Configuration
-- [ ] **Distance metric selected**: Cosine, L2, or Inner Product chosen based on embedding model
-- [ ] **Collection naming conventions followed**: Consistent, descriptive collection names
-- [ ] **HNSW parameters tuned**: `ef_construction`, `M`, and `ef_search` set for workload
-- [ ] **Batch sizes configured**: Upsert and query batch sizes tested under load
-
-### Infrastructure
-- [ ] **Persistence configured**: Data directory set and backed up on schedule
-- [ ] **Server mode secured**: Authentication tokens set, network access restricted
-- [ ] **Resource limits set**: Memory and CPU limits defined for Chroma process
-- [ ] **Health checks configured**: Liveness and readiness probes in place
-- [ ] **Backup and restore tested**: Recovery procedure verified end-to-end
-
-### Testing
-- [ ] **Similarity search validated**: Query results verified against known-good matches
-- [ ] **Metadata filtering tested**: All filter operators tested with edge cases
-- [ ] **Performance benchmarks established**: Query latency and throughput baselines recorded
-- [ ] **RAG pipeline end-to-end tested**: Full retrieval-to-generation flow validated
-- [ ] **Regression tests exist**: All previous bugs have corresponding test cases
-
-### Security
-- [ ] **No API keys in source code**: All secrets loaded from environment or secrets manager
-- [ ] **Dependency audit passing**: `pip-audit` or `npm audit` clean in CI
-- [ ] **Network access restricted**: Chroma server not exposed to public internet
-- [ ] **Input validation enabled**: User-supplied text validated before embedding
-
----
-
-## 16. Why This Configuration Works
-
-- **Embedding consistency eliminates silent failures**: Mandating the same model and configuration for indexing and querying prevents the subtle, hard-to-debug mismatch errors that occur when different embedding models produce vectors in incompatible spaces, which causes similarity search to return meaningless results.
-- **Metadata-first collection design enables efficient retrieval**: Designing collections and metadata schemas around query patterns rather than source data structure allows Chroma to filter before searching, dramatically reducing the vector comparison space and improving both latency and relevance.
-- **Pinned model versions ensure reproducibility**: Locking embedding model versions prevents silent changes in vector representations when models are updated, which would otherwise invalidate existing collections and require full re-embedding of all documents.
-- **Distance metric alignment with embedding models maximizes accuracy**: Matching the distance function (cosine, L2, inner product) to the one the embedding model was trained with ensures that similarity scores are meaningful and that nearest-neighbor results reflect true semantic proximity.
-- **Chunking strategy validation prevents garbage-in-garbage-out**: Testing document splitting with representative data catches problems like chunks that are too small (losing context) or too large (diluting relevance) before they corrupt the entire collection.
-
----
-
-## 17. Quick Reference
-
-### Chroma Operations at a Glance
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                   CHROMA QUICK REFERENCE                         │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  CLIENT MODES                                                    │
-│  ────────────                                                    │
-│  In-Memory:    chromadb.Client()                                │
-│  Persistent:   chromadb.PersistentClient(path="./chroma_data") │
-│  Server:       chromadb.HttpClient(host="...", port=8000)      │
-│                                                                  │
-│  CORE OPERATIONS                                                 │
-│  ───────────────                                                 │
-│  Create:   client.create_collection(name, embedding_function)   │
-│  Get:      client.get_collection(name)                          │
-│  Add:      collection.add(ids, documents, metadatas)            │
-│  Query:    collection.query(query_texts, n_results)             │
-│  Update:   collection.update(ids, documents, metadatas)         │
-│  Delete:   collection.delete(ids)                               │
-│  Upsert:   collection.upsert(ids, documents, metadatas)        │
-│                                                                  │
-│  DISTANCE METRICS                                                │
-│  ────────────────                                                │
-│  cosine:  Normalized direction similarity (default)              │
-│  l2:      Euclidean distance (magnitude matters)                │
-│  ip:      Inner product (dot product similarity)                │
-│                                                                  │
-│  METADATA FILTER OPERATORS                                       │
-│  ─────────────────────────                                       │
-│  $eq, $ne       Equal / Not equal                               │
-│  $gt, $gte      Greater than / Greater or equal                 │
-│  $lt, $lte      Less than / Less or equal                       │
-│  $in, $nin      In list / Not in list                           │
-│  $and, $or      Logical combinators                             │
-│                                                                  │
-│  EMBEDDING FUNCTIONS                                             │
-│  ───────────────────                                             │
-│  Default:        all-MiniLM-L6-v2 (Sentence Transformers)       │
-│  OpenAI:         text-embedding-3-small / text-embedding-3-large│
-│  Cohere:         embed-english-v3.0                             │
-│  HuggingFace:    Any sentence-transformers model                │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Performance Tuning Quick Reference
-
-```
-HNSW PARAMETERS:
-  ef_construction:  Higher = better recall, slower build (default: 100)
-  M:                Higher = better recall, more memory (default: 16)
-  ef_search:        Higher = better recall, slower query (default: 10)
-
-BATCH SIZING:
-  Upsert:  500-1000 documents per batch (avoid >5000)
-  Query:   1-10 query texts per call (avoid >100)
-
-CHUNKING GUIDELINES:
-  Target:     200-500 tokens per chunk
-  Overlap:    10-20% of chunk size
-  Strategy:   Sentence-aware splitting preferred over fixed-length
-```
-
-### Common Patterns
-
-```
-RAG PIPELINE:
-  1. Chunk documents → 2. Embed chunks → 3. Store in collection
-  4. Query with user input → 5. Retrieve top-k → 6. Pass to LLM
-
-HYBRID SEARCH:
-  1. Metadata filter (narrow candidates)
-  2. Similarity search (rank by relevance)
-  3. Optional reranking (cross-encoder)
-
-COLLECTION MANAGEMENT:
-  One collection per: embedding model + domain + version
-  Naming: {domain}_{model}_{version} (e.g., "docs_minilm_v2")
-```
-
----
-
-## References and Resources
-
-### Official Documentation
-- **Chroma Docs:** https://docs.trychroma.com/
-- **GitHub:** https://github.com/chroma-core/chroma
-- **Discord Community:** https://discord.gg/MMeYNTmh3x
-
-### Integration Guides
-- **LangChain:** https://python.langchain.com/docs/integrations/vectorstores/chroma
-- **LlamaIndex:** https://docs.llamaindex.ai/en/stable/examples/vector_stores/ChromaIndexDemo/
-- **OpenAI Embeddings:** https://platform.openai.com/docs/guides/embeddings
-
-### Tutorials and Examples
-- Chroma Cookbook: https://cookbook.chromadb.dev/
-- RAG Tutorial: https://docs.trychroma.com/guides
-- Embedding Models: https://www.sbert.net/
-
-### Related Tools
-- **Sentence Transformers:** https://www.sbert.net/
-- **HNSW:** https://github.com/nmslib/hnswlib
-- **DuckDB:** https://duckdb.org/
-
----
-
-**Document Maintenance:**
-- Review quarterly for Chroma updates
-- Update with new embedding models
-- Add community best practices
-- Test code examples with latest version
-
-**Last Updated:** February 2026
-**Next Review:** May 2026
-
----
-
-**End of Chroma Vector Database Development Guidelines**
+**End of Chroma Vector Database Guidelines**

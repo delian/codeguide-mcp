@@ -1,2171 +1,329 @@
 # sqlc Development Guidelines
-Mandatory coding standards and development practices for sqlc development. sqlc generates type-safe code from SQL; write SQL queries, run sqlc, and get fully type-safe interfaces. Eliminates runtime SQL errors, compile-time verification, SQL as source of truth.
+Mandatory standards for sqlc: write SQL, generate type-safe data-access code. Compile-time query verification, parameterized-by-design, zero-runtime-reflection. sqlc 1.27+, PostgreSQL/MySQL/SQLite, Go (primary).
+
+---
+name: sqlc
+title: sqlc Development Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: tooling
+tools: [sqlc@1.27, pgx@v5, postgresql, mysql, sqlite]
+requires: []
+recommends:
+  - sql
+  - go
+  - postgresql
+  - mysql-mariadb
+  - secure-coding
+provides:
+  - sqlc-codegen
+  - type-safe-queries
+  - sqlc-config
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide covers only what is unique to sqlc — the SQL→code generator. The SQL you write is owned by `sql.md`/the engine guides; the code sqlc emits is owned by `go.md`.
 
 ---
 
-**Agent Profile**: The SQL-First Database Access Expert
-**Role**: Senior Database Engineer & Type-Safe Query Specialist
-**Objective**: Generate type-safe, performant, and secure database code using sqlc with strict SQL-first principles.
-**Tools**: sqlc, PostgreSQL/MySQL/SQLite, Go (primary), Python, TypeScript, Kotlin, migration tools (golang-migrate, Atlas, Flyway)
+## 0. Prerequisites & References
+
+sqlc is a **code generator**, not a database or a language. It sits between SQL you author and the data-access layer it emits. Fetch the owners of those concerns:
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`sql.md`](guides://sql.md) — how to write the queries themselves (joins, CTEs, indexing). sqlc does **not** redefine SQL; it parses it. Do not restate SQL rules here.
+> - [`go.md`](guides://go.md) — the primary output language: error wrapping, `context`, package layout, `database/sql` vs `pgx/v5`.
+> - [`postgresql.md`](guides://postgresql.md) · [`mysql-mariadb.md`](guides://mysql-mariadb.md) — the engines. Schema syntax, types, enums, extensions belong to these.
+> - [`secure-coding.md`](guides://secure-coding.md) — supply chain & secrets. *(sqlc binding: every generated query is parameterized → SQL injection is structurally impossible; see §6.)*
+
+> 📎 **SEE ALSO:** [`tdd.md`](guides://tdd.md) (test-first against generated code) · [`error-handling.md`](guides://error-handling.md) (mapping driver errors) · [`ci-cd.md`](guides://ci-cd.md) (the generate/vet/diff gate) · [`performance.md`](guides://performance.md) · [`sqlite.md`](guides://sqlite.md)
 
 ---
 
 ## 1. Core Philosophies: SQL-FIRST
 
-The agent must adhere to the **SQL-FIRST** principles for every sqlc implementation:
+sqlc-specific principles only. SQL correctness, security, and Go idioms come from §0.
 
-**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
-**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+- **S**ource of truth is SQL: write real, engine-native SQL — never an ORM/query-builder abstraction. sqlc generates *from* it.
+- **Q**uery verification at build time: sqlc parses every query against the schema. Type/column/syntax errors fail `sqlc generate`, not production.
+- **L**ightweight output: emitted code is plain Go (or Python/Kotlin) with direct driver calls — no reflection, no runtime query assembly.
+- **F**rozen generated code: the `*.sql.go` output is read-only. To change behavior, change the SQL and regenerate — never hand-edit.
+- **I**njection-safe by construction: queries are static; all inputs are bound parameters. There is no string-concatenation code path to misuse.
+- **R**eproducible: same schema + same queries + same config ⇒ byte-identical output. This makes drift a CI-checkable property (`sqlc diff`).
+- **S**chema-as-input: sqlc reads your migration/DDL files as the schema; the migrations are the contract.
+- **T**ypes flow from DB to language: column types map to language types automatically; nullability is modeled explicitly.
 
-- **S**QL is the Source of Truth: Write real SQL, not ORM abstractions.
-- **Q**uery Verification: All queries validated against actual schema at generation time.
-- **L**ightweight Generated Code: No runtime reflection, no query building overhead.
-- **F**ail Fast: Catch SQL errors at build time, not runtime.
-- **I**mmutable Queries: Generated code is read-only; modify SQL files only.
-- **R**eproducible Builds: Same SQL + schema = same generated code.
-- **S**ecurity by Design: Parameterized queries by default, no SQL injection vectors.
-- **T**ype Safety: Database types map to language types with no manual casting.
-**Verified Code**: Agent-generated code MUST pass `sqlc compile`/`sqlc generate`, compile in the target language, and pass query tests before delivery.
+**Verified Code**: Agent-generated SQL+config MUST pass `sqlc compile`, `sqlc vet`, regenerate with no diff, build in the target language, and pass query tests before delivery.
 
 ---
 
-## 2. Agent Code Generation Requirements (MANDATORY)
+## 2. Requirements (MANDATORY, auditable)
 
-### A. Pre-Generation Verification Protocol
+RFC-2119 keywords. IDs `SQLC-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a shared rule cite its owner.
 
-Before generating any sqlc code, agent MUST:
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| SQLC-CFG-01 | Config MUST use v2 syntax (`version: "2"`) | head of `sqlc.yaml` | `version: "2"` |
+| SQLC-CMP-01 | All queries MUST parse against the schema | `sqlc compile` | exit 0 |
+| SQLC-VET-01 | Queries MUST pass vet lint rules | `sqlc vet` | exit 0, 0 warnings |
+| SQLC-GEN-01 | Generated code MUST be committed & in sync (no drift) | `sqlc diff` | no diff |
+| SQLC-GEN-02 | Generated code MUST NOT be hand-edited | regenerate → `git diff` | no manual edits |
+| SQLC-ANN-01 | Every query MUST carry a `-- name: X :command` annotation | `sqlc compile` | all named |
+| SQLC-TYP-01 | Nullable columns MUST map to nullable types (no panics on NULL) | `sqlc generate` + build | compiles, NULL-safe |
+| SQLC-SEC-01 | Parameterized inputs only; no broad secret columns (see `secure-coding.md`) | review / `sqlc vet` | 0 dynamic SQL |
+| SQLC-OUT-01 | Output MUST build in the target language | `go build ./...` | exit 0 |
+| SQLC-TST-01 | Queries MUST be tested against a real engine (see `tdd.md`) | `go test ./...` | exit 0, 0 skips |
 
-1. Verify sqlc is installed and accessible
-2. Validate database schema files exist and are syntactically correct
-3. Ensure sqlc.yaml configuration is present and valid
-4. Confirm target language plugin is available
+> **Forbidden**: hand-editing generated `*.sql.go`; committing a SQL change without regenerating; concatenating SQL strings around sqlc output; using `SELECT *` in security-sensitive reads (leaks `password_hash`); ignoring `sqlc vet` warnings.
+
+---
+
+## 3. Verification Protocol
+
+Run, in order, before presenting code. Fix → re-run until every gate is green.
 
 ```bash
-# Verify sqlc installation
-sqlc version
-
-# Validate configuration
-sqlc compile
-
-# Check for errors without generating
-sqlc vet
+sqlc compile      # SQLC-CMP-01: parse queries vs schema, no output
+sqlc vet          # SQLC-VET-01: CEL lint rules (+ db-prepare if managed)
+sqlc generate     # regenerate output
+sqlc diff         # SQLC-GEN-01: fail if regenerated output differs from committed
+go build ./...    # SQLC-OUT-01
+go test ./...     # SQLC-TST-01 (real engine via testcontainers / service container)
 ```
 
-### B. Verification Checklist
-
-- [ ] Schema files (.sql) exist in configured locations
-- [ ] All queries have proper sqlc annotations (-- name: QueryName :one/:many/:exec/:execrows/:execresult/:copyfrom/:batchone/:batchmany/:batchexec)
-- [ ] Configuration file (sqlc.yaml or sqlc.json) is valid
-- [ ] Database engine matches schema syntax (PostgreSQL/MySQL/SQLite)
-- [ ] Generated code compiles without errors
-- [ ] All queries execute successfully against test database
-- [ ] No SQL injection vulnerabilities (parameterized queries only)
-
-### C. Post-Generation Verification
-
-```bash
-# Generate code
-sqlc generate
-
-# Verify generated code compiles (Go example)
-go build ./..
-
-# Run query tests
-go test ./db/... -v
-
-# Python example
-python -m py_compile db/query.py
-
-# TypeScript example
-npx tsc --noEmit
-```
+`sqlc diff` is the drift gate: it runs generation in-memory and reports any delta from the committed files without touching the working tree — ideal for CI. The *why* behind test-first and CVE policy lives in the §0 owners.
 
 ---
 
-## 2A. TDD Protocol (Red-Green-Refactor)
+## 4. Project Structure
 
-EVERY new feature or module MUST follow the Red-Green-Refactor cycle. No production code without a failing test first.
-
-### Workflow
-
-1. **RED** -- Write a failing test that defines the expected behavior.
-2. **GREEN** -- Write the minimum production code to make the test pass.
-3. **REFACTOR** -- Clean up while keeping tests green.
-
-### Concrete Example -- Testing sqlc-Generated Query Functions
-
-**Step 1 -- RED (Go `testing` package):**
-
-```go
-// db/query_test.go
-package db_test
-
-import (
-	"context"
-	"database/sql"
-	"testing"
-
-	_ "github.com/lib/pq"
-	"myapp/db"
-)
-
-func setupTestDB(t *testing.T) *db.Queries {
-	t.Helper()
-	conn, err := sql.Open("postgres", "postgres://test:test@localhost:5432/testdb?sslmode=disable")
-	if err != nil {
-		t.Fatalf("failed to connect: %v", err)
-	}
-	t.Cleanup(func() {
-		conn.Exec("DELETE FROM authors")
-		conn.Close()
-	})
-	return db.New(conn)
-}
-
-func TestCreateAuthor(t *testing.T) {
-	q := setupTestDB(t)
-	ctx := context.Background()
-
-	author, err := q.CreateAuthor(ctx, db.CreateAuthorParams{
-		Name: "Ursula K. Le Guin",
-		Bio:  sql.NullString{String: "Science fiction author", Valid: true},
-	})
-	if err != nil {
-		t.Fatalf("CreateAuthor failed: %v", err)
-	}
-	if author.Name != "Ursula K. Le Guin" {
-		t.Errorf("expected name 'Ursula K. Le Guin', got %q", author.Name)
-	}
-	if author.ID == 0 {
-		t.Error("expected non-zero ID")
-	}
-}
-
-func TestGetAuthor(t *testing.T) {
-	q := setupTestDB(t)
-	ctx := context.Background()
-
-	created, _ := q.CreateAuthor(ctx, db.CreateAuthorParams{
-		Name: "Octavia Butler",
-		Bio:  sql.NullString{String: "Visionary author", Valid: true},
-	})
-
-	fetched, err := q.GetAuthor(ctx, created.ID)
-	if err != nil {
-		t.Fatalf("GetAuthor failed: %v", err)
-	}
-	if fetched.Name != "Octavia Butler" {
-		t.Errorf("expected 'Octavia Butler', got %q", fetched.Name)
-	}
-}
-
-func TestListAuthors(t *testing.T) {
-	q := setupTestDB(t)
-	ctx := context.Background()
-
-	for _, name := range []string{"Author A", "Author B", "Author C"} {
-		q.CreateAuthor(ctx, db.CreateAuthorParams{Name: name})
-	}
-
-	authors, err := q.ListAuthors(ctx)
-	if err != nil {
-		t.Fatalf("ListAuthors failed: %v", err)
-	}
-	if len(authors) != 3 {
-		t.Errorf("expected 3 authors, got %d", len(authors))
-	}
-}
-```
-
-**Step 2 -- GREEN (sqlc SQL definitions):**
-
-```sql
--- query/authors.sql
-
--- name: CreateAuthor :one
-INSERT INTO authors (name, bio)
-VALUES ($1, $2)
-RETURNING *;
-
--- name: GetAuthor :one
-SELECT * FROM authors WHERE id = $1;
-
--- name: ListAuthors :many
-SELECT * FROM authors ORDER BY name;
-```
-
-Then run `sqlc generate` to produce the Go code that satisfies the tests.
-
-**Step 3 -- REFACTOR:**
-
-- Extract `setupTestDB` into a shared `testutil` package.
-- Use `t.Parallel()` for tests that do not share state.
-- Add table-driven subtests for edge cases (empty bio, long name).
-
-### TDD Rules for sqlc
-
-- Write Go tests **against the generated code** -- never hand-edit sqlc output.
-- Use a real PostgreSQL test database (Docker container or testcontainers-go).
-- Clean up test data in `t.Cleanup` to keep tests isolated.
-- Re-run `sqlc generate` in CI to ensure SQL and Go stay in sync.
-- Test both `:one` and `:many` query annotations for correct return types.
-
----
-
-## 2B. Bug Fix Protocol (Regression Testing)
-
-EVERY bug fix MUST include a regression test that fails before the fix and passes after.
-
-### Workflow
-
-1. **Reproduce** -- Write a test that triggers the exact bug.
-2. **Verify RED** -- Confirm the test fails on the current code.
-3. **Fix** -- Apply the minimal code change.
-4. **Verify GREEN** -- Confirm the test (and all others) pass.
-5. **Document** -- Reference the bug/ticket in the test docstring.
-
-### Concrete Example -- NULL Bio Causes Scan Error
-
-**Bug report:** `GetAuthor` panics when `bio` is NULL because the generated struct uses `string` instead of `sql.NullString`.
-
-**Step 1 -- Regression test:**
-
-```go
-// db/query_bug_test.go
-package db_test
-
-import (
-	"context"
-	"database/sql"
-	"testing"
-
-	"myapp/db"
-)
-
-func TestGetAuthorWithNullBio(t *testing.T) {
-	// Regression: BUG-2201 -- GetAuthor must handle NULL bio without panic
-	q := setupTestDB(t)
-	ctx := context.Background()
-
-	// Create author with NULL bio
-	created, err := q.CreateAuthor(ctx, db.CreateAuthorParams{
-		Name: "Anonymous",
-		Bio:  sql.NullString{Valid: false},
-	})
-	if err != nil {
-		t.Fatalf("CreateAuthor failed: %v", err)
-	}
-
-	// This must not panic or return an error
-	fetched, err := q.GetAuthor(ctx, created.ID)
-	if err != nil {
-		t.Fatalf("BUG-2201: GetAuthor failed on NULL bio: %v", err)
-	}
-	if fetched.Bio.Valid {
-		t.Error("expected bio to be NULL/invalid")
-	}
-}
-```
-
-**Step 2 -- Verify the test fails** (scan error or panic on NULL).
-
-**Step 3 -- Fix** (update the schema or sqlc config to use `sql.NullString`):
-
-```yaml
-# sqlc.yaml
-overrides:
-  - column: "authors.bio"
-    go_type: "database/sql.NullString"
-```
-
-Re-run `sqlc generate`.
-
-**Step 4 -- Verify GREEN** -- `GetAuthor` handles NULL bio correctly.
-
-### Regression Test Rules for sqlc
-
-- Name test files `query_bug_test.go` or `query_regression_test.go`.
-- Include the ticket/issue number in the test name or comment.
-- Regression tests are NEVER deleted.
-- After fixing, always re-run `sqlc generate` and verify the generated code compiles.
-
----
-
-## 3. Project Structure (MANDATORY)
-
-### A. Recommended Directory Layout
+sqlc reads a **queries** directory and a **schema** (your migration DDL) and writes generated code. Keep them separate from hand-written code.
 
 ```
 project/
-├── sqlc.yaml                    # sqlc configuration
+├── sqlc.yaml                 # config (single source — see §5)
 ├── db/
-│   ├── migrations/              # Schema migrations (numbered)
-│   │   ├── 000001_init.up.sql
-│   │   ├── 000001_init.down.sql
-│   │   ├── 000002_add_users.up.sql
-│   │   └── 000002_add_users.down.sql
-│   ├── queries/                 # SQL query files
-│   │   ├── users.sql
-│   │   ├── posts.sql
-│   │   └── comments.sql
-│   ├── schema/                  # Combined schema (optional, for sqlc)
-│   │   └── schema.sql
-│   └── generated/               # sqlc output (language-specific)
-│       ├── db.go                # Go: connection helpers
-│       ├── models.go            # Go: struct definitions
-│       ├── users.sql.go         # Go: generated query methods
-│       ├── query.py             # Python: generated queries
-│       └── query.ts             # TypeScript: generated queries
-├── internal/
-│   └── repository/              # Repository layer wrapping generated code
-│       └── user_repository.go
-└── tests/
-    └── db/
-        └── queries_test.go      # Integration tests for queries
+│   ├── migrations/           # DDL = the schema sqlc parses (NNNNNN_*.up/down.sql)
+│   ├── queries/              # *.sql — annotated queries, grouped by entity
+│   └── sqlc/                 # GENERATED — never edit (db.go, models.go, *.sql.go, querier.go)
+├── internal/repository/      # hand-written layer wrapping db.Queries (errors, domain types)
+└── ...
 ```
 
-### B. File Naming Conventions
-
-| File Type | Pattern | Example |
-|-----------|---------|---------|
-| Schema migrations | `NNNNNN_description.{up\|down}.sql` | `000001_create_users.up.sql` |
-| Query files | `entity.sql` or `domain.sql` | `users.sql`, `orders.sql` |
-| Generated code | Auto-generated by sqlc | `users.sql.go`, `query.py` |
+- `schema:` may point at the migrations dir directly — sqlc applies them in order to build the catalog. No separate schema file needed.
+- Treat `db/sqlc/` as build output: commit it (so consumers need no sqlc to build) but regenerate, never patch.
+- The repository layer (not the generated code) is where you map driver errors to domain errors (see `error-handling.md`) and apply layering (`go.md`).
 
 ---
 
-## 4. Configuration (MANDATORY)
+## 5. Configuration — `sqlc.yaml` (the heart)
 
-### A. sqlc.yaml Structure
+v2 is mandatory. One `sql` block per engine; each block names its queries, schema, and one or more `gen` language targets.
 
 ```yaml
 version: "2"
-
 sql:
-  # PostgreSQL Configuration
-  - engine: "postgresql"
-    queries: "db/queries/"
-    schema: "db/migrations/"
+  - engine: "postgresql"        # postgresql | mysql | sqlite
+    queries: "db/queries"
+    schema: "db/migrations"     # migrations dir IS the schema
+    database:
+      managed: true             # sqlc spins an ephemeral engine for `sqlc vet` db-prepare
     gen:
       go:
         package: "db"
-        out: "db/generated"
-        sql_package: "pgx/v5"
+        out: "db/sqlc"
+        sql_package: "pgx/v5"   # preferred PG driver; else "database/sql"
         emit_json_tags: true
-        emit_prepared_queries: true
-        emit_interface: true
-        emit_exact_table_names: false
-        emit_empty_slices: true
-        emit_exported_queries: true
-        emit_result_struct_pointers: false
-        emit_params_struct_pointers: false
-        emit_methods_with_db_argument: false
-        emit_pointers_for_null_types: true
+        emit_interface: true            # generate a Querier interface (mockable)
+        emit_pointers_for_null_types: true   # NULL → *T instead of sql.NullT
+        emit_empty_slices: true         # :many returns [] not nil
         emit_enum_valid_method: true
-        emit_all_enum_values: true
-        json_tags_case_style: "snake"
-        output_db_file_name: "db.go"
-        output_models_file_name: "models.go"
-        output_querier_file_name: "querier.go"
-        query_parameter_limit: 1
-
-  # MySQL Configuration
-  - engine: "mysql"
-    queries: "db/queries/"
-    schema: "db/schema.sql"
-    gen:
-      go:
-        package: "db"
-        out: "db/generated/mysql"
-        sql_package: "database/sql"
-        emit_json_tags: true
-
-  # SQLite Configuration
-  - engine: "sqlite"
-    queries: "db/queries/"
-    schema: "db/schema.sql"
-    gen:
-      go:
-        package: "db"
-        out: "db/generated/sqlite"
-
-# Global settings
-plugins: []
-rules: []
-```
-
-### B. Multi-Language Configuration
-
-```yaml
-version: "2"
-
-sql:
-  - engine: "postgresql"
-    queries: "db/queries/"
-    schema: "db/migrations/"
-    gen:
-      # Go generation
-      go:
-        package: "db"
-        out: "internal/db"
-        sql_package: "pgx/v5"
-        emit_json_tags: true
-        emit_interface: true
-
-      # Python generation
-      python:
-        package: "db"
-        out: "src/db"
-        emit_sync_querier: true
-        emit_async_querier: true
-
-      # TypeScript generation
-      typescript:
-        out: "src/db"
-        driver: "pg"
-
-      # Kotlin generation
-      kotlin:
-        package: "com.example.db"
-        out: "src/main/kotlin/db"
-```
-
-### C. Database-Specific Settings
-
-#### PostgreSQL (Recommended)
-
-```yaml
-sql:
-  - engine: "postgresql"
-    queries: "db/queries/"
-    schema: "db/migrations/"
-    gen:
-      go:
-        package: "db"
-        out: "db/generated"
-        sql_package: "pgx/v5"      # Preferred: native PostgreSQL driver
-        # sql_package: "database/sql"  # Alternative: standard library
-        emit_json_tags: true
-        emit_prepared_queries: true  # Performance optimization
-        emit_pointers_for_null_types: true
         overrides:
-          - db_type: "uuid"
-            go_type: "github.com/google/uuid.UUID"
-          - db_type: "timestamptz"
-            go_type: "time.Time"
-          - db_type: "jsonb"
-            go_type: "json.RawMessage"
-          - db_type: "inet"
-            go_type: "netip.Addr"
+          - db_type: "uuid"        { go_type: "github.com/google/uuid.UUID" }
+          - db_type: "timestamptz" { go_type: "time.Time" }
+          - db_type: "jsonb"       { go_type: "encoding/json.RawMessage" }
+rules:
+  - sqlc/db-prepare              # prepares every query against the managed DB during vet
 ```
 
-#### MySQL
+Key choices:
+- **Engine** picks the SQL dialect and parameter style (`$1` for PG; `?` for MySQL/SQLite). Schema must match the engine.
+- **`sql_package`** (Go/PG): `pgx/v5` for native PG types & batching; `database/sql` for the stdlib path.
+- **Multiple `gen` targets** under one block emit several languages from the same SQL (Go is first-class; `python`, `kotlin` are codegen plugins — see §8).
+- **`database.managed: true`** (modernize): lets `sqlc vet` boot a throwaway engine and actually `PREPARE` each query, catching errors a static parse misses. No external DB or credentials in config — connection strings come from the environment.
 
-```yaml
-sql:
-  - engine: "mysql"
-    queries: "db/queries/"
-    schema: "db/schema.sql"
-    gen:
-      go:
-        package: "db"
-        out: "db/generated"
-        sql_package: "database/sql"
-        emit_json_tags: true
-        overrides:
-          - db_type: "datetime"
-            go_type: "time.Time"
-          - db_type: "json"
-            go_type: "json.RawMessage"
-```
-
-#### SQLite
-
-```yaml
-sql:
-  - engine: "sqlite"
-    queries: "db/queries/"
-    schema: "db/schema.sql"
-    gen:
-      go:
-        package: "db"
-        out: "db/generated"
-        emit_json_tags: true
-        overrides:
-          - db_type: "integer"
-            nullable: true
-            go_type:
-              type: "int64"
-              pointer: true
-```
+### Nullability & type overrides
+- By default a non-NULL column → `T`; a nullable column → `sql.NullT` (stdlib) or `pgtype.T` (pgx). `emit_pointers_for_null_types: true` makes nullable → `*T`, which is usually cleaner.
+- `overrides` remap a `db_type` (or a specific `column:` like `authors.bio`) to any Go type, optionally with `nullable: true` and `pointer: true`. Use them for UUIDs, enums, JSON, and domain wrappers.
+- Engine type mappings (PG `timestamptz`/`jsonb`/`citext`, MySQL `datetime`/`json`, SQLite affinities) are documented in the engine guides — bind them here, don't re-explain them.
 
 ---
 
-## 5. Query Writing Standards (MANDATORY)
+## 6. Queries — annotations & parameters (canonical)
 
-### A. Query Annotation Format
+Every query is a plain SQL statement preceded by an annotation. This is sqlc's core surface.
 
-```sql
--- name: QueryName :command
--- QueryName: PascalCase, descriptive
--- :command options:
---   :one      - Returns single row (error if not found)
---   :many     - Returns slice/list of rows
---   :exec     - No return value
---   :execrows - Returns affected row count
---   :execresult - Returns full result (lastInsertId, rowsAffected)
---   :copyfrom - Bulk insert (PostgreSQL COPY)
---   :batchone - Batch query returning one per batch
---   :batchmany - Batch query returning many per batch
---   :batchexec - Batch execute
-```
+### Annotation: `-- name: <PascalCase> :<command>`
 
-### B. Query Examples by Operation
-
-#### SELECT Queries
+| Command | Returns | Use |
+|---------|---------|-----|
+| `:one` | single row (err if 0) | get-by-id, unique lookup |
+| `:many` | slice/list | lists, search |
+| `:exec` | nothing | INSERT/UPDATE/DELETE without return |
+| `:execrows` | affected row count | bulk update/delete |
+| `:execresult` | driver result (lastInsertId, rowsAffected) | MySQL auto-increment |
+| `:copyfrom` | nothing | bulk insert via PG `COPY` (fast path) |
+| `:batchexec` / `:batchone` / `:batchmany` | pgx batch | pipelined multi-statement |
 
 ```sql
--- name: GetUserByID :one
-SELECT id, email, name, created_at, updated_at
-FROM users
-WHERE id = $1;
-
--- name: GetUserByEmail :one
-SELECT id, email, name, created_at, updated_at
-FROM users
-WHERE email = $1;
+-- name: GetUser :one
+SELECT id, email, name FROM users WHERE id = $1;
 
 -- name: ListUsers :many
-SELECT id, email, name, created_at, updated_at
-FROM users
-ORDER BY created_at DESC
-LIMIT $1 OFFSET $2;
+SELECT id, email, name FROM users ORDER BY created_at DESC LIMIT $1 OFFSET $2;
 
--- name: ListActiveUsers :many
-SELECT id, email, name, created_at, updated_at
-FROM users
-WHERE deleted_at IS NULL
-  AND status = 'active'
-ORDER BY name ASC;
-
--- name: CountUsers :one
-SELECT COUNT(*) FROM users WHERE deleted_at IS NULL;
-
--- name: UserExists :one
-SELECT EXISTS(SELECT 1 FROM users WHERE email = $1);
-```
-
-#### INSERT Queries
-
-```sql
 -- name: CreateUser :one
-INSERT INTO users (email, name, password_hash, created_at, updated_at)
-VALUES ($1, $2, $3, NOW(), NOW())
-RETURNING id, email, name, created_at, updated_at;
+INSERT INTO users (email, name) VALUES ($1, $2) RETURNING *;
 
--- name: CreateUserNoReturn :exec
-INSERT INTO users (email, name, password_hash, created_at, updated_at)
-VALUES ($1, $2, $3, NOW(), NOW());
-
--- name: BulkInsertUsers :copyfrom
-INSERT INTO users (email, name, password_hash, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5);
+-- name: DeleteUser :exec
+DELETE FROM users WHERE id = $1;
 ```
 
-#### UPDATE Queries
+`RETURNING *` (PG/SQLite) lets `:one`/`:many` give back the full row after a write — prefer it over a second round-trip.
+
+### Parameter handling — `$N`, `sqlc.arg`, `sqlc.narg`
+- **Positional**: `$1, $2` (PG) or `?` (MySQL/SQLite). sqlc names the Go params from the column.
+- **`sqlc.arg('name')`** — a *named, required* parameter; produces a named Go field. Use when positional names would be ambiguous.
+- **`sqlc.narg('name')`** — a *named, nullable* parameter, the idiom for optional filters and partial updates:
 
 ```sql
--- name: UpdateUser :one
-UPDATE users
-SET name = $2, updated_at = NOW()
-WHERE id = $1
-RETURNING id, email, name, created_at, updated_at;
-
--- name: UpdateUserEmail :exec
-UPDATE users
-SET email = $2, updated_at = NOW()
-WHERE id = $1;
+-- name: SearchUsers :many
+SELECT id, email, name FROM users
+WHERE (sqlc.narg('email')::text IS NULL OR email ILIKE sqlc.narg('email'))
+  AND (sqlc.narg('name')::text  IS NULL OR name  ILIKE sqlc.narg('name'))
+ORDER BY created_at DESC
+LIMIT sqlc.arg('limit') OFFSET sqlc.arg('offset');
 
 -- name: UpdateUserPartial :one
 UPDATE users
-SET
-  name = COALESCE(sqlc.narg('name'), name),
-  email = COALESCE(sqlc.narg('email'), email),
-  updated_at = NOW()
+SET name = COALESCE(sqlc.narg('name'), name),
+    email = COALESCE(sqlc.narg('email'), email)
 WHERE id = sqlc.arg('id')
 RETURNING *;
 ```
 
-#### DELETE Queries
+- **`sqlc.slice('ids')`** expands a Go slice into an `IN (...)` list (single-engine `IN` parameters otherwise can't bind a variadic).
+- **`sqlc.embed(t)`** nests a full table struct in a join result (e.g. `SELECT sqlc.embed(authors), sqlc.embed(books) ...`) so the row maps to `{Author, Book}` instead of flattened columns.
 
-```sql
--- name: DeleteUser :exec
-DELETE FROM users WHERE id = $1;
-
--- name: SoftDeleteUser :exec
-UPDATE users
-SET deleted_at = NOW(), updated_at = NOW()
-WHERE id = $1;
-
--- name: DeleteUserReturning :one
-DELETE FROM users WHERE id = $1
-RETURNING id, email, name;
-
--- name: PurgeDeletedUsers :execrows
-DELETE FROM users
-WHERE deleted_at IS NOT NULL
-  AND deleted_at < NOW() - INTERVAL '30 days';
-```
-
-### C. Advanced Query Patterns
-
-#### Joins
-
-```sql
--- name: GetUserWithPosts :many
-SELECT
-  u.id AS user_id,
-  u.name AS user_name,
-  u.email,
-  p.id AS post_id,
-  p.title,
-  p.content,
-  p.created_at AS post_created_at
-FROM users u
-LEFT JOIN posts p ON p.user_id = u.id
-WHERE u.id = $1
-ORDER BY p.created_at DESC;
-```
-
-#### Aggregations
-
-```sql
--- name: GetUserStats :one
-SELECT
-  COUNT(*) AS total_posts,
-  COALESCE(SUM(view_count), 0) AS total_views,
-  COALESCE(AVG(view_count), 0) AS avg_views
-FROM posts
-WHERE user_id = $1 AND deleted_at IS NULL;
-```
-
-#### CTEs (Common Table Expressions)
-
-```sql
--- name: GetUserPostsWithRank :many
-WITH ranked_posts AS (
-  SELECT
-    id,
-    title,
-    view_count,
-    ROW_NUMBER() OVER (ORDER BY view_count DESC) AS rank
-  FROM posts
-  WHERE user_id = $1 AND deleted_at IS NULL
-)
-SELECT id, title, view_count, rank
-FROM ranked_posts
-WHERE rank <= $2;
-```
-
-#### Dynamic Filtering with sqlc.narg
-
-```sql
--- name: SearchUsers :many
-SELECT id, email, name, created_at
-FROM users
-WHERE
-  deleted_at IS NULL
-  AND (sqlc.narg('email')::text IS NULL OR email ILIKE sqlc.narg('email'))
-  AND (sqlc.narg('name')::text IS NULL OR name ILIKE sqlc.narg('name'))
-  AND (sqlc.narg('created_after')::timestamptz IS NULL OR created_at >= sqlc.narg('created_after'))
-ORDER BY created_at DESC
-LIMIT sqlc.arg('limit')
-OFFSET sqlc.arg('offset');
-```
-
-#### Transactions (Go example)
-
-```sql
--- name: GetUserForUpdate :one
-SELECT id, email, name, balance
-FROM users
-WHERE id = $1
-FOR UPDATE;
-
--- name: UpdateUserBalance :exec
-UPDATE users
-SET balance = balance + $2, updated_at = NOW()
-WHERE id = $1;
-```
+The actual SQL design (which columns, which indexes, join shape) is owned by [`sql.md`](guides://sql.md) and the engine guides — keep query bodies idiomatic to the engine, here just bind them to sqlc's annotation/param syntax.
 
 ---
 
-## 6. Schema Design Guidelines (MANDATORY)
+## 7. Security binding (sqlc is SQLi-safe by design)
 
-### A. PostgreSQL Schema
+Policy is owned by [`secure-coding.md`](guides://secure-coding.md). The sqlc-specific facts:
 
-```sql
--- db/migrations/000001_init.up.sql
-
--- Enable required extensions
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "citext";
-
--- Enum types
-CREATE TYPE user_status AS ENUM ('pending', 'active', 'suspended', 'deleted');
-CREATE TYPE user_role AS ENUM ('user', 'admin', 'moderator');
-
--- Users table
-CREATE TABLE users (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    email CITEXT NOT NULL UNIQUE,
-    name VARCHAR(255) NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
-    status user_status NOT NULL DEFAULT 'pending',
-    role user_role NOT NULL DEFAULT 'user',
-    email_verified_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    deleted_at TIMESTAMPTZ,
-
-    CONSTRAINT users_email_check CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$')
-);
-
--- Posts table
-CREATE TABLE posts (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    title VARCHAR(255) NOT NULL,
-    slug VARCHAR(255) NOT NULL UNIQUE,
-    content TEXT NOT NULL,
-    excerpt VARCHAR(500),
-    view_count INTEGER NOT NULL DEFAULT 0,
-    published_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    deleted_at TIMESTAMPTZ
-);
-
--- Indexes
-CREATE INDEX idx_users_email ON users(email) WHERE deleted_at IS NULL;
-CREATE INDEX idx_users_status ON users(status) WHERE deleted_at IS NULL;
-CREATE INDEX idx_users_created_at ON users(created_at);
-
-CREATE INDEX idx_posts_user_id ON posts(user_id) WHERE deleted_at IS NULL;
-CREATE INDEX idx_posts_slug ON posts(slug) WHERE deleted_at IS NULL;
-CREATE INDEX idx_posts_published_at ON posts(published_at) WHERE published_at IS NOT NULL;
-
--- Updated_at trigger
-CREATE OR REPLACE FUNCTION update_updated_at()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER users_updated_at
-    BEFORE UPDATE ON users
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at();
-
-CREATE TRIGGER posts_updated_at
-    BEFORE UPDATE ON posts
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at();
-```
-
-```sql
--- db/migrations/000001_init.down.sql
-DROP TRIGGER IF EXISTS posts_updated_at ON posts;
-DROP TRIGGER IF EXISTS users_updated_at ON users;
-DROP FUNCTION IF EXISTS update_updated_at();
-DROP TABLE IF EXISTS posts;
-DROP TABLE IF EXISTS users;
-DROP TYPE IF EXISTS user_role;
-DROP TYPE IF EXISTS user_status;
-```
-
-### B. MySQL Schema
-
-```sql
--- db/migrations/000001_init.up.sql
-
-CREATE TABLE users (
-    id BINARY(16) PRIMARY KEY DEFAULT (UUID_TO_BIN(UUID())),
-    email VARCHAR(255) NOT NULL UNIQUE,
-    name VARCHAR(255) NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
-    status ENUM('pending', 'active', 'suspended', 'deleted') NOT NULL DEFAULT 'pending',
-    role ENUM('user', 'admin', 'moderator') NOT NULL DEFAULT 'user',
-    email_verified_at DATETIME,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    deleted_at DATETIME,
-
-    INDEX idx_users_email (email),
-    INDEX idx_users_status (status),
-    INDEX idx_users_created_at (created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE posts (
-    id BINARY(16) PRIMARY KEY DEFAULT (UUID_TO_BIN(UUID())),
-    user_id BINARY(16) NOT NULL,
-    title VARCHAR(255) NOT NULL,
-    slug VARCHAR(255) NOT NULL UNIQUE,
-    content TEXT NOT NULL,
-    excerpt VARCHAR(500),
-    view_count INT UNSIGNED NOT NULL DEFAULT 0,
-    published_at DATETIME,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    deleted_at DATETIME,
-
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    INDEX idx_posts_user_id (user_id),
-    INDEX idx_posts_slug (slug),
-    INDEX idx_posts_published_at (published_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-```
-
-### C. SQLite Schema
-
-```sql
--- db/schema.sql
-
-CREATE TABLE users (
-    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-    email TEXT NOT NULL UNIQUE COLLATE NOCASE,
-    name TEXT NOT NULL,
-    password_hash TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'suspended', 'deleted')),
-    role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin', 'moderator')),
-    email_verified_at TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    deleted_at TEXT
-);
-
-CREATE TABLE posts (
-    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    title TEXT NOT NULL,
-    slug TEXT NOT NULL UNIQUE,
-    content TEXT NOT NULL,
-    excerpt TEXT,
-    view_count INTEGER NOT NULL DEFAULT 0,
-    published_at TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    deleted_at TEXT
-);
-
-CREATE INDEX idx_users_email ON users(email) WHERE deleted_at IS NULL;
-CREATE INDEX idx_users_status ON users(status) WHERE deleted_at IS NULL;
-CREATE INDEX idx_posts_user_id ON posts(user_id) WHERE deleted_at IS NULL;
-CREATE INDEX idx_posts_slug ON posts(slug) WHERE deleted_at IS NULL;
-
--- SQLite trigger for updated_at
-CREATE TRIGGER users_updated_at
-    AFTER UPDATE ON users
-    FOR EACH ROW
-BEGIN
-    UPDATE users SET updated_at = datetime('now') WHERE id = NEW.id;
-END;
-
-CREATE TRIGGER posts_updated_at
-    AFTER UPDATE ON posts
-    FOR EACH ROW
-BEGIN
-    UPDATE posts SET updated_at = datetime('now') WHERE id = NEW.id;
-END;
-```
+- **No injection surface.** Generated queries are static prepared statements; every value is a bound parameter. There is no API that interpolates user input into SQL — string concatenation simply cannot be expressed. This is the single biggest security property sqlc provides.
+- **`sqlc vet` rules** (CEL expressions, optionally backed by a managed DB) can fail builds on policy violations — e.g. forbid `SELECT *`, require `LIMIT`, or block sequential scans. Add project rules under `rules:`.
+- **Least exposure**: select explicit columns; keep `password_hash`/secrets in a dedicated `:one` auth query, never in profile reads. (A `SELECT *` that leaks a hash is a `SQLC-SEC-01` failure.)
+- **Credentials** for managed/test databases come from the environment, never `sqlc.yaml`.
 
 ---
 
-## 7. Security Best Practices (MANDATORY)
+## 8. Output languages & plugins
 
-### A. SQL Injection Prevention
-
-sqlc provides automatic protection against SQL injection by design:
-
-```sql
--- CORRECT: Parameters are always parameterized
--- name: GetUser :one
-SELECT * FROM users WHERE id = $1;
-
--- CORRECT: Multiple parameters
--- name: CreateUser :one
-INSERT INTO users (email, name) VALUES ($1, $2) RETURNING *;
-
--- NEVER: String concatenation (sqlc won't generate this)
--- This is impossible with sqlc - queries are static
-```
-
-### B. Sensitive Data Handling
-
-```sql
--- CORRECT: Never select password hashes in normal queries
--- name: GetUser :one
-SELECT id, email, name, status, created_at, updated_at
-FROM users WHERE id = $1;
-
--- CORRECT: Separate query for authentication only
--- name: GetUserForAuth :one
-SELECT id, email, password_hash
-FROM users WHERE email = $1 AND deleted_at IS NULL;
-
--- CORRECT: Use specific columns, never SELECT *
--- name: GetUserProfile :one
-SELECT id, name, email, created_at
-FROM users WHERE id = $1;
-```
-
-### C. Access Control Patterns
-
-```sql
--- name: GetUserOwnedPost :one
--- Ensure user can only access their own resources
-SELECT id, title, content, created_at
-FROM posts
-WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL;
-
--- name: GetPostIfPublished :one
--- Public access only to published content
-SELECT id, title, content, published_at
-FROM posts
-WHERE id = $1 AND published_at IS NOT NULL AND deleted_at IS NULL;
-
--- name: AdminListAllUsers :many
--- Document queries that require elevated privileges
--- ADMIN ONLY: This query should only be called with admin authorization
-SELECT id, email, name, status, role, created_at
-FROM users
-ORDER BY created_at DESC
-LIMIT $1 OFFSET $2;
-```
-
-### D. Audit Logging Queries
-
-```sql
--- name: CreateAuditLog :exec
-INSERT INTO audit_logs (
-    user_id,
-    action,
-    resource_type,
-    resource_id,
-    old_values,
-    new_values,
-    ip_address,
-    user_agent,
-    created_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW());
-
--- name: GetAuditLogsForResource :many
-SELECT user_id, action, old_values, new_values, created_at
-FROM audit_logs
-WHERE resource_type = $1 AND resource_id = $2
-ORDER BY created_at DESC
-LIMIT $3;
-```
-
-### E. Rate Limiting Support
-
-```sql
--- name: CountRecentLoginAttempts :one
-SELECT COUNT(*)
-FROM login_attempts
-WHERE email = $1
-  AND created_at > NOW() - INTERVAL '15 minutes'
-  AND success = false;
-
--- name: RecordLoginAttempt :exec
-INSERT INTO login_attempts (email, ip_address, success, created_at)
-VALUES ($1, $2, $3, NOW());
-```
-
-### F. Configuration Security
-
-```yaml
-# sqlc.yaml - Never commit database credentials
-version: "2"
-
-sql:
-  - engine: "postgresql"
-    queries: "db/queries/"
-    schema: "db/migrations/"
-    # Database URL comes from environment, not config
-    # database:
-    #   uri: "${DATABASE_URL}"  # If using sqlc cloud/managed
-    gen:
-      go:
-        package: "db"
-        out: "internal/db"
-```
+- **Go is first-class** and the primary target — `pgx/v5` or `database/sql`, generated `Queries` struct, `WithTx(tx)` for transactions, optional `Querier` interface for mocking. Apply [`go.md`](guides://go.md) to the hand-written code that consumes it.
+- **Other languages are codegen plugins**, not built-ins: `python` and `kotlin` ship as official plugins (sync/async queriers for Python; JDBC for Kotlin). Configure them as additional `gen` targets or via the WASM/process `plugins:` mechanism. Treat their output the same way — generated, never edited — and apply that language's guide to the wrapping code.
+- Don't dump per-language repository boilerplate into this guide; the pattern (wrap `Queries`, map driver errors to domain errors, expose a transaction helper) is identical across languages and the specifics belong to each language guide.
 
 ---
 
-## 8. CI/CD Pipeline Integration (MANDATORY)
+## 9. Integration with migrations
 
-### A. GitHub Actions Workflow
+sqlc does not run migrations — it **reads** them as the schema source of truth.
 
-```yaml
-# .github/workflows/sqlc.yml
-name: sqlc
-
-on:
-  push:
-    paths:
-      - 'db/**'
-      - 'sqlc.yaml'
-  pull_request:
-    paths:
-      - 'db/**'
-      - 'sqlc.yaml'
-
-jobs:
-  sqlc:
-    runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: test
-          POSTGRES_PASSWORD: test
-          POSTGRES_DB: test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install sqlc
-        run: |
-          curl -L https://github.com/sqlc-dev/sqlc/releases/download/v1.27.0/sqlc_1.27.0_linux_amd64.tar.gz | tar xz
-          sudo mv sqlc /usr/local/bin/
-
-      - name: Verify sqlc config
-        run: sqlc compile
-
-      - name: Lint SQL queries
-        run: sqlc vet
-
-      - name: Generate code
-        run: sqlc generate
-
-      - name: Check for uncommitted changes
-        run: |
-          if [ -n "$(git status --porcelain)" ]; then
-            echo "Generated code is out of date. Run 'sqlc generate' and commit."
-            git diff
-            exit 1
-          fi
-
-      - name: Run migrations
-        env:
-          DATABASE_URL: postgres://test:test@localhost:5432/test?sslmode=disable
-        run: |
-          # Using golang-migrate
-          curl -L https://github.com/golang-migrate/migrate/releases/download/v4.17.0/migrate.linux-amd64.tar.gz | tar xz
-          ./migrate -path db/migrations -database "$DATABASE_URL" up
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-
-      - name: Run tests
-        env:
-          DATABASE_URL: postgres://test:test@localhost:5432/test?sslmode=disable
-        run: go test -v ./internal/db/..
-```
-
-### B. GitLab CI Pipeline
-
-```yaml
-# .gitlab-ci.yml
-stages:
-  - validate
-  - generate
-  - test
-
-variables:
-  POSTGRES_DB: test
-  POSTGRES_USER: test
-  POSTGRES_PASSWORD: test
-  DATABASE_URL: "postgres://test:test@postgres:5432/test?sslmode=disable"
-
-sqlc-validate:
-  stage: validate
-  image: golang:1.22
-  before_script:
-    - curl -L https://github.com/sqlc-dev/sqlc/releases/download/v1.27.0/sqlc_1.27.0_linux_amd64.tar.gz | tar xz
-    - mv sqlc /usr/local/bin/
-  script:
-    - sqlc compile
-    - sqlc vet
-  only:
-    changes:
-      - db/**/*
-      - sqlc.yaml
-
-sqlc-generate:
-  stage: generate
-  image: golang:1.22
-  before_script:
-    - curl -L https://github.com/sqlc-dev/sqlc/releases/download/v1.27.0/sqlc_1.27.0_linux_amd64.tar.gz | tar xz
-    - mv sqlc /usr/local/bin/
-  script:
-    - sqlc generate
-    - |
-      if [ -n "$(git status --porcelain)" ]; then
-        echo "Generated code out of date"
-        exit 1
-      fi
-  only:
-    changes:
-      - db/**/*
-      - sqlc.yaml
-
-sqlc-test:
-  stage: test
-  image: golang:1.22
-  services:
-    - postgres:16
-  before_script:
-    - curl -L https://github.com/golang-migrate/migrate/releases/download/v4.17.0/migrate.linux-amd64.tar.gz | tar xz
-    - ./migrate -path db/migrations -database "$DATABASE_URL" up
-  script:
-    - go test -v -race ./internal/db/..
-  only:
-    changes:
-      - db/**/*
-      - sqlc.yaml
-```
-
-### C. Pre-commit Hook
-
-```yaml
-# .pre-commit-config.yaml
-repos:
-  - repo: local
-    hooks:
-      - id: sqlc-compile
-        name: sqlc compile
-        entry: sqlc compile
-        language: system
-        files: '(\.sql|sqlc\.yaml)$'
-        pass_filenames: false
-
-      - id: sqlc-vet
-        name: sqlc vet
-        entry: sqlc vet
-        language: system
-        files: '(\.sql|sqlc\.yaml)$'
-        pass_filenames: false
-
-      - id: sqlc-generate
-        name: sqlc generate
-        entry: bash -c 'sqlc generate && git add db/generated/'
-        language: system
-        files: '(\.sql|sqlc\.yaml)$'
-        pass_filenames: false
-```
-
-### D. Makefile Integration
-
-```makefile
-# Makefile
-
-.PHONY: sqlc-install sqlc-generate sqlc-vet sqlc-diff db-migrate db-rollback db-reset
-
-SQLC_VERSION := 1.27.0
-MIGRATE_VERSION := 4.17.0
-
-# Install sqlc
-sqlc-install:
-	@which sqlc > /dev/null || (curl -L https://github.com/sqlc-dev/sqlc/releases/download/v$(SQLC_VERSION)/sqlc_$(SQLC_VERSION)_$$(uname -s | tr '[:upper:]' '[:lower:]')_amd64.tar.gz | tar xz && sudo mv sqlc /usr/local/bin/)
-
-# Validate sqlc configuration
-sqlc-compile: sqlc-install
-	sqlc compile
-
-# Lint SQL queries
-sqlc-vet: sqlc-install
-	sqlc vet
-
-# Generate code from SQL
-sqlc-generate: sqlc-install
-	sqlc generate
-
-# Check if generated code is up to date
-sqlc-diff: sqlc-generate
-	@if [ -n "$$(git status --porcelain db/generated/)" ]; then \
-		echo "Generated code is out of date. Please commit the changes."; \
-		git diff db/generated/; \
-		exit 1; \
-	fi
-
-# Database migrations
-db-migrate:
-	migrate -path db/migrations -database "$(DATABASE_URL)" up
-
-db-rollback:
-	migrate -path db/migrations -database "$(DATABASE_URL)" down 1
-
-db-reset:
-	migrate -path db/migrations -database "$(DATABASE_URL)" drop -f
-	migrate -path db/migrations -database "$(DATABASE_URL)" up
-
-# Full validation
-validate: sqlc-compile sqlc-vet sqlc-diff
-	@echo "All validations passed"
-```
+- Point `schema:` at the migrations directory; sqlc applies the `*.up.sql` files in numeric order to build its catalog. Down-migrations are ignored by sqlc.
+- Because schema is just DDL, sqlc is migration-tool-agnostic (golang-migrate, Atlas, goose, Flyway). Pick one in `ci-cd.md`/the engine guide; sqlc only needs the resulting DDL.
+- Keep DDL and queries in lockstep: a column rename in a migration must be followed by `sqlc generate`, and CI's `sqlc diff` catches the case where someone forgot.
+- Engine-managed mode can apply the same migration DDL to the ephemeral vet database, so `sqlc/db-prepare` validates queries against the *current* schema.
 
 ---
 
-## 9. Testing Strategies (MANDATORY)
+## 10. CI/CD binding
 
-### A. Integration Test Setup (Go)
+Pipeline policy is owned by [`ci-cd.md`](guides://ci-cd.md). The sqlc gate, in order, is small and language-agnostic:
 
-```go
-// internal/db/db_test.go
-package db_test
-
-import (
-    "context"
-    "database/sql"
-    "os"
-    "testing"
-
-    "github.com/jackc/pgx/v5/pgxpool"
-    _ "github.com/jackc/pgx/v5/stdlib"
-    "github.com/testcontainers/testcontainers-go"
-    "github.com/testcontainers/testcontainers-go/modules/postgres"
-
-    "yourproject/internal/db"
-)
-
-var testDB *pgxpool.Pool
-var testQueries *db.Queries
-
-func TestMain(m *testing.M) {
-    ctx := context.Background()
-
-    // Start PostgreSQL container
-    pgContainer, err := postgres.Run(ctx,
-        "postgres:16",
-        postgres.WithDatabase("test"),
-        postgres.WithUsername("test"),
-        postgres.WithPassword("test"),
-        testcontainers.WithWaitStrategy(
-            wait.ForLog("database system is ready to accept connections").
-                WithOccurrence(2)),
-    )
-    if err != nil {
-        panic(err)
-    }
-    defer pgContainer.Terminate(ctx)
-
-    // Get connection string
-    connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
-    if err != nil {
-        panic(err)
-    }
-
-    // Run migrations
-    runMigrations(connStr)
-
-    // Create connection pool
-    testDB, err = pgxpool.New(ctx, connStr)
-    if err != nil {
-        panic(err)
-    }
-    defer testDB.Close()
-
-    testQueries = db.New(testDB)
-
-    os.Exit(m.Run())
-}
-
-func runMigrations(connStr string) {
-    sqlDB, _ := sql.Open("pgx", connStr)
-    defer sqlDB.Close()
-
-    m, _ := migrate.NewWithDatabaseInstance(
-        "file://../../db/migrations",
-        "postgres",
-        &pgmigrate.Postgres{},
-    )
-    m.Up()
-}
-
-// Helper to clean up test data
-func cleanupTestData(t *testing.T, ctx context.Context) {
-    t.Helper()
-    _, err := testDB.Exec(ctx, "TRUNCATE users, posts RESTART IDENTITY CASCADE")
-    if err != nil {
-        t.Fatalf("failed to cleanup: %v", err)
-    }
-}
+```bash
+sqlc compile && sqlc vet && sqlc diff   # parse, lint, drift-check — no codegen committed by CI
 ```
 
-### B. Query Tests (Go)
-
-```go
-// internal/db/users_test.go
-package db_test
-
-import (
-    "context"
-    "testing"
-    "time"
-
-    "github.com/stretchr/testify/assert"
-    "github.com/stretchr/testify/require"
-
-    "yourproject/internal/db"
-)
-
-func TestCreateUser(t *testing.T) {
-    ctx := context.Background()
-    cleanupTestData(t, ctx)
-
-    user, err := testQueries.CreateUser(ctx, db.CreateUserParams{
-        Email:        "test@example.com",
-        Name:         "Test User",
-        PasswordHash: "hashed_password",
-    })
-
-    require.NoError(t, err)
-    assert.NotEmpty(t, user.ID)
-    assert.Equal(t, "test@example.com", user.Email)
-    assert.Equal(t, "Test User", user.Name)
-    assert.WithinDuration(t, time.Now(), user.CreatedAt, time.Second)
-}
-
-func TestGetUserByID(t *testing.T) {
-    ctx := context.Background()
-    cleanupTestData(t, ctx)
-
-    // Create user first
-    created, err := testQueries.CreateUser(ctx, db.CreateUserParams{
-        Email:        "test@example.com",
-        Name:         "Test User",
-        PasswordHash: "hashed_password",
-    })
-    require.NoError(t, err)
-
-    // Retrieve user
-    user, err := testQueries.GetUserByID(ctx, created.ID)
-    require.NoError(t, err)
-    assert.Equal(t, created.ID, user.ID)
-    assert.Equal(t, created.Email, user.Email)
-}
-
-func TestGetUserByID_NotFound(t *testing.T) {
-    ctx := context.Background()
-    cleanupTestData(t, ctx)
-
-    _, err := testQueries.GetUserByID(ctx, "00000000-0000-0000-0000-000000000000")
-    assert.ErrorIs(t, err, pgx.ErrNoRows)
-}
-
-func TestListUsers_Pagination(t *testing.T) {
-    ctx := context.Background()
-    cleanupTestData(t, ctx)
-
-    // Create multiple users
-    for i := 0; i < 15; i++ {
-        _, err := testQueries.CreateUser(ctx, db.CreateUserParams{
-            Email:        fmt.Sprintf("user%d@example.com", i),
-            Name:         fmt.Sprintf("User %d", i),
-            PasswordHash: "hash",
-        })
-        require.NoError(t, err)
-    }
-
-    // Test pagination
-    page1, err := testQueries.ListUsers(ctx, db.ListUsersParams{Limit: 10, Offset: 0})
-    require.NoError(t, err)
-    assert.Len(t, page1, 10)
-
-    page2, err := testQueries.ListUsers(ctx, db.ListUsersParams{Limit: 10, Offset: 10})
-    require.NoError(t, err)
-    assert.Len(t, page2, 5)
-}
-
-func TestUpdateUser_Concurrent(t *testing.T) {
-    ctx := context.Background()
-    cleanupTestData(t, ctx)
-
-    user, _ := testQueries.CreateUser(ctx, db.CreateUserParams{
-        Email: "test@example.com", Name: "Test", PasswordHash: "hash",
-    })
-
-    // Test optimistic concurrency handling
-    tx1, _ := testDB.Begin(ctx)
-    tx2, _ := testDB.Begin(ctx)
-
-    q1 := testQueries.WithTx(tx1)
-    q2 := testQueries.WithTx(tx2)
-
-    // Both transactions read the same user
-    _, _ = q1.GetUserForUpdate(ctx, user.ID)
-    _, _ = q2.GetUserForUpdate(ctx, user.ID) // This will block
-
-    // First update succeeds
-    _, err1 := q1.UpdateUser(ctx, db.UpdateUserParams{ID: user.ID, Name: "Updated 1"})
-    require.NoError(t, err1)
-    tx1.Commit(ctx)
-
-    // Second update should succeed after first commits
-    _, err2 := q2.UpdateUser(ctx, db.UpdateUserParams{ID: user.ID, Name: "Updated 2"})
-    require.NoError(t, err2)
-    tx2.Commit(ctx)
-}
-```
-
-### C. Transaction Testing (Go)
-
-```go
-// internal/db/transactions_test.go
-package db_test
-
-func TestTransferBalance(t *testing.T) {
-    ctx := context.Background()
-    cleanupTestData(t, ctx)
-
-    // Create two users with balance
-    user1, _ := testQueries.CreateUser(ctx, db.CreateUserParams{...})
-    user2, _ := testQueries.CreateUser(ctx, db.CreateUserParams{...})
-
-    // Set initial balances
-    testQueries.UpdateUserBalance(ctx, db.UpdateUserBalanceParams{
-        ID: user1.ID, Balance: 100,
-    })
-    testQueries.UpdateUserBalance(ctx, db.UpdateUserBalanceParams{
-        ID: user2.ID, Balance: 50,
-    })
-
-    // Transfer in transaction
-    tx, err := testDB.Begin(ctx)
-    require.NoError(t, err)
-    defer tx.Rollback(ctx)
-
-    qtx := testQueries.WithTx(tx)
-
-    // Lock both rows
-    from, err := qtx.GetUserForUpdate(ctx, user1.ID)
-    require.NoError(t, err)
-    to, err := qtx.GetUserForUpdate(ctx, user2.ID)
-    require.NoError(t, err)
-
-    transferAmount := int64(30)
-
-    // Validate sufficient balance
-    require.GreaterOrEqual(t, from.Balance, transferAmount)
-
-    // Perform transfer
-    err = qtx.UpdateUserBalance(ctx, db.UpdateUserBalanceParams{
-        ID: user1.ID, Balance: from.Balance - transferAmount,
-    })
-    require.NoError(t, err)
-
-    err = qtx.UpdateUserBalance(ctx, db.UpdateUserBalanceParams{
-        ID: user2.ID, Balance: to.Balance + transferAmount,
-    })
-    require.NoError(t, err)
-
-    err = tx.Commit(ctx)
-    require.NoError(t, err)
-
-    // Verify final balances
-    finalFrom, _ := testQueries.GetUserByID(ctx, user1.ID)
-    finalTo, _ := testQueries.GetUserByID(ctx, user2.ID)
-
-    assert.Equal(t, int64(70), finalFrom.Balance)
-    assert.Equal(t, int64(80), finalTo.Balance)
-}
-```
+- Pin the sqlc version (`tools:` here is 1.27+); install from the GitHub release or `go install ...@vX`.
+- Run the gate on changes to `db/**` and `sqlc.yaml`.
+- `sqlc diff` replaces the older "regenerate then `git status --porcelain`" dance: it fails the build on drift without writing files.
+- Add `sqlc/db-prepare` under `rules:` with `database.managed: true` (or a CI service container) so vet validates every query against a live engine.
+- A pre-commit hook running `sqlc compile && sqlc vet` (see `pre-commit.md`) catches errors before push.
 
 ---
 
-## 10. Language-Specific Patterns
+## 11. Performance binding
 
-### A. Go (Primary Support)
+Policy is owned by [`performance.md`](guides://performance.md); query/index tuning by the engine guides. sqlc levers:
 
-```go
-// internal/repository/user_repository.go
-package repository
-
-import (
-    "context"
-    "errors"
-    "fmt"
-
-    "github.com/jackc/pgx/v5"
-    "github.com/jackc/pgx/v5/pgxpool"
-
-    "yourproject/internal/db"
-)
-
-var (
-    ErrUserNotFound = errors.New("user not found")
-    ErrEmailExists  = errors.New("email already exists")
-)
-
-type UserRepository struct {
-    pool    *pgxpool.Pool
-    queries *db.Queries
-}
-
-func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
-    return &UserRepository{
-        pool:    pool,
-        queries: db.New(pool),
-    }
-}
-
-func (r *UserRepository) GetByID(ctx context.Context, id string) (*db.User, error) {
-    user, err := r.queries.GetUserByID(ctx, id)
-    if err != nil {
-        if errors.Is(err, pgx.ErrNoRows) {
-            return nil, ErrUserNotFound
-        }
-        return nil, fmt.Errorf("get user by id: %w", err)
-    }
-    return &user, nil
-}
-
-func (r *UserRepository) Create(ctx context.Context, params db.CreateUserParams) (*db.User, error) {
-    user, err := r.queries.CreateUser(ctx, params)
-    if err != nil {
-        // Check for unique violation
-        var pgErr *pgconn.PgError
-        if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-            return nil, ErrEmailExists
-        }
-        return nil, fmt.Errorf("create user: %w", err)
-    }
-    return &user, nil
-}
-
-// Transaction example
-func (r *UserRepository) TransferWithTx(ctx context.Context, fn func(*db.Queries) error) error {
-    tx, err := r.pool.Begin(ctx)
-    if err != nil {
-        return fmt.Errorf("begin transaction: %w", err)
-    }
-    defer tx.Rollback(ctx)
-
-    qtx := r.queries.WithTx(tx)
-    if err := fn(qtx); err != nil {
-        return err
-    }
-
-    return tx.Commit(ctx)
-}
-```
-
-### B. Python
-
-```python
-# src/db/repository.py
-from dataclasses import dataclass
-from typing import Optional
-import asyncpg
-
-from .query import AsyncQuerier, CreateUserParams, User
-
-class UserNotFoundError(Exception):
-    pass
-
-class EmailExistsError(Exception):
-    pass
-
-@dataclass
-class UserRepository:
-    pool: asyncpg.Pool
-
-    @property
-    def queries(self) -> AsyncQuerier:
-        return AsyncQuerier(self.pool)
-
-    async def get_by_id(self, user_id: str) -> User:
-        user = await self.queries.get_user_by_id(id=user_id)
-        if user is None:
-            raise UserNotFoundError(f"User {user_id} not found")
-        return user
-
-    async def create(self, params: CreateUserParams) -> User:
-        try:
-            return await self.queries.create_user(params)
-        except asyncpg.UniqueViolationError:
-            raise EmailExistsError(f"Email {params.email} already exists")
-
-    async def list_users(self, limit: int = 10, offset: int = 0) -> list[User]:
-        return await self.queries.list_users(limit=limit, offset=offset)
-
-    async def with_transaction(self, fn):
-        async with self.pool.acquire() as conn:
-            async with conn.transaction():
-                tx_queries = AsyncQuerier(conn)
-                return await fn(tx_queries)
-```
-
-### C. TypeScript
-
-```typescript
-// src/db/repository.ts
-import { Pool, PoolClient } from 'pg';
-import * as db from './query';
-
-export class UserNotFoundError extends Error {
-  constructor(id: string) {
-    super(`User ${id} not found`);
-    this.name = 'UserNotFoundError';
-  }
-}
-
-export class EmailExistsError extends Error {
-  constructor(email: string) {
-    super(`Email ${email} already exists`);
-    this.name = 'EmailExistsError';
-  }
-}
-
-export class UserRepository {
-  constructor(private pool: Pool) {}
-
-  async getById(id: string): Promise<db.User> {
-    const user = await db.getUserByID(this.pool, { id });
-    if (!user) {
-      throw new UserNotFoundError(id);
-    }
-    return user;
-  }
-
-  async create(params: db.CreateUserParams): Promise<db.User> {
-    try {
-      return await db.createUser(this.pool, params);
-    } catch (err: any) {
-      if (err.code === '23505') {
-        throw new EmailExistsError(params.email);
-      }
-      throw err;
-    }
-  }
-
-  async withTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      const result = await fn(client);
-      await client.query('COMMIT');
-      return result;
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
-  }
-}
-```
-
-### D. Kotlin
-
-```kotlin
-// src/main/kotlin/db/UserRepository.kt
-package com.example.db
-
-import java.sql.Connection
-import java.sql.SQLException
-import javax.sql.DataSource
-
-class UserNotFoundException(id: String) : Exception("User $id not found")
-class EmailExistsException(email: String) : Exception("Email $email already exists")
-
-class UserRepository(private val dataSource: DataSource) {
-
-    private val queries: Queries
-        get() = Queries(dataSource.connection)
-
-    fun getById(id: String): User {
-        return queries.getUserByID(id)
-            ?: throw UserNotFoundException(id)
-    }
-
-    fun create(params: CreateUserParams): User {
-        return try {
-            queries.createUser(params)
-        } catch (e: SQLException) {
-            if (e.sqlState == "23505") {
-                throw EmailExistsException(params.email)
-            }
-            throw e
-        }
-    }
-
-    fun <T> withTransaction(block: (Queries) -> T): T {
-        val conn = dataSource.connection
-        return try {
-            conn.autoCommit = false
-            val txQueries = Queries(conn)
-            val result = block(txQueries)
-            conn.commit()
-            result
-        } catch (e: Exception) {
-            conn.rollback()
-            throw e
-        } finally {
-            conn.autoCommit = true
-            conn.close()
-        }
-    }
-}
-```
+- **Prepared queries**: `emit_prepared_queries: true` (or `db.Prepare(ctx, conn)`) caches statements at startup — fewer parse/plan round-trips on hot paths.
+- **Batching / COPY**: `:copyfrom` uses PG `COPY` for bulk insert; `:batchexec`/`:batchone`/`:batchmany` pipeline statements over a single pgx round-trip. Reach for these instead of looping single inserts.
+- **Connection pooling** (`pgxpool`) and index/keyset-pagination design are engine concerns — bind sqlc queries to them (e.g. keyset `WHERE (created_at, id) < ($1,$2)`), don't re-document pooling here.
 
 ---
 
-## 11. Error Handling Patterns (MANDATORY)
+## 12. Testing binding
 
-### A. Database Error Classification
+Test-first (Red-Green-Refactor) and regression-test-before-fix are owned by [`tdd.md`](guides://tdd.md). sqlc specifics:
 
-```go
-// internal/db/errors.go
-package db
-
-import (
-    "errors"
-
-    "github.com/jackc/pgx/v5"
-    "github.com/jackc/pgx/v5/pgconn"
-)
-
-// Sentinel errors
-var (
-    ErrNotFound       = errors.New("record not found")
-    ErrDuplicate      = errors.New("duplicate record")
-    ErrForeignKey     = errors.New("foreign key violation")
-    ErrCheckViolation = errors.New("check constraint violation")
-    ErrConnection     = errors.New("database connection error")
-)
-
-// PostgreSQL error codes
-const (
-    PgUniqueViolation     = "23505"
-    PgForeignKeyViolation = "23503"
-    PgCheckViolation      = "23514"
-    PgNotNullViolation    = "23502"
-)
-
-// WrapError converts database errors to domain errors
-func WrapError(err error) error {
-    if err == nil {
-        return nil
-    }
-
-    if errors.Is(err, pgx.ErrNoRows) {
-        return ErrNotFound
-    }
-
-    var pgErr *pgconn.PgError
-    if errors.As(err, &pgErr) {
-        switch pgErr.Code {
-        case PgUniqueViolation:
-            return fmt.Errorf("%w: %s", ErrDuplicate, pgErr.Detail)
-        case PgForeignKeyViolation:
-            return fmt.Errorf("%w: %s", ErrForeignKey, pgErr.Detail)
-        case PgCheckViolation:
-            return fmt.Errorf("%w: %s", ErrCheckViolation, pgErr.Detail)
-        }
-    }
-
-    return err
-}
-```
-
-### B. Retry Logic for Transient Errors
-
-```go
-// internal/db/retry.go
-package db
-
-import (
-    "context"
-    "time"
-
-    "github.com/jackc/pgx/v5/pgconn"
-)
-
-func isRetryable(err error) bool {
-    var pgErr *pgconn.PgError
-    if errors.As(err, &pgErr) {
-        // Serialization failure, deadlock detected
-        return pgErr.Code == "40001" || pgErr.Code == "40P01"
-    }
-    return false
-}
-
-func WithRetry[T any](ctx context.Context, maxRetries int, fn func() (T, error)) (T, error) {
-    var result T
-    var err error
-
-    for attempt := 0; attempt <= maxRetries; attempt++ {
-        result, err = fn()
-        if err == nil {
-            return result, nil
-        }
-
-        if !isRetryable(err) {
-            return result, err
-        }
-
-        // Exponential backoff
-        backoff := time.Duration(1<<attempt) * 10 * time.Millisecond
-        select {
-        case <-ctx.Done():
-            return result, ctx.Err()
-        case <-time.After(backoff):
-        }
-    }
-
-    return result, fmt.Errorf("max retries exceeded: %w", err)
-}
-```
+- Test **against the generated code**, never against hand-written SQL strings, and never hand-edit the output to make a test pass.
+- Use a **real engine** — `testcontainers-go` or a CI service container — not mocks; sqlc's value is real-schema validation. Apply migrations, then `db.New(pool)`.
+- Cover both `:one` (incl. not-found → `pgx.ErrNoRows`/`sql.ErrNoRows`) and `:many` paths, and NULL columns (the classic `sql.NullString` vs panic regression).
+- Re-run `sqlc generate` in CI so SQL and generated code can't silently diverge (this is also `SQLC-GEN-01`).
+- Driver-error → domain-error mapping (unique-violation `23505`, etc.) lives in the repository layer and follows [`error-handling.md`](guides://error-handling.md).
 
 ---
 
-## 12. Performance Optimization
+## 13. Quick Reference
 
-### A. Prepared Statements
-
-```yaml
-# sqlc.yaml - Enable prepared statements
-sql:
-  - engine: "postgresql"
-    gen:
-      go:
-        emit_prepared_queries: true
+```bash
+sqlc init        # scaffold sqlc.yaml
+sqlc compile     # parse queries vs schema (no output)   SQLC-CMP-01
+sqlc vet         # lint / db-prepare                      SQLC-VET-01
+sqlc generate    # write generated code
+sqlc diff        # fail on drift vs committed output      SQLC-GEN-01
+sqlc version
 ```
 
-```go
-// Usage with prepared statements
-func main() {
-    pool, _ := pgxpool.New(ctx, connStr)
-
-    // Prepare all queries at startup
-    queries, err := db.Prepare(ctx, pool)
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    // Use prepared queries
-    user, err := queries.GetUserByID(ctx, userID)
-}
-```
-
-### B. Batch Operations
-
-```sql
--- name: BatchCreateUsers :batchexec
-INSERT INTO users (email, name, password_hash)
-VALUES ($1, $2, $3);
-
--- name: BatchGetUsers :batchmany
-SELECT id, email, name FROM users WHERE id = $1;
-```
-
-```go
-// Using batch operations
-func (r *UserRepository) CreateBatch(ctx context.Context, users []CreateUserParams) error {
-    batch := &pgx.Batch{}
-
-    for _, u := range users {
-        r.queries.BatchCreateUsers(batch, u)
-    }
-
-    results := r.pool.SendBatch(ctx, batch)
-    defer results.Close()
-
-    for range users {
-        if _, err := results.Exec(); err != nil {
-            return err
-        }
-    }
-
-    return nil
-}
-```
-
-### C. Connection Pooling Configuration
-
-```go
-// Connection pool configuration
-config, _ := pgxpool.ParseConfig(connStr)
-config.MaxConns = 25
-config.MinConns = 5
-config.MaxConnLifetime = time.Hour
-config.MaxConnIdleTime = 30 * time.Minute
-config.HealthCheckPeriod = time.Minute
-
-pool, _ := pgxpool.NewWithConfig(ctx, config)
-```
-
-### D. Query Optimization Tips
-
-```sql
--- Use covering indexes for common queries
--- name: GetUserEmailOnly :one
-SELECT email FROM users WHERE id = $1;
--- Index: CREATE INDEX idx_users_id_email ON users(id) INCLUDE (email);
-
--- Use EXISTS instead of COUNT for existence checks
--- name: UserExists :one
-SELECT EXISTS(SELECT 1 FROM users WHERE email = $1);
-
--- Limit columns in SELECT
--- WRONG: SELECT * FROM users WHERE id = $1;
--- CORRECT:
--- name: GetUserBasic :one
-SELECT id, email, name FROM users WHERE id = $1;
-
--- Use keyset pagination for large datasets
--- name: ListUsersAfter :many
-SELECT id, email, name, created_at
-FROM users
-WHERE created_at < $1 OR (created_at = $1 AND id < $2)
-ORDER BY created_at DESC, id DESC
-LIMIT $3;
-```
-
----
-
-## 13. Migrations Best Practices
-
-### A. Migration Naming Convention
-
-```
-NNNNNN_description.{up|down}.sql
-
-Examples:
-000001_create_users_table.up.sql
-000001_create_users_table.down.sql
-000002_add_user_status.up.sql
-000002_add_user_status.down.sql
-000003_create_posts_table.up.sql
-000003_create_posts_table.down.sql
-```
-
-### B. Safe Migration Patterns
-
-```sql
--- 000004_add_user_phone.up.sql
--- SAFE: Adding nullable column
-ALTER TABLE users ADD COLUMN phone VARCHAR(20);
-
--- 000004_add_user_phone.down.sql
-ALTER TABLE users DROP COLUMN phone;
-```
-
-```sql
--- 000005_add_phone_index.up.sql
--- SAFE: Create index concurrently (PostgreSQL)
-CREATE INDEX CONCURRENTLY idx_users_phone ON users(phone);
-
--- 000005_add_phone_index.down.sql
-DROP INDEX CONCURRENTLY idx_users_phone;
-```
-
-```sql
--- 000006_rename_column.up.sql
--- CAREFUL: Renaming requires application coordination
--- Step 1: Add new column
-ALTER TABLE users ADD COLUMN display_name VARCHAR(255);
--- Step 2: Copy data (run as separate migration after app update)
-UPDATE users SET display_name = name WHERE display_name IS NULL;
--- Step 3: Drop old column (run after app fully migrated)
--- ALTER TABLE users DROP COLUMN name;
-```
-
-### C. Data Migration Pattern
-
-```sql
--- 000007_backfill_user_slugs.up.sql
--- Backfill in batches to avoid locking
-DO $$
-DECLARE
-    batch_size INT := 1000;
-    affected INT := 1;
-BEGIN
-    WHILE affected > 0 LOOP
-        UPDATE users
-        SET slug = lower(replace(name, ' ', '-'))
-        WHERE id IN (
-            SELECT id FROM users
-            WHERE slug IS NULL
-            LIMIT batch_size
-            FOR UPDATE SKIP LOCKED
-        );
-        GET DIAGNOSTICS affected = ROW_COUNT;
-        COMMIT;
-    END LOOP;
-END $$;
-```
+| Concern | sqlc construct |
+|---------|----------------|
+| Return shape | `:one` `:many` `:exec` `:execrows` `:execresult` `:copyfrom` `:batch*` |
+| Required named param | `sqlc.arg('x')` |
+| Optional/nullable param | `sqlc.narg('x')` |
+| `IN (...)` from a slice | `sqlc.slice('ids')` |
+| Nest a table in a join | `sqlc.embed(t)` |
+| NULL → pointer | `emit_pointers_for_null_types: true` |
+| Type remap | `overrides: [{ db_type, go_type }]` |
 
 ---
 
 ## 14. Deployment Checklist
 
-### Pre-Deployment
+Generated from §2 — one box per requirement ID.
 
-- [ ] All SQL queries pass `sqlc compile`
-- [ ] All queries pass `sqlc vet` with no warnings
-- [ ] Generated code is committed and up to date
-- [ ] All database tests pass against test database
-- [ ] Migrations tested in staging environment
-- [ ] Rollback migrations verified
-- [ ] No breaking schema changes without migration plan
-- [ ] Connection pool settings reviewed for production load
-
-### Deployment
-
-- [ ] Run migrations before deploying new application code
-- [ ] Verify migration status: `migrate version`
-- [ ] Monitor database connections during rollout
-- [ ] Verify query performance in production
-
-### Post-Deployment
-
-- [ ] Monitor slow query logs
-- [ ] Verify no connection pool exhaustion
-- [ ] Check for lock contention
-- [ ] Validate data integrity
+- [ ] SQLC-CFG-01 — `sqlc.yaml` is `version: "2"`
+- [ ] SQLC-CMP-01 — `sqlc compile` clean
+- [ ] SQLC-VET-01 — `sqlc vet` clean (db-prepare passes if managed)
+- [ ] SQLC-GEN-01 — `sqlc diff` shows no drift; generated code committed
+- [ ] SQLC-GEN-02 — no hand-edits to generated output
+- [ ] SQLC-ANN-01 — every query annotated `-- name: X :cmd`
+- [ ] SQLC-TYP-01 — nullable columns map to NULL-safe types, no panics
+- [ ] SQLC-SEC-01 — parameterized only, no secret-leaking `SELECT *` (see `secure-coding.md`)
+- [ ] SQLC-OUT-01 — output builds in the target language
+- [ ] SQLC-TST-01 — queries tested against a real engine (see `tdd.md`)
+- [ ] Agent ran every §3 command and documented any fixes
 
 ---
-
-## 15. Quick Reference
-
-### Common Commands
-
-```bash
-# Install sqlc
-go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
-# or
-brew install sqlc
-
-# Validate configuration
-sqlc compile
-
-# Lint queries
-sqlc vet
-
-# Generate code
-sqlc generate
-
-# View sqlc version
-sqlc version
-
-# Initialize new project
-sqlc init
-```
-
-### Query Annotation Cheatsheet
-
-| Annotation | Returns | Use Case |
-|------------|---------|----------|
-| `:one` | Single row | Get by ID, unique lookups |
-| `:many` | Slice/List | List queries, search |
-| `:exec` | Nothing | DELETE, UPDATE (no return) |
-| `:execrows` | Row count | Bulk updates, deletes |
-| `:execresult` | Full result | Need lastInsertId |
-| `:copyfrom` | Nothing | Bulk insert (PostgreSQL) |
-| `:batchone` | One per batch | Batch lookups |
-| `:batchmany` | Many per batch | Batch queries |
-| `:batchexec` | Nothing | Batch inserts/updates |
-
-### Parameter Syntax
-
-| Database | Positional | Named (sqlc) |
-|----------|------------|--------------|
-| PostgreSQL | `$1, $2, $3` | `sqlc.arg('name')` |
-| MySQL | `?, ?, ?` | `sqlc.arg('name')` |
-| SQLite | `?, ?, ?` | `sqlc.arg('name')` |
-
-### Nullable Parameters
-
-```sql
--- Optional parameter with sqlc.narg
-WHERE (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
-
--- Required parameter with sqlc.arg
-WHERE id = sqlc.arg('id')
-```
-
-### Type Overrides Reference
-
-```yaml
-overrides:
-  # PostgreSQL
-  - db_type: "uuid"
-    go_type: "github.com/google/uuid.UUID"
-  - db_type: "timestamptz"
-    go_type: "time.Time"
-  - db_type: "jsonb"
-    go_type: "json.RawMessage"
-  - db_type: "citext"
-    go_type: "string"
-  - db_type: "inet"
-    go_type: "netip.Addr"
-
-  # Nullable handling
-  - db_type: "pg_catalog.int4"
-    nullable: true
-    go_type:
-      type: "int32"
-      pointer: true
-```
-
----
-
-## 16. Why This Configuration Works
-
-**Compile-Time SQL Validation**:
-- SQL queries are parsed and validated against the actual database schema at code generation time, catching syntax errors, type mismatches, and missing columns before runtime.
-
-**Zero Runtime Overhead**:
-- Generated code is plain Go (or Python/TypeScript) with direct database driver calls, providing the same performance as hand-written database code without reflection or runtime query building.
-
-**Type-Safe Query Results**:
-- Each query generates a dedicated struct with correctly typed fields, eliminating `interface{}` assertions, `sql.Scan` ordering bugs, and nil pointer issues from nullable columns.
-
-**SQL as the Source of Truth**:
-- Writing standard SQL rather than an ORM abstraction means developers leverage full database capabilities (window functions, CTEs, lateral joins) with exact control over generated queries.
-
-**Seamless CI Integration**:
-- Running `sqlc vet` and `sqlc diff` in CI pipelines ensures schema and query consistency across the team, preventing drift between SQL files and generated code.
-
----
-
-## 17. Related Guidelines
-
-- [SQL Guidelines](sql.md) - General SQL best practices
-- [PostgreSQL Guidelines](postgresql.md) - PostgreSQL-specific patterns
-- [Go Guidelines](go.md) - Go language best practices
-- [Python Guidelines](python.md) - Python development standards
-- [TypeScript Guidelines](typescript.md) - TypeScript patterns
-- [Testing Guidelines](testing.md) - Testing strategies
-- [CI/CD Guidelines](ci-cd.md) - Pipeline configuration
-- [Secure Coding Guidelines](secure-coding.md) - Security practices
-
----
-
-**End of sqlc Development Guidelines**
+**End of sqlc Guidelines**

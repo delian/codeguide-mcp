@@ -1,1256 +1,347 @@
 # iOS Development Guidelines
-Mandatory standards for building native iOS applications using Swift and SwiftUI. Xcode 15+, Swift 5.9+, SwiftUI, Swift Concurrency, SwiftData, SPM.
+Mandatory standards for native iOS apps: SwiftUI-first, Observation-driven, concurrency-safe, HIG-compliant. iOS 18 SDK, Xcode 16, Swift 6, SwiftUI, Observation, SwiftData, Swift Testing.
+
+---
+name: ios
+title: iOS Development Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: framework
+tools: [ios@18, xcode@16, swift@6.0, swiftui, observation, swiftdata, swift-testing, xcuitest, swiftpm]
+requires:
+  - swift
+  - tdd
+  - secure-coding
+recommends:
+  - accessibility
+  - performance
+  - ui
+  - oauth
+  - observability
+provides:
+  - swiftui
+  - ios-observation
+  - swiftui-navigation
+  - ios-lifecycle
+  - swiftdata
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide covers only what is unique to the **Apple-platform UI layer**. The Swift language itself (value types, optionals, concurrency primitives, ARC, `throws`/`Result`) is owned by [`swift.md`](guides://swift.md) and is **not** repeated here.
 
 ---
 
-**Agent Profile**: The iOS Expert
-**Role**: Senior iOS Developer & Apple Platform Architect
-**Objective**: Generate polished, performant iOS applications following Apple's Human Interface Guidelines and Swift best practices.
-**Tools**: Xcode 15+, Swift 5.9+, SwiftUI, Swift Concurrency, SwiftData, SPM.
+## 0. Prerequisites & References
+
+Fetch and apply these **before** generating iOS code. Their rules are assumed below and not repeated.
+
+> 📎 **REQUIRED — fetch & apply first:**
+> - [`swift.md`](guides://swift.md) — the language: value types, optionals, protocol-oriented design, `async`/`await`/actors, ARC, error handling. *(This guide builds on it; it does not restate it.)*
+> - [`tdd.md`](guides://tdd.md) — test-first, Red-Green-Refactor, regression-test-before-fix. *(iOS binding: unit/integration via **Swift Testing** (`@Test`/`#expect`) or XCTest; UI flows via **XCUITest**; run with `xcodebuild test` / Cmd+U.)*
+> - [`secure-coding.md`](guides://secure-coding.md) — secrets, supply chain, CVE policy. *(iOS binding: **Keychain** for all secrets, **ATS** enforced, **PrivacyInfo.xcprivacy** manifest, `Package.resolved` committed — §6.)*
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`ui.md`](guides://ui.md) — UX & Apple Human Interface Guidelines (HIG); this guide supplies only the SwiftUI binding.
+> - [`accessibility.md`](guides://accessibility.md) — a11y policy *(binding: `.accessibilityLabel`/`Value`/`Hint`/`Element`, Dynamic Type, VoiceOver — §5.G)*
+> - [`oauth.md`](guides://oauth.md) — auth flows *(binding: Sign in with Apple / `ASWebAuthenticationSession`, tokens in Keychain)*
+> - [`performance.md`](guides://performance.md) — perf policy *(binding: Instruments, lazy lists, image caching — §5.F)*
+> - [`observability.md`](guides://observability.md) — *(binding: `OSLog`/`Logger`, MetricKit, signposts)*
+
+> 📎 **SEE ALSO:** [`android.md`](guides://android.md) · [`react-native.md`](guides://react-native.md) · [`flutter.md`](guides://flutter.md) *(only if the project is cross-platform)*
 
 ---
 
 ## 1. Core Philosophies: IOS-FIRST
 
-**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
-**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+iOS-UI-specific principles only. TDD, security, and language idioms come from §0.
 
-- **I**ntuitive: Follow Apple's Human Interface Guidelines
-- **O**ptimized: Leverage native APIs for best performance
-- **S**wifty: Use modern Swift patterns and conventions
+- **I**ntuitive: follow Apple's HIG (owned by `ui.md`); embrace platform conventions, SF Symbols, and standard controls over bespoke UI.
+- **O**bservation-driven: state flows through the **Observation** framework (`@Observable`, `@State`, `@Binding`, `@Environment`) — never the legacy `ObservableObject`/`@Published`/`@StateObject` stack in new code.
+- **S**wiftUI-first: SwiftUI is the default for all new screens. UIKit appears only as deliberate, isolated interop (§5.D), never as the primary UI.
+- **F**ine-grained & native: prefer first-party frameworks (SwiftData, NavigationStack, `.task`, AsyncImage) over third-party equivalents; let Observation re-render only what changed.
+- **I**solation-safe: UI state is `@MainActor`; async work is structured (`.task`, `async let`, task groups — see `swift.md`); the app builds clean under **Swift 6 strict concurrency**.
+- **R**eachable to all: every interactive view is accessible (Dynamic Type, VoiceOver labels) — policy in `accessibility.md`.
+- **S**ecure by default: secrets in Keychain, ATS on, privacy manifest present — policy in `secure-coding.md`.
+
+**Verified Code**: Agent-generated iOS code MUST pass every gate in §2 before delivery.
 
 ---
 
-## 2. Project Structure (MANDATORY)
+## 2. Requirements (MANDATORY, auditable)
 
-### A. Directory Layout
+RFC-2119 keywords. IDs `IOS-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a shared rule cite its owner.
+
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| IOS-TST-01 | Every feature MUST be test-first (see `tdd.md`) | `xcodebuild test -scheme App` | exit 0, 0 skips |
+| IOS-TST-02 | Each bug MUST get a regression test before the fix (see `tdd.md`) | `xcodebuild test` | failing→passing |
+| IOS-TST-03 | Critical user flows MUST have a XCUITest (see `tdd.md`) | `xcodebuild test -only-testing:AppUITests` | exit 0 |
+| IOS-FMT-01 | Code MUST be formatted (see `swift.md`) | `swiftformat --lint .` | no diff |
+| IOS-LINT-01 | Linter MUST pass clean (see `swift.md`) | `swiftlint --strict` | 0 violations |
+| IOS-CONC-01 | App MUST build under Swift 6 strict concurrency; UI state on `@MainActor` | `xcodebuild -strict-concurrency=complete` | exit 0, 0 warnings |
+| IOS-STATE-01 | New view models MUST use `@Observable`, not `ObservableObject` | review / grep `ObservableObject` | none in new code |
+| IOS-NAV-01 | Navigation MUST use `NavigationStack` (not deprecated `NavigationView`) | grep `NavigationView` | none |
+| IOS-A11Y-01 | Interactive views MUST be accessible (see `accessibility.md`) | Accessibility Inspector / audit | 0 critical issues |
+| IOS-SEC-01 | Secrets MUST live in Keychain, never UserDefaults/source (see `secure-coding.md`) | grep secrets / review | none leaked |
+| IOS-SEC-02 | ATS MUST stay enabled; HTTPS only (see `secure-coding.md`) | inspect `Info.plist` | no global ATS exception |
+| IOS-SEC-03 | App MUST ship a `PrivacyInfo.xcprivacy` manifest (see `secure-coding.md`) | check bundle | manifest present |
+| IOS-DEP-01 | `Package.resolved` committed & in sync (see `secure-coding.md`) | `swift package resolve` + `git diff` | no diff |
+| IOS-SEC-04 | 0 high/critical CVEs in deps (see `secure-coding.md`) | `snyk test` / OWASP DC | 0 high/critical |
+
+> **Forbidden**: shipping implementation before its test (violates `tdd.md`); `NavigationView`/`ObservableObject`/`@StateObject` in new code; force-unwraps in production paths (see `swift.md`); disabling ATS globally; storing tokens in `UserDefaults` or `Info.plist`; blocking the main actor with synchronous I/O.
+
+---
+
+## 3. Verification Protocol
+
+Run, in order, before presenting code. Fix → re-run until every gate is green.
+
+```bash
+swiftformat --lint .                              # IOS-FMT-01
+swiftlint --strict                                # IOS-LINT-01
+xcodebuild build -scheme App \
+  OTHER_SWIFT_FLAGS="-strict-concurrency=complete" # IOS-CONC-01
+xcodebuild test -scheme App \
+  -destination 'platform=iOS Simulator,name=iPhone 16' # IOS-TST-01/02/03
+swift package resolve && git diff --exit-code Package.resolved # IOS-DEP-01
+snyk test                                         # IOS-SEC-04
+```
+
+The *why* behind each gate lives in its §0 owner; do not re-derive it here.
+
+---
+
+## 4. Project Structure
+
+Feature-grouped layout. Architectural *principles* (dependency direction, testable boundaries) come from `swift.md`/architecture guides; below is only their iOS mapping.
 
 ```
 MyApp/
-├── MyApp/
-│   ├── App/
-│   │   ├── MyAppApp.swift            # App entry point
-│   │   ├── AppDelegate.swift         # If needed for UIKit lifecycle
-│   │   └── SceneDelegate.swift       # If using scenes
-│   ├── Features/                      # Feature modules
-│   │   ├── Home/
-│   │   │   ├── Views/
-│   │   │   │   ├── HomeView.swift
-│   │   │   │   └── Components/
-│   │   │   ├── ViewModels/
-│   │   │   │   └── HomeViewModel.swift
-│   │   │   └── Models/
-│   │   ├── Detail/
-│   │   └── Settings/
-│   ├── Core/                          # Shared infrastructure
-│   │   ├── Network/
-│   │   │   ├── APIClient.swift
-│   │   │   ├── Endpoints.swift
-│   │   │   └── NetworkError.swift
-│   │   ├── Persistence/
-│   │   │   ├── ModelContainer.swift
-│   │   │   └── Models/
-│   │   ├── Services/
-│   │   └── Utilities/
-│   ├── UI/                            # Shared UI components
-│   │   ├── Components/
-│   │   │   ├── Buttons/
-│   │   │   ├── Cards/
-│   │   │   └── Forms/
-│   │   ├── Modifiers/
-│   │   └── Theme/
-│   │       ├── Colors.swift
-│   │       ├── Typography.swift
-│   │       └── Spacing.swift
-│   ├── Resources/
-│   │   ├── Assets.xcassets
-│   │   └── Localizable.xcstrings
-│   └── Info.plist
-├── MyAppTests/
-├── MyAppUITests/
-└── Package.swift                      # For SPM dependencies
+├── App/
+│   ├── MyAppApp.swift          # @main App + Scene + root modelContainer (§5.E)
+│   └── AppDelegate.swift       # ONLY if a UIKit lifecycle hook is unavoidable
+├── Features/<Feature>/         # group by feature, not by type
+│   ├── <Feature>View.swift     # SwiftUI view(s)
+│   ├── <Feature>Model.swift    # @Observable view model (@MainActor)
+│   └── Components/
+├── Core/
+│   ├── Network/                # actor APIClient, endpoints (see swift.md concurrency)
+│   ├── Persistence/            # SwiftData @Model + ModelContainer (§5.E)
+│   └── Security/Keychain.swift # Keychain wrapper (policy: secure-coding.md)
+├── DesignSystem/               # shared components, theme, modifiers (see ui.md)
+├── Resources/                  # Assets.xcassets, Localizable.xcstrings
+├── PrivacyInfo.xcprivacy       # IOS-SEC-03
+├── MyAppTests/                 # Swift Testing / XCTest (see tdd.md)
+├── MyAppUITests/               # XCUITest (IOS-TST-03)
+└── Package.swift               # SPM deps; Package.resolved committed (IOS-DEP-01)
 ```
+
+- One view = one responsibility; extract subviews early (a `body` over ~2 screens is a smell).
+- View models hold logic and state; views stay declarative and side-effect-free.
 
 ---
 
-## 2A. TDD Protocol (MANDATORY)
+## 5. iOS Specifics
 
-**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+The unique value of this guide.
 
-### Red-Green-Refactor Cycle with XCTest
+### A. SwiftUI views & state ownership
 
-```swift
-// ═══════════════════════════════════════════════════════════════
-// STEP 1: RED - Write failing test first
-// ═══════════════════════════════════════════════════════════════
+Pick the property wrapper by **who owns the value**:
 
-// MyAppTests/ViewModels/HomeViewModelTests.swift
-import XCTest
-@testable import MyApp
-
-@MainActor
-final class HomeViewModelTDDTests: XCTestCase {
-    var sut: HomeViewModel!
-    var mockService: MockItemService!
-
-    override func setUp() {
-        super.setUp()
-        mockService = MockItemService()
-        sut = HomeViewModel(itemService: mockService)
-    }
-
-    override func tearDown() {
-        sut = nil
-        mockService = nil
-        super.tearDown()
-    }
-
-    func test_loadInitialData_success_setsLoadedState() async {
-        // Given
-        let items = [Item(title: "Test", description: "Description")]
-        mockService.itemsToReturn = items
-
-        // When
-        await sut.loadInitialData()
-
-        // Then
-        if case .loaded(let loadedItems) = sut.state {
-            XCTAssertEqual(loadedItems.count, 1)
-            XCTAssertEqual(loadedItems.first?.title, "Test")
-        } else {
-            XCTFail("Expected loaded state, got \(sut.state)")
-        }
-    }
-
-    func test_loadInitialData_empty_setsEmptyState() async {
-        // Given
-        mockService.itemsToReturn = []
-
-        // When
-        await sut.loadInitialData()
-
-        // Then
-        if case .empty = sut.state {
-            // Success
-        } else {
-            XCTFail("Expected empty state")
-        }
-    }
-}
-
-// Run: Cmd+U or xcodebuild test
-// ❌ FAILS - HomeViewModel doesn't exist yet
-
-// ═══════════════════════════════════════════════════════════════
-// STEP 2: GREEN - Write minimal implementation
-// ═══════════════════════════════════════════════════════════════
-
-// Implement HomeViewModel with loadInitialData() to make tests pass
-
-// Run: Cmd+U
-// ✅ PASSES - all tests pass
-
-// ═══════════════════════════════════════════════════════════════
-// STEP 3: REFACTOR - Add analytics, improve while tests stay green
-// ═══════════════════════════════════════════════════════════════
-```
-
----
-
-## 2B. Bug Fix Protocol (MANDATORY)
-
-**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
-
-### Bug Fix Workflow Example
+| Wrapper | Use for |
+|---|---|
+| `@State` | view-local value (incl. an `@Observable` model **owned** by this view) |
+| `@Binding` | two-way reference to state owned by a parent |
+| `@Environment` | injected/system values (`\.dismiss`, `\.modelContext`, custom keys) |
+| `@Bindable` | deriving `$` bindings from an `@Observable` model |
 
 ```swift
-// ═══════════════════════════════════════════════════════════════
-// Bug Report #112: HomeViewModel never exits loading state when
-// network request fails with timeout error
-// ═══════════════════════════════════════════════════════════════
-
-// STEP 1: Write test that reproduces the bug
-// MyAppTests/ViewModels/HomeViewModelTests.swift
-
-func test_loadInitialData_timeout_setsErrorState_Bug112() async {
-    // Bug: ViewModel stays in .loading state on timeout
-    // Discovered: 2026-03-18
-    // Root cause: catch block didn't update state on URLError
-
-    mockService.errorToThrow = URLError(.timedOut)
-
-    await sut.loadInitialData()
-
-    if case .error(let error) = sut.state {
-        XCTAssertTrue(error is URLError)
-    } else {
-        XCTFail("Bug #112: Expected error state after timeout, got \(sut.state)")
-    }
-}
-
-// Run: Cmd+U
-// ❌ FAILS - state is still .loading after timeout
-
-// STEP 2: Fix the bug - Update catch block to handle URLError
-
-// Run: Cmd+U
-// ✅ PASSES - bug fixed, regression prevented forever
-```
-
----
-
-## 3. SwiftUI Views (MANDATORY)
-
-### A. View Structure
-
-```swift
-// Features/Home/Views/HomeView.swift
-import SwiftUI
-
 struct HomeView: View {
-    @StateObject private var viewModel = HomeViewModel()
+    @State private var model = HomeModel()        // view owns the model
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             content
                 .navigationTitle("Home")
-                .toolbar { toolbarContent }
-                .refreshable { await viewModel.refresh() }
-                .task { await viewModel.loadInitialData() }
+                .task { await model.load() }       // async lifecycle, auto-cancels
+                .refreshable { await model.refresh() }
         }
     }
 
-    @ViewBuilder
-    private var content: some View {
-        switch viewModel.state {
-        case .loading:
-            ProgressView()
-        case .loaded(let items):
-            itemsList(items)
-        case .empty:
-            emptyState
-        case .error(let error):
-            errorState(error)
+    @ViewBuilder private var content: some View {
+        switch model.state {
+        case .loading:        ProgressView()
+        case .loaded(let xs): List(xs) { ItemRow(item: $0) }
+        case .empty:          ContentUnavailableView("No Items", systemImage: "tray")
+        case .failed(let e):  ContentUnavailableView("Error", systemImage: "exclamationmark.triangle",
+                                                     description: Text(e.localizedDescription))
         }
-    }
-
-    private func itemsList(_ items: [Item]) -> some View {
-        List(items) { item in
-            NavigationLink(value: item) {
-                ItemRow(item: item)
-            }
-        }
-        .listStyle(.plain)
-        .navigationDestination(for: Item.self) { item in
-            DetailView(item: item)
-        }
-    }
-
-    private var emptyState: some View {
-        ContentUnavailableView(
-            "No Items",
-            systemImage: "tray",
-            description: Text("Add your first item to get started.")
-        )
-    }
-
-    private func errorState(_ error: Error) -> some View {
-        ContentUnavailableView {
-            Label("Error", systemImage: "exclamationmark.triangle")
-        } description: {
-            Text(error.localizedDescription)
-        } actions: {
-            Button("Retry") {
-                Task { await viewModel.refresh() }
-            }
-        }
-    }
-
-    @ToolbarContentBuilder
-    private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .primaryAction) {
-            Button {
-                viewModel.showAddSheet = true
-            } label: {
-                Image(systemName: "plus")
-            }
-        }
-    }
-}
-
-#Preview {
-    HomeView()
-}
-```
-
-### B. Reusable Components
-
-```swift
-// UI/Components/Buttons/PrimaryButton.swift
-import SwiftUI
-
-struct PrimaryButton: View {
-    let title: String
-    let action: () -> Void
-    var isLoading: Bool = false
-    var isDisabled: Bool = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                if isLoading {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                        .tint(.white)
-                }
-                Text(title)
-                    .fontWeight(.semibold)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 16)
-            .background(isDisabled ? Color.gray : Color.accentColor)
-            .foregroundStyle(.white)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-        }
-        .disabled(isDisabled || isLoading)
-    }
-}
-
-// UI/Components/Cards/ItemCard.swift
-struct ItemCard: View {
-    let item: Item
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 8) {
-                AsyncImage(url: item.imageURL) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    case .failure:
-                        Image(systemName: "photo")
-                            .foregroundStyle(.secondary)
-                    case .empty:
-                        ProgressView()
-                    @unknown default:
-                        EmptyView()
-                    }
-                }
-                .frame(height: 150)
-                .clipped()
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(item.title)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-
-                    Text(item.description)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-                .padding(.horizontal, 12)
-                .padding(.bottom, 12)
-            }
-            .background(Color(.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .shadow(color: .black.opacity(0.1), radius: 8, y: 4)
-        }
-        .buttonStyle(.plain)
     }
 }
 ```
 
----
+- Drive UI off an explicit state enum, not scattered `isLoading`/`error` flags.
+- Use first-party empty/error UI (`ContentUnavailableView`) and `AsyncImage` before rolling your own.
 
-## 4. ViewModel and State (MANDATORY)
+### B. Observation framework (the modern default)
 
-### A. Observable ViewModel
+`@Observable` replaces `ObservableObject`: no `@Published`, fine-grained invalidation (only views reading a changed property re-render), and plain `@State`/`@Environment` injection.
 
 ```swift
-// Features/Home/ViewModels/HomeViewModel.swift
-import SwiftUI
 import Observation
 
-@Observable
-final class HomeViewModel {
-    // MARK: - State
-    enum State {
-        case loading
-        case loaded([Item])
-        case empty
-        case error(Error)
-    }
-
+@Observable @MainActor
+final class HomeModel {
+    enum State { case loading, loaded([Item]), empty, failed(Error) }
     private(set) var state: State = .loading
-    var showAddSheet = false
-    var selectedItem: Item?
+    var query = ""                                  // observed automatically
 
-    // MARK: - Dependencies
-    private let itemService: ItemServiceProtocol
-    private let analytics: AnalyticsProtocol
+    private let service: ItemServicing             // injected port (see swift.md protocols)
+    init(service: ItemServicing = LiveItemService()) { self.service = service }
 
-    // MARK: - Init
-    init(
-        itemService: ItemServiceProtocol = ItemService.shared,
-        analytics: AnalyticsProtocol = Analytics.shared
-    ) {
-        self.itemService = itemService
-        self.analytics = analytics
-    }
-
-    // MARK: - Actions
-    @MainActor
-    func loadInitialData() async {
-        guard case .loading = state else { return }
-        await fetchItems()
-    }
-
-    @MainActor
-    func refresh() async {
-        await fetchItems()
-    }
-
-    @MainActor
-    private func fetchItems() async {
+    func load() async {
         do {
-            let items = try await itemService.fetchItems()
+            let items = try await service.fetch()
             state = items.isEmpty ? .empty : .loaded(items)
-            analytics.track(.itemsLoaded(count: items.count))
-        } catch {
-            state = .error(error)
-            analytics.track(.error(error))
-        }
+        } catch { state = .failed(error) }          // error policy: error-handling.md
     }
-
-    @MainActor
-    func deleteItem(_ item: Item) async {
-        do {
-            try await itemService.deleteItem(item)
-            if case .loaded(var items) = state {
-                items.removeAll { $0.id == item.id }
-                state = items.isEmpty ? .empty : .loaded(items)
-            }
-        } catch {
-            // Handle error
-        }
-    }
+    func refresh() async { await load() }
 }
 ```
 
-### B. Legacy ObservableObject (Pre-iOS 17)
+- `@MainActor` on the model keeps UI mutations on the main actor (satisfies IOS-CONC-01).
+- Use `@ObservationIgnored` for stored deps that need not trigger view updates.
+- **Legacy only:** `ObservableObject`/`@Published`/`@StateObject` remain for iOS 16 targets, but new code MUST use Observation (IOS-STATE-01).
+
+### C. Architecture — MVVM with SwiftUI
+
+The default is **MVVM**: a SwiftUI `View` renders an `@Observable` model that depends on protocol-typed services (dependency injection via initializers/`@Environment`, mockable in tests — see `tdd.md`). Keep view models free of SwiftUI/UIKit imports so they unit-test without a simulator. For large, highly-stateful apps a unidirectional store (e.g. **The Composable Architecture**) is a valid alternative — apply it whole-app, not per-screen.
+
+### D. UIKit interop (legacy / when SwiftUI lacks coverage)
+
+SwiftUI is primary; reach for UIKit only for gaps (e.g. advanced text input, camera, `PHPicker`). Bridge explicitly:
 
 ```swift
-// For iOS 16 and earlier
-import SwiftUI
-import Combine
-
-final class HomeViewModel: ObservableObject {
-    @Published private(set) var state: State = .loading
-    @Published var showAddSheet = false
-
-    private var cancellables = Set<AnyCancellable>()
-    private let itemService: ItemServiceProtocol
-
-    init(itemService: ItemServiceProtocol = ItemService.shared) {
-        self.itemService = itemService
-    }
-
-    @MainActor
-    func loadInitialData() async {
-        // Same implementation
-    }
+struct ScannerView: UIViewControllerRepresentable {       // UIKit → SwiftUI
+    @Binding var code: String
+    func makeUIViewController(context: Context) -> ScannerController { … }
+    func updateUIViewController(_ vc: ScannerController, context: Context) { … }
+    func makeCoordinator() -> Coordinator { Coordinator(self) }   // delegate bridge
 }
+// SwiftUI → UIKit: UIHostingController(rootView:)
 ```
 
----
+Keep bridges in one file per feature; never let UIKit delegate state leak into view models untranslated.
 
-## 5. Networking (MANDATORY)
-
-### A. API Client
+### E. App lifecycle & SwiftData
 
 ```swift
-// Core/Network/APIClient.swift
-import Foundation
-
-actor APIClient {
-    static let shared = APIClient()
-
-    private let session: URLSession
-    private let decoder: JSONDecoder
-    private let baseURL: URL
-
-    init(
-        session: URLSession = .shared,
-        baseURL: URL = URL(string: "https://api.example.com")!
-    ) {
-        self.session = session
-        self.baseURL = baseURL
-
-        self.decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-    }
-
-    func request<T: Decodable>(
-        _ endpoint: Endpoint,
-        type: T.Type = T.self
-    ) async throws -> T {
-        let request = try buildRequest(for: endpoint)
-
-        let (data, response) = try await session.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw NetworkError.invalidResponse
-        }
-
-        switch httpResponse.statusCode {
-        case 200...299:
-            return try decoder.decode(T.self, from: data)
-        case 401:
-            throw NetworkError.unauthorized
-        case 404:
-            throw NetworkError.notFound
-        case 400...499:
-            throw NetworkError.clientError(httpResponse.statusCode)
-        case 500...599:
-            throw NetworkError.serverError(httpResponse.statusCode)
-        default:
-            throw NetworkError.unknown(httpResponse.statusCode)
-        }
-    }
-
-    private func buildRequest(for endpoint: Endpoint) throws -> URLRequest {
-        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: true)!
-        components.path = endpoint.path
-        components.queryItems = endpoint.queryItems
-
-        guard let url = components.url else {
-            throw NetworkError.invalidURL
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = endpoint.method.rawValue
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        if let token = try? KeychainManager.shared.getToken() {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-
-        if let body = endpoint.body {
-            request.httpBody = try JSONEncoder().encode(body)
-        }
-
-        return request
-    }
-}
-
-// Core/Network/Endpoint.swift
-struct Endpoint {
-    let path: String
-    let method: HTTPMethod
-    let queryItems: [URLQueryItem]?
-    let body: Encodable?
-
-    init(
-        path: String,
-        method: HTTPMethod = .get,
-        queryItems: [URLQueryItem]? = nil,
-        body: Encodable? = nil
-    ) {
-        self.path = path
-        self.method = method
-        self.queryItems = queryItems
-        self.body = body
-    }
-}
-
-enum HTTPMethod: String {
-    case get = "GET"
-    case post = "POST"
-    case put = "PUT"
-    case patch = "PATCH"
-    case delete = "DELETE"
-}
-
-// Usage
-extension Endpoint {
-    static func items(page: Int = 1) -> Endpoint {
-        Endpoint(
-            path: "/v1/items",
-            queryItems: [URLQueryItem(name: "page", value: "\(page)")]
-        )
-    }
-
-    static func item(id: String) -> Endpoint {
-        Endpoint(path: "/v1/items/\(id)")
-    }
-
-    static func createItem(_ item: CreateItemRequest) -> Endpoint {
-        Endpoint(path: "/v1/items", method: .post, body: item)
-    }
-}
-```
-
----
-
-## 6. Data Persistence (MANDATORY)
-
-### A. SwiftData
-
-```swift
-// Core/Persistence/Models/Item.swift
-import SwiftData
-
-@Model
-final class Item {
-    @Attribute(.unique) var id: UUID
-    var title: String
-    var itemDescription: String
-    var imageURL: URL?
-    var createdAt: Date
-    var updatedAt: Date
-
-    @Relationship(deleteRule: .cascade, inverse: \Tag.items)
-    var tags: [Tag]
-
-    init(
-        id: UUID = UUID(),
-        title: String,
-        description: String,
-        imageURL: URL? = nil,
-        createdAt: Date = .now,
-        updatedAt: Date = .now
-    ) {
-        self.id = id
-        self.title = title
-        self.itemDescription = description
-        self.imageURL = imageURL
-        self.createdAt = createdAt
-        self.updatedAt = updatedAt
-        self.tags = []
-    }
-}
-
-// App/MyAppApp.swift
-import SwiftUI
-import SwiftData
-
 @main
 struct MyAppApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootView()
         }
-        .modelContainer(for: [Item.self, Tag.self])
+        .modelContainer(for: [Item.self, Tag.self])   // SwiftData container at the Scene
     }
 }
+```
 
-// Using in View
-struct ItemListView: View {
-    @Environment(\.modelContext) private var modelContext
+SwiftData is the default persistence layer (macro models over Core Data boilerplate; Core Data underneath, and still valid for advanced migration/concurrency needs):
+
+```swift
+@Model final class Item {
+    @Attribute(.unique) var id: UUID
+    var title: String
+    var createdAt: Date
+    @Relationship(deleteRule: .cascade) var tags: [Tag] = []
+    init(id: UUID = .init(), title: String, createdAt: Date = .now) { … }
+}
+
+struct ItemList: View {
+    @Environment(\.modelContext) private var context
     @Query(sort: \Item.createdAt, order: .reverse) private var items: [Item]
-
-    var body: some View {
-        List(items) { item in
-            ItemRow(item: item)
-        }
-    }
-
-    private func addItem() {
-        let item = Item(title: "New Item", description: "Description")
-        modelContext.insert(item)
-    }
-
-    private func deleteItems(at offsets: IndexSet) {
-        for index in offsets {
-            modelContext.delete(items[index])
-        }
-    }
+    var body: some View { List(items) { ItemRow(item: $0) } }
 }
 ```
 
-### B. Keychain
+- Mutate via `context.insert`/`delete`; query declaratively with `@Query` + `#Predicate`.
+- For lifecycle events use `@Environment(\.scenePhase)`; add an `AppDelegate` (via `@UIApplicationDelegateAdaptor`) **only** when a callback has no SwiftUI equivalent (e.g. push registration).
 
-```swift
-// Core/Services/KeychainManager.swift
-import Foundation
-import Security
+### F. Concurrency in the UI & Combine
 
-actor KeychainManager {
-    static let shared = KeychainManager()
+- Tie async work to view lifetime with `.task`/`.task(id:)` — it auto-cancels on disappear; avoid unstructured `Task {}` that outlives the view.
+- Networking lives in an `actor`; UI mutation hops to `@MainActor`. Strict-concurrency rules and `Sendable` are owned by `swift.md` — apply them, don't re-explain them.
+- **Combine vs async:** prefer `async`/`await` and `AsyncSequence`. Combine is legacy — keep it only for existing reactive pipelines or APIs that still vend `Publisher`s; do not introduce it in new code.
 
-    private let service = Bundle.main.bundleIdentifier ?? "com.example.app"
+### G. Accessibility & navigation bindings
 
-    func save(token: String, for key: String) throws {
-        let data = Data(token.utf8)
-
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: key,
-            kSecValueData as String: data
-        ]
-
-        // Delete existing
-        SecItemDelete(query as CFDictionary)
-
-        // Add new
-        let status = SecItemAdd(query as CFDictionary, nil)
-        guard status == errSecSuccess else {
-            throw KeychainError.saveFailed(status)
-        }
-    }
-
-    func getToken(for key: String) throws -> String {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: key,
-            kSecReturnData as String: true
-        ]
-
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-
-        guard status == errSecSuccess,
-              let data = result as? Data,
-              let token = String(data: data, encoding: .utf8) else {
-            throw KeychainError.itemNotFound
-        }
-
-        return token
-    }
-
-    func delete(key: String) throws {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: key
-        ]
-
-        let status = SecItemDelete(query as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw KeychainError.deleteFailed(status)
-        }
-    }
-}
-
-enum KeychainError: Error {
-    case saveFailed(OSStatus)
-    case deleteFailed(OSStatus)
-    case itemNotFound
-}
-```
+- **Navigation:** value-typed `NavigationStack` with `navigationDestination(for:)`; bind a `NavigationPath`/`@Observable` router for deep links. `NavigationView` is deprecated (IOS-NAV-01).
+- **Accessibility** (policy: `accessibility.md`): add `.accessibilityLabel/Value/Hint`, group with `.accessibilityElement(children:)`, support Dynamic Type (scalable fonts, no fixed heights), verify with VoiceOver + Accessibility Inspector. The *what/why* lives in `accessibility.md`; SwiftUI supplies the *how*.
 
 ---
 
-## 7. Navigation (MANDATORY)
+## 6. Security, Keychain & Distribution
 
-### A. NavigationStack
+Security/supply-chain *policy* is owned by [`secure-coding.md`](guides://secure-coding.md); auth flows by [`oauth.md`](guides://oauth.md). iOS bindings only:
 
-```swift
-// Features/Navigation/AppNavigation.swift
-import SwiftUI
-
-struct AppNavigation: View {
-    @State private var path = NavigationPath()
-
-    var body: some View {
-        NavigationStack(path: $path) {
-            HomeView()
-                .navigationDestination(for: Item.self) { item in
-                    DetailView(item: item)
-                }
-                .navigationDestination(for: Route.self) { route in
-                    destinationView(for: route)
-                }
-        }
-        .environment(\.navigate, NavigateAction { route in
-            path.append(route)
-        })
-    }
-
-    @ViewBuilder
-    private func destinationView(for route: Route) -> some View {
-        switch route {
-        case .detail(let item):
-            DetailView(item: item)
-        case .settings:
-            SettingsView()
-        case .profile:
-            ProfileView()
-        }
-    }
-}
-
-enum Route: Hashable {
-    case detail(Item)
-    case settings
-    case profile
-}
-
-// Environment-based navigation
-struct NavigateAction {
-    let action: (Route) -> Void
-    func callAsFunction(_ route: Route) {
-        action(route)
-    }
-}
-
-struct NavigateEnvironmentKey: EnvironmentKey {
-    static let defaultValue = NavigateAction { _ in }
-}
-
-extension EnvironmentValues {
-    var navigate: NavigateAction {
-        get { self[NavigateEnvironmentKey.self] }
-        set { self[NavigateEnvironmentKey.self] = newValue }
-    }
-}
-```
+- **Keychain** for every secret/token (IOS-SEC-01). Thin wrapper over `Security`:
+  ```swift
+  func save(_ token: Data, account: String) throws {
+      let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                              kSecAttrAccount as String: account,
+                              kSecValueData as String: token]
+      SecItemDelete(q as CFDictionary)
+      guard SecItemAdd(q as CFDictionary, nil) == errSecSuccess else { throw KeychainError.save }
+  }
+  ```
+- **ATS** (IOS-SEC-02): never disable globally; HTTPS only. A scoped `NSExceptionDomains` entry needs written justification and review.
+- **Privacy manifest** (IOS-SEC-03): ship `PrivacyInfo.xcprivacy` declaring collected data types and required-reason APIs; add Tracking Transparency (ATT) prompt if you track.
+- **Auth:** Sign in with Apple / OAuth via `ASWebAuthenticationSession` (flow owned by `oauth.md`); store resulting tokens in Keychain.
+- **Build-time config:** non-secret values in `.xcconfig`; keep secret `.xcconfig` out of VCS. Never hardcode keys in source or `Info.plist`.
+- **Dependencies (SPM):** pin versions, commit `Package.resolved` (IOS-DEP-01), scan with Snyk/OWASP Dependency-Check in CI (IOS-SEC-04).
+- **Distribution basics:** bump marketing/build numbers, configure signing (prefer automatic / Xcode Cloud or `fastlane match`), archive and upload via App Store Connect / TestFlight, and ensure the privacy manifest + screenshots + privacy-policy URL are set before submission.
 
 ---
 
-## 8. Testing (MANDATORY)
-
-### A. Unit Tests
+## 7. Quick Reference
 
 ```swift
-// MyAppTests/ViewModels/HomeViewModelTests.swift
-import XCTest
-@testable import MyApp
+@Observable @MainActor final class VM { … }   // model (B)
+@State private var vm = VM()                   // view owns model
+@Bindable var vm; @Binding var x; @Environment(\.modelContext) var ctx
 
-@MainActor
-final class HomeViewModelTests: XCTestCase {
-    var sut: HomeViewModel!
-    var mockService: MockItemService!
+.task { await vm.load() }     .refreshable { await vm.refresh() }
+NavigationStack { … }.navigationDestination(for: Item.self) { DetailView($0) }
 
-    override func setUp() {
-        super.setUp()
-        mockService = MockItemService()
-        sut = HomeViewModel(itemService: mockService)
-    }
-
-    override func tearDown() {
-        sut = nil
-        mockService = nil
-        super.tearDown()
-    }
-
-    func test_loadInitialData_success_setsLoadedState() async {
-        // Given
-        let items = [Item(title: "Test", description: "Test")]
-        mockService.itemsToReturn = items
-
-        // When
-        await sut.loadInitialData()
-
-        // Then
-        if case .loaded(let loadedItems) = sut.state {
-            XCTAssertEqual(loadedItems.count, 1)
-            XCTAssertEqual(loadedItems.first?.title, "Test")
-        } else {
-            XCTFail("Expected loaded state")
-        }
-    }
-
-    func test_loadInitialData_empty_setsEmptyState() async {
-        // Given
-        mockService.itemsToReturn = []
-
-        // When
-        await sut.loadInitialData()
-
-        // Then
-        if case .empty = sut.state {
-            // Success
-        } else {
-            XCTFail("Expected empty state")
-        }
-    }
-
-    func test_loadInitialData_failure_setsErrorState() async {
-        // Given
-        mockService.errorToThrow = NetworkError.serverError(500)
-
-        // When
-        await sut.loadInitialData()
-
-        // Then
-        if case .error = sut.state {
-            // Success
-        } else {
-            XCTFail("Expected error state")
-        }
-    }
-}
-
-// Mock
-final class MockItemService: ItemServiceProtocol {
-    var itemsToReturn: [Item] = []
-    var errorToThrow: Error?
-
-    func fetchItems() async throws -> [Item] {
-        if let error = errorToThrow {
-            throw error
-        }
-        return itemsToReturn
-    }
-
-    func deleteItem(_ item: Item) async throws {
-        if let error = errorToThrow {
-            throw error
-        }
-    }
-}
+@Model final class Item { @Attribute(.unique) var id: UUID }   // SwiftData
+@Query(sort: \Item.createdAt) var items: [Item]
 ```
-
-### B. UI Tests
-
-```swift
-// MyAppUITests/HomeViewUITests.swift
-import XCTest
-
-final class HomeViewUITests: XCTestCase {
-    var app: XCUIApplication!
-
-    override func setUp() {
-        super.setUp()
-        continueAfterFailure = false
-        app = XCUIApplication()
-        app.launchArguments = ["UI_TESTING"]
-        app.launch()
-    }
-
-    func test_homeView_displaysItems() {
-        let firstItem = app.cells.firstMatch
-        XCTAssertTrue(firstItem.waitForExistence(timeout: 5))
-    }
-
-    func test_addButton_opensSheet() {
-        let addButton = app.buttons["Add"]
-        XCTAssertTrue(addButton.exists)
-
-        addButton.tap()
-
-        let sheet = app.sheets.firstMatch
-        XCTAssertTrue(sheet.waitForExistence(timeout: 2))
-    }
-
-    func test_pullToRefresh_refreshesList() {
-        let firstCell = app.cells.firstMatch
-        XCTAssertTrue(firstCell.waitForExistence(timeout: 5))
-
-        // Pull to refresh
-        let start = firstCell.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        let finish = firstCell.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 5))
-        start.press(forDuration: 0, thenDragTo: finish)
-
-        // Verify refresh indicator appeared
-        let refreshIndicator = app.activityIndicators.firstMatch
-        XCTAssertTrue(refreshIndicator.exists)
-    }
-}
-```
-
----
-
-## 9. Performance (MANDATORY)
-
-### A. Image Loading
-
-```swift
-// UI/Components/AsyncImageView.swift
-import SwiftUI
-
-struct CachedAsyncImage: View {
-    let url: URL?
-    var contentMode: ContentMode = .fill
-
-    @State private var phase: AsyncImagePhase = .empty
-
-    var body: some View {
-        Group {
-            switch phase {
-            case .success(let image):
-                image
-                    .resizable()
-                    .aspectRatio(contentMode: contentMode)
-            case .failure:
-                Image(systemName: "photo")
-                    .foregroundStyle(.secondary)
-            case .empty:
-                ProgressView()
-            @unknown default:
-                EmptyView()
-            }
-        }
-        .task(id: url) {
-            await loadImage()
-        }
-    }
-
-    private func loadImage() async {
-        guard let url else {
-            phase = .failure(URLError(.badURL))
-            return
-        }
-
-        // Check cache
-        if let cached = ImageCache.shared[url] {
-            phase = .success(Image(uiImage: cached))
-            return
-        }
-
-        do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            guard let uiImage = UIImage(data: data) else {
-                throw URLError(.cannotDecodeContentData)
-            }
-            ImageCache.shared[url] = uiImage
-            phase = .success(Image(uiImage: uiImage))
-        } catch {
-            phase = .failure(error)
-        }
-    }
-}
-
-// Simple cache
-final class ImageCache {
-    static let shared = ImageCache()
-    private let cache = NSCache<NSURL, UIImage>()
-
-    subscript(_ url: URL) -> UIImage? {
-        get { cache.object(forKey: url as NSURL) }
-        set {
-            if let image = newValue {
-                cache.setObject(image, forKey: url as NSURL)
-            } else {
-                cache.removeObject(forKey: url as NSURL)
-            }
-        }
-    }
-}
-```
-
-### B. List Optimization
-
-```swift
-struct OptimizedList: View {
-    let items: [Item]
-
-    var body: some View {
-        List(items) { item in
-            ItemRow(item: item)
-                .listRowInsets(EdgeInsets())
-                .listRowSeparator(.hidden)
-        }
-        .listStyle(.plain)
-    }
-}
-
-// Equatable conformance for performance
-struct ItemRow: View, Equatable {
-    let item: Item
-
-    static func == (lhs: ItemRow, rhs: ItemRow) -> Bool {
-        lhs.item.id == rhs.item.id &&
-        lhs.item.title == rhs.item.title &&
-        lhs.item.updatedAt == rhs.item.updatedAt
-    }
-
-    var body: some View {
-        // View implementation
-    }
-}
-```
-
----
-
-## 10. Security & Dependency Management (MANDATORY)
-
-### A. Dependency Vulnerability Scanning
-
-SPM and CocoaPods do not include a native audit command. Use third-party scanners:
-
-**Snyk (recommended):**
-```bash
-# Install Snyk CLI
-brew install snyk
-
-# Scan SPM dependencies
-snyk test --file=Package.swift
-
-# Scan CocoaPods dependencies
-snyk test --file=Podfile.lock
-
-# Monitor for new vulnerabilities continuously
-snyk monitor --file=Package.swift
-```
-
-**OWASP Dependency-Check:**
-```bash
-# Run against the project directory
-dependency-check --project "MyApp" --scan . --format HTML
-```
-
-- Run scans in CI on every PR and at least weekly on the main branch
-- Review and triage all HIGH and CRITICAL findings before release
-
-### B. Lockfile Discipline
-
-- **SPM**: ALWAYS commit `Package.resolved` to version control for reproducible builds
-- **CocoaPods**: ALWAYS commit `Podfile.lock` to version control
-- Review lockfile diffs during code review to catch unexpected dependency changes
 
 ```bash
-# Verify dependency resolution is deterministic
-swift package resolve
-git diff Package.resolved  # Should show no changes on clean resolve
-```
-
-### C. App Transport Security (ATS)
-
-- NEVER disable ATS globally. All network connections MUST use HTTPS.
-- If an exception is absolutely required, scope it to a single domain with justification:
-
-```xml
-<!-- Info.plist - scoped exception (avoid if possible) -->
-<key>NSAppTransportSecurity</key>
-<dict>
-    <key>NSExceptionDomains</key>
-    <dict>
-        <key>legacy-api.example.com</key>
-        <dict>
-            <key>NSTemporaryExceptionAllowsInsecureHTTPLoads</key>
-            <true/>
-        </dict>
-    </dict>
-</dict>
-```
-
-- Apple will reject apps that disable ATS without a valid reason
-
-### D. Secret Management with Keychain
-
-- NEVER store API keys, tokens, or passwords in `UserDefaults`, plists, or source code
-- Use the iOS Keychain for all sensitive data (see Section 6B for `KeychainManager` implementation)
-- For build-time secrets, use Xcode Build Configuration files (`.xcconfig`) excluded from VCS:
-
-```bash
-# .gitignore
-*.xcconfig
-!Shared.xcconfig  # Only commit non-secret configs
-```
-
-```
-// Secrets.xcconfig (NOT committed to VCS)
-API_KEY = your-secret-key-here
-```
-
-```swift
-// Access in code via Info.plist
-let apiKey = Bundle.main.infoDictionary?["API_KEY"] as? String
-```
-
-### E. Security Checklist
-
-- [ ] Snyk or OWASP Dependency-Check configured in CI
-- [ ] `Package.resolved` / `Podfile.lock` committed to version control
-- [ ] App Transport Security enforced (no global exceptions)
-- [ ] All secrets stored in Keychain, never in UserDefaults or source code
-- [ ] Build-time secrets in `.xcconfig` files excluded from VCS
-- [ ] Certificate pinning enabled for critical API endpoints
-- [ ] Sensitive data cleared from memory when no longer needed
-- [ ] CI pipeline runs vulnerability scans on every build
-
----
-
-## 11. Deployment Checklist
-
-### Code Quality
-- [ ] No force unwraps
-- [ ] Proper error handling
-- [ ] Accessibility labels added
-- [ ] Dark mode supported
-
-### Performance
-- [ ] Images optimized
-- [ ] Memory leaks checked
-- [ ] Launch time acceptable
-- [ ] Instruments profiled
-
-### Release
-- [ ] Version/build numbers updated
-- [ ] Signing configured
-- [ ] App Store screenshots ready
-- [ ] Privacy policy URL set
-
----
-
-## 12. Quick Reference
-
-```swift
-// Swift Concurrency
-async let result = fetchData()
-await withTaskGroup(of: Data.self) { group in }
-Task { @MainActor in }
-
-// SwiftUI State
-@State private var value: Type
-@Binding var value: Type
-@StateObject private var vm = ViewModel()
-@ObservedObject var vm: ViewModel
-@Observable final class VM { }
-@Environment(\.dismiss) private var dismiss
-
-// Modifiers
-.task { await load() }
-.refreshable { await refresh() }
-.searchable(text: $query)
-.sheet(isPresented: $show) { }
-.alert(isPresented: $showAlert) { }
-
-// Navigation
-NavigationStack { }
-NavigationLink(value: item) { }
-.navigationDestination(for: Item.self) { }
+swiftformat --lint . && swiftlint --strict          # format + lint
+xcodebuild test -scheme App -destination '…iPhone 16'  # test
+swift package resolve                                # deps
 ```
 
 ---
 
-## 13. Why This Configuration Works
+## 8. Deployment Checklist
 
-1. **SwiftUI with MVVM**: Declarative UI with observable ViewModels provides automatic view updates, eliminating the delegate/datasource boilerplate of UIKit.
+Generated from §2 — one box per requirement ID.
 
-2. **Swift Concurrency over GCD**: Structured concurrency with async/await and actors prevents data races at compile time, replacing error-prone dispatch queue patterns.
-
-3. **SwiftData over Core Data**: SwiftData's macro-driven model definitions reduce boilerplate by 60-70% while maintaining Core Data's mature persistence engine underneath.
-
-4. **SPM over CocoaPods**: Swift Package Manager integrates natively with Xcode, eliminates workspace complexity, and provides hermetic builds with resolved dependency graphs.
-
-5. **@Observable Macro**: The Observation framework provides fine-grained view invalidation, re-rendering only views that read changed properties instead of entire view hierarchies.
-
-6. **Protocol-Oriented Architecture**: Defining service interfaces as protocols enables dependency injection with mock implementations, making ViewModels fully testable without a device.
-
-7. **NavigationStack with Type-Safe Routing**: Value-based navigation with `navigationDestination(for:)` eliminates stringly-typed segue identifiers and enables deep linking.
-
-8. **XCTest with async/await Support**: Native async test methods verify concurrent code without expectations or timeouts, producing deterministic and readable test suites.
-
-9. **App Intents and Widgets**: Exposing functionality via App Intents enables Siri, Shortcuts, and Spotlight integration from a single declaration.
-
-10. **Privacy Manifests and Tracking Transparency**: Declaring data usage in privacy manifests and using ATT ensures App Store compliance and builds user trust.
+- [ ] IOS-TST-01/02/03 — tests pass, bugs have regression tests, critical flows have XCUITests
+- [ ] IOS-FMT-01 — `swiftformat --lint` clean
+- [ ] IOS-LINT-01 — `swiftlint --strict` clean
+- [ ] IOS-CONC-01 — builds under Swift 6 strict concurrency; UI state on `@MainActor`
+- [ ] IOS-STATE-01 — new view models use `@Observable`
+- [ ] IOS-NAV-01 — `NavigationStack` only, no `NavigationView`
+- [ ] IOS-A11Y-01 — accessibility audit clean
+- [ ] IOS-SEC-01/02/03 — secrets in Keychain, ATS enforced, privacy manifest present
+- [ ] IOS-DEP-01 — `Package.resolved` committed & in sync
+- [ ] IOS-SEC-04 — 0 high/critical CVEs in deps
+- [ ] Agent ran every §3 command and documented any fixes
 
 ---
-
-**Last Updated:** 2026-01-31
-**Version:** 1.0
-**Maintainer:** iOS Team
-
-
 **End of iOS Development Guidelines**

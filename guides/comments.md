@@ -1,222 +1,129 @@
 # Code Comments & Documentation Guidelines
-Mandatory standards for writing clean, minimalistic, and maintainable code comments across all programming languages. Comments should enhance understanding without cluttering the codebase. Language-specific doc generators (pydoc, javadoc, jsdoc, typedoc, godoc, rustdoc, doxygen, RDoc, yard, etc.).
+Canonical owner of code comments and API documentation: when/why to comment, doc-comment conventions, self-documenting code, examples-in-docs, and language-agnostic doc generation. Doc generators: pydoc/Sphinx, JSDoc/TypeDoc, Javadoc, godoc, rustdoc, Doxygen, YARD, phpDocumentor, Dokka, DocC.
+
+---
+name: comments
+title: Code Comments & Documentation Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: cross-cutting
+tools: [sphinx, typedoc, jsdoc, javadoc, godoc, rustdoc, doxygen, yard, dokka, docc]
+requires: []
+recommends:
+  - markdown
+  - adr
+  - todo
+provides:
+  - doc-comments
+  - api-docs
+  - self-documenting-code
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): this is the **canonical owner** of code comments and API documentation. Language guides reference it and add only their doc-generator binding. It references — rather than restates — markdown authoring, decision records, and TODO conventions.
 
 ---
 
-**Agent Profile**: The Documentation Craftsman
-**Role**: Senior Software Engineer & Technical Documentation Specialist
-**Objective**: Generate self-documenting code with precise, minimal comments that enable automatic API documentation generation.
-**Tools**: Language-specific doc generators (pydoc, javadoc, jsdoc, typedoc, godoc, rustdoc, doxygen, RDoc, yard, etc.)
+## 0. Prerequisites & References
+
+This guide owns *what/why/how* of comments and API docs across all languages. It defers the following adjacent concerns to their owners.
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`markdown.md`](guides://markdown.md) — authoring prose/READMEs/long-form docs. *(Binding: doc-comment bodies that render as Markdown, e.g. rustdoc/Dokka/DocC, follow its rules; this guide governs the doc-comment structure, not Markdown syntax.)*
+> - [`adr.md`](guides://adr.md) — Architecture Decision Records. *(Binding: a reference comment may link an ADR; the decision itself lives in the ADR, never duplicated in a comment.)*
+> - [`todo.md`](guides://todo.md) — TODO/FIXME/HACK tags, issue linkage, priority, lifecycle. *(Binding: §2 requires every incomplete-work marker carry an issue ref per `todo.md`; the tag taxonomy and triage rules are owned there.)*
+
+> 📎 **SEE ALSO:** [`code-review.md`](guides://code-review.md) — comments are reviewed like code · [`ci-cd.md`](guides://ci-cd.md) — where doc-gen runs as a gate · [`semver.md`](guides://semver.md) — `@since`/`@deprecated` version tags.
+
+> Cross-cutting *content* (error strategy, security rationale, performance numbers) belongs in its owner guide; a comment may *point* to it but the policy is not restated here.
 
 ---
 
 ## 1. Core Philosophies: COMMENT-WISE
 
-The agent must adhere to the **COMMENT-WISE** principles for every code comment:
+A comment exists to convey what code cannot. Each principle below is enforced by a §2 requirement.
 
-- **C**ode First: Write self-documenting code; comments supplement, not replace, clear code
-- **O**nly When Necessary: Comment the WHY, not the WHAT; avoid obvious comments
-- **M**achine-Readable: Use doc-generator syntax for API documentation (always)
-- **M**aintained Always: Update comments when code changes; stale comments are worse than none
-- **E**xamples Included: Provide usage examples for public APIs
-- **N**o Redundancy: Never repeat what the code already says clearly
-- **T**ODOs Tracked: Mark incomplete work with standardized TODO comments
+- **C**ode First — self-documenting code is the primary documentation; comments supplement, never substitute for, clear names and structure. If a comment is needed to make code understandable, refactor the code first.
+- **O**nly the WHY — comment intent, constraints, trade-offs, and non-obvious decisions; never narrate the WHAT the code already states.
+- **M**achine-readable — public APIs use the language's native doc-comment syntax so docs generate automatically and surface in IDEs.
+- **M**aintained — a comment is part of the code under change; stale comments are worse than none and MUST be updated or deleted in the same change.
+- **E**xamples — every non-trivial public API carries at least one runnable usage example.
+- **N**o redundancy — no noise, no journal/attribution, no commented-out code, no closing-brace labels.
+- **T**ODOs tracked — incomplete work uses standardized, issue-linked markers (owned by [`todo.md`](guides://todo.md)).
+- **W**arnings explained — danger, side effects, thread-safety, and deprecation are stated *with their reason*, never "here be dragons".
+- **I**ssue-linked — bug fixes and references cite the issue/spec/RFC/ADR that justifies the code.
+- **S**tructured — follow each language's documentation convention exactly so generators parse cleanly.
+- **E**volving — treat comments as living documentation; review them on every signature, behavior, or dependency change.
 
-- **W**hy Over What: Explain reasoning, constraints, and non-obvious decisions
-- **I**ssue-Linked: Reference bug IDs, tickets, and external documentation
-- **S**tructured Format: Follow language-specific documentation conventions
-- **E**volved Continuously: Treat comments as living documentation that grows with the code
+**Golden Rule:** if you need extensive comments to explain code, refactor the code first.
 
-**Golden Rule**: If you need extensive comments to explain code, consider refactoring the code first.
-
-**Agent Responsibility**: When modifying code, agents MUST review and update all affected comments before delivery.
-
----
-
-## 2. Agent Documentation Requirements (MANDATORY)
-
-### A. Comment Verification Protocol
-
-**CRITICAL: Agents MUST verify that all comments are accurate, up-to-date, and follow documentation standards before presenting code to the user.**
-
-#### Pre-Delivery Checklist
-
-**Before delivering ANY code, the agent MUST:**
-
-1. **Documentation Completeness**:
-   - All public APIs have doc comments
-   - All parameters are documented with types and descriptions
-   - All return values are documented
-   - All exceptions/errors are documented
-   - Examples provided for non-trivial APIs
-
-2. **Comment Accuracy**:
-   - Comments match current implementation
-   - No references to removed/renamed code
-   - No outdated parameter names or types
-   - No stale TODOs for completed work
-
-3. **Documentation Generation**:
-   ```bash
-   # Verify documentation generates without errors
-   # Python
-   pydoc module_name
-
-   # JavaScript/TypeScript
-   npx typedoc src/
-
-   # Java
-   javadoc -d docs src/*.java
-
-   # Go
-   go doc ./..
-
-   # Rust
-   cargo doc --no-deps
-
-   # C/C++
-   doxygen Doxyfile
-   ```
-   - Documentation generates without warnings
-   - All links resolve correctly
-   - Examples compile/run successfully
-
-4. **TODO Verification**:
-   - All incomplete work has TODO comments
-   - TODOs include assignee and issue reference
-   - No orphaned TODOs for completed work
-
-#### Comment Update Process
-
-When modifying code, agents MUST:
-
-1. **Read existing comments** in the affected area
-2. **Identify outdated comments** that reference changed behavior
-3. **Update or remove** comments that no longer apply
-4. **Add new comments** for non-obvious changes
-5. **Verify documentation** still generates correctly
-6. **Never leave** comments that contradict the code
-
-### B. Prohibited Practices
-
-**NEVER deliver code with:**
-- [ ] Comments that contradict the code
-- [ ] Outdated parameter or return descriptions
-- [ ] Missing documentation for public APIs
-- [ ] Commented-out code without explanation
-- [ ] TODOs without issue references
-- [ ] Obvious comments that repeat the code
-- [ ] Comments with profanity or unprofessional language
-- [ ] Personal notes not relevant to the code
-- [ ] Hardcoded values without explanation
-- [ ] **Comments not updated after code changes**
+**Agent Responsibility:** when modifying code, the agent MUST review and update every affected comment before delivery (DOC-MNT-01).
 
 ---
 
-## 3. When to Comment (MANDATORY)
+## 2. Requirements (MANDATORY, auditable)
 
-### A. ALWAYS Comment
+RFC-2119 keywords. IDs `DOC-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a shared rule cite its owner. "Verify" is language-agnostic — bind the concrete command in the language guide (e.g. `pydoc`, `typedoc`, `cargo doc`).
 
-**These situations REQUIRE comments:**
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| DOC-API-01 | Every public function/method/class/interface/type/module MUST have a doc comment in the language's native format | doc-gen run / coverage tool (e.g. `interrogate`, `typedoc --validation`) | 100% public symbols documented |
+| DOC-API-02 | Each doc comment MUST document: one-line summary, every parameter (type, constraints, defaults), return value (if any), and errors/exceptions raised | doc-gen + review | no undocumented param/return/error |
+| DOC-API-03 | Every non-trivial public API MUST include at least one usage example | review / doc-gen | example present |
+| DOC-API-04 | Examples in docs MUST compile/run | doctest / example test step (e.g. `pytest --doctest-modules`, `cargo test --doc`) | exit 0 |
+| DOC-WHY-01 | Comments MUST explain WHY (intent/constraint/decision), MUST NOT restate the WHAT | review | no narrating comments |
+| DOC-WHY-02 | Non-obvious algorithm choices, performance trade-offs, workarounds, security considerations, and business rules MUST be commented at their site | review | rationale present |
+| DOC-REF-01 | Bug-fix code MUST carry a comment citing the issue ID and root cause | review / `grep` for fix markers | issue ref present |
+| DOC-REF-02 | Reference comments to specs/RFCs/algorithms/ADRs MUST link the canonical source (ADRs via `adr.md`, not inlined) | review | link resolves |
+| DOC-TODO-01 | Every incomplete-work marker MUST be a standardized issue-linked TODO/FIXME/HACK (see `todo.md`) | TODO scanner / `grep -nE 'TODO\|FIXME\|HACK'` | every marker has an issue ref |
+| DOC-NOISE-01 | Code MUST NOT contain noise, journal/attribution, position-marker, or closing-brace comments | review / lint (e.g. `eslint no-inline-comments`, custom) | none |
+| DOC-NOISE-02 | Code MUST NOT contain commented-out code without an explanatory reason | review / `grep` | none |
+| DOC-MNT-01 | When code changes, all affected comments MUST be updated or removed in the same change; no comment may contradict the code | review / doc-gen diff | no stale/contradicting comments |
+| DOC-GEN-01 | API documentation MUST generate with zero warnings/errors | doc-gen (e.g. `javadoc -Xdoclint:all`, `cargo doc`, `typedoc`) | exit 0, 0 warnings |
+| DOC-VER-01 | Public APIs SHOULD carry `@since` on addition and `@deprecated` (with replacement + removal version) on deprecation (see `semver.md`) | review / doc-gen | tags present where applicable |
 
-```
-MANDATORY COMMENTS:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  PUBLIC API DOCUMENTATION                                               │
-│  • Every public function, method, class, interface, type                │
-│  • Parameters with types, constraints, defaults                         │
-│  • Return values with types and possible values                         │
-│  • Exceptions/errors that can be thrown                                 │
-│  • Usage examples for non-trivial APIs                                  │
-│                                                                         │
-│  WHY COMMENTS (Business Logic)                                          │
-│  • Non-obvious algorithm choices                                        │
-│  • Performance optimizations and their reasoning                        │
-│  • Workarounds for external limitations                                 │
-│  • Business rules that aren't self-evident                              │
-│  • Security considerations                                              │
-│                                                                         │
-│  REFERENCE COMMENTS                                                     │
-│  • Bug fix references with issue IDs                                    │
-│  • Links to specifications or RFCs                                      │
-│  • External API documentation references                                │
-│  • Algorithm source (paper, book, URL)                                  │
-│                                                                         │
-│  WARNING COMMENTS                                                       │
-│  • Dangerous operations                                                 │
-│  • Non-obvious side effects                                             │
-│  • Thread safety considerations                                         │
-│  • Deprecation notices                                                  │
-│                                                                         │
-│  INCOMPLETE WORK                                                        │
-│  • TODO items with issue references                                     │
-│  • FIXME for known issues                                               │
-│  • HACK for temporary solutions                                         │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### B. NEVER Comment
-
-**These situations should NOT have comments:**
-
-```
-AVOID THESE COMMENTS:
-
-❌ Obvious operations
-   // Increment counter
-   counter++;
-
-   // Set name to value
-   this.name = name;
-
-❌ Repeating code in English
-   // Loop through users
-   for (user in users) { ... }
-
-   // Check if user is null
-   if (user == null) { ... }
-
-❌ Journal/changelog entries
-   // Modified by John on 2024-01-15
-   // Changed from array to list
-
-❌ Commented-out code without reason
-   // oldFunction();
-   // anotherOldFunction();
-
-❌ Closing brace labels (use shorter functions instead)
-   } // end if
-   } // end for
-   } // end class
-
-❌ Redundant type information (if language has types)
-   // string variable to hold name
-   String name;
-```
+> **Forbidden:** delivering code that fails any gate above; comments that contradict the code; missing docs on a public API; commented-out code without a reason; TODOs/FIXMEs without an issue ref (violates `todo.md`); journal/attribution comments (use git history); duplicating an ADR's content inside a comment (violates `adr.md`); using comments to compensate for code that should be refactored.
 
 ---
 
-## 4. Documentation-as-Code Standards (MANDATORY)
+## 3. When to Comment
 
-### A. Doc Comment Syntax by Language
+### A. ALWAYS comment
 
-**CRITICAL: Use the native documentation format for each language to enable automatic API documentation generation.**
+- **Public API documentation** — every public function, method, class, interface, type, module: summary, parameters (type/constraint/default), returns, errors/exceptions, and a usage example for anything non-trivial. *(DOC-API-01..04)*
+- **WHY / business logic** — non-obvious algorithm choices, performance optimizations and their measured reasoning, workarounds for external limitations, business rules that are not self-evident, security considerations. *(DOC-WHY-01/02)*
+- **References** — bug-fix issue IDs, links to specs/RFCs, external-API docs, algorithm source (paper/book/URL), ADRs (link via [`adr.md`](guides://adr.md)). *(DOC-REF-01/02)*
+- **Warnings** — dangerous operations, non-obvious side effects, thread-safety, deprecation — always *with the reason and safe-usage note*.
+- **Incomplete work** — TODO/FIXME/HACK markers, all issue-linked per [`todo.md`](guides://todo.md). *(DOC-TODO-01)*
 
-#### Python (Google Style / NumPy Style)
+### B. NEVER comment
+
+| Anti-pattern | Example | Fix |
+|---|---|---|
+| Obvious operation | `counter++  // increment counter` | delete |
+| Code restated in English | `// loop through users` over a `for` | delete; the code says it |
+| Redundant type info | `// string to hold name` on a typed field | delete; the type says it |
+| Journal / changelog | `// modified by John 2024-01-15` | use git history |
+| Attribution / copyright in code | `// written by John Smith` | use file header / `LICENSE` |
+| Commented-out code | `// oldFunction();` | delete; git preserves it |
+| Closing-brace labels | `} // end for` | extract smaller functions |
+| Position markers | `//==== HELPERS ====` | split into files/classes |
+| Context-free scare | `// DON'T TOUCH THIS!` | state WHY and consequences |
+| Mandated trivial doc | `/** Gets the id. @return id */` on a getter | comment only when it adds value |
+
+---
+
+## 4. Doc-Comment Conventions by Language
+
+Use the language's **native** doc-comment format so generators produce API docs and IDEs show inline help. The structure (summary → description → params → returns → errors → example → see-also → since) is identical across languages; only the syntax differs. Below is one canonical example — a discount calculator — rendered in each ecosystem's format. Required elements are tabulated in §4.B.
+
+### Python — Google-style (PEP 257), parsed by Sphinx/pydoc
 ```python
 def calculate_discount(price: float, percentage: float, max_discount: float = 100.0) -> float:
-    """Calculate the discounted price with an optional maximum discount cap.
-
-    Applies a percentage discount to the given price, ensuring the discount
-    does not exceed the specified maximum.
+    """Apply a percentage discount to a price, capped at a maximum.
 
     Args:
-        price: The original price in dollars. Must be non-negative.
-        percentage: The discount percentage (0-100). Values outside
-            this range will be clamped.
+        price: Original price in dollars. Must be non-negative.
+        percentage: Discount percentage (0-100); values outside are clamped.
         max_discount: Maximum discount amount allowed. Defaults to 100.0.
 
     Returns:
@@ -228,973 +135,222 @@ def calculate_discount(price: float, percentage: float, max_discount: float = 10
     Example:
         >>> calculate_discount(100.0, 20.0)
         80.0
-        >>> calculate_discount(100.0, 50.0, max_discount=30.0)
-        70.0
 
     Note:
-        This implements the pricing rules from SPEC-123.
-        See: https://internal.docs/pricing-rules
+        Implements pricing rules from SPEC-123.
 
     Since:
         1.2.0
     """
 ```
 
-#### JavaScript/TypeScript (JSDoc/TSDoc)
+### TypeScript / JavaScript — TSDoc / JSDoc, parsed by TypeDoc/JSDoc
 ```typescript
 /**
- * Calculate the discounted price with an optional maximum discount cap.
+ * Apply a percentage discount to a price, capped at a maximum.
  *
- * Applies a percentage discount to the given price, ensuring the discount
- * does not exceed the specified maximum.
- *
- * @param price - The original price in dollars. Must be non-negative.
- * @param percentage - The discount percentage (0-100).
+ * @param price - Original price in dollars. Must be non-negative.
+ * @param percentage - Discount percentage (0-100).
  * @param maxDiscount - Maximum discount amount allowed.
- * @returns The final price after applying the discount.
+ * @returns The final price after the discount.
  * @throws {RangeError} If price is negative.
- *
  * @example
- * // Basic usage
- * const finalPrice = calculateDiscount(100, 20);
- * console.log(finalPrice); // 80
- *
- * @example
- * // With maximum discount cap
- * const cappedPrice = calculateDiscount(100, 50, 30);
- * console.log(cappedPrice); // 70
- *
- * @see {@link https://internal.docs/pricing-rules} for pricing specification
+ * calculateDiscount(100, 20); // 80
+ * @see {@link https://internal.docs/pricing-rules}
  * @since 1.2.0
  */
-function calculateDiscount(
-  price: number,
-  percentage: number,
-  maxDiscount: number = 100
-): number {
+function calculateDiscount(price: number, percentage: number, maxDiscount = 100): number {
 ```
 
-#### Java (Javadoc)
+### Java — Javadoc
 ```java
 /**
- * Calculate the discounted price with an optional maximum discount cap.
- *
- * <p>Applies a percentage discount to the given price, ensuring the discount
- * does not exceed the specified maximum.</p>
+ * Apply a percentage discount to a price, capped at a maximum.
  *
  * @param price       the original price in dollars; must be non-negative
  * @param percentage  the discount percentage (0-100)
  * @param maxDiscount maximum discount amount allowed
- * @return the final price after applying the discount
+ * @return the final price after the discount
  * @throws IllegalArgumentException if price is negative
- *
- * <pre>{@code
- * // Basic usage
- * double finalPrice = calculateDiscount(100.0, 20.0, 100.0);
- * // finalPrice = 80.0
- *
- * // With maximum discount cap
- * double cappedPrice = calculateDiscount(100.0, 50.0, 30.0);
- * // cappedPrice = 70.0
- * }</pre>
- *
- * @see <a href="https://internal.docs/pricing-rules">Pricing Rules</a>
  * @since 1.2.0
+ * @see <a href="https://internal.docs/pricing-rules">Pricing Rules</a>
  */
 public double calculateDiscount(double price, double percentage, double maxDiscount) {
 ```
 
-#### Go (godoc)
+### Go — godoc (full sentences, exported-name first)
 ```go
-// CalculateDiscount calculates the discounted price with an optional maximum cap.
+// CalculateDiscount applies a percentage discount to price, capped at maxDiscount.
 //
-// It applies a percentage discount to the given price, ensuring the discount
-// does not exceed the specified maximum.
+// price must be non-negative; percentage is 0-100. It returns the final price,
+// or an error if price is negative. See https://internal.docs/pricing-rules.
 //
-// Parameters:
-//   - price: The original price in dollars. Must be non-negative.
-//   - percentage: The discount percentage (0-100).
-//   - maxDiscount: Maximum discount amount allowed.
-//
-// Returns the final price after applying the discount.
-// Returns an error if price is negative.
-//
-// Example:
-//
-//	finalPrice, err := CalculateDiscount(100.0, 20.0, 100.0)
-//	// finalPrice = 80.0
-//
-//	cappedPrice, err := CalculateDiscount(100.0, 50.0, 30.0)
-//	// cappedPrice = 70.0
-//
-// See https://internal.docs/pricing-rules for pricing specification.
+//	final, err := CalculateDiscount(100.0, 20.0, 100.0) // final == 80.0
 func CalculateDiscount(price, percentage, maxDiscount float64) (float64, error) {
 ```
 
-#### Rust (rustdoc)
+### Rust — rustdoc (body is Markdown — see `markdown.md`; `cargo test --doc` runs the example)
 ```rust
-/// Calculate the discounted price with an optional maximum discount cap.
-///
-/// Applies a percentage discount to the given price, ensuring the discount
-/// does not exceed the specified maximum.
+/// Apply a percentage discount to `price`, capped at `max_discount`.
 ///
 /// # Arguments
-///
-/// * `price` - The original price in dollars. Must be non-negative.
-/// * `percentage` - The discount percentage (0-100).
-/// * `max_discount` - Maximum discount amount allowed.
-///
-/// # Returns
-///
-/// The final price after applying the discount.
+/// * `price` - Original price; must be non-negative.
+/// * `percentage` - Discount percentage (0-100).
 ///
 /// # Errors
-///
-/// Returns `DiscountError::NegativePrice` if price is negative.
+/// Returns [`DiscountError::NegativePrice`] if `price` is negative.
 ///
 /// # Examples
-///
 /// ```
-/// use pricing::calculate_discount;
-///
-/// let final_price = calculate_discount(100.0, 20.0, 100.0)?;
-/// assert_eq!(final_price, 80.0);
-///
-/// let capped_price = calculate_discount(100.0, 50.0, 30.0)?;
-/// assert_eq!(capped_price, 70.0);
+/// # use pricing::calculate_discount;
+/// assert_eq!(calculate_discount(100.0, 20.0, 100.0)?, 80.0);
+/// # Ok::<(), pricing::DiscountError>(())
 /// ```
-///
-/// # See Also
-///
-/// * [Pricing Rules](https://internal.docs/pricing-rules)
-///
-/// # Since
-///
-/// 1.2.0
 pub fn calculate_discount(price: f64, percentage: f64, max_discount: f64) -> Result<f64, DiscountError> {
 ```
 
-#### C/C++ (Doxygen)
+### C / C++ — Doxygen
 ```cpp
 /**
- * @brief Calculate the discounted price with an optional maximum discount cap.
- *
- * Applies a percentage discount to the given price, ensuring the discount
- * does not exceed the specified maximum.
- *
- * @param[in] price        The original price in dollars. Must be non-negative.
- * @param[in] percentage   The discount percentage (0-100).
- * @param[in] max_discount Maximum discount amount allowed. Default: 100.0
- *
- * @return The final price after applying the discount.
- *
+ * @brief Apply a percentage discount to a price, capped at a maximum.
+ * @param[in] price        Original price; must be non-negative.
+ * @param[in] percentage   Discount percentage (0-100).
+ * @param[in] max_discount Maximum discount amount. Default: 100.0.
+ * @return The final price after the discount.
  * @throws std::invalid_argument if price is negative.
- *
- * @code
- * // Basic usage
- * double final_price = calculate_discount(100.0, 20.0);
- * // final_price = 80.0
- *
- * // With maximum discount cap
- * double capped_price = calculate_discount(100.0, 50.0, 30.0);
- * // capped_price = 70.0
- * @endcode
- *
  * @see https://internal.docs/pricing-rules
  * @since 1.2.0
- * @author Pricing Team
  */
 double calculate_discount(double price, double percentage, double max_discount = 100.0);
 ```
 
-### B. Required Documentation Elements
+> Other ecosystems map the same structure: **Ruby** → YARD (`@param`/`@return`); **PHP** → phpDocumentor; **Kotlin** → KDoc/Dokka; **Swift** → DocC markup. The language guide owns the binding; this section owns the required elements.
 
-**Every public API MUST document:**
+### B. Required documentation elements
 
-| Element | Description | Required |
-|---------|-------------|----------|
-| **Summary** | One-line description of purpose | YES |
-| **Description** | Detailed explanation (if needed) | If non-trivial |
-| **Parameters** | Name, type, constraints, defaults | YES (all params) |
-| **Returns** | Type, possible values, meaning | YES (if not void) |
-| **Errors/Exceptions** | What can go wrong and when | YES (if any) |
-| **Examples** | Usage code that compiles/runs | YES (for public API) |
-| **See Also** | Links to related docs/specs | If applicable |
-| **Since** | Version when added | Recommended |
-| **Deprecated** | Replacement and removal timeline | If deprecated |
+| Element | Required |
+|---|---|
+| **Summary** — one-line purpose | YES |
+| **Description** — detail | if non-trivial |
+| **Parameters** — name, type, constraints, defaults | YES (all params) |
+| **Returns** — type, meaning, possible values | YES (if not void) |
+| **Errors/Exceptions** — what and when | YES (if any) |
+| **Example** — runnable | YES for public API (DOC-API-03/04) |
+| **See Also** — related docs/specs/ADRs | if applicable |
+| **Since** — version added | recommended (DOC-VER-01) |
+| **Deprecated** — replacement + removal version | if deprecated (DOC-VER-01, see `semver.md`) |
 
 ---
 
-## 5. Bug Fix Comments (MANDATORY)
+## 5. Comment Kinds & Their Formats
 
-### A. Bug Fix Documentation Standard
-
-**CRITICAL: Every bug fix MUST include a comment with the issue reference and reasoning.**
-
-```
-BUG FIX COMMENT FORMAT:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  // FIX(#ISSUE-ID): Brief description of what was fixed                │
-│  //                                                                     │
-│  // Problem: Description of the bug behavior                           │
-│  // Cause: Root cause analysis                                         │
-│  // Solution: How this code fixes it                                   │
-│  // Date: YYYY-MM-DD                                                   │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### B. Bug Fix Examples
-
-#### Simple Bug Fix
+### A. Bug-fix comments (DOC-REF-01)
+State issue, root cause, and fix at the change site so the *why* survives. Keep it tight; the discussion lives in the issue, the decision (if architectural) in an ADR (see [`adr.md`](guides://adr.md)).
 ```python
-# FIX(#GH-1234): Prevent division by zero in percentage calculation
-# Previously crashed when total_count was 0
-if total_count > 0:
-    percentage = (count / total_count) * 100
-else:
-    percentage = 0.0
+# FIX(#GH-1234): guard against division by zero in percentage calc.
+# Cause: total_count could be 0 for empty cohorts. Fix: branch on > 0.
+percentage = (count / total_count) * 100 if total_count > 0 else 0.0
 ```
-
-#### Complex Bug Fix
+For non-trivial fixes add Problem / Cause / Solution lines and a regression link:
 ```java
-// FIX(#JIRA-5678): Race condition in user session management
-//
-// Problem: Multiple concurrent requests could create duplicate sessions
-//          for the same user, causing data inconsistency.
-//
-// Cause: The check-then-create pattern was not atomic. Between checking
-//        if a session exists and creating a new one, another thread could
-//        create a session for the same user.
-//
-// Solution: Use a distributed lock with Redis to ensure atomic
-//           check-and-create. Lock is held for max 5 seconds.
-//
-// Date: 2024-01-15
-// Related: #JIRA-5679 (follow-up for session cleanup)
-synchronized (getUserLock(userId)) {
-    Session existing = sessionStore.get(userId);
-    if (existing == null) {
-        existing = sessionStore.create(userId);
-    }
-    return existing;
-}
+// FIX(#JIRA-5678): race in session creation — concurrent requests made
+//   duplicate sessions. Cause: non-atomic check-then-create.
+//   Solution: per-user distributed lock (held ≤5s). See ADR-031.
+synchronized (getUserLock(userId)) { /* atomic check-and-create */ }
 ```
 
-#### Regression Fix
-```typescript
-// FIX(#BUG-9012): Restore backward compatibility for legacy date format
-//
-// Problem: After refactoring in v2.3.0, API stopped accepting dates
-//          in "DD/MM/YYYY" format, breaking existing integrations.
-//
-// Cause: New date parser only accepted ISO 8601 format.
-//
-// Solution: Added fallback parser for legacy format. Legacy format
-//           will be deprecated in v3.0.0.
-//
-// Date: 2024-02-20
-// Regression introduced: v2.3.0 (commit abc123)
-// See: Migration guide at docs/date-format-migration.md
-const parsedDate = parseISO(dateString) ?? parseLegacyFormat(dateString);
-```
-
----
-
-## 6. TODO Comments (MANDATORY)
-
-### A. TODO Comment Standard
-
-**CRITICAL: All incomplete work MUST be tracked with standardized TODO comments.**
-
-```
-TODO COMMENT FORMAT:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  STANDARD TODO:                                                         │
-│  // TODO(#ISSUE-ID): Description of what needs to be done              │
-│                                                                         │
-│  PRIORITIZED TODO:                                                      │
-│  // TODO(#ISSUE-ID)[P1]: Critical - must be done before release        │
-│  // TODO(#ISSUE-ID)[P2]: Important - should be done soon               │
-│  // TODO(#ISSUE-ID)[P3]: Nice to have - can wait                       │
-│                                                                         │
-│  VARIATIONS:                                                            │
-│  // FIXME(#ISSUE-ID): Known bug that needs fixing                      │
-│  // HACK(#ISSUE-ID): Temporary workaround, needs proper solution       │
-│  // XXX(#ISSUE-ID): Dangerous or problematic code, needs attention     │
-│  // OPTIMIZE(#ISSUE-ID): Performance improvement needed                │
-│  // REVIEW(#ISSUE-ID): Needs code review or second opinion             │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### B. TODO Examples
-
-```python
-# TODO(#GH-456): Add input validation for email format
-# Currently accepts any string, should validate RFC 5322
-def create_user(email: str, name: str) -> User:
-    pass
-
-# FIXME(#GH-789): Memory leak in connection pool
-# Connections are not being returned to pool on error
-# Temporary workaround: restart service every 24h
-def get_connection():
-    pass
-
-# HACK(#GH-101): Workaround for upstream library bug
-# Remove when library version > 2.3.0 is released
-# See: https://github.com/library/issues/555
-def process_data(data):
-    data = data.copy()  # HACK: Avoid mutation bug in library
-    pass
-
-# OPTIMIZE(#GH-202)[P3]: Replace O(n²) algorithm with O(n log n)
-# Current implementation acceptable for n < 1000
-# Profile before optimizing - may not be bottleneck
-def sort_items(items):
-    pass
-
-# XXX(#GH-303): This bypasses security check - needs proper auth
-# Temporary bypass for demo, MUST be removed before production
-# Deadline: 2024-03-01
-def admin_action():
-    pass
-
-# REVIEW(#GH-404): Unsure if this handles edge cases correctly
-# Need input from domain expert on business rules
-def calculate_tax(amount, region):
-    pass
-```
-
-### C. TODO Best Practices
-
-**DO:**
-- Include issue/ticket reference
-- Describe WHAT needs to be done
-- Add context on WHY it's not done yet
-- Include deadline if time-sensitive
-- Add priority for triage
-
-**DON'T:**
-- Leave TODOs without issue references
-- Write vague TODOs like "fix this later"
-- Keep TODOs for completed work
-- Use TODOs as permanent documentation
-- Accumulate hundreds of untracked TODOs
-
----
-
-## 7. Reference Comments (MANDATORY)
-
-### A. Types of Reference Comments
-
-**Link to external resources when they clarify the code:**
-
-```
-REFERENCE COMMENT TYPES:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  SPECIFICATION REFERENCES                                               │
-│  // Implements RFC 7231, Section 6.5.1 (400 Bad Request)               │
-│  // See: https://tools.ietf.org/html/rfc7231#section-6.5.1             │
-│                                                                         │
-│  ALGORITHM REFERENCES                                                   │
-│  // Uses Dijkstra's algorithm for shortest path                        │
-│  // Reference: Introduction to Algorithms, Cormen et al., Ch. 24       │
-│  // Complexity: O((V + E) log V) with binary heap                      │
-│                                                                         │
-│  API DOCUMENTATION                                                      │
-│  // Stripe API webhook signature verification                          │
-│  // See: https://stripe.com/docs/webhooks/signatures                   │
-│                                                                         │
-│  INTERNAL DOCUMENTATION                                                 │
-│  // Business rules defined in SPEC-123                                 │
-│  // See: https://confluence.company.com/display/SPEC/Pricing+Rules     │
-│                                                                         │
-│  STACK OVERFLOW / COMMUNITY                                            │
-│  // Workaround for browser quirk in Safari                             │
-│  // See: https://stackoverflow.com/a/12345678                          │
-│                                                                         │
-│  DESIGN DECISIONS                                                       │
-│  // Architecture Decision Record: ADR-042                              │
-│  // See: docs/adr/042-event-sourcing.md                               │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### B. Reference Examples
-
+### B. Reference comments (DOC-REF-02)
+Link the canonical source; never paste the spec/decision.
 ```go
-// ParseJWT validates and parses a JWT token according to RFC 7519.
-//
-// Security considerations:
-// - Validates signature using RS256 (RSA + SHA-256)
-// - Rejects tokens with "none" algorithm (CVE-2015-2951)
-// - Validates exp, nbf, and iat claims
-//
-// References:
-// - JWT Spec: https://tools.ietf.org/html/rfc7519
-// - JWS Spec: https://tools.ietf.org/html/rfc7515
-// - Security Best Practices: https://auth0.com/blog/critical-vulnerabilities-in-json-web-token-libraries/
-func ParseJWT(token string, publicKey *rsa.PublicKey) (*Claims, error) {
+// ParseJWT validates a token per RFC 7519. Rejects "none" alg (CVE-2015-2951).
+// Spec: https://tools.ietf.org/html/rfc7519 · Decision: docs/adr/042-jwt.md
 ```
-
 ```python
-def levenshtein_distance(s1: str, s2: str) -> int:
-    """
-    Calculate the Levenshtein (edit) distance between two strings.
-
-    Uses Wagner-Fischer algorithm with O(min(m,n)) space optimization.
-
-    Algorithm Reference:
-        Wagner, R. A., & Fischer, M. J. (1974).
-        "The String-to-String Correction Problem"
-        Journal of the ACM, 21(1), 168-173.
-        https://doi.org/10.1145/321796.321811
-
-    Complexity:
-        Time: O(m * n) where m, n are string lengths
-        Space: O(min(m, n)) using rolling array optimization
-
-    See Also:
-        - Damerau-Levenshtein for transposition support
-        - Jaro-Winkler for similarity scoring
-    """
+# Wagner-Fischer edit distance, O(m*n) time / O(min(m,n)) space.
+# Wagner & Fischer (1974), JACM 21(1):168-173. https://doi.org/10.1145/321796.321811
 ```
 
----
-
-## 8. Inline Comments (MANDATORY)
-
-### A. When to Use Inline Comments
-
-**Use inline comments sparingly for non-obvious code:**
-
+### C. Inline comments
+Sparingly, for non-obvious *why*:
 ```python
-# GOOD: Explains WHY, not WHAT
-timeout = 30  # Matches upstream service SLA (see SLA-DOC-123)
-
-# GOOD: Explains business rule
-if age >= 65:  # Senior discount eligibility per policy POL-456
-    apply_discount(0.15)
-
-# GOOD: Explains non-obvious technical choice
-buffer_size = 8192  # Optimal for SSD page size, benchmarked in PERF-789
-
-# GOOD: Warns about subtle behavior
-result = data.copy()  # Must copy - original is mutated by process()
-
-# BAD: States the obvious
-counter = 0  # Initialize counter to zero
-i += 1  # Increment i
-
-# BAD: Repeats the code
-if user.is_active:  # Check if user is active
-    return True  # Return true
+timeout = 30        # matches upstream service SLA (SLA-DOC-123)
+buffer_size = 8192  # SSD page size; benchmarked in PERF-789
+result = data.copy()  # process() mutates its input — must copy
 ```
 
-### B. Complex Logic Comments
+### D. Block comments for complex logic
+A short block explaining approach, the rejected alternative, and edge cases handled — when the algorithm is genuinely non-trivial and naming alone cannot carry it.
 
-**For complex algorithms, add a block comment explaining the approach:**
+### E. Class / module headers
+Public classes and modules carry a header covering responsibility, thread-safety (if relevant), key dependencies, and one usage example. Push configuration/architecture detail to its owner guide and *link* it rather than restating (e.g. config → `env-config.md`, layering → the architecture owner).
 
-```java
-/*
- * Binary search with fuzzy matching for autocomplete suggestions.
- *
- * Algorithm:
- * 1. Binary search to find first prefix match
- * 2. Expand in both directions to collect all matches
- * 3. Score matches by:
- *    - Exact match: 100 points
- *    - Prefix match: 80 points
- *    - Contains match: 50 points
- * 4. Return top N by score, then alphabetically
- *
- * Why not linear search?
- * With 100K+ terms, linear search takes ~50ms.
- * This approach: ~0.5ms (measured in PERF-234)
- *
- * Edge cases handled:
- * - Empty query: returns popular terms
- * - No matches: returns empty list
- * - Unicode: normalized to NFC before comparison
- */
-public List<Suggestion> findSuggestions(String query, int limit) {
-```
+### F. TODO / FIXME / HACK markers
+Owned by [`todo.md`](guides://todo.md). This guide only requires (DOC-TODO-01) that every incomplete-work marker is standardized and issue-linked, e.g. `# TODO(#GH-456): validate email per RFC 5322`. The tag taxonomy, priority scheme, and lifecycle rules live in `todo.md` — do not restate them.
 
 ---
 
-## 9. Class/Module Comments (MANDATORY)
+## 6. Comment Maintenance
 
-### A. Class Documentation Standard
+A comment is part of the code under change. When code changes, audit and fix comments in the **same** change (DOC-MNT-01).
 
-**Every public class/module MUST have a documentation header:**
+- **Signature change** → update params, returns, errors, and examples.
+- **Behavior change** → update the description and any edge-case/performance notes.
+- **Bug fix** → add the fix comment (DOC-REF-01); remove comments describing the old buggy behavior.
+- **Refactor** → review every comment in the touched code; delete comments for deleted code; update the module header.
+- **Dependency change** → update version references; remove workaround comments whose upstream bug is now fixed.
 
-```typescript
-/**
- * Manages user authentication and session lifecycle.
- *
- * This service handles:
- * - User login/logout with multiple providers (OAuth, SAML, local)
- * - Session creation, validation, and refresh
- * - Token management (access tokens, refresh tokens)
- * - Rate limiting for authentication attempts
- *
- * Thread Safety:
- *   All public methods are thread-safe. Internal state is protected
- *   by read-write locks optimized for read-heavy workloads.
- *
- * Configuration:
- *   Required environment variables:
- *   - AUTH_JWT_SECRET: Secret for JWT signing
- *   - AUTH_SESSION_TTL: Session timeout in seconds (default: 3600)
- *   - AUTH_MAX_ATTEMPTS: Max login attempts before lockout (default: 5)
- *
- * Dependencies:
- *   - UserRepository: For user credential lookup
- *   - TokenService: For JWT generation/validation
- *   - CacheService: For session storage (Redis recommended)
- *
- * Example:
- *   ```typescript
- *   const auth = new AuthenticationService(userRepo, tokenService, cache);
- *
- *   // Login
- *   const session = await auth.login(email, password);
- *
- *   // Validate
- *   const user = await auth.validateSession(session.token);
- *
- *   // Logout
- *   await auth.logout(session.token);
- *   ```
- *
- * @see {@link UserRepository} for user data access
- * @see {@link TokenService} for token operations
- * @see docs/architecture/authentication.md for design decisions
- *
- * @since 1.0.0
- * @author Security Team
- */
-export class AuthenticationService {
-```
-
-### B. Module/Package Documentation
-
-```python
-"""
-User management module for the application.
-
-This module provides comprehensive user lifecycle management including
-registration, authentication, profile management, and access control.
-
-Modules:
-    authentication: Login, logout, password reset, MFA
-    registration: User signup, email verification
-    profile: User profile CRUD operations
-    permissions: Role-based access control (RBAC)
-
-Quick Start:
-    >>> from user import UserService
-    >>> service = UserService(db_connection)
-    >>> user = service.create_user("john@example.com", "John Doe")
-    >>> session = service.authenticate("john@example.com", "password")
-
-Configuration:
-    The module reads configuration from environment variables:
-    - USER_DB_URL: Database connection string
-    - USER_HASH_ROUNDS: bcrypt hash rounds (default: 12)
-    - USER_SESSION_TTL: Session timeout in seconds
-
-Architecture:
-    Follows hexagonal architecture with clear separation:
-    - Domain: Core business logic (user.domain)
-    - Ports: Interfaces (user.ports)
-    - Adapters: Implementations (user.adapters)
-
-See Also:
-    - Architecture docs: docs/architecture/user-module.md
-    - API reference: docs/api/user.md
-    - Security guidelines: docs/security/authentication.md
-
-Note:
-    This module handles sensitive data. Ensure all deployments
-    follow the security checklist in docs/security/checklist.md
-"""
-```
+**Stale-comment smells:** a documented parameter that no longer exists; a summary describing pre-refactor behavior ("returns all users" when it now paginates); a reference to a renamed symbol; a `HACK` for a bug fixed in a since-upgraded dependency.
 
 ---
 
-## 10. Comment Maintenance (MANDATORY)
+## 7. Documentation Generation
 
-### A. Comment Update Rules
+API docs are generated and verified in CI as a gate (DOC-GEN-01); the *pipeline* is owned by [`ci-cd.md`](guides://ci-cd.md). Long-form prose docs follow [`markdown.md`](guides://markdown.md).
 
-**CRITICAL: Comments MUST be updated whenever code changes.**
+| Language | Generator | Generate | Coverage / lint |
+|---|---|---|---|
+| Python | Sphinx / pydoc | `sphinx-build -b html docs/ _build/` | `interrogate -vv --fail-under 100 src/` |
+| JS | JSDoc | `jsdoc -c jsdoc.json` | — |
+| TypeScript | TypeDoc | `typedoc --out docs src/` | `typedoc --validation.notExported` |
+| Java | Javadoc | `javadoc -d docs -sourcepath src` | `javadoc -Xdoclint:all` |
+| Go | godoc | `go doc -all ./...` | `go vet ./...` (doc-adjacent) |
+| Rust | rustdoc | `cargo doc --no-deps` | `cargo test --doc` |
+| C/C++ | Doxygen | `doxygen Doxyfile` | warnings-as-errors in `Doxyfile` |
+| Ruby | YARD | `yard doc` | `yard stats --list-undoc` |
+| PHP | phpDocumentor | `phpdoc -d src -t docs` | — |
+| Kotlin | Dokka | `./gradlew dokkaHtml` | — |
+| Swift | DocC | `swift package generate-documentation` | — |
 
-```
-COMMENT MAINTENANCE PROTOCOL:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  WHEN CODE CHANGES, CHECK AND UPDATE:                                   │
-│                                                                         │
-│  1. Function/Method Signature Changes                                   │
-│     → Update parameter descriptions                                     │
-│     → Update return value documentation                                 │
-│     → Update exception documentation                                    │
-│     → Update examples                                                   │
-│                                                                         │
-│  2. Behavior Changes                                                    │
-│     → Update description of what the code does                         │
-│     → Update any edge case documentation                               │
-│     → Update performance characteristics if changed                    │
-│                                                                         │
-│  3. Bug Fixes                                                          │
-│     → Add bug fix comment with issue reference                         │
-│     → Update any comments that described buggy behavior                │
-│                                                                         │
-│  4. Refactoring                                                        │
-│     → Review all comments in refactored code                           │
-│     → Remove comments for deleted code                                 │
-│     → Update file/module-level documentation                           │
-│                                                                         │
-│  5. Dependency Changes                                                 │
-│     → Update version references                                        │
-│     → Update workaround comments if issue is fixed                     │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### B. Detecting Stale Comments
-
-**Signs of stale comments:**
-
-```python
-# STALE: References non-existent parameter
-def process(data):  # config parameter removed in v2.0
-    """
-    Process the data with the given configuration.  # ❌ No config param!
-
-    Args:
-        data: The input data
-        config: Configuration options  # ❌ This parameter doesn't exist!
-    """
-    pass
-
-# STALE: Describes old behavior
-def get_users():
-    """Returns all users from the database."""  # ❌ Now returns paginated!
-    return paginate(User.query.all(), page=1, per_page=50)
-
-# STALE: References old code structure
-# See UserManager.validate() for validation logic  # ❌ Class was renamed!
-user_validator.check(user)
-
-# STALE: Workaround for fixed issue
-# HACK: Workaround for bug in library v1.2  # ❌ Using v2.0 now!
-result = library.fixed_function()  # Bug was fixed in v1.5
-```
-
-### C. Agent Comment Update Checklist
-
-**Before delivering modified code, agents MUST:**
-
-- [ ] Read all comments in files being modified
-- [ ] Identify comments affected by the changes
-- [ ] Update parameter documentation if signatures changed
-- [ ] Update behavior descriptions if logic changed
-- [ ] Remove comments for deleted code
-- [ ] Add bug fix comments for bug fixes
-- [ ] Verify examples still work
-- [ ] Run documentation generator to check for warnings
-- [ ] Search for references to renamed/deleted items
+Gate principle: generation MUST fail on warnings, public-API coverage MUST meet threshold (100% for public symbols), and documentation examples MUST execute (DOC-API-04). Generated HTML stays out of version control.
 
 ---
 
-## 11. Anti-Patterns (PROHIBITED)
+## 8. Why This Works
 
-### A. Comment Anti-Patterns
-
-**NEVER use these patterns:**
-
-```
-PROHIBITED COMMENT PATTERNS:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  ❌ NOISE COMMENTS                                                      │
-│     // Constructor                                                      │
-│     public UserService() { }                                            │
-│                                                                         │
-│     // Getter                                                          │
-│     public String getName() { return name; }                           │
-│                                                                         │
-│  ❌ REDUNDANT COMMENTS                                                  │
-│     i++; // Increment i by 1                                           │
-│     return null; // Return null                                        │
-│                                                                         │
-│  ❌ JOURNAL COMMENTS                                                    │
-│     // 2024-01-15: Added validation (John)                             │
-│     // 2024-01-20: Fixed bug (Jane)                                    │
-│     // Use git history instead!                                        │
-│                                                                         │
-│  ❌ COMMENTED-OUT CODE                                                  │
-│     // oldImplementation();                                            │
-│     // if (legacy) { doOldThing(); }                                   │
-│     // Delete it! Git has history.                                     │
-│                                                                         │
-│  ❌ CLOSING BRACE COMMENTS                                             │
-│     } // end if                                                        │
-│     } // end for                                                       │
-│     } // end try                                                       │
-│     // Refactor to smaller functions instead!                          │
-│                                                                         │
-│  ❌ POSITION MARKERS                                                   │
-│     ///////////////// SECTION 1 /////////////////                      │
-│     // ============ HELPERS ============ //                            │
-│     // Refactor into separate files/classes!                           │
-│                                                                         │
-│  ❌ SCARY WARNINGS WITHOUT CONTEXT                                     │
-│     // DON'T TOUCH THIS!                                               │
-│     // HERE BE DRAGONS                                                 │
-│     // Explain WHY it's dangerous instead!                             │
-│                                                                         │
-│  ❌ ATTRIBUTION IN CODE                                                │
-│     // Written by John Smith                                           │
-│     // Copyright 2024 Company Inc                                      │
-│     // Use file headers or LICENSE files instead!                      │
-│                                                                         │
-│  ❌ MANDATED COMMENTS                                                  │
-│     // Every function must have a comment (even if trivial)            │
-│     /** Gets the ID. @return the ID */                                │
-│     public long getId() { return id; }                                 │
-│     // Only comment when it adds value!                                │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### B. How to Fix Anti-Patterns
-
-| Anti-Pattern | Solution |
-|--------------|----------|
-| Noise comments | Delete them; code should be self-explanatory |
-| Journal comments | Use git commit messages and blame |
-| Commented-out code | Delete it; git preserves history |
-| Closing braces | Extract to smaller functions |
-| Position markers | Split into multiple files/classes |
-| Scary warnings | Add context: WHY and WHAT happens if touched |
-| Redundant docs | Only document non-obvious behavior |
+- **Code as primary documentation** — self-documenting code lowers maintenance load; comments carry intent, code carries implementation, so the two diverge less.
+- **Machine-readable docs** — native doc-comment syntax means docs generate automatically, ship in the same PR as the code, and surface in the IDE.
+- **Minimal comments** — fewer comments means less to go stale; the comments that remain are signal, not noise, and they pressure better naming.
+- **Issue-linked fixes & TODOs** — traceability enables bisecting, prevents reintroducing fixed bugs, and makes technical debt visible and triageable.
 
 ---
 
-## 12. Documentation Generation (MANDATORY)
+## Deployment Checklist
 
-### A. Documentation Tools by Language
+Generated from §2 — one box per requirement ID. No new requirements.
 
-| Language | Tool | Command | Output |
-|----------|------|---------|--------|
-| Python | pydoc / Sphinx | `sphinx-build -b html docs/ _build/` | HTML |
-| JavaScript | JSDoc | `jsdoc -c jsdoc.json` | HTML |
-| TypeScript | TypeDoc | `typedoc --out docs src/` | HTML |
-| Java | Javadoc | `javadoc -d docs -sourcepath src` | HTML |
-| Go | godoc | `go doc -all ./...` | Text/HTML |
-| Rust | rustdoc | `cargo doc --no-deps` | HTML |
-| C/C++ | Doxygen | `doxygen Doxyfile` | HTML/PDF |
-| Ruby | YARD | `yard doc` | HTML |
-| PHP | phpDocumentor | `phpdoc -d src -t docs` | HTML |
-| Kotlin | Dokka | `./gradlew dokkaHtml` | HTML |
-| Swift | DocC | `swift package generate-documentation` | HTML |
-
-### B. Documentation Generation Requirements
-
-**MANDATORY: Documentation MUST be generated and verified.**
-
-```bash
-# Example CI/CD step for documentation verification
-documentation:
-  stage: verify
-  script:
-    # Generate documentation
-    - npm run docs:generate
-
-    # Check for warnings (fail on warnings)
-    - npm run docs:generate 2>&1 | tee docs.log
-    - "! grep -i 'warning' docs.log"
-
-    # Verify all public APIs are documented
-    - npm run docs:coverage -- --threshold 100
-
-    # Test code examples in documentation
-    - npm run docs:test-examples
-  artifacts:
-    paths:
-      - docs/_build/
-```
-
-### C. Documentation Quality Checks
-
-**Verify documentation quality:**
-
-```bash
-# Check documentation coverage
-# Python
-interrogate -vv --fail-under 100 src/
-
-# TypeScript
-typedoc --validation.notExported
-
-# Java
-javadoc -Xdoclint:all
-
-# Go (check for missing comments)
-golint ./..
-
-# Rust
-cargo doc --document-private-items 2>&1 | grep -i "warning"
-```
+- [ ] DOC-API-01 — every public symbol has a native-format doc comment
+- [ ] DOC-API-02 — summary, all params, returns, and errors documented
+- [ ] DOC-API-03 — non-trivial public APIs carry a usage example
+- [ ] DOC-API-04 — doc examples compile/run (doctest passes)
+- [ ] DOC-WHY-01/02 — comments explain WHY; non-obvious decisions documented; no WHAT-narration
+- [ ] DOC-REF-01 — bug fixes cite issue ID + root cause
+- [ ] DOC-REF-02 — spec/RFC/algorithm/ADR references link the canonical source (ADRs via `adr.md`)
+- [ ] DOC-TODO-01 — every TODO/FIXME/HACK is issue-linked (see `todo.md`)
+- [ ] DOC-NOISE-01 — no noise/journal/attribution/position/closing-brace comments
+- [ ] DOC-NOISE-02 — no commented-out code without a reason
+- [ ] DOC-MNT-01 — affected comments updated in the same change; none contradict the code
+- [ ] DOC-GEN-01 — API docs generate with zero warnings/errors
+- [ ] DOC-VER-01 — `@since`/`@deprecated` tags present where applicable (see `semver.md`)
 
 ---
-
-## 13. Deployment Checklist
-
-### Documentation Verification (MANDATORY)
-
-**Before delivering ANY code, verify:**
-
-#### Comment Quality
-- [ ] All public APIs have doc comments
-- [ ] All parameters documented with types and constraints
-- [ ] All return values documented
-- [ ] All exceptions/errors documented
-- [ ] Examples provided for non-trivial APIs
-- [ ] No comments contradict the code
-- [ ] No stale comments referencing old code
-
-#### Comment Maintenance
-- [ ] Comments updated for all code changes
-- [ ] Bug fix comments include issue references
-- [ ] TODOs include issue references
-- [ ] Removed comments for deleted code
-- [ ] No commented-out code without explanation
-
-#### Documentation Generation
-- [ ] Documentation generates without errors
-- [ ] Documentation generates without warnings
-- [ ] All links in documentation resolve
-- [ ] Code examples in docs compile/run
-- [ ] Documentation coverage meets threshold
-
-#### Agent Workflow Completed
-- [ ] Agent reviewed all comments in modified files
-- [ ] Agent updated affected comments
-- [ ] Agent verified documentation generates correctly
-- [ ] Agent tested examples in documentation
-- [ ] Agent removed stale comments
-
----
-
-## 14. Why These Guidelines Work
-
-**Code as Primary Documentation**:
-- Self-documenting code reduces maintenance burden
-- Comments explain intent, code explains implementation
-- Reduces risk of comments diverging from code
-
-**Machine-Readable Documentation**:
-- Automatic API doc generation ensures consistency
-- Docs stay in sync with code (same repo, same PR)
-- IDE integration provides inline documentation
-
-**Minimal Comments**:
-- Less to maintain = less to go stale
-- Forces better naming and structure
-- Comments that exist are valuable, not noise
-
-**Bug Fix Traceability**:
-- Issue references enable bisecting and understanding
-- Future developers can find related discussions
-- Prevents re-introduction of fixed bugs
-
-**TODO Tracking**:
-- Makes technical debt visible
-- Enables prioritization and planning
-- Prevents forgotten incomplete work
-
----
-
-## 15. Quick Reference
-
-### Comment Decision Tree
-
-```
-Should I write a comment?
-
-                    ┌─────────────────────┐
-                    │ Is it a public API? │
-                    └─────────┬───────────┘
-                              │
-              ┌───────────────┴───────────────┐
-              ▼                               ▼
-             YES                              NO
-              │                               │
-              ▼                               ▼
-    ┌─────────────────┐           ┌─────────────────────┐
-    │ Write doc       │           │ Is the code unclear │
-    │ comment with    │           │ after refactoring?  │
-    │ full API docs   │           └─────────┬───────────┘
-    └─────────────────┘                     │
-                              ┌─────────────┴─────────────┐
-                              ▼                           ▼
-                             YES                          NO
-                              │                           │
-                              ▼                           ▼
-                    ┌─────────────────┐       ┌─────────────────┐
-                    │ Comment WHY,    │       │ No comment      │
-                    │ not WHAT        │       │ needed          │
-                    └─────────────────┘       └─────────────────┘
-```
-
-### Comment Templates
-
-```
-// === PUBLIC API ===
-/**
- * Brief description.
- *
- * Detailed description if needed.
- *
- * @param name - Description
- * @returns Description
- * @throws Error - When X happens
- * @example
- * code example here
- */
-
-// === BUG FIX ===
-// FIX(#ISSUE-ID): Brief description
-// Problem: What was happening
-// Solution: How this fixes it
-
-// === TODO ===
-// TODO(#ISSUE-ID): What needs to be done
-// Context: Why it's not done yet
-
-// === REFERENCE ===
-// Implements SPEC-123 / RFC-7231 / Algorithm Name
-// See: https://link.to/documentation
-
-// === WARNING ===
-// WARNING: Description of danger
-// Why: Explanation of consequences
-// Safe usage: How to use safely
-```
-
----
-
 **End of Code Comments & Documentation Guidelines**

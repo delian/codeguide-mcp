@@ -1,1092 +1,325 @@
 # C# Development Guidelines
-Mandatory standards for C# development, following modern .NET patterns and best practices. .NET 10+, Visual Studio, Rider, Roslyn analyzers, dotnet CLI.
+Mandatory coding standards for C#: null-safe, async-correct, test-covered, DI-driven. .NET 9, C# 13, dotnet CLI, xUnit, Roslyn analyzers.
+
+---
+name: csharp
+title: C# Development Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: language
+tools: [dotnet@9.0, csharp@13, dotnet-cli, xunit, roslyn-analyzers, dotnet-format]
+requires:
+  - tdd
+  - hexagonal
+  - secure-coding
+  - error-handling
+recommends:
+  - designpatterns
+  - logging
+  - observability
+  - comments
+  - semver
+provides:
+  - modern-csharp
+  - nullable-refs
+  - async-await
+  - linq
+  - dotnet-di
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide covers only what is unique to C# and .NET.
 
 ---
 
-**Agent Profile**: The C# Expert
-**Role**: Senior .NET Developer & Software Architect
-**Objective**: Generate clean, efficient, and maintainable C# code following Microsoft and community best practices.
-**Tools**: .NET 10+, Visual Studio, Rider, Roslyn analyzers, dotnet CLI.
+## 0. Prerequisites & References
+
+Fetch and apply these **before** generating C# code. Their rules are assumed below and not repeated.
+
+> 📎 **REQUIRED — fetch & apply first:**
+> - [`tdd.md`](guides://tdd.md) — test-first, Red-Green-Refactor, regression-test-before-fix, coverage. *(C# binding: runner is `dotnet test`; framework xUnit.)*
+> - [`hexagonal.md`](guides://hexagonal.md) — layering, ports/adapters, dependency inversion. *(C# binding: ports are interfaces; adapters wired via the built-in DI container in `Program.cs`.)*
+> - [`secure-coding.md`](guides://secure-coding.md) — supply chain, secrets, CVE policy. *(C# binding: `dotnet list package --vulnerable`, NuGet lock files, package signature verification.)*
+> - [`error-handling.md`](guides://error-handling.md) — error strategy & propagation. *(C# binding: typed exceptions; no swallowing; `ProblemDetails` at the boundary.)*
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`designpatterns.md`](guides://designpatterns.md) — GoF & friends; this guide shows only the C# binding.
+> - [`logging.md`](guides://logging.md) — structured logging *(binding: `ILogger<T>`, message templates, source-generated `LoggerMessage`).*
+> - [`observability.md`](guides://observability.md) — metrics/tracing *(binding: `System.Diagnostics.Activity`, OpenTelemetry .NET SDK).*
+> - [`comments.md`](guides://comments.md) — API-doc policy *(binding: XML doc comments, `GenerateDocumentationFile`).*
+> - [`semver.md`](guides://semver.md) — versioning of NuGet packages.
+
+> 📎 **SEE ALSO:** [`cleanarch.md`](guides://cleanarch.md) · [`code-review.md`](guides://code-review.md) · [`ci-cd.md`](guides://ci-cd.md) · [`rest.md`](guides://rest.md) *(for ASP.NET Core HTTP APIs)*
 
 ---
 
 ## 1. Core Philosophies: DOTNET-FIRST
 
-The agent must adhere to the **DOTNET-FIRST** principles for every C# implementation:
+C#-specific principles only. TDD, security, error handling, and architecture come from §0.
 
-**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
-**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
-**Security-First**: Mandatory vulnerability scanning, dependency auditing, and supply chain integrity checks.
+- **D**efensive nullability: nullable reference types **on** solution-wide; the compiler is the contract — no `!` to silence warnings without justification.
+- **O**bject model: records for data, interfaces for ports, sealed-by-default classes for behavior; favor composition over inheritance.
+- **T**estable by construction: constructor injection through the built-in DI container; no `new` of dependencies, no static singletons holding state.
+- **N**amespaced: file-scoped namespaces that mirror the folder/project layout; one public type per file.
+- **E**fficient async: async all the way with `CancellationToken` flowing through; `Span<T>`/`Memory<T>` and pooling on hot paths.
+- **T**yped strongly: lean on generics, pattern matching, and the type system instead of casts and `object`.
 
-- **D**efensive: Null safety, validation, and proper exception handling.
-- **O**bject-Oriented: Proper use of classes, interfaces, and inheritance.
-- **T**estable: Design for unit testing with dependency injection.
-- **N**amespaced: Logical organization with proper namespace hierarchy.
-- **E**fficient: Use async/await, spans (`ReadOnlySpan<T>`), and memory-efficient patterns.
-- **T**yped: Leverage the strong type system and generics.
-
-**Verified Code**: Agent-generated code MUST compile and pass security audits before delivery.
+**Verified Code**: Agent-generated C# MUST pass every gate in §2 before delivery.
 
 ---
 
-## 2. Agent Code Generation Requirements (MANDATORY)
+## 2. Requirements (MANDATORY, auditable)
 
-### A. Verification Protocol
+RFC-2119 keywords. IDs `CS-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a shared rule cite its owner.
 
-**CRITICAL: Agents MUST verify that all generated C# code compiles and passes tests before presenting it to the user.**
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| CS-TST-01 | Every feature MUST be test-first (see `tdd.md`) | `dotnet test` | exit 0, 0 skips |
+| CS-TST-02 | Each bug MUST get a regression test before the fix (see `tdd.md`) | `dotnet test` | failing→passing |
+| CS-TST-03 | Business-logic coverage MUST meet the project gate | `dotnet test --collect:"XPlat Code Coverage"` | ≥ project threshold |
+| CS-FMT-01 | Code MUST be formatted | `dotnet format --verify-no-changes` | no diff |
+| CS-LINT-01 | Roslyn analyzers MUST pass clean (warnings-as-errors) | `dotnet build` | 0 warnings, 0 errors |
+| CS-TYP-01 | Nullable reference types MUST be enabled; no unjustified `!` or `#pragma` suppressions | `dotnet build` (Nullable=enable, WarningsAsErrors) | 0 CS86xx warnings |
+| CS-DOC-01 | Public APIs MUST have XML doc comments (see `comments.md`) | `dotnet build` (GenerateDocumentationFile=true) | 0 CS1591 |
+| CS-SEC-01 | 0 high/critical CVEs in deps, incl. transitive (see `secure-coding.md`) | `dotnet list package --vulnerable --include-transitive` | none high/critical |
+| CS-DEP-01 | Lockfile in sync & restore reproducible (see `secure-coding.md`) | `dotnet restore --locked-mode` | restores clean |
+| CS-ARCH-01 | Domain imports no infrastructure/framework code (see `hexagonal.md`) | architecture test / review | no inward→outward |
+| CS-ASYNC-01 | No sync-over-async; no `async void` except event handlers | analyzer review (`.Result`/`.Wait()`/`async void` ban) | none found |
 
-#### Pre-Delivery Checklist
-
-**Before delivering ANY C# code, the agent MUST:**
-
-1. **Compilation Check**:
-   ```bash
-   # Verify project compiles without errors
-   dotnet build
-   # Exit code MUST be 0
-   ```
-   - **MUST** return 0 errors and 0 warnings.
-   - All nullable reference type warnings must be addressed.
-
-2. **Test Execution**:
-   ```bash
-   # Run all tests
-   dotnet test
-   ```
-   - **MUST** pass all tests (100% pass rate).
-   - Verify coverage meets project requirements (min 80%).
-
-3. **Security & Dependency Verification (MANDATORY)**:
-   ```bash
-   # Scan for vulnerabilities in dependencies
-   dotnet list package --vulnerable
-   
-   # Check for outdated dependencies
-   dotnet list package --outdated
-   ```
-   - **MUST** have 0 high/critical vulnerabilities.
-   - Dependencies MUST be pinned to secure versions.
-   - Supply chain integrity (lockfiles) MUST be verified if `Directory.Packages.props` is used.
-
-4. **Documentation Verification**:
-   - All public APIs have XML documentation comments.
-   - Examples provided for complex APIs.
-
-#### Error Correction Process
-
-If verification fails:
-
-1. **Identify the error**: Read the full `dotnet build` or `dotnet test` error message.
-2. **Locate the source**: Identify which project or file failed.
-3. **Fix the root cause**:
-   - Null safety violation? Add null check or `required` keyword.
-   - Dependency vulnerability? Update package version in `Directory.Packages.props`.
-4. **Re-verify**: Run build and audits again until they succeed.
-
-### B. Agent Workflow Example
-
-**Complete C# generation workflow:**
-
-1. **Generate Code Structure**:
-   ```
-   src/
-   ├── MyApp.Core/
-   │   └── Entities/User.cs
-   tests/
-   └── MyApp.UnitTests/
-       └── UserTests.cs
-   ```
-
-2. **Generate Initial Code**:
-   ```csharp
-   public record User(int Id, string Name);
-   ```
-
-3. **Verify**:
-   ```bash
-   dotnet build
-   # ✓ Build successful
-   ```
-
-4. **Add Tests**:
-   ```csharp
-   [Fact]
-   public void CreateUser_Works() { ... }
-   ```
-
-5. **Run Tests**:
-   ```bash
-   dotnet test
-   # ✓ All tests pass
-   ```
-
-6. **Final Verification**:
-   ```bash
-   dotnet list package --vulnerable
-   # ✓ No vulnerabilities found
-   ```
-
-7. **Present Code**: Only after ALL checks pass
+> **Forbidden**: shipping implementation before its test (violates `tdd.md`), fixing a bug without a regression test first, blocking on async (`.Result`/`.Wait()`/`.GetAwaiter().GetResult()`), `async void` outside event handlers, suppressing nullable warnings with `!` instead of fixing the flow, or `[Fact(Skip=...)]` to bypass a failing test.
 
 ---
 
-## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+## 3. Verification Protocol
 
-### A. Solution Organization
+Run, in order, before presenting code. Fix → re-run until every gate is green.
+
+```bash
+dotnet format --verify-no-changes              # CS-FMT-01
+dotnet build -warnaserror                      # CS-LINT-01, CS-TYP-01, CS-DOC-01
+dotnet test --collect:"XPlat Code Coverage"    # CS-TST-01/02/03
+dotnet list package --vulnerable --include-transitive   # CS-SEC-01
+dotnet restore --locked-mode                   # CS-DEP-01
+```
+
+The *why* behind each gate lives in its §0 owner; do not re-derive it here.
+
+---
+
+## 4. Project Structure
+
+Idiomatic multi-project solution layout. Architectural principles (dependency direction, ports/adapters, acyclic deps) are owned by [`hexagonal.md`](guides://hexagonal.md); below is only their C# mapping.
 
 ```
 MySolution/
 ├── src/
-│   ├── MyApp.Api/                    # Web API project
-│   │   ├── Controllers/
-│   │   ├── Middleware/
-│   │   ├── Filters/
-│   │   └── Program.cs
-│   ├── MyApp.Core/                   # Domain/business logic
-│   │   ├── Entities/
-│   │   ├── Interfaces/
-│   │   ├── Services/
-│   │   └── Exceptions/
-│   ├── MyApp.Infrastructure/         # Data access, external services
-│   │   ├── Data/
-│   │   ├── Repositories/
-│   │   └── ExternalServices/
-│   └── MyApp.Shared/                 # Shared DTOs, utilities
-│       ├── DTOs/
-│       └── Extensions/
+│   ├── MyApp.Domain/          # pure business logic — no framework/IO refs (CS-ARCH-01)
+│   ├── MyApp.Application/      # use cases; depends only on Domain + port interfaces
+│   ├── MyApp.Infrastructure/   # adapters: EF Core, HTTP, messaging — implements ports
+│   └── MyApp.Api/             # composition root: Program.cs wires DI, hosts endpoints
 ├── tests/
-│   ├── MyApp.UnitTests/
+│   ├── MyApp.UnitTests/       # mirrors src/ (see tdd.md)
 │   ├── MyApp.IntegrationTests/
-│   └── MyApp.ArchitectureTests/
-├── Directory.Build.props             # Shared MSBuild properties
-├── Directory.Packages.props          # Central package management
+│   └── MyApp.ArchitectureTests/   # asserts CS-ARCH-01 (e.g. NetArchTest)
+├── Directory.Build.props      # shared MSBuild props (Nullable, analyzers, warnings)
+├── Directory.Packages.props   # central package management (versions in one place)
+├── packages.lock.json         # committed lockfile (CS-DEP-01)
 └── MySolution.sln
 ```
 
-### B. Directory.Build.props
+- Dependencies point inward: `Api → Infrastructure → Application → Domain`. `Domain` references nothing.
+- Enforce the boundary with an architecture test project (NetArchTest / ArchUnitNET), not just convention.
+- File-scoped namespaces mirror the folder path; one public type per file.
+
+---
+
+## 5. C# Specifics
+
+The unique value of this guide. Targets **.NET 9 / C# 13**.
+
+### A. Solution-wide configuration — `Directory.Build.props`
+Set the compiler contract once for every project.
 
 ```xml
 <Project>
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
-    <Nullable>enable</Nullable>
+    <TargetFramework>net9.0</TargetFramework>
+    <LangVersion>13</LangVersion>
+    <Nullable>enable</Nullable>                 <!-- CS-TYP-01 -->
     <ImplicitUsings>enable</ImplicitUsings>
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>  <!-- CS-LINT-01 -->
     <AnalysisLevel>latest-all</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>  <!-- CS-DOC-01 -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>  <!-- CS-DEP-01 -->
   </PropertyGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Microsoft.CodeAnalysis.NetAnalyzers" Version="8.*">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; analyzers</IncludeAssets>
-    </PackageReference>
-  </ItemGroup>
 </Project>
 ```
 
----
-
-## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
-
-**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
-
-### TDD Cycle
-
-```
-1. RED: Write a failing test first
-   ↓
-2. GREEN: Write minimal code to make it pass
-   ↓
-3. REFACTOR: Improve code while keeping tests green
-   ↓
-   Repeat
-```
-
-### Example TDD Workflow for C#
+### B. Nullable reference types
+Nullability is a compile-time contract — model intent, don't silence the compiler.
 
 ```csharp
-// Step 1: RED - Write failing test first
-using Xunit;
-
-public class EmailValidatorTests
+public sealed class User
 {
-    [Fact]
-    public void Validate_WithValidEmail_ReturnsEmail()
-    {
-        var result = EmailValidator.Validate("user@example.com");
-
-        Assert.True(result.IsValid);
-        Assert.Equal("user@example.com", result.Email);
-    }
-
-    [Fact]
-    public void Validate_WithoutAtSymbol_ReturnsInvalid()
-    {
-        var result = EmailValidator.Validate("invalid-email");
-
-        Assert.False(result.IsValid);
-        Assert.Equal("Invalid email format", result.Error);
-    }
-
-    [Fact]
-    public void Validate_WithEmptyString_ReturnsInvalid()
-    {
-        var result = EmailValidator.Validate("");
-
-        Assert.False(result.IsValid);
-    }
+    public required string Email { get; init; }   // non-null, enforced at construction
+    public string? MiddleName { get; init; }       // explicitly optional
 }
 
-// Run: dotnet test --filter "FullyQualifiedName~EmailValidatorTests"
-// FAILS - EmailValidator class does not exist
+public User? FindUser(int id) => _repository.Find(id);   // null = "not found"
 
-// Step 2: GREEN - Write minimal implementation
-public record EmailValidationResult(bool IsValid, string? Email = null, string? Error = null);
-
-public static class EmailValidator
-{
-    public static EmailValidationResult Validate(string email)
-    {
-        if (email.Contains('@'))
-            return new EmailValidationResult(true, Email: email);
-
-        return new EmailValidationResult(false, Error: "Invalid email format");
-    }
-}
-
-// Run: dotnet test --filter "FullyQualifiedName~EmailValidatorTests"
-// PASSES - all tests pass
-
-// Step 3: REFACTOR - Improve with regex validation
-using System.Text.RegularExpressions;
-
-public static partial class EmailValidator
-{
-    [GeneratedRegex(@"^[^\s@]+@[^\s@]+\.[^\s@]+$")]
-    private static partial Regex EmailRegex();
-
-    public static EmailValidationResult Validate(string email)
-    {
-        if (EmailRegex().IsMatch(email))
-            return new EmailValidationResult(true, Email: email.ToLowerInvariant());
-
-        return new EmailValidationResult(false, Error: "Invalid email format");
-    }
-}
-// Tests still pass
+var name   = user?.MiddleName ?? "Unknown";              // null-coalescing
+var length = user?.Email.Length ?? 0;
+if (user is { Email: var email }) Send(email);            // property pattern narrows to non-null
 ```
 
----
-
-## 2B. Bug Fix Protocol (MANDATORY)
-
-**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
-
-### Bug Fix Workflow
-
-```
-1. Bug Reported/Discovered
-   ↓
-2. Write a test that REPRODUCES the bug (test will FAIL)
-   ↓
-3. Verify the test fails for the right reason
-   ↓
-4. Fix the bug (make the test pass)
-   ↓
-5. Verify the test now PASSES
-   ↓
-6. Document the bug in test comments (include bug ID)
-   ↓
-7. Deploy with confidence (regression prevented)
-```
-
-### Example Bug Fix
+Guard at boundaries with the built-in throw helpers:
 
 ```csharp
-// Bug Report #1042: EmailValidator accepts emails with spaces like "user @example.com"
-
-// Step 1-2: Write test that reproduces the bug
-public class EmailValidatorTests
-{
-    // Regression test for Bug #1042
-    [Theory]
-    [InlineData("user @example.com")]
-    [InlineData(" user@example.com")]
-    [InlineData("user@example.com ")]
-    public void Validate_WithSpacesInEmail_ReturnsInvalid(string email)
-    {
-        var result = EmailValidator.Validate(email);
-
-        Assert.False(result.IsValid);
-    }
-}
-
-// Run: dotnet test --filter "FullyQualifiedName~EmailValidatorTests"
-// FAILS - Validate returns IsValid=true for emails with spaces
-
-// Step 3: Fix the bug
-public static partial class EmailValidator
-{
-    [GeneratedRegex(@"^[^\s@]+@[^\s@]+\.[^\s@]+$")]
-    private static partial Regex EmailRegex();
-
-    public static EmailValidationResult Validate(string email)
-    {
-        if (email != email.Trim())
-            return new EmailValidationResult(false, Error: "Invalid email format");
-
-        if (EmailRegex().IsMatch(email))
-            return new EmailValidationResult(true, Email: email.ToLowerInvariant());
-
-        return new EmailValidationResult(false, Error: "Invalid email format");
-    }
-}
-
-// Run: dotnet test --filter "FullyQualifiedName~EmailValidatorTests"
-// PASSES - bug fixed, regression prevented
+ArgumentNullException.ThrowIfNull(order);
+ArgumentException.ThrowIfNullOrWhiteSpace(order.ProductId);
+ArgumentOutOfRangeException.ThrowIfNegativeOrZero(order.Quantity);
 ```
 
-### Prohibited Practices for Bug Fixes
+**Footgun:** the null-forgiving `!` operator hides bugs. Use it only to assert an invariant the compiler can't see, with a comment — never to make a warning disappear (violates CS-TYP-01).
 
-**NEVER:**
-- Fix a bug without adding a regression test first
-- Write implementation before writing tests (violates TDD)
-- Skip the Red-Green-Refactor cycle
-- Commit code with failing tests
-- Remove tests to make code pass
-- Use `[Fact(Skip = "...")]` to bypass failing tests instead of fixing them
-
----
-
-## 3. Naming Conventions (MANDATORY)
-
-### A. General Rules
+### C. Records, pattern matching & immutability
+Records for data/DTOs/value objects; `with` for non-destructive updates.
 
 ```csharp
-// ✅ PascalCase for types, methods, properties, events
-public class UserService { }
-public interface IUserRepository { }
-public void ProcessOrder() { }
-public string FirstName { get; set; }
-public event EventHandler OrderCompleted;
+public record UserDto(int Id, string Name, string Email);
+public readonly record struct Money(decimal Amount, string Currency);  // small value type
 
-// ✅ camelCase for parameters, local variables
-public void CreateUser(string userName, int userId)
-{
-    var localVariable = 42;
-    var isValid = true;
-}
-
-// ✅ _camelCase for private fields
-private readonly ILogger<UserService> _logger;
-private int _counter;
-
-// ✅ UPPER_CASE for constants (or PascalCase)
-public const int MaxRetryCount = 3;
-public const string DefaultConnectionString = "...";
-
-// ✅ Prefix interfaces with I
-public interface IOrderService { }
-
-// ✅ Suffix async methods with Async
-public async Task<User> GetUserAsync(int id);
-
-// ❌ WRONG: Hungarian notation
-int iCounter;  // Don't prefix with type
-string strName; // Don't prefix with type
+var updated = original with { Name = "New Name" };
 ```
 
-### B. Meaningful Names
+Switch on shape with patterns instead of type-check ladders:
 
 ```csharp
-// ❌ WRONG: Unclear names
-public class Mgr { }
-public int Calc(int x, int y);
-public bool Check();
-
-// ✅ CORRECT: Descriptive names
-public class OrderManager { }
-public int CalculateTotal(int quantity, int unitPrice);
-public bool IsValidEmail(string email);
+decimal Discount(Customer c) => c switch
+{
+    { Tier: Tier.Gold, Orders: > 100 } => 0.20m,
+    { Tier: Tier.Gold }                => 0.10m,
+    { Orders: > 50 }                   => 0.05m,
+    _                                  => 0m,
+};
 ```
 
----
+Prefer immutable state: `init` setters, `IReadOnlyList<T>` on the surface, `System.Collections.Immutable` when callers must not mutate shared state.
 
-## 4. Null Safety (MANDATORY)
-
-### A. Nullable Reference Types
-
-```csharp
-// Enable nullable reference types (in .csproj or globally)
-#nullable enable
-
-public class User
-{
-    // Non-nullable - must be initialized
-    public required string Email { get; init; }
-
-    // Nullable - can be null
-    public string? MiddleName { get; set; }
-
-    // Constructor ensures non-nullable fields are set
-    public User(string email)
-    {
-        Email = email ?? throw new ArgumentNullException(nameof(email));
-    }
-}
-
-// Handle nullable returns
-public User? FindUser(int id)
-{
-    // May return null
-    return _repository.Find(id);
-}
-
-// Use null-conditional operators
-var length = user?.Name?.Length ?? 0;
-user?.SendNotification();
-
-// Use null-coalescing
-var name = user?.Name ?? "Unknown";
-var list = items ?? [];
-
-// Pattern matching for null checks
-if (user is not null)
-{
-    Console.WriteLine(user.Name);
-}
-
-if (user is { Email: var email })
-{
-    SendEmail(email);
-}
-```
-
-### B. Guard Clauses
+### D. Async/await
+Async all the way; flow `CancellationToken` through every awaitable call.
 
 ```csharp
-public class OrderService
-{
-    public void ProcessOrder(Order order, Customer customer)
-    {
-        // Guard clauses at the top
-        ArgumentNullException.ThrowIfNull(order);
-        ArgumentNullException.ThrowIfNull(customer);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(order.Quantity);
-
-        if (string.IsNullOrWhiteSpace(order.ProductId))
-        {
-            throw new ArgumentException("Product ID is required", nameof(order));
-        }
-
-        // Main logic after guards
-        // ..
-    }
-}
-```
-
----
-
-## 5. Async/Await (MANDATORY)
-
-### A. Proper Async Patterns
-
-```csharp
-// ✅ CORRECT: Async all the way
 public async Task<User> GetUserAsync(int id, CancellationToken ct = default)
 {
     var user = await _repository.FindAsync(id, ct);
-    return user ?? throw new NotFoundException($"User {id} not found");
+    return user ?? throw new NotFoundException(nameof(User), id);
 }
 
-// ✅ CORRECT: ConfigureAwait in library code
-public async Task<Data> FetchDataAsync(CancellationToken ct)
-{
-    var response = await _httpClient.GetAsync(url, ct).ConfigureAwait(false);
-    return await response.Content.ReadFromJsonAsync<Data>(ct).ConfigureAwait(false);
-}
+// Library code: avoid forcing the caller's sync context.
+var resp = await _httpClient.GetAsync(url, ct).ConfigureAwait(false);
 
-// ✅ CORRECT: Parallel async operations
-public async Task<(User, Order[])> GetUserWithOrdersAsync(int userId, CancellationToken ct)
-{
-    var userTask = _userRepository.GetAsync(userId, ct);
-    var ordersTask = _orderRepository.GetByUserAsync(userId, ct);
-
-    await Task.WhenAll(userTask, ordersTask);
-
-    return (await userTask, await ordersTask);
-}
-
-// ❌ WRONG: Blocking on async code
-public User GetUser(int id)
-{
-    return GetUserAsync(id).Result;  // Deadlock risk!
-    return GetUserAsync(id).GetAwaiter().GetResult();  // Still blocking
-}
-
-// ❌ WRONG: async void (except event handlers)
-public async void ProcessData()  // Can't await, exceptions lost
-{
-    await DoWorkAsync();
-}
-
-// ✅ CORRECT: async Task
-public async Task ProcessDataAsync()
-{
-    await DoWorkAsync();
-}
+// Parallelize independent work.
+await Task.WhenAll(userTask, ordersTask);
 ```
 
-### B. Cancellation Tokens
+**Footguns (CS-ASYNC-01):**
+- `.Result` / `.Wait()` / `.GetAwaiter().GetResult()` → deadlocks and lost exceptions. Stay async.
+- `async void` → exceptions can't be observed. Use `async Task`; `async void` only for event handlers.
+- Forgetting `ct` → uncancellable work. Thread it everywhere, including loops (`ct.ThrowIfCancellationRequested()`).
+- `IAsyncEnumerable<T>` for streamed results; `await foreach (var x in source.WithCancellation(ct))`.
+
+### E. LINQ
+Project before materializing; enumerate once; keep filtering at the data source.
 
 ```csharp
-public class DataService
-{
-    public async Task<IEnumerable<Item>> GetItemsAsync(
-        int pageSize,
-        CancellationToken cancellationToken = default)
-    {
-        // Check for cancellation
-        cancellationToken.ThrowIfCancellationRequested();
-
-        // Pass cancellation token to all async operations
-        var items = await _repository.GetAllAsync(cancellationToken);
-
-        // For long-running loops
-        foreach (var item in items)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            await ProcessItemAsync(item, cancellationToken);
-        }
-
-        return items;
-    }
-}
+var dtos = await db.Users
+    .Where(u => u.IsActive)
+    .Select(u => new UserDto(u.Id, u.Name, u.Email))   // shape in the DB, not in memory
+    .ToListAsync(ct);
 ```
 
----
+**Footguns:**
+- `ToList()` then `Where(...)` materializes the whole table before filtering — filter first.
+- Lazy navigation in a loop = N+1 queries → use `.Include(...)` (EF Core) or a projection.
+- Re-enumerating an `IEnumerable<T>` runs the query twice — materialize once (`var list = q.ToList();`).
+- `Single`/`First` vs `*OrDefault`: pick the one whose throwing/empty semantics you actually want.
 
-## 6. Dependency Injection (MANDATORY)
-
-### A. Service Registration
+### F. Dependency injection — built-in container
+Ports are interfaces; the composition root (`Program.cs`) is the only place that knows concrete adapters. Architectural rationale lives in [`hexagonal.md`](guides://hexagonal.md).
 
 ```csharp
-// Program.cs
 var builder = WebApplication.CreateBuilder(args);
 
-// Register services with appropriate lifetimes
-builder.Services.AddScoped<IOrderService, OrderService>();
+builder.Services.AddScoped<IOrderService, OrderService>();      // per request
 builder.Services.AddSingleton<ICacheService, MemoryCacheService>();
 builder.Services.AddTransient<IEmailSender, SmtpEmailSender>();
-
-// Register with factory for complex construction
-builder.Services.AddScoped<IDbConnection>(sp =>
-{
-    var config = sp.GetRequiredService<IConfiguration>();
-    return new SqlConnection(config.GetConnectionString("Default"));
-});
-
-// Register options pattern
-builder.Services.Configure<EmailOptions>(
-    builder.Configuration.GetSection("Email"));
-
-// Register HttpClient with typed client
-builder.Services.AddHttpClient<IPaymentGateway, StripePaymentGateway>(client =>
-{
-    client.BaseAddress = new Uri("https://api.stripe.com");
-    client.DefaultRequestHeaders.Add("Accept", "application/json");
-});
+builder.Services.AddHttpClient<IPaymentGateway, StripePaymentGateway>();
+builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection("Email"));  // options pattern
 ```
 
-### B. Constructor Injection
+Inject via constructor (primary constructors keep it terse); never `new` a dependency or reach for a static singleton:
 
 ```csharp
-public class OrderService : IOrderService
+public sealed class OrderService(IOrderRepository repository, ILogger<OrderService> logger)
+    : IOrderService
 {
-    private readonly IOrderRepository _repository;
-    private readonly ILogger<OrderService> _logger;
-    private readonly IEmailSender _emailSender;
-
-    // Primary constructor (C# 12)
-    public OrderService(
-        IOrderRepository repository,
-        ILogger<OrderService> logger,
-        IEmailSender emailSender)
+    public async Task<Order> CreateAsync(CreateOrderDto dto, CancellationToken ct)
     {
-        _repository = repository;
-        _logger = logger;
-        _emailSender = emailSender;
-    }
-
-    public async Task<Order> CreateOrderAsync(CreateOrderDto dto, CancellationToken ct)
-    {
-        _logger.LogInformation("Creating order for customer {CustomerId}", dto.CustomerId);
-
+        logger.LogInformation("Creating order for {CustomerId}", dto.CustomerId);  // see logging.md
         var order = new Order(dto.CustomerId, dto.Items);
-        await _repository.AddAsync(order, ct);
-
-        await _emailSender.SendOrderConfirmationAsync(order, ct);
-
+        await repository.AddAsync(order, ct);
         return order;
     }
 }
 ```
 
----
+Lifetimes: Singleton (stateless/thread-safe), Scoped (per request, e.g. `DbContext`), Transient (cheap, stateless). Never inject a Scoped service into a Singleton (captive dependency).
 
-## 7. Exception Handling (MANDATORY)
-
-### A. Custom Exceptions
+### G. Resource lifetime — `IDisposable` / `IAsyncDisposable`
+Own a disposable → release it deterministically with `using`. Implement the pattern only when you hold unmanaged or disposable state.
 
 ```csharp
-// Base domain exception
-public abstract class DomainException : Exception
+await using var conn = new SqlConnection(connectionString);   // IAsyncDisposable
+using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+public sealed class FileCache : IAsyncDisposable
 {
-    public string Code { get; }
-
-    protected DomainException(string code, string message) : base(message)
-    {
-        Code = code;
-    }
-}
-
-// Specific exceptions
-public class NotFoundException : DomainException
-{
-    public NotFoundException(string entityName, object id)
-        : base("NOT_FOUND", $"{entityName} with ID '{id}' was not found")
-    {
-    }
-}
-
-public class ValidationException : DomainException
-{
-    public IReadOnlyDictionary<string, string[]> Errors { get; }
-
-    public ValidationException(IDictionary<string, string[]> errors)
-        : base("VALIDATION_ERROR", "One or more validation errors occurred")
-    {
-        Errors = errors.AsReadOnly();
-    }
-}
-
-public class ConflictException : DomainException
-{
-    public ConflictException(string message)
-        : base("CONFLICT", message)
-    {
-    }
+    private readonly Stream _stream;
+    public async ValueTask DisposeAsync() => await _stream.DisposeAsync();
 }
 ```
 
-### B. Exception Handling Middleware
+Prefer DI-managed lifetimes (the container disposes Scoped/Transient `IDisposable` services) over manual disposal where possible.
+
+### H. Exceptions — C# binding
+Strategy (when to throw, wrap, retry, propagate) is owned by [`error-handling.md`](guides://error-handling.md). C# binding: derive a small typed hierarchy, never swallow, translate to transport at the edge.
 
 ```csharp
-public class ExceptionHandlingMiddleware
+public abstract class DomainException(string code, string message) : Exception(message)
 {
-    private readonly RequestDelegate _next;
-    private readonly ILogger<ExceptionHandlingMiddleware> _logger;
-
-    public ExceptionHandlingMiddleware(RequestDelegate next, ILogger<ExceptionHandlingMiddleware> logger)
-    {
-        _next = next;
-        _logger = logger;
-    }
-
-    public async Task InvokeAsync(HttpContext context)
-    {
-        try
-        {
-            await _next(context);
-        }
-        catch (Exception ex)
-        {
-            await HandleExceptionAsync(context, ex);
-        }
-    }
-
-    private async Task HandleExceptionAsync(HttpContext context, Exception exception)
-    {
-        var (statusCode, response) = exception switch
-        {
-            NotFoundException ex => (StatusCodes.Status404NotFound,
-                new ProblemDetails { Title = ex.Message, Status = 404 }),
-
-            ValidationException ex => (StatusCodes.Status400BadRequest,
-                new ValidationProblemDetails(ex.Errors) { Status = 400 }),
-
-            ConflictException ex => (StatusCodes.Status409Conflict,
-                new ProblemDetails { Title = ex.Message, Status = 409 }),
-
-            _ => (StatusCodes.Status500InternalServerError,
-                new ProblemDetails { Title = "An error occurred", Status = 500 })
-        };
-
-        if (statusCode == 500)
-        {
-            _logger.LogError(exception, "Unhandled exception occurred");
-        }
-
-        context.Response.StatusCode = statusCode;
-        await context.Response.WriteAsJsonAsync(response);
-    }
+    public string Code { get; } = code;
 }
+public sealed class NotFoundException(string entity, object id)
+    : DomainException("NOT_FOUND", $"{entity} '{id}' was not found");
 ```
+
+At an ASP.NET Core boundary, map exceptions to `ProblemDetails` once via `IExceptionHandler` / `AddProblemDetails()` (the modern replacement for hand-rolled middleware) — don't scatter try/catch per endpoint.
+
+### I. Design patterns — C# binding
+GoF and friends are owned by [`designpatterns.md`](guides://designpatterns.md). In C#, prefer language/runtime features over hand-rolled patterns: built-in DI for Factory/Strategy wiring, `IOptions<T>` for configuration, `IAsyncEnumerable<T>` for Iterator, records + `with` for immutable Builder-style updates, and source generators (`[GeneratedRegex]`, `LoggerMessage`) instead of reflection-heavy machinery.
+
+### J. Observability — binding
+Policy in [`logging.md`](guides://logging.md) / [`observability.md`](guides://observability.md). C#: structured logging via `ILogger<T>` with message templates (`logger.LogInformation("Order {OrderId}", id)`) — never string-interpolate the message. Use source-generated `[LoggerMessage]` on hot paths. Tracing/metrics via `System.Diagnostics.ActivitySource` + `Meter`, exported with the OpenTelemetry .NET SDK.
 
 ---
 
-## 8. LINQ Best Practices (MANDATORY)
+## 6. Tooling & Dependencies
 
-### A. Efficient LINQ Usage
-
-```csharp
-// ✅ CORRECT: Use appropriate methods
-var firstUser = users.FirstOrDefault(u => u.IsActive);
-var singleAdmin = users.SingleOrDefault(u => u.Role == "Admin");
-var hasActiveUsers = users.Any(u => u.IsActive);
-var activeCount = users.Count(u => u.IsActive);
-
-// ✅ CORRECT: Project before materializing
-var userDtos = await _context.Users
-    .Where(u => u.IsActive)
-    .Select(u => new UserDto(u.Id, u.Name, u.Email))  // Select only needed fields
-    .ToListAsync(ct);
-
-// ❌ WRONG: Multiple enumerations
-var users = GetUsers();  // IEnumerable
-var count = users.Count();  // First enumeration
-var list = users.ToList();  // Second enumeration
-
-// ✅ CORRECT: Materialize once
-var users = GetUsers().ToList();
-var count = users.Count;
-
-// ✅ CORRECT: Use method syntax for complex queries
-var results = await _context.Orders
-    .Where(o => o.Status == OrderStatus.Pending)
-    .Where(o => o.CreatedAt >= startDate)
-    .OrderByDescending(o => o.Total)
-    .Take(10)
-    .Select(o => new OrderSummary
-    {
-        Id = o.Id,
-        CustomerName = o.Customer.Name,
-        Total = o.Total
-    })
-    .ToListAsync(ct);
-```
-
-### B. Avoid Common Mistakes
-
-```csharp
-// ❌ WRONG: Calling ToList() too early
-var users = _context.Users.ToList()  // Loads ALL users
-    .Where(u => u.IsActive);
-
-// ✅ CORRECT: Filter in database
-var users = await _context.Users
-    .Where(u => u.IsActive)
-    .ToListAsync(ct);
-
-// ❌ WRONG: N+1 query problem
-var orders = await _context.Orders.ToListAsync(ct);
-foreach (var order in orders)
-{
-    var customer = order.Customer;  // Lazy loading = N queries
-}
-
-// ✅ CORRECT: Eager loading
-var orders = await _context.Orders
-    .Include(o => o.Customer)
-    .ToListAsync(ct);
-```
-
----
-
-## 9. Records and Immutability (MANDATORY)
-
-### A. Record Types
-
-```csharp
-// Immutable record (preferred for DTOs)
-public record UserDto(int Id, string Name, string Email);
-
-// Record with additional members
-public record OrderDto(int Id, decimal Total, DateTime CreatedAt)
-{
-    public string FormattedTotal => Total.ToString("C");
-}
-
-// Record with init-only properties
-public record CreateUserRequest
-{
-    public required string Email { get; init; }
-    public required string Name { get; init; }
-    public string? Phone { get; init; }
-}
-
-// Use with expression for immutable updates
-var updated = original with { Name = "New Name" };
-
-// Record struct for small value types
-public readonly record struct Point(int X, int Y);
-public readonly record struct Money(decimal Amount, string Currency);
-```
-
-### B. Immutable Collections
-
-```csharp
-using System.Collections.Immutable;
-
-public class ShoppingCart
-{
-    private readonly ImmutableList<CartItem> _items;
-
-    public IReadOnlyList<CartItem> Items => _items;
-
-    public ShoppingCart() : this(ImmutableList<CartItem>.Empty) { }
-
-    private ShoppingCart(ImmutableList<CartItem> items)
-    {
-        _items = items;
-    }
-
-    public ShoppingCart AddItem(CartItem item)
-    {
-        return new ShoppingCart(_items.Add(item));
-    }
-
-    public ShoppingCart RemoveItem(int itemId)
-    {
-        var index = _items.FindIndex(i => i.Id == itemId);
-        return index >= 0 ? new ShoppingCart(_items.RemoveAt(index)) : this;
-    }
-}
-```
-
----
-
-## 10. Entity Framework Core (MANDATORY)
-
-### A. DbContext Configuration
-
-```csharp
-public class AppDbContext : DbContext
-{
-    public DbSet<User> Users => Set<User>();
-    public DbSet<Order> Orders => Set<Order>();
-
-    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
-
-    protected override void OnModelCreating(ModelBuilder modelBuilder)
-    {
-        modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
-    }
-
-    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
-    {
-        // Auto-set timestamps
-        foreach (var entry in ChangeTracker.Entries<ITimestamped>())
-        {
-            if (entry.State == EntityState.Added)
-            {
-                entry.Entity.CreatedAt = DateTime.UtcNow;
-            }
-            entry.Entity.UpdatedAt = DateTime.UtcNow;
-        }
-
-        return await base.SaveChangesAsync(cancellationToken);
-    }
-}
-
-// Entity configuration
-public class UserConfiguration : IEntityTypeConfiguration<User>
-{
-    public void Configure(EntityTypeBuilder<User> builder)
-    {
-        builder.ToTable("users");
-
-        builder.HasKey(u => u.Id);
-
-        builder.Property(u => u.Email)
-            .HasMaxLength(255)
-            .IsRequired();
-
-        builder.HasIndex(u => u.Email)
-            .IsUnique();
-
-        builder.HasMany(u => u.Orders)
-            .WithOne(o => o.User)
-            .HasForeignKey(o => o.UserId)
-            .OnDelete(DeleteBehavior.Cascade);
-    }
-}
-```
-
-### B. Repository Pattern
-
-```csharp
-public interface IRepository<T> where T : class
-{
-    Task<T?> GetByIdAsync(int id, CancellationToken ct = default);
-    Task<IReadOnlyList<T>> GetAllAsync(CancellationToken ct = default);
-    Task AddAsync(T entity, CancellationToken ct = default);
-    void Update(T entity);
-    void Remove(T entity);
-}
-
-public class Repository<T> : IRepository<T> where T : class
-{
-    protected readonly AppDbContext Context;
-    protected readonly DbSet<T> DbSet;
-
-    public Repository(AppDbContext context)
-    {
-        Context = context;
-        DbSet = context.Set<T>();
-    }
-
-    public virtual async Task<T?> GetByIdAsync(int id, CancellationToken ct = default)
-    {
-        return await DbSet.FindAsync([id], ct);
-    }
-
-    public virtual async Task<IReadOnlyList<T>> GetAllAsync(CancellationToken ct = default)
-    {
-        return await DbSet.ToListAsync(ct);
-    }
-
-    public async Task AddAsync(T entity, CancellationToken ct = default)
-    {
-        await DbSet.AddAsync(entity, ct);
-    }
-
-    public void Update(T entity)
-    {
-        DbSet.Update(entity);
-    }
-
-    public void Remove(T entity)
-    {
-        DbSet.Remove(entity);
-    }
-}
-```
-
----
-
-## 11. Testing (MANDATORY)
-
-### A. Unit Tests with xUnit
-
-```csharp
-public class OrderServiceTests
-{
-    private readonly Mock<IOrderRepository> _repositoryMock;
-    private readonly Mock<ILogger<OrderService>> _loggerMock;
-    private readonly OrderService _sut;
-
-    public OrderServiceTests()
-    {
-        _repositoryMock = new Mock<IOrderRepository>();
-        _loggerMock = new Mock<ILogger<OrderService>>();
-        _sut = new OrderService(_repositoryMock.Object, _loggerMock.Object);
-    }
-
-    [Fact]
-    public async Task CreateOrder_WithValidData_ReturnsOrder()
-    {
-        // Arrange
-        var dto = new CreateOrderDto(CustomerId: 1, Items: [new OrderItem(1, 2)]);
-        _repositoryMock
-            .Setup(r => r.AddAsync(It.IsAny<Order>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        // Act
-        var result = await _sut.CreateOrderAsync(dto, CancellationToken.None);
-
-        // Assert
-        Assert.NotNull(result);
-        Assert.Equal(dto.CustomerId, result.CustomerId);
-        _repositoryMock.Verify(r => r.AddAsync(It.IsAny<Order>(), It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-1)]
-    public async Task CreateOrder_WithInvalidCustomerId_ThrowsValidationException(int customerId)
-    {
-        // Arrange
-        var dto = new CreateOrderDto(CustomerId: customerId, Items: []);
-
-        // Act & Assert
-        await Assert.ThrowsAsync<ValidationException>(
-            () => _sut.CreateOrderAsync(dto, CancellationToken.None));
-    }
-}
-```
-
-### B. Integration Tests
-
-```csharp
-public class OrdersControllerTests : IClassFixture<WebApplicationFactory<Program>>
-{
-    private readonly HttpClient _client;
-    private readonly WebApplicationFactory<Program> _factory;
-
-    public OrdersControllerTests(WebApplicationFactory<Program> factory)
-    {
-        _factory = factory.WithWebHostBuilder(builder =>
-        {
-            builder.ConfigureServices(services =>
-            {
-                // Replace real database with in-memory
-                services.RemoveAll<DbContextOptions<AppDbContext>>();
-                services.AddDbContext<AppDbContext>(options =>
-                    options.UseInMemoryDatabase("TestDb"));
-            });
-        });
-        _client = _factory.CreateClient();
-    }
-
-    [Fact]
-    public async Task GetOrders_ReturnsSuccessAndCorrectContentType()
-    {
-        // Act
-        var response = await _client.GetAsync("/api/orders");
-
-        // Assert
-        response.EnsureSuccessStatusCode();
-        Assert.Equal("application/json; charset=utf-8",
-            response.Content.Headers.ContentType?.ToString());
-    }
-
-    [Fact]
-    public async Task CreateOrder_WithValidData_ReturnsCreated()
-    {
-        // Arrange
-        var order = new { CustomerId = 1, Items = new[] { new { ProductId = 1, Quantity = 2 } } };
-
-        // Act
-        var response = await _client.PostAsJsonAsync("/api/orders", order);
-
-        // Assert
-        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-    }
-}
-```
-
----
-
-## 12. Security & Dependency Management (MANDATORY)
-
-### A. Automated Dependency Management
-
-**Use NuGet with Central Package Management (CPM) via `Directory.Packages.props`:**
+Security/supply-chain *policy* → [`secure-coding.md`](guides://secure-coding.md); versioning → [`semver.md`](guides://semver.md). C# binding uses NuGet with Central Package Management.
 
 ```xml
-<!-- Directory.Packages.props -->
+<!-- Directory.Packages.props — one version per package, solution-wide -->
 <Project>
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
@@ -1094,161 +327,64 @@ public class OrdersControllerTests : IClassFixture<WebApplicationFactory<Program
   </PropertyGroup>
   <ItemGroup>
     <PackageVersion Include="Microsoft.Extensions.Logging" Version="9.0.0" />
-    <PackageVersion Include="Newtonsoft.Json" Version="13.0.3" />
-  </ItemGroup>
-</Project>
-```
-
-- **Lockfiles**: Enable NuGet lock files (`packages.lock.json`) for reproducible builds in CI.
-- **Vulnerability Checks**: `dotnet list package --vulnerable` MUST be part of the CI pipeline.
-
-### B. Vulnerability Scanning & Security
-
-**Mandatory security checks for ALL C# projects:**
-
-1. **Vulnerability Scan**:
-   ```bash
-   # Scan for known vulnerabilities in dependencies
-   dotnet list package --vulnerable --include-transitive
-   ```
-   - Agents MUST fix all discoverable high/critical vulnerabilities before presentation.
-
-2. **Supply Chain Audit**:
-   - Verify NuGet signatures for external packages.
-   - Use `dotnet restore --locked-mode` in CI to ensure no tampered dependencies.
-
-### C. Dependency File
-
-```xml
-<!-- Directory.Packages.props example -->
-<Project>
-  <ItemGroup>
     <PackageVersion Include="xunit" Version="2.9.2" />
-    <PackageVersion Include="Moq" Version="4.20.72" />
   </ItemGroup>
 </Project>
 ```
-
----
-
-## 13. Deployment Checklist
-
-### Agent-Generated Code Verification (MANDATORY)
-
-#### Build & Compilation
-- [ ] Code compiles: `dotnet build` returns exit code 0
-- [ ] No compilation errors or warnings (TreatWarningsAsErrors=true)
-- [ ] All nullable reference types resolved
-- [ ] Code formatted: `dotnet format --verify-no-changes` passes
-
-#### Testing
-- [ ] All tests pass: `dotnet test` returns exit code 0
-- [ ] Reasonable coverage: `dotnet test /p:CollectCoverage=true` shows >80%
-- [ ] Integration tests pass (if applicable)
-
-#### Security
-- [ ] Dependency scan passes: 0 vulnerabilities found via `dotnet list package --vulnerable`
-- [ ] Supply chain verified: NuGet lockfiles in sync
-- [ ] Secrets check: No hardcoded secrets in appsettings.json or code
-- [ ] Static analysis: Roslyn analyzers report 0 issues
-
-#### Code Quality
-- [ ] No unused dependencies
-- [ ] Clean namespace hierarchy
-- [ ] Project structure follows standard layout
-
-#### Documentation
-- [ ] All public APIs have XML documentation comments
-- [ ] Documentation follows conventions
-- [ ] Examples provided for complex APIs
-
-#### Architecture
-- [ ] Repository pattern followed where appropriate
-- [ ] Dependency injection used for all services
-- [ ] No global mutable state
-
-#### Agent Workflow Completed
-- [ ] Agent verified code compiles/builds successfully
-- [ ] Agent ran all tests and verified they pass
-- [ ] Agent ran formatters and linters
-- [ ] Agent verified documentation
-- [ ] Agent documented any fixes made during verification
-
----
-
-## 14. Why This Configuration Works
-
-**Central Package Management**:
-- Ensures consistent dependency versions across the entire solution, preventing "dependency hell" and simplifying security updates.
-
-**Nullable Reference Types**:
-- Eliminates an entire class of runtime errors (NullReferenceException) by forcing explicit intent and compile-time checks.
-
-**Modern Synchronization (Lock type)**:
-- The .NET 10 `System.Threading.Lock` provides a more efficient and structured way to handle thread safety than the traditional `lock(obj)` keyword.
-
-**Performance (params Span)**:
-- Using `params ReadOnlySpan<T>` allows high-performance APIs that avoid heap allocations when calling methods with varying numbers of arguments.
-
----
-
-## 15. Quick Reference
-
-### Common Commands
 
 ```bash
-# Build
-dotnet build
-
-# Test
-dotnet test
-
-# Lint & Format
-dotnet format
-
-# Security Scan
-dotnet list package --vulnerable
-
-# Run
-dotnet run --project src/MyApp.Api
-
-# Clean
-dotnet clean
+dotnet restore --locked-mode                 # CS-DEP-01: reproducible, no tampering
+dotnet add package <pkg>                      # add (updates Directory.Packages.props + lockfile)
+dotnet list package --outdated                # find upgrades
+dotnet list package --vulnerable --include-transitive   # CS-SEC-01: CVE scan
 ```
 
-### Modern C# 14 Patterns Cheat Sheet
+Commit `packages.lock.json`. Verify NuGet package signatures for external dependencies. Keep secrets out of `appsettings.json` — use user-secrets in dev and a secret store in prod (see `secure-coding.md`).
+
+---
+
+## 7. Quick Reference
+
+```bash
+dotnet build -warnaserror                    # build (lint + nullable + docs gates)
+dotnet test                                  # test
+dotnet format                                # format
+dotnet format --verify-no-changes            # format check
+dotnet list package --vulnerable --include-transitive   # security
+dotnet run --project src/MyApp.Api           # run
+```
 
 ```csharp
-// New Lock type (.NET 10)
-private readonly System.Threading.Lock _gate = new();
-public void ThreadSafeMethod()
+// C# 13 idioms worth reaching for
+private readonly System.Threading.Lock _gate = new();   // .NET 9 Lock type
+using (_gate.EnterScope()) { /* thread-safe */ }
+
+public void Process(params ReadOnlySpan<int> numbers)   // allocation-free params
 {
-    using (_gate.EnterScope())
-    {
-        // Thread-safe code here
-    }
+    foreach (var n in numbers) { /* ... */ }
 }
 
-// params ReadOnlySpan (.NET 10)
-public void ProcessData(params ReadOnlySpan<int> numbers)
-{
-    foreach (var n in numbers) { ... }
-}
-
-// Raw string literals
 var json = """
-{
-  "name": "John",
-  "age": 30
-}
-""";
+    { "name": "John", "age": 30 }
+    """;                                                 // raw string literal
 ```
 
 ---
 
-**Last Updated:** 2026-02-06
-**Version:** 1.1
-**Maintainer:** .NET Team
+## 8. Deployment Checklist
 
+Generated from §2 — one box per requirement ID.
 
+- [ ] CS-FMT-01 — `dotnet format --verify-no-changes` clean
+- [ ] CS-LINT-01 — `dotnet build` 0 warnings/errors (warnings-as-errors)
+- [ ] CS-TYP-01 — nullable enabled, no unjustified `!`/suppressions
+- [ ] CS-TST-01/02/03 — tests pass, bugs have regression tests, coverage ≥ gate
+- [ ] CS-DOC-01 — public APIs have XML docs (0 CS1591)
+- [ ] CS-SEC-01 — `dotnet list package --vulnerable --include-transitive` clean
+- [ ] CS-DEP-01 — `packages.lock.json` in sync, `--locked-mode` restores clean
+- [ ] CS-ARCH-01 — domain free of infrastructure/framework references
+- [ ] CS-ASYNC-01 — no sync-over-async, no stray `async void`
+- [ ] Agent ran every §3 command and documented any fixes
+
+---
 **End of C# Development Guidelines**

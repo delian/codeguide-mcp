@@ -1,1979 +1,331 @@
-# Software Architecture Reference Guide
-Comprehensive overview of software architecture patterns, their relationships, trade-offs, and guidance for selecting the right architecture based on project requirements. This guide is language-agnostic and focuses on architectural principles and decision-making. Architecture Decision Records (ADRs), C4 Model, UML, Domain-Driven Design (DDD), SOLID principles.
+# Software Architecture Styles Guidelines
+How to position, compare, and choose software architecture styles — internal structure, deployment, communication, and data — by trade-off, not by hype. Language-agnostic; centred on ADRs, the C4 Model, DDD, and fitness functions.
+
+---
+name: architectures
+title: Software Architecture Styles Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: cross-cutting
+tools: []
+requires: []
+recommends:
+  - hexagonal
+  - cleanarch
+  - microservices
+  - designpatterns
+  - observability
+provides:
+  - style-selection
+  - tradeoff-analysis
+  - architecture-overview
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): this guide OWNS the overview, comparison, and selection of architecture *styles*. It deliberately does **not** restate the deep mechanics of styles that have their own canonical guide — it references them and keeps only positioning, trade-offs, and decision guidance.
 
 ---
 
-**Agent Profile**: The Software Architect
-**Role**: Senior Solutions Architect & System Design Expert
-**Objective**: Guide architectural decisions by understanding trade-offs, selecting appropriate patterns, and designing systems that balance maintainability, scalability, and team capabilities.
-**Tools**: Architecture Decision Records (ADRs), C4 Model, UML, Domain-Driven Design (DDD), SOLID principles.
+## 0. Prerequisites & References
+
+This is the entry point for "which architecture should this system use?" Once a style is chosen, fetch its owning guide for the mechanics.
+
+> 📎 **RECOMMENDED — fetch when the task settles on that style:**
+> - [`hexagonal.md`](guides://hexagonal.md) — Ports & Adapters mechanics, dependency inversion, adapter wiring. *(This guide only positions it vs. Clean/Onion/Layered.)*
+> - [`cleanarch.md`](guides://cleanarch.md) — the four concentric layers, Screaming Architecture, use-case/entity split.
+> - [`microservices.md`](guides://microservices.md) — service decomposition, data ownership, inter-service contracts, deployment topology.
+> - [`designpatterns.md`](guides://designpatterns.md) — GoF & friends used to realise a style (Strategy, Factory, Adapter, Repository).
+> - [`observability.md`](guides://observability.md) — metrics, tracing, and the fitness-function instrumentation a distributed style demands.
+
+> 📎 **SEE ALSO:** [`adr.md`](guides://adr.md) — record every style decision · [`tdd.md`](guides://tdd.md) — architectural fitness tests are written test-first · [`kafka.md`](guides://kafka.md) — event-streaming substrate · [`kubernetes.md`](guides://kubernetes.md) — runtime for microservices/serverless · [`rest.md`](guides://rest.md) · [`grpc.md`](guides://grpc.md) · [`graphql.md`](guides://graphql.md) — synchronous communication contracts · [`error-handling.md`](guides://error-handling.md) · [`performance.md`](guides://performance.md) · [`parallelism.md`](guides://parallelism.md) · [`secure-coding.md`](guides://secure-coding.md).
 
 ---
 
 ## 1. Core Philosophies: ARCHITECTURE-FIRST
 
-The agent must adhere to the **ARCHITECTURE-FIRST** principles for every architectural decision:
+Principles unique to *choosing and positioning* architecture. The mechanics of any chosen style live in its owning guide (§0); test-first discipline lives in [`tdd.md`](guides://tdd.md).
 
-- **A**lign with Business: Architecture serves business goals, not the reverse
-- **R**ight-Size Complexity: Match architecture complexity to problem complexity
-- **C**hange-Friendly: Design for evolution, not perfection
-- **H**uman-Centric: Consider team skills, size, and cognitive load
-- **I**nformed Trade-offs: Every decision has trade-offs; make them explicit
-- **T**estable by Design: Architecture should enable, not hinder, testing
-- **E**volvable Boundaries: Define boundaries that can shift as understanding grows
-- **C**onsistent Patterns: Apply patterns consistently within a bounded context
-- **T**echnically Sound: Base decisions on engineering principles, not hype
-- **U**ndocumented is Unfinished: Architecture decisions must be recorded
-- **R**eversible Decisions: Prefer decisions that can be changed later
-- **E**xplicit Dependencies: Make all dependencies visible and intentional
+- **A**lign with business: architecture serves business goals, not résumés.
+- **R**ight-size complexity: match architecture complexity to *problem* complexity (see the alignment matrix in §7).
+- **C**hange-friendly: design for evolution, not a perfect final state.
+- **H**uman-centric: fit the architecture to team size, skill, and cognitive load (Conway's Law is real — the system mirrors the org chart).
+- **I**nformed trade-offs: every choice has costs; make them explicit and write them down.
+- **T**estable by design: prefer styles whose boundaries enable isolated testing.
+- **E**volvable boundaries: pick boundaries that can shift as the domain is understood.
+- **R**eversible decisions: prefer two-way-door choices; defer one-way doors until forced.
+- **U**ndocumented is unfinished: a style choice without an ADR (see [`adr.md`](guides://adr.md)) does not exist.
 
-**Additional Principles:**
-
-- **Test-Driven Development (TDD)**: Architecture should support TDD at all levels
-- **Fitness Functions**: Define measurable architectural characteristics
-- **Evolutionary Architecture**: Build for change, not for a final state
-- **Conway's Law Awareness**: Organizational structure influences architecture
+**Orthogonality is the key insight** (§3): internal structure, deployment, communication, and data are *separate axes*. You combine them — e.g. Microservices (deployment) + Hexagonal (internal) + Events (communication) + CQRS (data). Never conflate "should it be microservices?" with "should it be hexagonal?".
 
 ---
 
-## 2. The Architecture Landscape
+## 2. Requirements (MANDATORY, auditable)
 
-### A. Architecture Categories Overview
+RFC-2119 keywords. IDs `ARCH-<TOPIC>-<NN>`. These govern the *act of choosing and enforcing* a style; per-style implementation rules are gated in that style's owning guide.
 
-```
-ARCHITECTURE TAXONOMY:
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| ARCH-STRUCT-01 | Each system MUST declare its style on all four axes (internal / deployment / communication / data) | review of the system's ADR | four axes named |
+| ARCH-STRUCT-02 | Style complexity MUST be justified against problem complexity (no microservices/CQRS without a demonstrated driver) | review vs. §7 alignment matrix | justification present |
+| ARCH-STRUCT-03 | Module/layer dependencies MUST flow as the chosen style mandates; no cycles (see owning style guide) | `pydeps`/`madge --circular` / import-linter | 0 cycles, 0 violations |
+| ARCH-ARCH-01 | Every significant style decision MUST be recorded as an ADR (see `adr.md`) | ADR exists in `docs/adr/` | one ADR per decision |
+| ARCH-TST-01 | Architectural constraints MUST have automated fitness tests, written test-first (see `tdd.md`) | `pytest tests/architecture/` (or lang equiv) | exit 0 |
+| ARCH-TST-02 | Each architectural violation bug MUST get a regression fitness test before the fix (see `tdd.md`) | run the new test pre-fix | failing→passing |
+| ARCH-OBS-01 | Distributed styles MUST emit the metrics/traces their fitness functions assert on (see `observability.md`) | dashboards/traces exist | SLO signals present |
+| ARCH-STRUCT-04 | Service/module boundaries MUST be independently deployable iff the deployment style claims so (no distributed monolith) | service independence test | each deploys alone |
 
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  INTERNAL STRUCTURE          DEPLOYMENT & SCALE       COMMUNICATION     │
-│  (How code is organized)     (How it runs)            (How parts talk)  │
-│                                                                         │
-│  ┌─────────────────────┐    ┌─────────────────────┐  ┌─────────────────┐│
-│  │ • Layered (N-Tier)  │    │ • Monolith          │  │ • Request/Reply ││
-│  │ • Hexagonal         │    │ • Modular Monolith  │  │ • Event-Driven  ││
-│  │ • Clean             │    │ • Microservices     │  │ • Message Queue ││
-│  │ • Onion             │    │ • Serverless        │  │ • Pub/Sub       ││
-│  │ • Vertical Slice    │    │ • Service-Oriented  │  │ • Streaming     ││
-│  │ • Feature-Based     │    │ • Distributed       │  │ • CQRS          ││
-│  └─────────────────────┘    └─────────────────────┘  └─────────────────┘│
-│                                                                         │
-│  These are ORTHOGONAL - you combine them:                               │
-│  Example: Microservices (deployment) + Hexagonal (internal) +           │
-│           Event-Driven (communication)                                  │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### B. Key Insight: Orthogonal Concerns
-
-**CRITICAL: These architecture types solve different problems and can be combined.**
-
-```
-COMBINING ARCHITECTURES:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  Question                      │ Architecture Category                  │
-│  ──────────────────────────────┼──────────────────────────────────────  │
-│  How do I organize my code?    │ Hexagonal, Clean, Layered, Onion      │
-│  How do I deploy my system?    │ Monolith, Microservices, Serverless   │
-│  How do my components talk?    │ REST, Events, Messages, gRPC          │
-│  How do I handle data?         │ CRUD, CQRS, Event Sourcing            │
-│                                                                         │
-│  EXAMPLE COMBINATION:                                                   │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                                                                   │   │
-│  │  Microservices Deployment                                        │   │
-│  │       │                                                          │   │
-│  │       └── Each service uses Hexagonal Architecture               │   │
-│  │              │                                                   │   │
-│  │              └── Services communicate via Events                 │   │
-│  │                     │                                            │   │
-│  │                     └── Complex queries use CQRS                 │   │
-│  │                                                                   │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+> **Forbidden**: adopting a distributed style to learn it (résumé-driven development); copying a hyperscaler's architecture without their constraints (cargo cult); shipping "microservices" that share a database or must deploy together (distributed monolith); choosing a style without an ADR.
 
 ---
 
-## 2A. Test-Driven Development (TDD) Protocol for Architecture (MANDATORY)
+## 3. The Four Orthogonal Axes
 
-**CRITICAL: Follow the Red-Green-Refactor cycle when implementing architectural decisions.**
+Architecture styles answer four *independent* questions. Choose one option per axis and combine.
 
-### TDD Cycle for Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                                                                             │
-│  ARCHITECTURE TDD CYCLE                                                     │
-│                                                                             │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │                                                                     │   │
-│  │     ┌───────────┐                                                   │   │
-│  │     │   RED     │  Write architectural fitness tests first          │   │
-│  │     │  (Test)   │  • Boundary tests fail (modules don't exist)      │   │
-│  │     └─────┬─────┘  • Contract tests fail (interfaces undefined)     │   │
-│  │           │        • Integration tests fail (not connected)          │   │
-│  │           ▼                                                          │   │
-│  │     ┌───────────┐                                                   │   │
-│  │     │  GREEN    │  Implement minimum architecture to pass           │   │
-│  │     │ (Impl)    │  • Define module boundaries                       │   │
-│  │     └─────┬─────┘  • Create port/adapter interfaces                 │   │
-│  │           │        • Wire components together                        │   │
-│  │           ▼                                                          │   │
-│  │     ┌───────────┐                                                   │   │
-│  │     │ REFACTOR  │  Improve architecture while tests stay green      │   │
-│  │     │ (Improve) │  • Extract common patterns                        │   │
-│  │     └─────┬─────┘  • Optimize boundaries                            │   │
-│  │           │        • Apply design patterns                           │   │
-│  │           │                                                          │   │
-│  │           └────────────────────► Repeat                             │   │
-│  │                                                                     │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-│                                                                             │
-│  ARCHITECTURAL FITNESS FUNCTIONS:                                           │
-│  • Dependency direction tests (core has no outward dependencies)           │
-│  • Module coupling metrics (low coupling between modules)                  │
-│  • Cohesion tests (high cohesion within modules)                          │
-│  • Performance boundary tests (latency, throughput)                        │
-│  • Scalability tests (load handling, resource usage)                      │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Example: TDD for Hexagonal Architecture Boundary
+| Axis | Question | Options |
+|------|----------|---------|
+| **Internal structure** | How is code organised inside a unit? | Layered · Hexagonal · Clean · Onion · Vertical Slice |
+| **Deployment** | How is it packaged and run? | Monolith · Modular Monolith · Microservices · Serverless |
+| **Communication** | How do parts talk? | Request/Reply (REST/gRPC/GraphQL) · Events · Message Queue · Streaming |
+| **Data** | How is state managed? | CRUD · CQRS · Event Sourcing |
 
 ```
-SCENARIO: Adding a new payment gateway adapter
-
-Step 1: RED - Write failing boundary test first
-────────────────────────────────────────────────────────────────────────────────
-// Test: PaymentPort should be independent of any payment gateway
-// File: tests/architecture/payment_boundary_test.py
-
-def test_payment_port_has_no_external_dependencies():
-    """Core payment port must not import any external payment SDK."""
-    import_graph = analyze_imports("core/ports/payment_port")
-
-    # This test FAILS initially - port doesn't exist
-    assert "stripe" not in import_graph.all_imports
-    assert "paypal" not in import_graph.all_imports
-    assert "braintree" not in import_graph.all_imports
-
-def test_payment_service_uses_only_port_interface():
-    """Payment service must only depend on PaymentPort, not concrete adapters."""
-    service_deps = get_dependencies("core/services/payment_service")
-
-    # This test FAILS initially - service doesn't exist
-    assert "PaymentPort" in service_deps
-    assert "StripeAdapter" not in service_deps
-────────────────────────────────────────────────────────────────────────────────
-
-Step 2: GREEN - Implement minimum architecture to pass
-────────────────────────────────────────────────────────────────────────────────
-// File: core/ports/payment_port.py (Port - no external dependencies)
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
-
-@dataclass
-class PaymentResult:
-    success: bool
-    transaction_id: str
-    error_message: str | None = None
-
-class PaymentPort(ABC):
-    @abstractmethod
-    def charge(self, amount: int, currency: str, token: str) -> PaymentResult:
-        pass
-
-// File: core/services/payment_service.py (Uses only port)
-from core.ports.payment_port import PaymentPort, PaymentResult
-
-class PaymentService:
-    def __init__(self, payment_port: PaymentPort):
-        self._payment = payment_port
-
-    def process_payment(self, order_id: str, amount: int) -> PaymentResult:
-        return self._payment.charge(amount, "USD", order_id)
-
-// File: adapters/payment/stripe_adapter.py (Adapter - external dependency here)
-import stripe
-from core.ports.payment_port import PaymentPort, PaymentResult
-
-class StripeAdapter(PaymentPort):
-    def charge(self, amount: int, currency: str, token: str) -> PaymentResult:
-        # Stripe SDK used only in adapter layer
-        result = stripe.Charge.create(amount=amount, currency=currency)
-        return PaymentResult(success=True, transaction_id=result.id)
-────────────────────────────────────────────────────────────────────────────────
-
-Step 3: REFACTOR - Improve while keeping tests green
-────────────────────────────────────────────────────────────────────────────────
-• Add error handling abstraction to port
-• Create adapter factory for easy switching
-• Add retry decorator for resilience
-• Tests continue to pass - boundaries maintained
-────────────────────────────────────────────────────────────────────────────────
+EXAMPLE COMBINATION:
+  Microservices (deployment)
+    └─ each service uses Hexagonal (internal)
+         └─ services communicate via Events (communication)
+              └─ complex reporting uses CQRS (data)
 ```
 
-### Architecture TDD Checklist
-
-```
-BEFORE implementing any architectural change:
-
-□ Write fitness function tests for the architectural constraint
-  • Dependency direction tests
-  • Module boundary tests
-  • Contract/interface tests
-
-□ Verify tests FAIL (Red phase confirms constraint doesn't exist yet)
-
-□ Implement minimum architecture to pass tests (Green phase)
-  • Focus on boundaries and interfaces first
-  • Implement concrete components second
-
-□ Refactor while tests remain green
-  • Apply patterns (Factory, Strategy, etc.)
-  • Optimize for clarity and performance
-  • Ensure documentation is updated
-
-□ Add new tests for edge cases discovered during refactoring
-```
+The sections below give the *positioning* of each option — what it's for, when it wins, what it costs. Deep mechanics of Hexagonal, Clean, and Microservices are in their own guides (§0).
 
 ---
 
-## 2B. Bug Fix Protocol for Architecture (MANDATORY)
+## 4. Internal Structure Styles
 
-**CRITICAL: Every architectural bug MUST receive a regression test BEFORE fixing.**
+How you organise code *within* a deployable unit. Hexagonal, Clean, and Onion share one DNA — **dependency inversion** (dependencies point inward, the domain knows nothing of infrastructure). They differ mainly in prescriptiveness and vocabulary.
 
-### Architectural Bug Fix Workflow
+### A. Layered (N-Tier)
+Presentation → Business → Data Access → Database, each depending on the one below.
+- ✅ Simplest to grasp; fine for CRUD and prototypes.
+- ❌ DB changes ripple upward; business logic leaks; hard to test in isolation; trends toward an anemic domain model.
+- **Best for:** simple CRUD apps, MVPs, teams new to structured architecture.
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                                                                             │
-│  ARCHITECTURAL BUG FIX WORKFLOW                                            │
-│                                                                             │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │                                                                     │   │
-│  │  1. BUG DISCOVERED                                                  │   │
-│  │     │  "Circular dependency between Order and Payment modules"      │   │
-│  │     │  "Database logic leaked into domain layer"                    │   │
-│  │     │  "Service directly calls external API instead of adapter"    │   │
-│  │     ▼                                                               │   │
-│  │  2. WRITE REGRESSION TEST (MUST FAIL)                               │   │
-│  │     │  Test that exposes the architectural violation                │   │
-│  │     │  Document bug ID and description in test                      │   │
-│  │     ▼                                                               │   │
-│  │  3. VERIFY TEST FAILS FOR CORRECT REASON                            │   │
-│  │     │  Confirm the test catches the actual bug                      │   │
-│  │     │  Not a false positive from other issues                       │   │
-│  │     ▼                                                               │   │
-│  │  4. FIX THE ARCHITECTURAL VIOLATION                                 │   │
-│  │     │  Refactor to correct boundaries                               │   │
-│  │     │  Introduce missing abstractions                               │   │
-│  │     │  Remove improper dependencies                                 │   │
-│  │     ▼                                                               │   │
-│  │  5. VERIFY TEST PASSES                                              │   │
-│  │     │  Regression prevented                                         │   │
-│  │     │  Architecture constraint enforced                             │   │
-│  │     ▼                                                               │   │
-│  │  6. RUN FULL ARCHITECTURE TEST SUITE                                │   │
-│  │     │  Ensure fix didn't break other constraints                    │   │
-│  │     ▼                                                               │   │
-│  │  7. UPDATE ADR (Architecture Decision Record)                       │   │
-│  │        Document the issue and resolution                            │   │
-│  │        Add to "Lessons Learned" section                             │   │
-│  │                                                                     │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+### B. Hexagonal (Ports & Adapters)
+Domain at the centre, **ports** (interfaces) as boundaries, **adapters** translating external↔internal; driving (input) vs. driven (output) sides.
+- ✅ Highly testable (mock adapters); multiple I/O channels; framework-independent.
+- ❌ Up-front interface ceremony; needs comfort with dependency inversion.
+- **Best for:** long-lived apps needing high testability and many I/O channels.
+- 📎 Mechanics, port/adapter wiring, and language bindings: [`hexagonal.md`](guides://hexagonal.md).
 
-### Example: Fixing a Layer Violation Bug
+### C. Clean (Uncle Bob)
+Four explicit concentric layers — Entities → Use Cases → Interface Adapters → Frameworks & Drivers — with source dependencies pointing strictly inward, plus "Screaming Architecture" (directory structure reveals *what the app does*, not which framework it uses).
+- vs. Hexagonal: more prescriptive (fixed layer count), separates Entities from Use Cases, explicit Presenter pattern.
+- **Best for:** large teams wanting a standardised, governed layer scheme.
+- 📎 Layer responsibilities and mechanics: [`cleanarch.md`](guides://cleanarch.md).
 
-```
-BUG REPORT #ARCH-042: Domain service directly imports database ORM model
-────────────────────────────────────────────────────────────────────────────────
-SEVERITY: High (violates Clean Architecture dependency rule)
-DISCOVERED: Code review found OrderService importing SQLAlchemy model
-IMPACT: Domain layer now coupled to database implementation
-────────────────────────────────────────────────────────────────────────────────
+### D. Onion (Palermo)
+Domain Model at the absolute core, then Domain Services (pure, stateless), Application Services (orchestration), Infrastructure outermost. Core MUST compile without infrastructure. Strong DDD alignment; sharpest Domain-vs-Application service split.
+- **Best for:** complex enterprise domains with strong DDD experience and 10-year horizons.
 
-Step 1-2: Write regression test that reproduces the bug
-────────────────────────────────────────────────────────────────────────────────
-// File: tests/architecture/layer_dependency_test.py
+### E. Vertical Slice
+Organise by **feature**, not layer: each slice (e.g. `CreateOrder/` with its command, handler, validator, endpoint) cuts through all layers and is independent. "Code that changes together lives together"; duplication is preferred over the wrong abstraction.
+- ✅ Fast feature work, low cross-feature coupling, good for brownfield refactors.
+- ❌ Can duplicate; heavily interconnected features still want a shared domain.
+- **Best for:** CRUD-heavy or feature-driven apps; discovering boundaries before extraction.
 
-def test_domain_services_have_no_infrastructure_imports():
-    """
-    Regression test for BUG #ARCH-042
-    Domain services must not import infrastructure/ORM modules.
-    """
-    domain_modules = discover_modules("core/services/")
-    infrastructure_patterns = [
-        "sqlalchemy", "psycopg", "pymongo",  # Database
-        "redis", "celery",                    # Infrastructure
-        "requests", "httpx", "aiohttp"        # HTTP clients
-    ]
+### F. The "inverted family" at a glance
 
-    for module in domain_modules:
-        imports = get_all_imports(module)
-        for pattern in infrastructure_patterns:
-            # This test FAILS - OrderService imports sqlalchemy.orm
-            assert pattern not in imports, \
-                f"BUG #ARCH-042: {module} imports {pattern}"
-
-// Run test:
-// $ pytest tests/architecture/layer_dependency_test.py -v
-// FAILED - core/services/order_service.py imports sqlalchemy.orm
-────────────────────────────────────────────────────────────────────────────────
-
-Step 3: Verify failure is for the correct reason
-────────────────────────────────────────────────────────────────────────────────
-// The bug (BEFORE fix):
-// File: core/services/order_service.py
-
-from sqlalchemy.orm import Session  # ❌ VIOLATION: Infrastructure in domain
-from infrastructure.db.models import OrderModel  # ❌ VIOLATION
-
-class OrderService:
-    def __init__(self, db: Session):
-        self._db = db
-
-    def get_order(self, order_id: str):
-        return self._db.query(OrderModel).filter_by(id=order_id).first()
-────────────────────────────────────────────────────────────────────────────────
-
-Step 4: Fix the architectural violation
-────────────────────────────────────────────────────────────────────────────────
-// File: core/domain/order.py (Pure domain entity)
-@dataclass
-class Order:
-    id: str
-    customer_id: str
-    total: Decimal
-    status: OrderStatus
-
-// File: core/ports/order_repository.py (Port interface)
-from abc import ABC, abstractmethod
-from core.domain.order import Order
-
-class OrderRepository(ABC):
-    @abstractmethod
-    def find_by_id(self, order_id: str) -> Order | None:
-        pass
-
-// File: core/services/order_service.py (Uses only port)
-from core.ports.order_repository import OrderRepository  # ✅ Clean dependency
-
-class OrderService:
-    def __init__(self, repository: OrderRepository):  # ✅ Injected abstraction
-        self._repository = repository
-
-    def get_order(self, order_id: str):
-        return self._repository.find_by_id(order_id)
-
-// File: infrastructure/persistence/sqlalchemy_order_repository.py (Adapter)
-from sqlalchemy.orm import Session
-from core.ports.order_repository import OrderRepository
-from core.domain.order import Order
-from .models import OrderModel
-
-class SqlAlchemyOrderRepository(OrderRepository):  # ✅ Infrastructure isolated
-    def __init__(self, session: Session):
-        self._session = session
-
-    def find_by_id(self, order_id: str) -> Order | None:
-        model = self._session.query(OrderModel).filter_by(id=order_id).first()
-        return self._map_to_domain(model) if model else None
-────────────────────────────────────────────────────────────────────────────────
-
-Step 5-6: Verify test passes and run full suite
-────────────────────────────────────────────────────────────────────────────────
-// Run regression test:
-// $ pytest tests/architecture/layer_dependency_test.py -v
-// PASSED - No infrastructure imports in domain services
-
-// Run full architecture test suite:
-// $ pytest tests/architecture/ -v
-// All tests pass - bug fixed, regression prevented
-────────────────────────────────────────────────────────────────────────────────
-
-Step 7: Update ADR
-────────────────────────────────────────────────────────────────────────────────
-// File: docs/adr/ADR-001-hexagonal-architecture.md
-
-## Lessons Learned
-
-### BUG #ARCH-042 (2024-01-15)
-**Issue**: OrderService directly imported SQLAlchemy ORM, violating dependency rule.
-**Root Cause**: Developer unfamiliar with ports/adapters pattern.
-**Resolution**: Introduced OrderRepository port, moved ORM to adapter layer.
-**Prevention**: Added automated architecture tests to CI pipeline.
-────────────────────────────────────────────────────────────────────────────────
-```
-
-### Common Architectural Bugs and Their Tests
-
-```
-┌────────────────────────────┬────────────────────────────────────────────────┐
-│ Architectural Bug          │ Regression Test Approach                       │
-├────────────────────────────┼────────────────────────────────────────────────┤
-│ Circular module dependency │ Import graph analysis for cycles               │
-│ Layer violation            │ Dependency direction verification              │
-│ Missing abstraction        │ Interface coverage tests                       │
-│ Leaky adapter              │ Domain purity tests (no infra imports)         │
-│ God module (too big)       │ Module size/complexity metrics                 │
-│ Shotgun surgery required   │ Change impact analysis tests                   │
-│ Wrong bounded context      │ Context mapping validation                     │
-│ Distributed monolith       │ Service independence tests                     │
-└────────────────────────────┴────────────────────────────────────────────────┘
-```
+| Aspect | Layered | Hexagonal | Clean | Onion | Vertical Slice |
+|--------|---------|-----------|-------|-------|----------------|
+| Core focus | Technical layers | Boundaries & testing | Standardised layers | Pure domain model | Feature independence |
+| Dependency rule | Top→down | Inward to domain | Inward to entities | Inward to domain model | Within the slice |
+| Prescriptive | Low | Less | More | Medium | Low |
+| DDD alignment | Weak | Compatible | Compatible | Strong | Compatible |
+| Complexity | Low | Medium | High | High | Medium |
+| Testability | Low | High | High | High | Medium |
+| Best team size | 1-5 | 3-15 | 10-50+ | 10-50+ | 5-20 |
 
 ---
 
-## 3. Internal Structure Architectures
+## 5. Deployment & Communication Styles
 
-These define how you organize code within a deployable unit.
+How you package/run the system, and how its parts talk.
 
-### A. Layered Architecture (N-Tier)
+### Deployment
 
-```
-LAYERED ARCHITECTURE:
+| Style | What it is | Choose when |
+|-------|-----------|-------------|
+| **Monolith** | One deployable artifact, one process, often one DB. ACID across modules, trivial debugging; scales all-or-nothing. | New project, team < 10, simple domain, need fast time-to-market. |
+| **Modular Monolith** | Monolith with **strict** module boundaries: modules talk only via public APIs, own their schema, never query each other's tables. The common "sweet spot". | Growing complexity, team 5-30, want clean boundaries + simple ops, planning eventual extraction. |
+| **Microservices** | Small, independently deployable services, each owning its data, talking over the network. | Large org, multiple autonomous teams, independent scaling, mature DevOps, clear bounded contexts. 📎 [`microservices.md`](guides://microservices.md) |
+| **Serverless** | Functions as the deployment unit; pay-per-invocation, auto-scale to zero, event-driven, stateless. | Event-driven or spiky workloads, cost-sensitive, simple stateless operations. |
 
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  The Traditional Approach - Linear Dependencies                         │
-│                                                                         │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                    PRESENTATION LAYER                            │   │
-│  │                    (Controllers, Views, APIs)                    │   │
-│  └───────────────────────────┬─────────────────────────────────────┘   │
-│                              │ depends on                              │
-│                              ▼                                         │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                    BUSINESS LOGIC LAYER                          │   │
-│  │                    (Services, Business Rules)                    │   │
-│  └───────────────────────────┬─────────────────────────────────────┘   │
-│                              │ depends on                              │
-│                              ▼                                         │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                    DATA ACCESS LAYER                             │   │
-│  │                    (Repositories, ORM, Queries)                  │   │
-│  └───────────────────────────┬─────────────────────────────────────┘   │
-│                              │ depends on                              │
-│                              ▼                                         │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                    DATABASE                                       │   │
-│  │                    (Schema is foundation)                         │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+**Extraction path** (the recommended evolution): Monolith → Modular Monolith (clean module boundaries) → extract a module to a service → replace in-process calls with network calls → split its schema. Start simple; extract only when boundaries are proven and a driver exists.
 
-CHARACTERISTICS:
-  ✅ Simple to understand and implement
-  ✅ Clear separation of concerns by technical function
-  ✅ Works well for CRUD-focused applications
+### Communication
 
-  ❌ Database changes ripple upward
-  ❌ Business logic often leaks into other layers
-  ❌ Tight coupling to infrastructure
-  ❌ Difficult to test business logic in isolation
-  ❌ Tends toward "Anemic Domain Model"
+| Style | Coupling | Consistency | Best for | Cost |
+|-------|----------|-------------|----------|------|
+| **Request/Reply** (REST/gRPC/GraphQL) | Tight (caller blocks) | Strong | Simple, immediate-feedback APIs | Cascading failures; callee must be up. 📎 [`rest.md`](guides://rest.md) · [`grpc.md`](guides://grpc.md) · [`graphql.md`](guides://graphql.md) |
+| **Event-Driven** (pub/sub of facts: `OrderPlaced`) | Loose | Eventual | Decoupled, scalable, resilient reactions | Eventual consistency; harder debugging; ordering. |
+| **Message Queue** (commands: `ProcessPayment`) | Loose | At-least-once delivery | Load leveling, parallel work, buffered spikes | Idempotency required; message-broker ops. |
+| **Event Streaming** (immutable ordered log; Kafka) | Loose | Eventual, replayable | Event sourcing, audit, real-time analytics, state rebuild | Offset/retention management. 📎 [`kafka.md`](guides://kafka.md) |
 
-BEST FOR:
-  • Simple CRUD applications
-  • Prototypes and MVPs
-  • Small applications with limited complexity
-  • Teams new to structured architecture
-```
-
-### B. Hexagonal Architecture (Ports & Adapters)
-
-```
-HEXAGONAL ARCHITECTURE:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  Focus: Protect business logic from external concerns via boundaries    │
-│                                                                         │
-│                    DRIVING SIDE                                         │
-│                    (Primary/Input)                                      │
-│                         │                                               │
-│     ┌───────────────────┼───────────────────┐                          │
-│     │ REST    │ CLI     │ Tests   │ Events  │  ← Driving Adapters      │
-│     │ Controller        │                   │                          │
-│     └───────────────────┼───────────────────┘                          │
-│                         │                                               │
-│                    ┌────▼────┐                                         │
-│                    │  PORTS  │  ← Interfaces (Driving)                 │
-│                    └────┬────┘                                         │
-│                         │                                               │
-│     ┌───────────────────┼───────────────────────────────────┐          │
-│     │                   ▼                                    │          │
-│     │     ┌─────────────────────────────────────┐           │          │
-│     │     │         DOMAIN / CORE               │           │          │
-│     │     │  • Entities                         │           │          │
-│     │     │  • Value Objects                    │           │          │
-│     │     │  • Domain Services                  │           │          │
-│     │     │  • Business Rules                   │           │          │
-│     │     │  (NO external dependencies)         │           │          │
-│     │     └─────────────────────────────────────┘           │          │
-│     │                                                        │          │
-│     │     ┌─────────────────────────────────────┐           │          │
-│     │     │      APPLICATION SERVICES           │           │          │
-│     │     │  • Use Cases / Interactors          │           │          │
-│     │     │  • Orchestration                    │           │          │
-│     │     └─────────────────────────────────────┘           │          │
-│     │                                                        │          │
-│     └───────────────────┼───────────────────────────────────┘          │
-│                         │                                               │
-│                    ┌────▼────┐                                         │
-│                    │  PORTS  │  ← Interfaces (Driven)                  │
-│                    └────┬────┘                                         │
-│                         │                                               │
-│     ┌───────────────────┼───────────────────┐                          │
-│     │ Database  │ Email │ Payment │ Queue   │  ← Driven Adapters       │
-│     │ Adapter           │                   │                          │
-│     └───────────────────┼───────────────────┘                          │
-│                         │                                               │
-│                    DRIVEN SIDE                                          │
-│                    (Secondary/Output)                                   │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-KEY CONCEPTS:
-  • Ports: Interfaces that define how the core interacts with the world
-  • Adapters: Implementations that translate between external and internal
-  • Driving: Things that drive your application (user, API, tests)
-  • Driven: Things your application drives (database, email, payments)
-
-DEPENDENCY RULE:
-  Dependencies point INWARD. The core knows nothing about adapters.
-
-BEST FOR:
-  • Applications needing high testability
-  • Systems with multiple input/output channels
-  • Long-lived applications requiring flexibility
-  • Teams comfortable with dependency inversion
-```
-
-### C. Clean Architecture (Uncle Bob)
-
-```
-CLEAN ARCHITECTURE:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  Focus: Explicit layers with clear responsibilities                     │
-│                                                                         │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                    FRAMEWORKS & DRIVERS                          │   │
-│  │  (Web, UI, Database, Devices, External Interfaces)               │   │
-│  │                                                                   │   │
-│  │    ┌─────────────────────────────────────────────────────────┐   │   │
-│  │    │                  INTERFACE ADAPTERS                      │   │   │
-│  │    │  (Controllers, Gateways, Presenters)                     │   │   │
-│  │    │                                                          │   │   │
-│  │    │    ┌─────────────────────────────────────────────────┐   │   │   │
-│  │    │    │              USE CASES                           │   │   │   │
-│  │    │    │  (Application Business Rules)                    │   │   │   │
-│  │    │    │                                                  │   │   │   │
-│  │    │    │    ┌─────────────────────────────────────────┐   │   │   │   │
-│  │    │    │    │              ENTITIES                   │   │   │   │   │
-│  │    │    │    │  (Enterprise Business Rules)            │   │   │   │   │
-│  │    │    │    └─────────────────────────────────────────┘   │   │   │   │
-│  │    │    │                                                  │   │   │   │
-│  │    │    └─────────────────────────────────────────────────┘   │   │   │
-│  │    │                                                          │   │   │
-│  │    └─────────────────────────────────────────────────────────┘   │   │
-│  │                                                                   │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-│                                                                         │
-│  DEPENDENCY RULE: Source code dependencies point INWARD only           │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-LAYER RESPONSIBILITIES:
-
-Layer               │ Contains                    │ Depends On
-────────────────────┼─────────────────────────────┼─────────────
-Entities            │ Business objects, rules     │ Nothing
-Use Cases           │ Application logic, flows    │ Entities
-Interface Adapters  │ Controllers, presenters     │ Use Cases
-Frameworks          │ Web, DB, external tools     │ All inner
-
-KEY FEATURE - "Screaming Architecture":
-  The directory structure should reveal WHAT the app does,
-  not WHICH framework it uses.
-
-  ✅ CORRECT:
-  src/
-  ├── healthcare/
-  │   ├── patient/
-  │   ├── appointment/
-  │   └── prescription/
-
-  ❌ WRONG:
-  src/
-  ├── controllers/
-  ├── services/
-  ├── repositories/
-
-DIFFERENCE FROM HEXAGONAL:
-  • More prescriptive about layer count (4 explicit layers)
-  • Separates Entities from Use Cases
-  • Explicit Presenter pattern for output
-  • Stronger emphasis on standardized structure
-
-BEST FOR:
-  • Teams wanting strict, standardized layer definitions
-  • Large applications with many developers
-  • Enterprise systems requiring governance
-```
-
-### D. Onion Architecture (Jeffrey Palermo)
-
-```
-ONION ARCHITECTURE:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  Focus: Domain Model as the absolute core                               │
-│                                                                         │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                         INFRASTRUCTURE                           │   │
-│  │  (Database, File System, External Services, UI)                  │   │
-│  │                                                                   │   │
-│  │    ┌─────────────────────────────────────────────────────────┐   │   │
-│  │    │                    APPLICATION SERVICES                  │   │   │
-│  │    │  (Orchestration, Use Cases, Application Logic)           │   │   │
-│  │    │                                                          │   │   │
-│  │    │    ┌─────────────────────────────────────────────────┐   │   │   │
-│  │    │    │                DOMAIN SERVICES                   │   │   │   │
-│  │    │    │  (Pure Business Logic, Stateless)                │   │   │   │
-│  │    │    │                                                  │   │   │   │
-│  │    │    │    ┌─────────────────────────────────────────┐   │   │   │   │
-│  │    │    │    │              DOMAIN MODEL               │   │   │   │   │
-│  │    │    │    │  (Entities, Value Objects, Aggregates)  │   │   │   │   │
-│  │    │    │    └─────────────────────────────────────────┘   │   │   │   │
-│  │    │    │                                                  │   │   │   │
-│  │    │    └─────────────────────────────────────────────────┘   │   │   │
-│  │    │                                                          │   │   │
-│  │    └─────────────────────────────────────────────────────────┘   │   │
-│  │                                                                   │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-KEY DISTINCTION FROM OTHERS:
-  • Emphasizes "Application Core" must compile WITHOUT infrastructure
-  • Strong distinction between Domain Services (pure) and
-    Application Services (orchestration)
-  • Heavy DDD (Domain-Driven Design) influence
-
-DOMAIN SERVICES vs APPLICATION SERVICES:
-
-Domain Services (Pure Logic):
-  • Stateless operations on domain objects
-  • No infrastructure dependencies
-  • Example: PricingService.calculateDiscount(order, customer)
-
-Application Services (Orchestration):
-  • Coordinate multiple domain operations
-  • May call infrastructure (via interfaces)
-  • Example: PlaceOrderService.execute(command)
-
-BEST FOR:
-  • Complex enterprise applications
-  • Rich business rules requiring DDD
-  • Long-lived systems (10+ years)
-  • Teams with strong DDD experience
-```
-
-### E. Vertical Slice Architecture
-
-```
-VERTICAL SLICE ARCHITECTURE:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  Focus: Organize by FEATURE, not by LAYER                               │
-│                                                                         │
-│  TRADITIONAL (Layered):          VERTICAL SLICE:                        │
-│                                                                         │
-│  src/                            src/                                   │
-│  ├── Controllers/                ├── Features/                          │
-│  │   ├── OrderController         │   ├── CreateOrder/                   │
-│  │   └── CustomerController      │   │   ├── CreateOrderCommand         │
-│  ├── Services/                   │   │   ├── CreateOrderHandler         │
-│  │   ├── OrderService            │   │   ├── CreateOrderValidator       │
-│  │   └── CustomerService         │   │   └── CreateOrderEndpoint        │
-│  ├── Repositories/               │   ├── GetOrder/                      │
-│  │   ├── OrderRepository         │   │   ├── GetOrderQuery              │
-│  │   └── CustomerRepository      │   │   ├── GetOrderHandler            │
-│  └── Models/                     │   │   └── GetOrderEndpoint           │
-│      ├── Order                   │   └── CancelOrder/                   │
-│      └── Customer                │       ├── CancelOrderCommand         │
-│                                  │       └── ...                        │
-│                                  └── Shared/                            │
-│                                      └── Domain/                        │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-PRINCIPLES:
-  1. Each feature is a complete slice through all layers
-  2. Features are independent - change one without affecting others
-  3. Code that changes together lives together
-  4. Minimize shared code (duplication > wrong abstraction)
-
-SLICE STRUCTURE:
-
-CreateOrder/
-├── CreateOrderCommand.cs      # Input DTO
-├── CreateOrderHandler.cs      # Business logic + persistence
-├── CreateOrderValidator.cs    # Validation rules
-├── CreateOrderEndpoint.cs     # HTTP endpoint
-└── CreateOrderResponse.cs     # Output DTO
-
-WHEN A SLICE HANDLES EVERYTHING:
-
-Request → Endpoint → Handler → Database → Response
-           │           │
-           │           └── Contains: validation, business rules,
-           │                        persistence, response mapping
-           └── Maps HTTP to/from command/response
-
-BEST FOR:
-  • CRUD-heavy applications
-  • Rapid feature development
-  • Teams that struggle with layer coupling
-  • Applications with independent features
-  • Brownfield refactoring of legacy systems
-
-CAUTION:
-  • Can lead to duplication
-  • Complex domain logic may need shared domain layer
-  • Not ideal for heavily interconnected features
-```
-
-### F. Architecture Comparison Matrix
-
-```
-INTERNAL ARCHITECTURE COMPARISON:
-
-┌──────────────────┬───────────────────────────────────────────────────────┐
-│ Architecture     │ Key Characteristics                                   │
-├──────────────────┼───────────────────────────────────────────────────────┤
-│ Layered          │ • Linear dependencies (top-down)                      │
-│                  │ • Database is foundation                              │
-│                  │ • Simple, widely understood                           │
-│                  │ • Risk: Anemic domain, tight coupling                 │
-├──────────────────┼───────────────────────────────────────────────────────┤
-│ Hexagonal        │ • Domain at center, ports as boundaries               │
-│                  │ • Adapters translate external ↔ internal              │
-│                  │ • Highly testable (mock adapters)                     │
-│                  │ • Focus: Boundary protection                          │
-├──────────────────┼───────────────────────────────────────────────────────┤
-│ Clean            │ • 4 explicit concentric layers                        │
-│                  │ • Entities separate from Use Cases                    │
-│                  │ • "Screaming Architecture" principle                  │
-│                  │ • Focus: Standardization                              │
-├──────────────────┼───────────────────────────────────────────────────────┤
-│ Onion            │ • Domain Model + Domain Services at core              │
-│                  │ • Core must compile without infrastructure            │
-│                  │ • Strong DDD alignment                                │
-│                  │ • Focus: Pure domain model                            │
-├──────────────────┼───────────────────────────────────────────────────────┤
-│ Vertical Slice   │ • Organize by feature, not layer                      │
-│                  │ • Each slice is independent                           │
-│                  │ • Minimize shared abstractions                        │
-│                  │ • Focus: Feature independence                         │
-└──────────────────┴───────────────────────────────────────────────────────┘
-
-THE "INVERTED FAMILY" COMPARISON:
-(Hexagonal, Clean, Onion share the same DNA: Dependency Inversion)
-
-┌────────────────┬──────────────┬───────────────────┬──────────────────────┐
-│ Aspect         │ Hexagonal    │ Clean             │ Onion                │
-├────────────────┼──────────────┼───────────────────┼──────────────────────┤
-│ Visual         │ Hexagon      │ Concentric circles│ Onion layers         │
-│ Terminology    │ Ports,       │ Entities, Use     │ Domain Model,        │
-│                │ Adapters     │ Cases, Gateways   │ Domain Services      │
-│ Primary Focus  │ Boundaries & │ Standardized      │ Pure domain model    │
-│                │ Testing      │ layers            │                      │
-│ Prescriptive   │ Less         │ More              │ Medium               │
-│ DDD Alignment  │ Compatible   │ Compatible        │ Strong               │
-│ Origin         │ Cockburn     │ Martin (Uncle Bob)│ Palermo              │
-└────────────────┴──────────────┴───────────────────┴──────────────────────┘
-```
+The defining difference between a queue and a stream: a queue **deletes** a message once consumed; a stream **retains** it, and consumers track their own offset and can replay.
 
 ---
 
-## 4. Deployment Architectures
+## 6. Data Styles
 
-These define how you package and deploy your system.
+How state is read and written.
 
-### A. Monolith
+| Style | What it is | Best for | Trade-offs |
+|-------|-----------|----------|------------|
+| **CRUD** | One model for reads and writes, one schema, one DB. | Simple apps, similar read/write patterns, small volumes. | Read and write needs eventually diverge. |
+| **CQRS** | Separate **write model** (rich, normalised, validated) and **read model** (denormalised, query-optimised), kept in sync by projection. | Read-heavy systems, complex queries that don't fit the write model, independent read/write scaling. | Eventual consistency between models; sync complexity. |
+| **Event Sourcing** | Store **events**, not current state; state = replay of events. | Audit/compliance, temporal queries, debug-by-replay, rebuildable read models. | Event-schema evolution, long-stream performance, learning curve. |
 
-```
-MONOLITHIC ARCHITECTURE:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  Single deployable unit containing all functionality                    │
-│                                                                         │
-│  ┌───────────────────────────────────────────────────────────────────┐ │
-│  │                        MONOLITH                                    │ │
-│  │                                                                    │ │
-│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐          │ │
-│  │  │  Orders  │  │ Customers│  │ Payments │  │ Inventory│          │ │
-│  │  │  Module  │  │  Module  │  │  Module  │  │  Module  │          │ │
-│  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘          │ │
-│  │                                                                    │ │
-│  │  ┌──────────────────────────────────────────────────────────────┐ │ │
-│  │  │                    SHARED DATABASE                            │ │ │
-│  │  └──────────────────────────────────────────────────────────────┘ │ │
-│  │                                                                    │ │
-│  └───────────────────────────────────────────────────────────────────┘ │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-CHARACTERISTICS:
-  ✅ Simple deployment (one artifact)
-  ✅ Simple development environment
-  ✅ Easy debugging (single process)
-  ✅ No network latency between modules
-  ✅ ACID transactions across modules
-
-  ❌ Scaling is all-or-nothing
-  ❌ Single point of failure
-  ❌ Long build/test times as it grows
-  ❌ Technology lock-in
-  ❌ Difficult for large teams
-
-BEST FOR:
-  • Startups and MVPs
-  • Small to medium applications
-  • Small teams (< 10 developers)
-  • Simple domains
-  • Budget constraints
-```
-
-### B. Modular Monolith
-
-```
-MODULAR MONOLITH ARCHITECTURE:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  Monolith with strict module boundaries (best of both worlds)           │
-│                                                                         │
-│  ┌───────────────────────────────────────────────────────────────────┐ │
-│  │                     MODULAR MONOLITH                               │ │
-│  │                                                                    │ │
-│  │  ┌─────────────────┐    ┌─────────────────┐                       │ │
-│  │  │  Orders Module  │    │ Customers Module│                       │ │
-│  │  │ ┌─────────────┐ │    │ ┌─────────────┐ │                       │ │
-│  │  │ │   Domain    │ │    │ │   Domain    │ │                       │ │
-│  │  │ ├─────────────┤ │    │ ├─────────────┤ │                       │ │
-│  │  │ │ Application │ │    │ │ Application │ │                       │ │
-│  │  │ ├─────────────┤ │    │ ├─────────────┤ │                       │ │
-│  │  │ │Infrastructure│ │◄──┤ │Infrastructure│ │  ← Communication     │ │
-│  │  │ ├─────────────┤ │    │ ├─────────────┤ │    via PUBLIC API    │ │
-│  │  │ │ Public API  │ │    │ │ Public API  │ │    only              │ │
-│  │  │ └─────────────┘ │    │ └─────────────┘ │                       │ │
-│  │  │       │         │    │       │         │                       │ │
-│  │  │       ▼         │    │       ▼         │                       │ │
-│  │  │  [Own Schema]   │    │  [Own Schema]   │  ← Logical separation │ │
-│  │  └─────────────────┘    └─────────────────┘                       │ │
-│  │                                                                    │ │
-│  │  ┌──────────────────────────────────────────────────────────────┐ │ │
-│  │  │                    SHARED DATABASE                            │ │ │
-│  │  │         (but modules only access OWN schema)                  │ │ │
-│  │  └──────────────────────────────────────────────────────────────┘ │ │
-│  │                                                                    │ │
-│  └───────────────────────────────────────────────────────────────────┘ │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-KEY RULES:
-  1. Modules can ONLY communicate through their PUBLIC APIs
-  2. Modules CANNOT access each other's internal classes
-  3. Modules CANNOT directly query each other's database tables
-  4. Each module has its own schema/namespace in the database
-
-WHY THIS IS THE "SWEET SPOT":
-  • Simple deployment like a monolith
-  • Clean boundaries like microservices
-  • Easy to extract to microservices later
-  • Single database transaction when needed
-  • Lower operational complexity
-
-EXTRACTION PATH TO MICROSERVICES:
-  1. Module already has clean boundaries
-  2. Extract module to separate service
-  3. Replace in-process calls with network calls
-  4. Separate the database schema
-
-BEST FOR:
-  • Growing startups (most common recommendation)
-  • Medium complexity domains
-  • Teams wanting microservice benefits without overhead
-  • Path to eventual microservices
-```
-
-### C. Microservices
-
-```
-MICROSERVICES ARCHITECTURE:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  Small, independently deployable services                               │
-│                                                                         │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐   │
-│  │   Orders    │  │  Customers  │  │  Payments   │  │  Inventory  │   │
-│  │   Service   │  │   Service   │  │   Service   │  │   Service   │   │
-│  │             │  │             │  │             │  │             │   │
-│  │ ┌─────────┐ │  │ ┌─────────┐ │  │ ┌─────────┐ │  │ ┌─────────┐ │   │
-│  │ │Hexagonal│ │  │ │Hexagonal│ │  │ │  Clean  │ │  │ │ Layered │ │   │
-│  │ │Internal │ │  │ │Internal │ │  │ │Internal │ │  │ │Internal │ │   │
-│  │ └─────────┘ │  │ └─────────┘ │  │ └─────────┘ │  │ └─────────┘ │   │
-│  │      │      │  │      │      │  │      │      │  │      │      │   │
-│  │      ▼      │  │      ▼      │  │      ▼      │  │      ▼      │   │
-│  │ [Own DB]    │  │ [Own DB]    │  │ [Own DB]    │  │ [Own DB]    │   │
-│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘   │
-│         │                │                │                │          │
-│         └────────────────┴────────────────┴────────────────┘          │
-│                                  │                                     │
-│                         Network Communication                          │
-│                    (REST, gRPC, Events, Messages)                      │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-KEY CHARACTERISTICS:
-  • Each service is independently deployable
-  • Each service owns its data (no shared databases)
-  • Services communicate over the network
-  • Different services can use different technologies
-  • Teams can work independently
-
-ANTI-PATTERN - Distributed Monolith:
-  ❌ Services that share a database
-  ❌ Services that must be deployed together
-  ❌ Synchronous call chains across services
-  ❌ Tight coupling between services
-
-PREREQUISITES:
-  • Mature DevOps (CI/CD, monitoring, logging)
-  • Experienced team
-  • Well-understood domain boundaries
-  • Infrastructure for distributed systems
-
-TRADE-OFFS:
-  ✅ Independent scaling
-  ✅ Technology flexibility
-  ✅ Team autonomy
-  ✅ Fault isolation
-
-  ❌ Network latency
-  ❌ Distributed transactions complexity
-  ❌ Operational complexity
-  ❌ Testing complexity
-  ❌ Debugging difficulty
-
-BEST FOR:
-  • Large organizations with multiple teams
-  • Systems needing independent scaling
-  • Complex domains with clear boundaries
-  • Teams with strong DevOps capabilities
-```
-
-### D. Serverless Architecture
-
-```
-SERVERLESS ARCHITECTURE:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  Functions as the unit of deployment                                    │
-│                                                                         │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │                        API GATEWAY                                │  │
-│  │            (Routing, Authentication, Rate Limiting)               │  │
-│  └─────┬────────────────┬────────────────┬────────────────┬─────────┘  │
-│        │                │                │                │            │
-│        ▼                ▼                ▼                ▼            │
-│  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐         │
-│  │ Function │    │ Function │    │ Function │    │ Function │         │
-│  │ Create   │    │ Get      │    │ Update   │    │ Delete   │         │
-│  │ Order    │    │ Order    │    │ Order    │    │ Order    │         │
-│  └────┬─────┘    └────┬─────┘    └────┬─────┘    └────┬─────┘         │
-│       │               │               │               │                │
-│       └───────────────┴───────────────┴───────────────┘                │
-│                              │                                          │
-│                              ▼                                          │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │                    MANAGED SERVICES                               │  │
-│  │  (DynamoDB, S3, SQS, SNS, Aurora Serverless, etc.)               │  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-CHARACTERISTICS:
-  • Pay per invocation (no idle costs)
-  • Auto-scaling to zero and to infinity
-  • No server management
-  • Event-driven by nature
-  • Stateless functions
-
-CHALLENGES:
-  • Cold start latency
-  • Vendor lock-in
-  • Limited execution time
-  • Complex debugging
-  • State management
-
-BEST FOR:
-  • Event-driven workloads
-  • Variable/unpredictable traffic
-  • Simple APIs with independent endpoints
-  • Cost-sensitive applications
-  • Background processing
-```
-
-### E. Deployment Architecture Comparison
-
-```
-DEPLOYMENT ARCHITECTURE SELECTION:
-
-┌──────────────────┬───────────────────────────────────────────────────────┐
-│ Architecture     │ Choose When                                           │
-├──────────────────┼───────────────────────────────────────────────────────┤
-│ Monolith         │ • Starting new project                                │
-│                  │ • Team < 10 developers                                │
-│                  │ • Simple domain                                       │
-│                  │ • Need fast time-to-market                            │
-├──────────────────┼───────────────────────────────────────────────────────┤
-│ Modular Monolith │ • Growing complexity                                  │
-│                  │ • Want microservice benefits without overhead         │
-│                  │ • Planning for eventual extraction                    │
-│                  │ • Team 10-30 developers                               │
-├──────────────────┼───────────────────────────────────────────────────────┤
-│ Microservices    │ • Large organization                                  │
-│                  │ • Multiple autonomous teams                           │
-│                  │ • Need independent scaling                            │
-│                  │ • Strong DevOps maturity                              │
-│                  │ • Clear bounded contexts                              │
-├──────────────────┼───────────────────────────────────────────────────────┤
-│ Serverless       │ • Event-driven workloads                              │
-│                  │ • Highly variable traffic                             │
-│                  │ • Cost optimization critical                          │
-│                  │ • Simple, stateless operations                        │
-└──────────────────┴───────────────────────────────────────────────────────┘
-```
+CQRS and Event Sourcing pair naturally: events are the write side, projections build the read models.
 
 ---
 
-## 5. Communication Architectures
+## 7. Selecting a Style (decision framework)
 
-These define how components communicate with each other.
+This is the canonical decision content this guide owns.
 
-### A. Request/Response (Synchronous)
+### A. Requirements → recommendation
 
-```
-REQUEST/RESPONSE PATTERN:
+| If the project is… | Internal | Deployment | Communication | Data |
+|--------------------|----------|------------|---------------|------|
+| Simple CRUD / prototype | Layered | Monolith | REST | CRUD |
+| Standard business app | Hexagonal | Monolith / Modular Monolith | REST | CRUD |
+| Growing product | Hexagonal per module | Modular Monolith | REST + internal Events | CRUD + read replicas |
+| Complex domain, long lifecycle | Clean / Onion + DDD | Modular Monolith → Microservices | Events + gRPC | CQRS for key domains |
+| High scale / many teams | Hexagonal per service | Microservices | Event Streaming | CQRS + Event Sourcing |
+| Variable / spiky traffic | Vertical Slice or Hexagonal | Serverless | Events | CRUD or Event Sourcing |
 
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  Service A ──────────────────────────────► Service B                   │
-│            │        Request                     │                       │
-│            │                                    │                       │
-│            │                                    │ Process               │
-│            │                                    │                       │
-│            ◄──────────────────────────────────  │                       │
-│                    Response                     │                       │
-│                                                                         │
-│  Caller WAITS for response (blocking)                                   │
-│                                                                         │
-│  PROTOCOLS:                                                             │
-│    • REST over HTTP (most common)                                       │
-│    • gRPC (high performance, typed)                                     │
-│    • GraphQL (flexible queries)                                         │
-│                                                                         │
-│  TRADE-OFFS:                                                            │
-│    ✅ Simple to understand and debug                                    │
-│    ✅ Immediate feedback                                                │
-│    ✅ Strong consistency                                                │
-│    ❌ Tight coupling (caller waits)                                     │
-│    ❌ Cascading failures                                                │
-│    ❌ Service availability required                                     │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+### B. Complexity alignment (the central rule)
 
-### B. Event-Driven (Asynchronous)
+Architecture complexity MUST match problem complexity (ARCH-STRUCT-02):
 
 ```
-EVENT-DRIVEN ARCHITECTURE:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  EVENTS = Facts that happened (past tense)                              │
-│  "OrderPlaced", "PaymentReceived", "InventoryReserved"                  │
-│                                                                         │
-│  ┌─────────────┐                              ┌─────────────┐          │
-│  │   Orders    │     OrderPlaced              │  Payments   │          │
-│  │   Service   │  ─────────────────────────►  │   Service   │          │
-│  └─────────────┘           │                  └─────────────┘          │
-│                            │                                            │
-│                            │                  ┌─────────────┐          │
-│                            └─────────────────►│  Inventory  │          │
-│                            │                  │   Service   │          │
-│                            │                  └─────────────┘          │
-│                            │                                            │
-│                            │                  ┌─────────────┐          │
-│                            └─────────────────►│  Analytics  │          │
-│                                               │   Service   │          │
-│                                               └─────────────┘          │
-│                                                                         │
-│  CHARACTERISTICS:                                                       │
-│    • Publisher doesn't know about subscribers                           │
-│    • Loose coupling between services                                    │
-│    • Asynchronous processing                                            │
-│    • Natural audit log (event history)                                  │
-│                                                                         │
-│  TRADE-OFFS:                                                            │
-│    ✅ Loose coupling                                                    │
-│    ✅ High scalability                                                  │
-│    ✅ Resilience (no immediate dependencies)                            │
-│    ❌ Eventual consistency                                              │
-│    ❌ Complex debugging                                                 │
-│    ❌ Event ordering challenges                                         │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+                 Simple problem   Medium problem   Complex problem
+Layered          ✅ perfect fit   ❌ under-built   ❌ dangerous
+Hexagonal        ❌ over-built    ✅ perfect fit   ❌ may struggle
+Microservices    ❌ massively     ❌ over-         ✅ appropriate
+                    over-built       engineered       complexity
 ```
 
-### C. Message Queue (Command Pattern)
+### C. Team-size heuristic
+
+| Team | Deployment default |
+|------|--------------------|
+| 1-5 | Monolith (Hexagonal internals optional) |
+| 5-15 | Modular Monolith |
+| 15-50 | Modular Monolith or *careful* Microservices |
+| 50+ | Microservices (a team per service) |
+
+### D. Decision questions to answer in the ADR
+
+- **Deployment:** How many teams? Do parts scale independently? DevOps maturity? Infra budget?
+- **Internal:** How complex is the domain logic? How important is isolated testability? How volatile is the infrastructure choice?
+- **Communication:** Do we need immediate responses? Can we tolerate eventual consistency? Do we need replay/audit?
+- **Data:** Do read and write patterns differ? Do we need full history? What consistency is acceptable?
+- **Evolution:** How long will this live? How uncertain are the requirements? How cheap is later refactoring?
+
+### E. Decision flow
 
 ```
-MESSAGE QUEUE PATTERN:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  COMMANDS = Instructions to do something                                │
-│  "ProcessPayment", "SendEmail", "GenerateReport"                        │
-│                                                                         │
-│  ┌─────────────┐    ┌──────────────────┐    ┌─────────────┐            │
-│  │  Producer   │───►│   Message Queue   │───►│  Consumer   │            │
-│  │  (Sender)   │    │                   │    │ (Processor) │            │
-│  └─────────────┘    │  [Message 1]      │    └─────────────┘            │
-│                     │  [Message 2]      │                               │
-│                     │  [Message 3]      │    ┌─────────────┐            │
-│                     │  ...              │───►│  Consumer   │            │
-│                     │                   │    │ (Processor) │            │
-│                     └──────────────────┘    └─────────────┘            │
-│                                                                         │
-│  KEY FEATURES:                                                          │
-│    • Messages persist until processed                                   │
-│    • Multiple consumers can process in parallel                         │
-│    • Guaranteed delivery (at-least-once)                                │
-│    • Load leveling (buffer traffic spikes)                              │
-│                                                                         │
-│  COMMON IMPLEMENTATIONS:                                                │
-│    • RabbitMQ (traditional message broker)                              │
-│    • Amazon SQS (managed queue)                                         │
-│    • Azure Service Bus                                                  │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+Prototype/MVP? ─yes→ Layered + Monolith + REST + CRUD (keep it simple)
+   │no
+Clear domain boundaries? ─no→ Vertical Slice + Modular Monolith (discover boundaries)
+   │yes
+>3 teams working independently? ─no→ Hexagonal + Modular Monolith + REST/Events (extraction-ready)
+   │yes
+   └→ Microservices + Event-Driven (+ CQRS if read/write diverge)
 ```
 
-### D. Event Streaming (Kafka Pattern)
+### F. Proven combinations
 
-```
-EVENT STREAMING:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  Events stored as an immutable, ordered log (commit log)                │
-│                                                                         │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │                         KAFKA TOPIC                               │  │
-│  │                                                                   │  │
-│  │  ┌─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┐              │  │
-│  │  │  0  │  1  │  2  │  3  │  4  │  5  │  6  │ ... │              │  │
-│  │  └─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┘              │  │
-│  │                   │         │         │                          │  │
-│  │                   │         │         │                          │  │
-│  │              Consumer A  Consumer B  Consumer C                  │  │
-│  │              (offset 3)  (offset 5)  (offset 2)                  │  │
-│  │                                                                   │  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-│                                                                         │
-│  KEY DIFFERENCES FROM MESSAGE QUEUE:                                    │
-│    • Events are NOT deleted after consumption                           │
-│    • Consumers track their own position (offset)                        │
-│    • Replay possible from any point                                     │
-│    • Event log as source of truth                                       │
-│                                                                         │
-│  USE CASES:                                                             │
-│    • Event sourcing                                                     │
-│    • State reconstruction                                               │
-│    • Audit trails                                                       │
-│    • Real-time analytics                                                │
-│    • Stream processing                                                  │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+- **Startup:** Layered/Hexagonal · Monolith · REST · CRUD — MVP, < 5 devs, need speed.
+- **Growth:** Hexagonal per module · Modular Monolith · REST + internal Events · CRUD + read replicas — 5-30 devs, eventual extraction.
+- **Enterprise:** Clean/Hexagonal per service · Microservices · gRPC internal + Events external · CQRS + Event Sourcing for key domains — 30+ devs, compliance.
+- **Real-time:** Hexagonal per service · Microservices/Serverless · Event Streaming (Kafka) · Event Sourcing + CQRS — replay/audit needs.
 
 ---
 
-## 6. Data Architectures
+## 8. Resilience & Consistency Patterns (distributed styles)
 
-These define how data is managed and accessed.
+Once a distributed deployment/communication style is chosen, these patterns are table stakes. They are *named* here for selection; their implementation belongs to the relevant service/infra guides and [`error-handling.md`](guides://error-handling.md).
 
-### A. Traditional CRUD
+- **Circuit Breaker** — stop calling a failing dependency (`CLOSED → OPEN → HALF-OPEN`) to prevent cascading failure.
+- **Retry with backoff** — exponential backoff *with jitter* (`base * 2^attempt`); only for idempotent operations.
+- **Bulkhead** — isolate resource pools so one overloaded dependency can't sink the rest.
+- **Timeout** — fail fast and release resources; never wait forever.
+- **Fallback** — degrade gracefully (cached/default value, backup service) when the primary fails.
+- **Saga** — model a distributed transaction as local transactions with compensating actions; choreography (events) for loose coupling, orchestration (central coordinator) for visibility.
+- **Outbox** — write the domain change and an outbox row in one DB transaction; a separate process relays the row to the broker, guaranteeing the event is published iff the state changed.
 
-```
-CRUD PATTERN:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  Single model for both reading and writing                              │
-│                                                                         │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐                 │
-│  │   Create    │    │    Read     │    │   Update    │                 │
-│  │  (INSERT)   │    │  (SELECT)   │    │  (UPDATE)   │                 │
-│  └──────┬──────┘    └──────┬──────┘    └──────┬──────┘                 │
-│         │                  │                  │                         │
-│         └──────────────────┴──────────────────┘                         │
-│                            │                                            │
-│                            ▼                                            │
-│         ┌──────────────────────────────────────┐                       │
-│         │            SINGLE MODEL              │                       │
-│         │                                      │                       │
-│         │     Used for BOTH queries AND        │                       │
-│         │     commands (same schema)           │                       │
-│         │                                      │                       │
-│         └──────────────────────────────────────┘                       │
-│                            │                                            │
-│                            ▼                                            │
-│         ┌──────────────────────────────────────┐                       │
-│         │          SINGLE DATABASE             │                       │
-│         └──────────────────────────────────────┘                       │
-│                                                                         │
-│  BEST FOR:                                                              │
-│    • Simple applications                                                │
-│    • Similar read/write patterns                                        │
-│    • Small data volumes                                                 │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### B. CQRS (Command Query Responsibility Segregation)
-
-```
-CQRS PATTERN:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  SEPARATE models for reading and writing                                │
-│                                                                         │
-│        COMMANDS (Write)                    QUERIES (Read)               │
-│        ┌─────────────────┐                ┌─────────────────┐          │
-│        │ CreateOrder     │                │ GetOrderDetails │          │
-│        │ UpdateOrder     │                │ ListOrders      │          │
-│        │ CancelOrder     │                │ SearchOrders    │          │
-│        └────────┬────────┘                └────────┬────────┘          │
-│                 │                                  │                    │
-│                 ▼                                  ▼                    │
-│        ┌─────────────────┐                ┌─────────────────┐          │
-│        │   WRITE MODEL   │                │   READ MODEL    │          │
-│        │                 │                │                 │          │
-│        │ • Rich domain   │  ──────────►   │ • Denormalized  │          │
-│        │ • Validation    │   Projection   │ • Optimized for │          │
-│        │ • Business rules│                │   queries       │          │
-│        │ • Normalized    │                │ • Pre-computed  │          │
-│        └────────┬────────┘                └────────┬────────┘          │
-│                 │                                  │                    │
-│                 ▼                                  ▼                    │
-│        ┌─────────────────┐                ┌─────────────────┐          │
-│        │  WRITE DATABASE │                │  READ DATABASE  │          │
-│        │  (PostgreSQL)   │                │  (Elasticsearch)│          │
-│        └─────────────────┘                └─────────────────┘          │
-│                                                                         │
-│  WHY USE CQRS:                                                          │
-│    • Reads and writes have different performance requirements           │
-│    • Complex queries that don't fit the write model                     │
-│    • Scale reads and writes independently                               │
-│    • Optimize each model for its purpose                                │
-│                                                                         │
-│  TRADE-OFFS:                                                            │
-│    ✅ Optimized read performance                                        │
-│    ✅ Independent scaling                                               │
-│    ✅ Simpler queries                                                   │
-│    ❌ Eventual consistency between models                               │
-│    ❌ Increased complexity                                              │
-│    ❌ Data synchronization challenges                                   │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### C. Event Sourcing
-
-```
-EVENT SOURCING PATTERN:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  Store EVENTS, not current state                                        │
-│  Current state = replay all events                                      │
-│                                                                         │
-│  TRADITIONAL:                      EVENT SOURCING:                      │
-│  ┌──────────────────┐              ┌──────────────────────────────────┐│
-│  │ orders           │              │ events                           ││
-│  │─────────────────-│              │──────────────────────────────────││
-│  │ id    │ status   │              │ id │ type          │ data       ││
-│  │───────┼──────────│              │────┼───────────────┼────────────││
-│  │ 123   │ shipped  │              │ 1  │ OrderCreated  │ {id:123,...}│
-│  │       │          │              │ 2  │ ItemAdded     │ {item:...} ││
-│  └──────────────────┘              │ 3  │ PaymentMade   │ {amount:..}││
-│                                    │ 4  │ OrderShipped  │ {date:...} ││
-│  Only current state                └──────────────────────────────────┘│
-│                                    Full history preserved              │
-│                                                                         │
-│  REPLAYING EVENTS TO GET STATE:                                         │
-│                                                                         │
-│  OrderCreated ──► ItemAdded ──► PaymentMade ──► OrderShipped           │
-│       │               │              │               │                  │
-│       ▼               ▼              ▼               ▼                  │
-│  Order{               Order{         Order{         Order{             │
-│    status:created      +item         status:paid    status:shipped     │
-│  }                   }              }              }                    │
-│                                                                         │
-│  BENEFITS:                                                              │
-│    • Complete audit trail                                               │
-│    • Temporal queries ("what was the state on date X?")                 │
-│    • Debug by replaying events                                          │
-│    • Rebuild read models from scratch                                   │
-│                                                                         │
-│  CHALLENGES:                                                            │
-│    • Event schema evolution                                             │
-│    • Performance (long event streams)                                   │
-│    • Complexity                                                         │
-│    • Learning curve                                                     │
-│                                                                         │
-│  OFTEN COMBINED WITH CQRS:                                              │
-│    Events (write) ──► Projections ──► Read Models (query)              │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 7. Resilience Patterns
-
-Essential patterns for distributed systems.
-
-### A. Core Resilience Patterns
-
-```
-RESILIENCE PATTERNS:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  CIRCUIT BREAKER                                                        │
-│  ─────────────────                                                      │
-│  Prevent cascading failures by stopping calls to failing services       │
-│                                                                         │
-│  States: CLOSED ──(failures)──► OPEN ──(timeout)──► HALF-OPEN          │
-│             │                     │                      │              │
-│             │                     │                      │              │
-│        (success)            (reject all)          (test one call)       │
-│             │                     │                      │              │
-│             ◄─────────────────────┴──────────────────────┘              │
-│                                                                         │
-│  RETRY WITH BACKOFF                                                     │
-│  ──────────────────                                                     │
-│  Retry failed operations with increasing delays                         │
-│                                                                         │
-│  Attempt 1 ──(fail)──► wait 1s ──► Attempt 2 ──(fail)──► wait 2s ──►...│
-│                                                                         │
-│  Exponential backoff: wait = base * 2^attempt (+ jitter)               │
-│                                                                         │
-│  BULKHEAD                                                               │
-│  ────────                                                               │
-│  Isolate failures to prevent spreading                                  │
-│                                                                         │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │   │
-│  │  │ Orders Pool  │  │ Payments Pool│  │ Reports Pool │          │   │
-│  │  │ (10 threads) │  │ (5 threads)  │  │ (3 threads)  │          │   │
-│  │  └──────────────┘  └──────────────┘  └──────────────┘          │   │
-│  │  If Payments fails, Orders and Reports continue working         │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-│                                                                         │
-│  TIMEOUT                                                                │
-│  ───────                                                                │
-│  Don't wait forever; fail fast and release resources                    │
-│                                                                         │
-│  FALLBACK                                                               │
-│  ────────                                                               │
-│  Provide alternative behavior when primary fails                        │
-│  • Return cached data                                                   │
-│  • Return default value                                                 │
-│  • Call backup service                                                  │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### B. Consistency Patterns
-
-```
-DISTRIBUTED CONSISTENCY:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  SAGA PATTERN                                                           │
-│  ────────────                                                           │
-│  Distributed transaction as a sequence of local transactions            │
-│                                                                         │
-│  Choreography (Events):                                                 │
-│  ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐             │
-│  │ Order   │───►│ Payment │───►│Inventory│───►│Shipping │             │
-│  │ Service │    │ Service │    │ Service │    │ Service │             │
-│  └─────────┘    └─────────┘    └─────────┘    └─────────┘             │
-│     OrderPlaced   PaymentMade   InventoryReserved  ShipmentCreated     │
-│                                                                         │
-│  If any step fails, compensating transactions roll back:                │
-│  InventoryReserved ──(fail)──► RefundPayment ──► CancelOrder           │
-│                                                                         │
-│  Orchestration (Central Coordinator):                                   │
-│                    ┌───────────────────┐                               │
-│                    │    Orchestrator   │                               │
-│                    │   (Saga Manager)  │                               │
-│                    └─────────┬─────────┘                               │
-│                              │                                          │
-│         ┌────────────────────┼────────────────────┐                    │
-│         ▼                    ▼                    ▼                    │
-│    ┌─────────┐         ┌─────────┐         ┌─────────┐                │
-│    │ Payment │         │Inventory│         │Shipping │                │
-│    │ Service │         │ Service │         │ Service │                │
-│    └─────────┘         └─────────┘         └─────────┘                │
-│                                                                         │
-│  OUTBOX PATTERN                                                         │
-│  ──────────────                                                         │
-│  Ensure event publishing and database update are atomic                 │
-│                                                                         │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │ Transaction:                                                     │   │
-│  │   1. UPDATE orders SET status = 'completed'                      │   │
-│  │   2. INSERT INTO outbox (event_type, payload)                    │   │
-│  │      VALUES ('OrderCompleted', '{...}')                          │   │
-│  │ COMMIT                                                           │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-│                                                                         │
-│  Separate process reads outbox and publishes to message broker          │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 8. Architecture Decision Framework
-
-### A. Selection Criteria
-
-```
-ARCHITECTURE SELECTION MATRIX:
-
-┌──────────────────────────────────────────────────────────────────────────┐
-│ If your project is...           │ Recommended Architecture              │
-├─────────────────────────────────┼───────────────────────────────────────┤
-│ Simple CRUD / Prototype         │ Layered (MVC)                         │
-│                                 │ Keep it simple, don't over-engineer   │
-├─────────────────────────────────┼───────────────────────────────────────┤
-│ Standard Business Application   │ Hexagonal or Modular Monolith         │
-│                                 │ Balance of structure and speed        │
-├─────────────────────────────────┼───────────────────────────────────────┤
-│ Complex Domain / Long Lifecycle │ Clean Architecture + DDD              │
-│                                 │ Strict rules to prevent rot           │
-├─────────────────────────────────┼───────────────────────────────────────┤
-│ High Scale / Distributed        │ Microservices                         │
-│                                 │ With Hexagonal internals per service  │
-├─────────────────────────────────┼───────────────────────────────────────┤
-│ High Concurrency / Real-time    │ Event-Driven + CQRS                   │
-│                                 │ Optimize for throughput               │
-├─────────────────────────────────┼───────────────────────────────────────┤
-│ Variable Traffic / Cost Focus   │ Serverless                            │
-│                                 │ Pay only for usage                    │
-└─────────────────────────────────┴───────────────────────────────────────┘
-
-TEAM SIZE CONSIDERATIONS:
-
-┌──────────────────┬───────────────────────────────────────────────────────┐
-│ Team Size        │ Recommended Approach                                  │
-├──────────────────┼───────────────────────────────────────────────────────┤
-│ 1-5 developers   │ Monolith (potentially with Hexagonal internal)        │
-│ 5-15 developers  │ Modular Monolith                                      │
-│ 15-50 developers │ Modular Monolith or careful Microservices             │
-│ 50+ developers   │ Microservices (team per service)                      │
-└──────────────────┴───────────────────────────────────────────────────────┘
-
-COMPLEXITY ALIGNMENT:
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  Architecture complexity should match problem complexity                │
-│                                                                         │
-│                                                                         │
-│  Architecture   │ Simple         Medium         Complex                 │
-│  Complexity     │ Problem        Problem        Problem                 │
-│  ──────────────────────────────────────────────────────────────────     │
-│                 │                                                       │
-│  Simple         │ ✅ Perfect     ❌ Under-      ❌ Dangerous            │
-│  (Layered)      │    fit         engineered                             │
-│                 │                                                       │
-│  Medium         │ ❌ Over-       ✅ Perfect     ❌ May struggle         │
-│  (Hexagonal)    │ engineered        fit                                 │
-│                 │                                                       │
-│  Complex        │ ❌ Massively   ❌ Over-       ✅ Appropriate          │
-│  (Microservices)│ over-engineered engineered       complexity           │
-│                 │                                                       │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### B. Decision Questions
-
-```
-ARCHITECTURE DECISION QUESTIONS:
-
-1. DEPLOYMENT
-   □ How many teams will work on this?
-   □ Do different parts need to scale independently?
-   □ What is our DevOps maturity?
-   □ What is our budget for infrastructure?
-
-2. INTERNAL STRUCTURE
-   □ How complex is the business logic?
-   □ How important is testability?
-   □ How likely are infrastructure changes?
-   □ What is the team's experience level?
-
-3. COMMUNICATION
-   □ Do we need immediate responses?
-   □ Can we tolerate eventual consistency?
-   □ What is our reliability requirement?
-   □ Do we need to replay/audit events?
-
-4. DATA
-   □ Are read and write patterns similar?
-   □ Do we need historical data?
-   □ What consistency model is acceptable?
-   □ What are the performance requirements?
-
-5. EVOLUTION
-   □ How long will this system live?
-   □ How much will requirements change?
-   □ What is our ability to refactor later?
-   □ What are the most uncertain areas?
-```
+> Distributed styles only work with observability: every saga step, retry, and breaker state transition must be traceable (see [`observability.md`](guides://observability.md), ARCH-OBS-01).
 
 ---
 
 ## 9. Anti-Patterns to Avoid
 
-### A. Common Mistakes
+- **Distributed monolith** — services that share a database or must deploy together: all the cost of microservices, none of the benefit. (Gated by ARCH-STRUCT-04.)
+- **Résumé-driven development** — choosing a style to learn it rather than to solve the problem.
+- **Premature microservices** — splitting before bounded contexts are understood; start modular-monolith, extract later.
+- **Big ball of mud** — no boundaries; everything depends on everything. Enforce boundaries even in a monolith.
+- **Golden hammer** — one architecture for every problem regardless of fit.
+- **Cargo cult** — copying Netflix/Amazon topology without their scale or constraints.
+- **Analysis paralysis** — over-deliberating; make reversible decisions quickly and iterate.
 
-```
-ARCHITECTURE ANTI-PATTERNS:
+### Architecture smells → reconsider
 
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  ❌ DISTRIBUTED MONOLITH                                                │
-│  ──────────────────────                                                 │
-│  Microservices that share a database or must deploy together            │
-│  → You have all the complexity of microservices with none of the        │
-│    benefits                                                             │
-│                                                                         │
-│  ❌ RESUME-DRIVEN DEVELOPMENT                                           │
-│  ────────────────────────                                               │
-│  Choosing architecture to learn new technologies, not to solve problems │
-│  → The best architecture is the simplest one that works                 │
-│                                                                         │
-│  ❌ PREMATURE MICROSERVICES                                             │
-│  ──────────────────────────                                             │
-│  Starting with microservices before understanding domain boundaries     │
-│  → Start with a modular monolith, extract when boundaries are clear     │
-│                                                                         │
-│  ❌ BIG BALL OF MUD                                                     │
-│  ───────────────────                                                    │
-│  No clear structure, everything depends on everything                   │
-│  → Enforce boundaries, even in a monolith                               │
-│                                                                         │
-│  ❌ GOLDEN HAMMER                                                       │
-│  ───────────────                                                        │
-│  Using the same architecture for every problem                          │
-│  → Different problems need different solutions                          │
-│                                                                         │
-│  ❌ CARGO CULT ARCHITECTURE                                             │
-│  ──────────────────────────                                             │
-│  Copying Netflix/Amazon architecture without their context              │
-│  → You're not Netflix. Solve YOUR problems.                             │
-│                                                                         │
-│  ❌ ANALYSIS PARALYSIS                                                  │
-│  ────────────────────                                                   │
-│  Spending too long deciding on architecture                             │
-│  → Make reversible decisions quickly, iterate                           │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+| Smell | Consider |
+|-------|----------|
+| Changing one feature touches 5+ files across layers | Vertical Slice |
+| Tests need full DB/infra to run | Ports & Adapters (Hexagonal) |
+| Two teams blocked on each other | Module boundaries / Microservices |
+| Must deploy everything to change one part | Modular Monolith / Microservices |
+| Can't say where new code belongs | Clean Architecture layers |
+| Same bug recurs | Add architectural fitness tests |
+| Schema drives every decision | Domain-first (DDD) |
+| Network calls everywhere, cascading failures | Event-driven + circuit breakers |
+| Simple changes take weeks | *Reduce* architecture complexity |
 
 ---
 
-## 10. Architecture Documentation
+## 10. Documenting & Enforcing the Choice
 
-### A. Essential Documentation
-
-```
-ARCHITECTURE DOCUMENTATION:
-
-1. ARCHITECTURE DECISION RECORDS (ADRs)
-   Document every significant architecture decision
-
-   Template:
-   ┌─────────────────────────────────────────────────────────────────────┐
-   │ # ADR-001: Use Hexagonal Architecture                               │
-   │                                                                     │
-   │ ## Status: Accepted                                                 │
-   │                                                                     │
-   │ ## Context                                                          │
-   │ We need to choose an internal architecture for our services...      │
-   │                                                                     │
-   │ ## Decision                                                         │
-   │ We will use Hexagonal Architecture because...                       │
-   │                                                                     │
-   │ ## Consequences                                                     │
-   │ Positive: High testability, framework independence...               │
-   │ Negative: Steeper learning curve for junior developers...           │
-   └─────────────────────────────────────────────────────────────────────┘
-
-2. C4 MODEL DIAGRAMS
-   Four levels of abstraction:
-
-   Level 1: System Context
-   └── How does system interact with users and other systems?
-
-   Level 2: Container
-   └── What are the major deployable units?
-
-   Level 3: Component
-   └── What are the major components within each container?
-
-   Level 4: Code
-   └── Class diagrams (only for complex areas)
-
-3. QUALITY ATTRIBUTES
-   Document non-functional requirements and how architecture addresses them:
-   • Performance: Response time < 200ms for 95th percentile
-   • Scalability: Support 10x current traffic within 1 hour
-   • Availability: 99.9% uptime
-   • Security: All data encrypted at rest and in transit
-```
-
----
-
-## 11. Summary
-
-### Core Recommendations
-
-| Scenario | Internal Structure | Deployment | Communication |
-|----------|-------------------|------------|---------------|
-| Startup/MVP | Layered or Hexagonal | Monolith | REST |
-| Growing Product | Hexagonal | Modular Monolith | REST + Events |
-| Enterprise | Clean/Onion | Microservices | Events + gRPC |
-| High Scale | Hexagonal per service | Microservices | Event Streaming |
-| Variable Load | Vertical Slice | Serverless | Events |
-
-### Golden Rules
-
-1. **Start simple**: Begin with a monolith, extract later
-2. **Align complexity**: Match architecture complexity to problem complexity
-3. **Consider the team**: Architecture should fit team skills and size
-4. **Document decisions**: Use ADRs to record why, not just what
-5. **Design for change**: Make boundaries clear for future evolution
-6. **Test everything**: Architecture should enable, not hinder, testing
-
-### Remember
-
-> "The goal of software architecture is to minimize the human resources required to build and maintain the required system." — Robert C. Martin
-
-> "Architecture is about the important stuff. Whatever that is." — Ralph Johnson
-
-> "The best architecture is the simplest one that solves the problem."
-
----
-
-## 12. Quick Reference
-
-### Architecture Comparison Patterns
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                     ARCHITECTURE SELECTION QUICK GUIDE                      │
-└─────────────────────────────────────────────────────────────────────────────┘
-
-INTERNAL STRUCTURE - "How do I organize code?"
-──────────────────────────────────────────────────────────────────────────────
-┌──────────────────┬─────────────┬─────────────┬─────────────┬───────────────┐
-│                  │   Layered   │  Hexagonal  │    Clean    │ Vertical Slice│
-├──────────────────┼─────────────┼─────────────┼─────────────┼───────────────┤
-│ Complexity       │    Low      │   Medium    │    High     │    Medium     │
-│ Testability      │    Low      │    High     │    High     │    Medium     │
-│ Flexibility      │    Low      │    High     │    High     │    High       │
-│ Learning Curve   │    Low      │   Medium    │    High     │    Medium     │
-│ Best For         │ CRUD/MVP    │ Long-lived  │ Enterprise  │ Feature-heavy │
-│ Team Size        │   1-5       │   3-15      │   10-50+    │    5-20       │
-└──────────────────┴─────────────┴─────────────┴─────────────┴───────────────┘
-
-DEPLOYMENT - "How do I run it?"
-──────────────────────────────────────────────────────────────────────────────
-┌──────────────────┬─────────────┬─────────────┬─────────────┬───────────────┐
-│                  │  Monolith   │ Mod. Mono.  │ Microservices│  Serverless  │
-├──────────────────┼─────────────┼─────────────┼─────────────┼───────────────┤
-│ Ops Complexity   │    Low      │    Low      │    High     │    Medium     │
-│ Scalability      │   Limited   │   Limited   │    High     │    High       │
-│ Team Independence│    Low      │   Medium    │    High     │    High       │
-│ Initial Cost     │    Low      │    Low      │    High     │    Low        │
-│ Best For         │  Startups   │   Growing   │   Large Org │ Event-driven  │
-│ Team Size        │   1-10      │   5-30      │    30+      │    Any        │
-└──────────────────┴─────────────┴─────────────┴─────────────┴───────────────┘
-
-COMMUNICATION - "How do parts talk?"
-──────────────────────────────────────────────────────────────────────────────
-┌──────────────────┬─────────────┬─────────────┬─────────────┬───────────────┐
-│                  │    REST     │    gRPC     │   Events    │   Streaming   │
-├──────────────────┼─────────────┼─────────────┼─────────────┼───────────────┤
-│ Coupling         │   Tight     │   Tight     │   Loose     │    Loose      │
-│ Latency          │   Medium    │    Low      │   Variable  │    Low        │
-│ Consistency      │   Strong    │   Strong    │  Eventual   │   Eventual    │
-│ Debugging        │   Easy      │   Medium    │    Hard     │    Hard       │
-│ Best For         │ Simple APIs │ Internal    │ Decoupled   │ Real-time     │
-└──────────────────┴─────────────┴─────────────┴─────────────┴───────────────┘
-
-DATA - "How do I manage state?"
-──────────────────────────────────────────────────────────────────────────────
-┌──────────────────┬─────────────┬─────────────┬─────────────────────────────┐
-│                  │    CRUD     │    CQRS     │     Event Sourcing          │
-├──────────────────┼─────────────┼─────────────┼─────────────────────────────┤
-│ Complexity       │    Low      │   Medium    │         High                │
-│ Audit Trail      │    None     │   Optional  │        Complete             │
-│ Read Performance │   Medium    │    High     │         High                │
-│ Consistency      │   Strong    │  Eventual   │        Eventual             │
-│ Best For         │ Simple apps │ Read-heavy  │  Audit/compliance           │
-└──────────────────┴─────────────┴─────────────┴─────────────────────────────┘
-```
-
-### Decision Flowchart
-
-```
-START: What should I use?
-        │
-        ▼
-┌───────────────────────────────┐
-│ Is this a prototype or MVP?   │
-└───────────────────┬───────────┘
-          ┌────────┴────────┐
-         YES               NO
-          │                 │
-          ▼                 ▼
-┌─────────────────┐ ┌───────────────────────────────┐
-│ Layered +       │ │ Do you have clear domain      │
-│ Monolith +      │ │ boundaries?                   │
-│ REST + CRUD     │ └───────────────┬───────────────┘
-│                 │       ┌────────┴────────┐
-│ (Keep it simple)│      YES               NO
-└─────────────────┘       │                 │
-                          ▼                 ▼
-            ┌─────────────────────┐ ┌─────────────────────┐
-            │ > 3 teams working   │ │ Vertical Slice +    │
-            │ independently?      │ │ Modular Monolith    │
-            └──────────┬──────────┘ │                     │
-              ┌───────┴───────┐     │ (Discover boundaries│
-             YES             NO     │  through features)  │
-              │               │     └─────────────────────┘
-              ▼               ▼
-┌─────────────────────┐ ┌─────────────────────┐
-│ Microservices +     │ │ Hexagonal +         │
-│ Event-Driven +      │ │ Modular Monolith +  │
-│ CQRS (if needed)    │ │ REST + Events       │
-│                     │ │                     │
-│ (Scale teams &      │ │ (Clean boundaries,  │
-│  systems)           │ │  extraction ready)  │
-└─────────────────────┘ └─────────────────────┘
-```
-
-### Common Combinations
-
-```
-PROVEN ARCHITECTURE COMBINATIONS:
-──────────────────────────────────────────────────────────────────────────────
-
-1. STARTUP STACK (Simple & Fast)
-   ┌─────────────────────────────────────────────────────────────────────────┐
-   │ Internal: Layered or Hexagonal                                          │
-   │ Deployment: Monolith                                                    │
-   │ Communication: REST                                                     │
-   │ Data: CRUD with PostgreSQL                                             │
-   │ When: MVP, <5 developers, simple domain, need speed                    │
-   └─────────────────────────────────────────────────────────────────────────┘
-
-2. GROWTH STACK (Balanced)
-   ┌─────────────────────────────────────────────────────────────────────────┐
-   │ Internal: Hexagonal per module                                          │
-   │ Deployment: Modular Monolith                                           │
-   │ Communication: REST + Internal Events                                  │
-   │ Data: CRUD + Read replicas                                             │
-   │ When: 5-30 developers, growing domain, eventual microservices          │
-   └─────────────────────────────────────────────────────────────────────────┘
-
-3. ENTERPRISE STACK (Complex)
-   ┌─────────────────────────────────────────────────────────────────────────┐
-   │ Internal: Clean/Hexagonal per service                                  │
-   │ Deployment: Microservices                                              │
-   │ Communication: gRPC internal + Events external                         │
-   │ Data: CQRS + Event Sourcing for key domains                           │
-   │ When: 30+ developers, complex domain, compliance requirements         │
-   └─────────────────────────────────────────────────────────────────────────┘
-
-4. EVENT-DRIVEN STACK (Real-time)
-   ┌─────────────────────────────────────────────────────────────────────────┐
-   │ Internal: Hexagonal per service                                         │
-   │ Deployment: Microservices or Serverless                                │
-   │ Communication: Event Streaming (Kafka)                                 │
-   │ Data: Event Sourcing + CQRS                                           │
-   │ When: Real-time requirements, audit trail, replay needed              │
-   └─────────────────────────────────────────────────────────────────────────┘
-```
-
-### Architecture Smell Checklist
-
-```
-WARNING SIGNS - Time to reconsider your architecture:
-──────────────────────────────────────────────────────────────────────────────
-
-□ Changing one feature requires touching 5+ files across layers
-  → Consider: Vertical Slice architecture
-
-□ "It works on my machine" but fails in production
-  → Consider: Better adapter isolation (Hexagonal)
-
-□ Tests require full database/infrastructure setup
-  → Consider: Ports and adapters for testability
-
-□ Two teams blocked waiting on each other
-  → Consider: Module boundaries or microservices
-
-□ Deploy everything to change one service
-  → Consider: Modular monolith or microservices
-
-□ Can't explain where new code should go
-  → Consider: Clean Architecture layers
-
-□ Same bug keeps coming back
-  → Consider: Add architectural fitness tests
-
-□ Database schema drives all decisions
-  → Consider: Domain-first approach (DDD)
-
-□ Network calls everywhere causing cascading failures
-  → Consider: Event-driven + Circuit breakers
-
-□ Simple changes take weeks
-  → Consider: Reduce architecture complexity
-```
-
-### Quick Commands for Architecture Validation
+- **ADRs** — record every significant style decision (status, context, decision, consequences). Owned by [`adr.md`](guides://adr.md); ARCH-ARCH-01 requires one per decision.
+- **C4 model** — communicate at four zoom levels: System Context → Container → Component → Code (last only where complex).
+- **Quality attributes** — state non-functional targets the style must meet (e.g. p95 < 200 ms, 99.9% uptime, 10× traffic headroom) and how the architecture achieves them.
+- **Fitness functions** — encode the constraints as automated tests (dependency direction, no cycles, module coupling, service independence) run in CI (ARCH-TST-01/02). Write them test-first per [`tdd.md`](guides://tdd.md).
 
 ```bash
-# Analyze module dependencies (Python example)
-pydeps --cluster --max-bacon 2 src/
-
-# Check for circular imports
-pylint --disable=all --enable=cyclic-import src/
-
-# Measure module coupling
-radon cc src/ -a -s  # Cyclomatic complexity
-radon mi src/ -s      # Maintainability index
-
-# Architecture fitness test example
-pytest tests/architecture/ -v --tb=short
-
-# Generate dependency graph
-madge --circular --image graph.svg src/
-
-# Check layer violations (custom script example)
-./scripts/check-architecture.sh
+# Validation tooling (examples; pick the language's equivalent)
+pydeps --cluster --max-bacon 2 src/      # dependency graph (Python)
+madge --circular src/                     # circular imports (JS/TS)
+pytest tests/architecture/ -v             # fitness tests (ARCH-TST-01)
+radon cc src/ -a -s ; radon mi src/ -s    # complexity / maintainability
 ```
 
 ---
 
-## 13. Why This Configuration Works
+## 11. Deployment Checklist
 
-- **Shared vocabulary reduces miscommunication**: A comprehensive reference of architecture patterns (layered, hexagonal, microservices, event-driven, CQRS) gives teams a common language for discussing system design, preventing costly misunderstandings that arise when different engineers use the same terms to mean different things.
-- **Pattern selection frameworks prevent over-engineering**: The decision framework that maps requirements to appropriate architectures helps teams choose the simplest pattern that meets their needs, avoiding the common trap of adopting complex distributed architectures for problems that a well-structured monolith would solve better.
-- **Resilience patterns build production-ready systems**: Including circuit breakers, bulkheads, retries, and fallback strategies as first-class architecture concerns ensures fault tolerance is designed in from the start rather than bolted on after the first production outage.
-- **Anti-pattern awareness saves refactoring effort**: Explicitly documenting what not to do (distributed monolith, shared databases between services, synchronous chains) helps teams avoid architectural mistakes that are extremely expensive to correct once the system is in production.
+Generated from §2 — one box per requirement ID. No new requirements.
 
----
-
-## 14. Implementation Checklist
-
-### Architecture Selection
-- [ ] **Requirements analyzed**: Functional and non-functional requirements documented before choosing architecture
-- [ ] **Decision framework applied**: Architecture chosen via the decision flowchart, not team familiarity or hype
-- [ ] **Complexity justified**: Distributed architectures selected only when monolith limitations are demonstrable
-- [ ] **ADR recorded**: Architecture Decision Record explains the why, not just the what
-- [ ] **Team capability assessed**: Team has skills to operate the chosen architecture in production
-
-### Structural Compliance
-- [ ] **Layer boundaries enforced**: No circular dependencies or layer violations in dependency graph
-- [ ] **Module coupling measured**: Coupling metrics (afferent/efferent) within acceptable thresholds
-- [ ] **Dependency direction verified**: Dependencies flow in the correct direction per chosen pattern
-- [ ] **Architecture fitness tests exist**: Automated tests verify structural rules on every build
-- [ ] **No forbidden imports**: Linting tools enforce that inner layers do not reference outer layers
-
-### Testing Verification
-- [ ] **Tests exist per layer**: Unit, integration, and E2E tests proportional to the testing pyramid
-- [ ] **Domain logic tested in isolation**: Core business rules testable without infrastructure
-- [ ] **Architecture tests automated**: Dependency rules, circular import checks, and coupling metrics run in CI
-- [ ] **TDD followed**: Red-Green-Refactor cycle used for all new functionality
-- [ ] **Regression tests for bugs**: Every resolved bug has a test preventing recurrence
-
-### Code Quality
-- [ ] **Cyclomatic complexity acceptable**: Average complexity per module below threshold (radon cc grade A-B)
-- [ ] **Maintainability index healthy**: All modules above maintainability threshold (radon mi grade A-B)
-- [ ] **Dead code removed**: No unused modules, classes, or functions in the codebase
-- [ ] **Consistent naming**: Module and package names reflect architecture concepts (domain, adapters, ports)
-
-### Documentation
-- [ ] **Architecture diagram current**: High-level system diagram updated with recent changes
-- [ ] **Component responsibilities documented**: Each module's purpose and boundaries described
-- [ ] **Integration points documented**: All external system interactions listed with failure modes
-- [ ] **Onboarding guide exists**: New developers can understand where code belongs from the directory structure
+- [ ] ARCH-STRUCT-01 — style declared on all four axes (internal/deployment/communication/data)
+- [ ] ARCH-STRUCT-02 — complexity justified against problem complexity (§7)
+- [ ] ARCH-STRUCT-03 — dependency direction correct, 0 cycles/violations
+- [ ] ARCH-STRUCT-04 — deployable units are independent as the style claims (no distributed monolith)
+- [ ] ARCH-ARCH-01 — one ADR per significant decision (see `adr.md`)
+- [ ] ARCH-TST-01 — architectural fitness tests exist and pass, written test-first (see `tdd.md`)
+- [ ] ARCH-TST-02 — every architectural bug has a pre-fix regression test
+- [ ] ARCH-OBS-01 — distributed styles emit the metrics/traces their fitness functions need (see `observability.md`)
 
 ---
 
-## Related Guides
-
-- **[hexagonal.md](hexagonal.md)**: Detailed Hexagonal Architecture implementation guide
-- **[cleanarch.md](cleanarch.md)**: Clean Architecture implementation guide
-- **[microservices.md](microservices.md)**: Microservices architecture patterns
-- **[kafka.md](kafka.md)**: Event streaming with Apache Kafka
-- **[kubernetes.md](kubernetes.md)**: Kubernetes deployment for various architectures
-- **[tdd.md](tdd.md)**: Test-Driven Development across all architectures
-
-
-**End of Software Architecture Reference Guide**
+**End of Software Architecture Styles Guidelines**

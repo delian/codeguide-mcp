@@ -1,1356 +1,340 @@
 # Elasticsearch & OpenSearch Development Guidelines
-Mandatory coding standards and development practices for Elasticsearch and OpenSearch development. Elasticsearch 8.x+, OpenSearch 2.x+, Query DSL, Kibana/OpenSearch Dashboards, ingest pipelines.
+Mandatory standards for Elasticsearch/OpenSearch: text-vs-keyword mapping discipline, filter-context queries, right-sized shards, data streams + ILM, search_after pagination, kNN/semantic search. Elasticsearch 8.x, OpenSearch 2.x, Query DSL, ILM/ISM, dense_vector/kNN.
+
+---
+name: elasticsearch-opensearch
+title: Elasticsearch & OpenSearch Development Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: datastore
+tools: [elasticsearch@8.x, opensearch@2.x, query-dsl, ilm, ism, kibana, opensearch-dashboards]
+requires:
+  - secure-coding
+  - error-handling
+recommends:
+  - observability
+  - performance
+  - rest
+  - env-config
+provides:
+  - inverted-index
+  - text-vs-keyword-mapping
+  - query-dsl
+  - aggregations
+  - shard-design
+  - knn-search
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide covers only what is unique to Elasticsearch/OpenSearch.
+
+> **Elasticsearch vs OpenSearch (fork history — be honest about it).** Both are distributed search/analytics engines on Apache Lucene. In 2021 Elastic relicensed Elasticsearch from Apache-2.0 to the dual SSPL/Elastic License; AWS forked the last Apache-2.0 release (7.10) into **OpenSearch** (Apache-2.0, Linux Foundation). They share heritage and most of the Query DSL but **have diverged** — they are *not* drop-in compatible at the version level. Differences to expect: security (Elastic X-Pack `xpack.security.*` vs OpenSearch Security plugin `plugins.security.*`), lifecycle (Elastic **ILM** vs OpenSearch **ISM**), vectors (Elastic `dense_vector`+`knn` query vs OpenSearch `knn_vector`+`knn` plugin), ESQL/transforms/runtime-fields (Elastic-only), and client libraries (`elasticsearch`/`@elastic/elasticsearch` deliberately reject OpenSearch servers — use `opensearch-py`/`@opensearch-project/opensearch` against OpenSearch). Elastic re-added an AGPL option in 2024, but version lines remain separate. **Pick one per cluster, pin the matching client, and test against the real target** — do not assume a query/setting valid on one works unchanged on the other.
 
 ---
 
-**Agent Profile**: The Elasticsearch/OpenSearch Expert
-**Role**: Senior Search & Analytics Engineer & Lucene Specialist
-**Objective**: Generate production-ready, performant and scalable search and analytics solutions.
-**Tools**: Elasticsearch 8.x+, OpenSearch 2.x+, Query DSL, Kibana/OpenSearch Dashboards, ingest pipelines
+## 0. Prerequisites & References
 
----
+Fetch and apply these **before** generating Elasticsearch/OpenSearch code, mappings, or queries. Their rules are assumed below and not repeated.
 
-**Version:** 1.0 | **Last Updated:** February 2026 | **Target Versions:** Elasticsearch 8.x+ | OpenSearch 2.x+
+> 📎 **REQUIRED — fetch & apply first:**
+> - [`secure-coding.md`](guides://secure-coding.md) — secrets, network exposure, supply chain. *(ES/OS binding: security plugin on, TLS, RBAC, never-open-cluster — §11.)*
+> - [`error-handling.md`](guides://error-handling.md) — error strategy, retries, backoff. *(ES/OS binding: bulk partial failures, 429 rejections, client retry — §9, §10.)*
 
-## Table of Contents
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`rest.md`](guides://rest.md) — it is a REST/JSON-over-HTTP API; resource/verb/status-code discipline applies to every call.
+> - [`observability.md`](guides://observability.md) — metrics/tracing policy *(binding: ES/OS is itself the storage/search tier for logs & APM; monitor cluster health, slow logs — §13)*.
+> - [`performance.md`](guides://performance.md) — perf methodology *(binding: sharding, refresh, filter cache, query profiling — §12)*.
+> - [`env-config.md`](guides://env-config.md) — config & connection policy *(binding: cluster URL/credentials/TLS from secrets, never hardcoded)*.
 
-1. [Core Philosophies: SEARCH-FIRST](#1-core-philosophies-search-first)
-2. [Architecture and Fundamentals](#2-architecture-and-fundamentals)
-3. [Index Management and Mappings](#3-index-management-and-mappings)
-4. [Search and Query DSL](#4-search-and-query-dsl)
+> 📎 **SEE ALSO:** [`postgresql.md`](guides://postgresql.md) *(system-of-record behind a search index)* · [`kafka.md`](guides://kafka.md) *(ingest pipeline)* · [`docker-compose.md`](guides://docker-compose.md) *(local single-node cluster for tests)* · [`chroma-vectordb.md`](guides://chroma-vectordb.md) *(dedicated vector store alternative)*.
 
 ---
 
 ## 1. Core Philosophies: SEARCH-FIRST
 
-The agent must adhere to the **SEARCH-FIRST** principles for every Elasticsearch/OpenSearch implementation:
+Elasticsearch/OpenSearch-specific principles only. Security, error handling, observability, and performance methodology come from §0.
 
-**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
-**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+- **S**chema is a decision, not an accident: every production index gets an **explicit mapping** with `dynamic: strict`; getting `text` vs `keyword` wrong is the single most expensive mistake (§4) and a reindex to fix.
+- **E**xploit the inverted index: model fields for how they are queried — analyzed `text` for relevance, `keyword` for exact/aggregate/sort, `dense_vector` for semantic (§3, §4, §10).
+- **A**nalytics via aggregations: push bucketing/metrics into the engine (§7); avoid `script`/painless on the hot path.
+- **R**elevance is engineered: understand BM25, query-vs-filter context, and boosting (§6); put non-scoring predicates in **filter context** so they cache and skip scoring.
+- **C**luster economics: right-size shards (§8) — oversharding is the classic footgun; use **data streams + ILM/ISM** for time-series/logs, not hand-rolled daily indices.
+- **H**TTP/JSON discipline: it's a REST API (`rest.md`); batch writes with the **bulk API**, paginate deep results with **search_after**, never `from`/`size` into the thousands.
 
-- **S**chema and mapping: Define explicit mappings where needed; avoid dynamic mapping pitfalls.
-- **E**xploit inverted index: Design for full-text and filters; use appropriate analyzers.
-- **A**ggregations and analytics: Use aggregations for analytics; avoid heavy script usage when possible.
-- **R**esilience: Design for node failure; use replicas and ILM; test failover.
-- **C**luster awareness: Respect sharding and routing; avoid hot spots and oversized shards.
-- **H**TTP and API: Use REST API correctly; parameterize queries; handle errors and retries.
+**Secondary index, not source of truth.** Default posture: ES/OS is a *derived search/analytics layer*; the durable system of record (e.g. PostgreSQL) lives elsewhere and the index is rebuildable by reindex. It has **no multi-document ACID transactions** and is eventually consistent (refresh-bounded). Using it as a primary store is a deliberate, documented exception.
 
-**Verified Code**: Agent-generated code MUST use the Query DSL correctly, run against a cluster or test container, and pass tests before delivery.
-
----
-
-## 2. Architecture and Fundamentals
-
-### What is Elasticsearch/OpenSearch?
-
-**Elasticsearch** and **OpenSearch** are **distributed search and analytics engines** built on Apache Lucene:
-
-- ✅ **Full-text search** (inverted indexes, relevance scoring)
-- ✅ **Distributed architecture** (horizontal scaling)
-- ✅ **Real-time indexing** (near real-time search)
-- ✅ **Aggregations** (metrics, buckets, pipelines)
-- ✅ **RESTful API** (JSON over HTTP)
-- ✅ **Schema-free** (dynamic mapping)
-- ✅ **Multi-tenancy** (indices, types)
-
-### Architecture Overview
-
-```
-┌─────────────────────────────────────────────────────┐
-│                    Cluster                           │
-│  ┌──────────────┐  ┌──────────────┐  ┌────────────┐│
-│  │   Node 1     │  │   Node 2     │  │   Node 3   ││
-│  │  (Master)    │  │  (Data)      │  │  (Data)    ││
-│  │              │  │              │  │            ││
-│  │ ┌──────────┐ │  │ ┌──────────┐ │  │┌──────────┐││
-│  │ │ Primary  │ │  │ │ Replica  │ │  ││ Replica  │││
-│  │ │ Shard 0  │ │  │ │ Shard 0  │ │  ││ Shard 1  │││
-│  │ └──────────┘ │  │ └──────────┘ │  │└──────────┘││
-│  │ ┌──────────┐ │  │ ┌──────────┐ │  │            ││
-│  │ │ Primary  │ │  │ │ Replica  │ │  │            ││
-│  │ │ Shard 1  │ │  │ │ Shard 1  │ │  │            ││
-│  │ └──────────┘ │  │ └──────────┘ │  │            ││
-│  └──────────────┘  └──────────────┘  └────────────┘│
-└─────────────────────────────────────────────────────┘
-```
-
-### Core Concepts
-
-**Cluster:**
-- Collection of nodes working together
-- Shares data and workload
-- Identified by cluster name
-
-**Node:**
-- Single server in the cluster
-- Stores data and participates in indexing/search
-- Types: Master, Data, Ingest, Coordinating
-
-**Index:**
-- Collection of documents (like a database table)
-- Has a mapping (schema)
-- Divided into shards
-
-**Shard:**
-- Subset of an index's data
-- Horizontal partition (enables distribution)
-- Two types: Primary and Replica
-
-**Document:**
-- Basic unit of information (JSON)
-- Stored in an index
-- Has a unique ID
-
-**Mapping:**
-- Schema definition for documents
-- Defines field types and properties
-- Can be dynamic or explicit
-
-### Node Roles
-
-**Master Node:**
-```yaml
-node.roles: [master]
-```
-- Cluster management
-- Index creation/deletion
-- Node tracking
-- Shard allocation
-
-**Data Node:**
-```yaml
-node.roles: [data, data_content, data_hot, data_warm, data_cold, data_frozen]
-```
-- Stores data and executes queries
-- Handles CRUD operations
-- Performs aggregations
-
-**Ingest Node:**
-```yaml
-node.roles: [ingest]
-```
-- Pre-processes documents before indexing
-- Runs ingest pipelines
-- Transforms data
-
-**Coordinating Node:**
-```yaml
-node.roles: []  # No roles = coordinating only
-```
-- Routes requests
-- Handles search reduce phase
-- Load balancing
-
-**ML Node (Elasticsearch only):**
-```yaml
-node.roles: [ml]
-```
-- Machine learning tasks
-- Anomaly detection
-- Data frame analytics
-
-### When to Use Elasticsearch/OpenSearch
-
-**✅ Excellent For:**
-
-1. **Full-Text Search:**
-   - E-commerce product search
-   - Content search (documents, articles)
-   - Autocomplete and suggestions
-
-2. **Log and Event Analytics:**
-   - Centralized logging (ELK/EFK stack)
-   - Application performance monitoring
-   - Security event analysis
-
-3. **Real-Time Analytics:**
-   - Dashboards and visualizations
-   - Business intelligence
-   - Metrics aggregation
-
-4. **Geospatial Search:**
-   - Location-based search
-   - Geo-filtering and aggregations
-   - Map visualizations
-
-5. **Observability:**
-   - Log aggregation
-   - Metrics monitoring
-   - Distributed tracing
-
-**❌ Not Recommended For:**
-
-1. **Primary Data Store:**
-   - Use relational DB for source of truth
-   - Elasticsearch = secondary index/search layer
-
-2. **ACID Transactions:**
-   - No multi-document transactions
-   - Eventually consistent
-   - Use PostgreSQL, MySQL for transactions
-
-3. **Binary Data Storage:**
-   - Not designed for large binary files
-   - Use object storage (S3, GCS) + metadata in ES
-
-4. **Frequent Updates:**
-   - Optimized for append-heavy workloads
-   - Updates are expensive (reindex document)
-   - Use traditional RDBMS for frequent updates
+**Verified Code**: Agent-generated mappings/queries/config MUST pass every gate in §2 before delivery.
 
 ---
 
-## 2A. TDD Protocol (Red-Green-Refactor)
+## 2. Requirements (MANDATORY, auditable)
 
-EVERY new feature or module MUST follow the Red-Green-Refactor cycle. No production code without a failing test first.
+RFC-2119 keywords. IDs `ES-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a shared rule cite its owner.
 
-### Workflow
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| ES-MAP-01 | Production indices MUST have an explicit mapping with `dynamic: strict` (no mapping explosion) | `GET /<index>/_mapping` | explicit + strict |
+| ES-MAP-02 | String fields MUST be modelled deliberately: `text` for full-text, `keyword` for exact/aggregate/sort, multi-field when both are needed | review mapping vs query usage | every string justified |
+| ES-IDX-01 | Shards MUST be right-sized (target ~10–50 GB/shard); no oversharding | `GET /_cat/shards?v` | within target, no tiny shards |
+| ES-IDX-02 | Time-series/log indices MUST use data streams + ILM (ES) / ISM (OS), not unmanaged indices | `GET /_data_stream`, lifecycle policy exists | managed lifecycle |
+| ES-QRY-01 | Non-scoring predicates MUST run in **filter context** (cacheable, no scoring) | review queries / `_search?profile=true` | filters not in `must` |
+| ES-QRY-02 | No leading-wildcard, unbounded `regexp`, or `script` queries on the hot path | review / slow-query log | none on hot path |
+| ES-PAGE-01 | Deep pagination MUST use `search_after`+PIT (not `from`/`size` beyond a few pages) | review / reject `from`>1000 | search_after used |
+| ES-BULK-01 | Batch writes MUST use the bulk API AND inspect per-item `errors` (see `error-handling.md`) | code review | `errors` checked per item |
+| ES-KNN-01 | Vector search MUST use a vector field (`dense_vector`/`knn_vector`) with declared dims + similarity, not brute-force scripts | `GET /<index>/_mapping` | vector field + ANN index |
+| ES-SEC-01 | Security plugin ON, TLS on transport+HTTP, RBAC least-privilege, cluster not internet-exposed (see `secure-coding.md`) | `GET /_cluster/health` over TLS w/ auth; `GET /_security/role` | auth required, TLS on |
+| ES-SEC-02 | Cluster URL/credentials/CA from config/secrets, never hardcoded (see `env-config.md`,`secure-coding.md`) | grep source/config | no literals |
+| ES-ERR-01 | Client MUST retry with backoff and handle 429/bulk rejections; bounded timeouts (see `error-handling.md`) | review / fault test | retries + backoff present |
+| ES-OBS-01 | Cluster health, slow logs, and key node stats MUST be monitored (see `observability.md`) | `GET /_cluster/health`; slowlog settings | green/yellow tracked, slowlog on |
 
-1. **RED** -- Write a failing test that defines the expected behavior.
-2. **GREEN** -- Write the minimum production code to make the test pass.
-3. **REFACTOR** -- Clean up while keeping tests green.
-
-### Concrete Example -- Testing Indexing and Full-Text Search
-
-**Step 1 -- RED (Python `pytest` with `elasticsearch` client):**
-
-```python
-# tests/test_product_search.py
-import pytest
-from elasticsearch import Elasticsearch
-
-@pytest.fixture(scope="module")
-def es():
-    """Connect to a test Elasticsearch cluster."""
-    client = Elasticsearch("http://localhost:9200")
-    index = "test_products"
-    # Ensure clean state
-    if client.indices.exists(index=index):
-        client.indices.delete(index=index)
-    client.indices.create(index=index, body={
-        "mappings": {
-            "properties": {
-                "name": {"type": "text", "analyzer": "standard"},
-                "category": {"type": "keyword"},
-                "price": {"type": "float"},
-                "in_stock": {"type": "boolean"},
-            }
-        }
-    })
-    yield client, index
-    client.indices.delete(index=index, ignore=[404])
-
-def _index_and_refresh(client, index, docs):
-    for i, doc in enumerate(docs):
-        client.index(index=index, id=str(i), document=doc)
-    client.indices.refresh(index=index)
-
-def test_full_text_match(es):
-    """Full-text search on 'name' returns relevant documents."""
-    client, index = es
-    _index_and_refresh(client, index, [
-        {"name": "Wireless Bluetooth Headphones", "category": "audio", "price": 79.99, "in_stock": True},
-        {"name": "USB-C Charging Cable", "category": "accessories", "price": 12.99, "in_stock": True},
-        {"name": "Noise Cancelling Earbuds", "category": "audio", "price": 149.99, "in_stock": False},
-    ])
-
-    result = client.search(index=index, body={
-        "query": {"match": {"name": "wireless headphones"}}
-    })
-    hits = result["hits"]["hits"]
-    assert len(hits) >= 1
-    assert "Wireless" in hits[0]["_source"]["name"]
-
-def test_bool_filter_query(es):
-    """Bool query filters by category and in_stock."""
-    client, index = es
-    _index_and_refresh(client, index, [
-        {"name": "Studio Monitor", "category": "audio", "price": 299.99, "in_stock": True},
-        {"name": "Broken Speaker", "category": "audio", "price": 49.99, "in_stock": False},
-        {"name": "HDMI Cable", "category": "cables", "price": 9.99, "in_stock": True},
-    ])
-
-    result = client.search(index=index, body={
-        "query": {
-            "bool": {
-                "filter": [
-                    {"term": {"category": "audio"}},
-                    {"term": {"in_stock": True}},
-                ]
-            }
-        }
-    })
-    hits = result["hits"]["hits"]
-    assert len(hits) == 1
-    assert hits[0]["_source"]["name"] == "Studio Monitor"
-```
-
-**Step 2 -- GREEN:** Implement the search service that wraps these queries with proper error handling.
-
-**Step 3 -- REFACTOR:**
-
-- Extract index setup into a reusable `conftest.py` fixture.
-- Parameterize tests across Elasticsearch and OpenSearch clients.
-- Add assertion on `_score` ordering for relevance tests.
-
-### TDD Rules for Elasticsearch/OpenSearch
-
-- Use a dedicated test index with a unique name; delete it in teardown.
-- Always call `indices.refresh()` after indexing before searching (near real-time delay).
-- Test with the official Python client (`elasticsearch` or `opensearch-py`).
-- Use Docker (`elasticsearch:8.x` / `opensearchproject/opensearch:2.x`) for test clusters.
-- Test mapping conflicts by indexing documents with mismatched field types.
+> **Forbidden**: indexing into an index without an explicit mapping in production; using `text` where you need exact-match/aggregation/sort (or `keyword` where you need full-text); deep `from`/`size` paging; firing N single-document index calls instead of bulk; ignoring the `errors` flag on a bulk response; brute-force vector scoring via painless instead of an ANN field; a cluster reachable from the public internet or with security disabled.
 
 ---
 
-## 2B. Bug Fix Protocol (Regression Testing)
+## 3. The engine model — inverted index & Lucene
 
-EVERY bug fix MUST include a regression test that fails before the fix and passes after.
+ES/OS are distributed coordinators over per-shard **Apache Lucene** indices. The core structure is the **inverted index**: for analyzed text, each *term* maps to a posting list of the documents containing it, enabling sub-second full-text lookups over billions of docs with relevance scoring. Aggregations and sorts instead read **doc values** (a columnar, on-disk per-field store) — which is *why* exact/aggregate/sort fields want `keyword`, not analyzed `text`.
 
-### Workflow
-
-1. **Reproduce** -- Write a test that triggers the exact bug.
-2. **Verify RED** -- Confirm the test fails on the current code.
-3. **Fix** -- Apply the minimal code change.
-4. **Verify GREEN** -- Confirm the test (and all others) pass.
-5. **Document** -- Reference the bug/ticket in the test docstring.
-
-### Concrete Example -- Search Returns Zero Hits Due to Missing Refresh
-
-**Bug report:** Newly indexed products never appear in search results. The application indexes documents but searches immediately without waiting for a refresh.
-
-**Step 1 -- Regression test:**
-
-```python
-# tests/test_bug_missing_refresh.py
-import pytest
-from elasticsearch import Elasticsearch
-
-@pytest.fixture
-def es_index():
-    client = Elasticsearch("http://localhost:9200")
-    index = "test_bug_refresh"
-    if client.indices.exists(index=index):
-        client.indices.delete(index=index)
-    client.indices.create(index=index, body={
-        "settings": {"refresh_interval": "-1"},  # disable auto-refresh
-        "mappings": {"properties": {"title": {"type": "text"}}}
-    })
-    yield client, index
-    client.indices.delete(index=index, ignore=[404])
-
-def test_search_finds_doc_after_explicit_refresh(es_index):
-    """Regression: BUG-6140 -- search must refresh before querying
-    newly indexed documents."""
-    client, index = es_index
-
-    client.index(index=index, document={"title": "Important Document"})
-
-    # Without refresh, search returns 0 hits (the bug)
-    # The fix: application must call refresh or use refresh=True
-    client.indices.refresh(index=index)
-
-    result = client.search(index=index, body={
-        "query": {"match": {"title": "Important"}}
-    })
-    assert result["hits"]["total"]["value"] == 1, \
-        "BUG-6140: Document must be searchable after explicit refresh"
-```
-
-**Step 2 -- Verify the test fails** (without the `refresh()` call, hits = 0).
-
-**Step 3 -- Fix** (add `refresh=True` or explicit `indices.refresh()` in the application indexing pipeline).
-
-**Step 4 -- Verify GREEN** -- search returns the expected document.
-
-### Regression Test Rules for Elasticsearch/OpenSearch
-
-- Name test files `test_bug_<description>.py` or `test_regression_<ticket>.py`.
-- Include the ticket/issue number in the docstring.
-- Regression tests are NEVER deleted.
-- Disable auto-refresh in tests to expose timing-dependent bugs explicitly.
+- **Cluster → node → index → shard → segment.** An index is split into **primary shards** (fixed at creation — you cannot change the count without reindex) each with N **replicas** (changeable live; provide HA + read throughput). A shard is a self-contained Lucene index of immutable **segments**.
+- **Documents** are JSON, addressed by `_id`, grouped in an index governed by a **mapping** (the schema). Routing (`hash(_routing) % num_primary_shards`) places a doc on a shard.
+- **REST/JSON over HTTP** (`rest.md`): `PUT /<index>`, `POST /<index>/_doc`, `GET /<index>/_search`. Honour status codes (404 missing, 409 version conflict, 429 rejected/backpressure).
 
 ---
 
-## 3. Index Management and Mappings
+## 4. Mappings & field types — text vs keyword is THE decision
 
-### Creating Indices
+The mapping is the schema. A wrong type is not editable in place — it costs a **reindex**. Define mappings explicitly; set `dynamic: strict` so unexpected fields are rejected rather than silently (mis)typed and exploding the field count (ES-MAP-01).
 
-**Basic Index Creation:**
+### A. `text` vs `keyword` — never confuse them (ES-MAP-02)
+| | `text` | `keyword` |
+|---|---|---|
+| Analyzed? | yes — tokenized, lowercased, stemmed | no — stored verbatim, one term |
+| Built for | full-text relevance (`match`) | exact match, aggregations, sorting, `term` |
+| Query | `match`, `match_phrase`, `multi_match` | `term`, `terms`, prefix, sort, aggregate |
+| Aggregatable/sortable | no (needs costly `fielddata`) | yes (doc values) |
+
+Need both on one field (search the prose *and* aggregate the exact value)? Use a **multi-field**:
 ```json
 PUT /products
-{
-  "settings": {
-    "number_of_shards": 3,
-    "number_of_replicas": 2,
-    "refresh_interval": "1s"
-  }
-}
+{ "mappings": { "dynamic": "strict", "properties": {
+  "name":     { "type": "text", "analyzer": "english",
+                "fields": { "raw": { "type": "keyword", "ignore_above": 256 } } },
+  "category": { "type": "keyword" },
+  "price":    { "type": "scaled_float", "scaling_factor": 100 },
+  "created":  { "type": "date" },
+  "location": { "type": "geo_point" },
+  "tags":     { "type": "keyword" },
+  "embedding":{ "type": "dense_vector", "dims": 768, "index": true, "similarity": "cosine" }
+}}}
 ```
+`name` → relevance via `match name`; `name.raw` → `terms`/sort. Other key types: numeric (`integer`/`long`/`float`/`double`/`scaled_float` — prefer `scaled_float` for money), `boolean`, `date`, `ip`, `geo_point`/`geo_shape`, `object` (flattened) vs **`nested`** (each array element queried independently — required when array-element fields must match together).
 
-**Index with Mapping:**
-```json
-PUT /products
-{
-  "settings": {
-    "number_of_shards": 3,
-    "number_of_replicas": 2,
-    "analysis": {
-      "analyzer": {
-        "custom_analyzer": {
-          "type": "custom",
-          "tokenizer": "standard",
-          "filter": ["lowercase", "stop", "snowball"]
-        }
-      }
-    }
-  },
-  "mappings": {
-    "properties": {
-      "product_id": {
-        "type": "keyword"
-      },
-      "name": {
-        "type": "text",
-        "analyzer": "custom_analyzer",
-        "fields": {
-          "keyword": {
-            "type": "keyword"
-          }
-        }
-      },
-      "description": {
-        "type": "text"
-      },
-      "price": {
-        "type": "scaled_float",
-        "scaling_factor": 100
-      },
-      "category": {
-        "type": "keyword"
-      },
-      "tags": {
-        "type": "keyword"
-      },
-      "created_at": {
-        "type": "date",
-        "format": "strict_date_optional_time||epoch_millis"
-      },
-      "location": {
-        "type": "geo_point"
-      },
-      "rating": {
-        "type": "float"
-      },
-      "in_stock": {
-        "type": "boolean"
-      }
-    }
-  }
-}
-```
+### B. Dynamic mapping — discipline
+`dynamic: true` (default) auto-detects types: convenient in dev, dangerous in prod (a stray string field maps as `text`+`keyword`, a date-looking string maps wrong, field count explodes). For production: `dynamic: "strict"` (reject unknowns) or `dynamic: "false"` (store, don't index). Use **dynamic templates** only for known-shape dynamic data (e.g. map all unknown strings to `keyword`).
 
-### Field Data Types
-
-**Text Types:**
-```json
-{
-  "mappings": {
-    "properties": {
-      "title": {
-        "type": "text",              // Full-text search
-        "analyzer": "standard"
-      },
-      "sku": {
-        "type": "keyword"            // Exact match, aggregations
-      },
-      "description": {
-        "type": "text",
-        "fields": {
-          "keyword": {               // Multi-field
-            "type": "keyword",
-            "ignore_above": 256
-          }
-        }
-      }
-    }
-  }
-}
-```
-
-**Numeric Types:**
-```json
-{
-  "mappings": {
-    "properties": {
-      "quantity": {
-        "type": "integer"           // -2B to 2B
-      },
-      "user_id": {
-        "type": "long"              // -9 quintillion to 9 quintillion
-      },
-      "price": {
-        "type": "scaled_float",     // Efficient for prices
-        "scaling_factor": 100
-      },
-      "rating": {
-        "type": "float"             // Floating point
-      },
-      "score": {
-        "type": "double"            // Double precision
-      }
-    }
-  }
-}
-```
-
-**Date Types:**
-```json
-{
-  "mappings": {
-    "properties": {
-      "created_at": {
-        "type": "date",
-        "format": "strict_date_optional_time||epoch_millis"
-      },
-      "updated_at": {
-        "type": "date"
-      },
-      "date_range": {
-        "type": "date_range"        // Range of dates
-      }
-    }
-  }
-}
-```
-
-**Geo Types:**
-```json
-{
-  "mappings": {
-    "properties": {
-      "location": {
-        "type": "geo_point"         // Lat/lon point
-      },
-      "service_area": {
-        "type": "geo_shape"         // Polygon, circle, etc.
-      }
-    }
-  }
-}
-```
-
-**Complex Types:**
-```json
-{
-  "mappings": {
-    "properties": {
-      "tags": {
-        "type": "keyword"           // Array of keywords
-      },
-      "user": {
-        "type": "object",           // Nested object
-        "properties": {
-          "name": {"type": "text"},
-          "email": {"type": "keyword"}
-        }
-      },
-      "comments": {
-        "type": "nested",           // Array of objects (independent queries)
-        "properties": {
-          "author": {"type": "keyword"},
-          "text": {"type": "text"},
-          "date": {"type": "date"}
-        }
-      }
-    }
-  }
-}
-```
-
-### Dynamic Mapping
-
-**Dynamic Mapping Configuration:**
-```json
-PUT /dynamic_index
-{
-  "mappings": {
-    "dynamic": "strict",           // strict, true, false
-    "dynamic_templates": [
-      {
-        "strings_as_keywords": {
-          "match_mapping_type": "string",
-          "mapping": {
-            "type": "keyword"
-          }
-        }
-      },
-      {
-        "longs_as_integers": {
-          "match_mapping_type": "long",
-          "mapping": {
-            "type": "integer"
-          }
-        }
-      }
-    ],
-    "properties": {
-      "user_id": {
-        "type": "keyword"
-      }
-    }
-  }
-}
-```
-
-**Dynamic Options:**
-- `"dynamic": "true"` - Auto-detect and add new fields (default)
-- `"dynamic": "false"` - Ignore new fields (not indexed or searchable)
-- `"dynamic": "strict"` - Reject documents with unknown fields
-
-### Index Templates
-
-**Create Index Template:**
-```json
-PUT /_index_template/logs_template
-{
-  "index_patterns": ["logs-*"],
-  "priority": 100,
-  "template": {
-    "settings": {
-      "number_of_shards": 3,
-      "number_of_replicas": 2,
-      "refresh_interval": "5s",
-      "index.lifecycle.name": "logs_policy"
-    },
-    "mappings": {
-      "properties": {
-        "@timestamp": {
-          "type": "date"
-        },
-        "message": {
-          "type": "text"
-        },
-        "level": {
-          "type": "keyword"
-        },
-        "service": {
-          "type": "keyword"
-        },
-        "host": {
-          "type": "keyword"
-        }
-      }
-    }
-  }
-}
-```
-
-### Index Aliases
-
-**Create Alias:**
-```json
-POST /_aliases
-{
-  "actions": [
-    {
-      "add": {
-        "index": "products_v1",
-        "alias": "products"
-      }
-    }
-  ]
-}
-```
-
-**Zero-Downtime Reindex:**
-```json
-# 1. Create new index
-PUT /products_v2
-{ /* settings and mappings */ }
-
-# 2. Reindex data
-POST /_reindex
-{
-  "source": {
-    "index": "products_v1"
-  },
-  "dest": {
-    "index": "products_v2"
-  }
-}
-
-# 3. Switch alias atomically
-POST /_aliases
-{
-  "actions": [
-    {"remove": {"index": "products_v1", "alias": "products"}},
-    {"add": {"index": "products_v2", "alias": "products"}}
-  ]
-}
-
-# 4. Delete old index
-DELETE /products_v1
-```
-
-**Filtered Alias:**
-```json
-POST /_aliases
-{
-  "actions": [
-    {
-      "add": {
-        "index": "products",
-        "alias": "active_products",
-        "filter": {
-          "term": {
-            "status": "active"
-          }
-        }
-      }
-    }
-  ]
-}
-```
+### C. Index templates & aliases
+Use an **index template** (`PUT /_index_template/...` matching `index_patterns`) so every new backing index inherits settings/mappings — essential for data streams. Read/write through an **alias** (or data-stream name), never a raw index, so you can **zero-downtime reindex**: build `v2`, `_reindex` from `v1`, then atomically swap the alias in one `_aliases` action.
 
 ---
 
-## 4. Search and Query DSL
+## 5. Analysis pipeline — analyzers & tokenizers
 
-### Basic Search
+Indexing a `text` field runs the **analysis chain**: *char filters → tokenizer → token filters* → terms stored in the inverted index. The **same analyzer must apply at index and query time** or matches silently fail.
 
-**Match All:**
+- **Tokenizer** splits text into tokens (`standard`, `whitespace`, `keyword`, `pattern`, `ngram`/`edge_ngram` for autocomplete).
+- **Token filters** transform tokens (`lowercase`, `stop`, `stemmer`/`snowball`, `synonym`, `asciifolding`).
+- **Built-in analyzers**: `standard` (default), language analyzers (`english` — stemming + stop words), `keyword` (no-op). Define a **custom analyzer** in index `settings.analysis` and reference it from the field.
 ```json
-GET /products/_search
-{
-  "query": {
-    "match_all": {}
-  }
-}
+"settings": { "analysis": { "analyzer": { "en_search": {
+  "type": "custom", "tokenizer": "standard",
+  "filter": ["lowercase", "asciifolding", "english_stop", "english_stemmer"] }}}}
 ```
-
-**Full-Text Search:**
-```json
-GET /products/_search
-{
-  "query": {
-    "match": {
-      "name": "wireless headphones"
-    }
-  }
-}
-```
-
-**Multi-Field Search:**
-```json
-GET /products/_search
-{
-  "query": {
-    "multi_match": {
-      "query": "laptop computer",
-      "fields": ["name^3", "description", "category^2"],
-      "type": "best_fields"
-    }
-  }
-}
-```
-
-### Term-Level Queries
-
-**Exact Match:**
-```json
-GET /products/_search
-{
-  "query": {
-    "term": {
-      "category.keyword": "Electronics"
-    }
-  }
-}
-```
-
-**Multiple Values:**
-```json
-GET /products/_search
-{
-  "query": {
-    "terms": {
-      "tags": ["wireless", "bluetooth", "portable"]
-    }
-  }
-}
-```
-
-**Range Query:**
-```json
-GET /products/_search
-{
-  "query": {
-    "range": {
-      "price": {
-        "gte": 100,
-        "lte": 500
-      }
-    }
-  }
-}
-```
-
-**Wildcard and Regex:**
-```json
-GET /products/_search
-{
-  "query": {
-    "wildcard": {
-      "product_id": "PROD-*"
-    }
-  }
-}
-
-GET /products/_search
-{
-  "query": {
-    "regexp": {
-      "sku": "ABC[0-9]{3}"
-    }
-  }
-}
-```
-
-### Boolean Queries
-
-**Must, Should, Must Not:**
-```json
-GET /products/_search
-{
-  "query": {
-    "bool": {
-      "must": [
-        {"match": {"name": "laptop"}}
-      ],
-      "filter": [
-        {"range": {"price": {"lte": 1000}}},
-        {"term": {"in_stock": true}}
-      ],
-      "should": [
-        {"match": {"brand": "Apple"}},
-        {"match": {"brand": "Dell"}}
-      ],
-      "must_not": [
-        {"term": {"status": "discontinued"}}
-      ],
-      "minimum_should_match": 1
-    }
-  }
-}
-```
-
-**Difference Between Must and Filter:**
-- `must`: Contributes to relevance score
-- `filter`: No scoring (faster, cacheable)
-
-### Fuzzy Search
-
-**Typo Tolerance:**
-```json
-GET /products/_search
-{
-  "query": {
-    "fuzzy": {
-      "name": {
-        "value": "wireles",
-        "fuzziness": "AUTO"
-      }
-    }
-  }
-}
-```
-
-**Match with Fuzziness:**
-```json
-GET /products/_search
-{
-  "query": {
-    "match": {
-      "name": {
-        "query": "wirelss headphnes",
-        "fuzziness": "AUTO",
-        "operator": "and"
-      }
-    }
-  }
-}
-```
-
-### Phrase and Proximity Searches
-
-**Exact Phrase:**
-```json
-GET /products/_search
-{
-  "query": {
-    "match_phrase": {
-      "description": "noise cancelling technology"
-    }
-  }
-}
-```
-
-**Proximity Search:**
-```json
-GET /products/_search
-{
-  "query": {
-    "match_phrase": {
-      "description": {
-        "query": "noise technology",
-        "slop": 2
-      }
-    }
-  }
-}
-```
-
-### Nested Queries
-
-**Query Nested Documents:**
-```json
-GET /products/_search
-{
-  "query": {
-    "nested": {
-      "path": "reviews",
-      "query": {
-        "bool": {
-          "must": [
-            {"range": {"reviews.rating": {"gte": 4}}},
-            {"match": {"reviews.text": "excellent"}}
-          ]
-        }
-      }
-    }
-  }
-}
-```
-
-### Geospatial Queries
-
-**Geo Distance:**
-```json
-GET /stores/_search
-{
-  "query": {
-    "bool": {
-      "filter": {
-        "geo_distance": {
-          "distance": "10km",
-          "location": {
-            "lat": 40.7128,
-            "lon": -74.0060
-          }
-        }
-      }
-    }
-  }
-}
-```
-
-**Geo Bounding Box:**
-```json
-GET /stores/_search
-{
-  "query": {
-    "bool": {
-      "filter": {
-        "geo_bounding_box": {
-          "location": {
-            "top_left": {
-              "lat": 40.8,
-              "lon": -74.1
-            },
-            "bottom_right": {
-              "lat": 40.7,
-              "lon": -73.9
-            }
-          }
-        }
-      }
-    }
-  }
-}
-```
-
-### Highlighting
-
-**Highlight Search Results:**
-```json
-GET /products/_search
-{
-  "query": {
-    "match": {
-      "description": "wireless bluetooth"
-    }
-  },
-  "highlight": {
-    "fields": {
-      "description": {
-        "pre_tags": ["<strong>"],
-        "post_tags": ["</strong>"],
-        "fragment_size": 150,
-        "number_of_fragments": 3
-      }
-    }
-  }
-}
-```
-
-### Pagination
-
-**From/Size Pagination:**
-```json
-GET /products/_search
-{
-  "from": 0,
-  "size": 20,
-  "query": {
-    "match_all": {}
-  }
-}
-```
-
-**Search After (Efficient for Deep Pagination):**
-```json
-# First request
-GET /products/_search
-{
-  "size": 20,
-  "query": {"match_all": {}},
-  "sort": [
-    {"created_at": "desc"},
-    {"_id": "asc"}
-  ]
-}
-
-# Subsequent requests
-GET /products/_search
-{
-  "size": 20,
-  "query": {"match_all": {}},
-  "sort": [
-    {"created_at": "desc"},
-    {"_id": "asc"}
-  ],
-  "search_after": [1640995200000, "doc_id_from_last_result"]
-}
-```
-
-### Scroll API (Export Large Datasets)
-
-**Scroll Search:**
-```json
-# Initial request
-POST /products/_search?scroll=1m
-{
-  "size": 1000,
-  "query": {
-    "match_all": {}
-  }
-}
-
-# Subsequent requests
-POST /_search/scroll
-{
-  "scroll": "1m",
-  "scroll_id": "DXF1ZXJ5QW5kRmV0Y2gBAAAAAAAAAD4WYm9laVYtZndUQlNsdDcwakFMNjU1QQ=="
-}
-
-# Clear scroll
-DELETE /_search/scroll
-{
-  "scroll_id": "DXF1ZXJ5QW5kRmV0Y2gBAAAAAAAAAD4WYm9laVYtZndUQlNsdDcwakFMNjU1QQ=="
-}
-```
+Test before committing with `POST /<index>/_analyze` `{ "analyzer": "en_search", "text": "Running Shoes" }`. Autocomplete: prefer `search_as_you_type` or `edge_ngram` index-side + a non-ngram **search analyzer** (set `search_analyzer` separately to avoid expanding the query). Changing an analyzer requires reindexing existing docs.
 
 ---
 
-*[Sections 4-20 continue with the same comprehensive detail as shown in the previous attempt - I'll note that the complete document is very large and contains all 20 sections with extensive examples, best practices, and configurations for Elasticsearch/OpenSearch]*
+## 6. Query DSL — match vs term, context, relevance
 
----
+Two query families and **two contexts** — conflating them is the most common correctness/perf bug.
 
-## 5. Security & Dependency Management (MANDATORY)
+- **Full-text (`match`, `multi_match`, `match_phrase`)** runs the field's analyzer on the query → matches **terms**. Use on `text`.
+- **Term-level (`term`, `terms`, `range`, `prefix`, `exists`)** is **not** analyzed → matches the exact stored term. Use on `keyword`/numeric/date. (`term` on a `text` field is a classic zero-hits bug — the stored term is lowercased/stemmed but your `term` value isn't.)
 
-### A. Client Library Vulnerability Scanning
-
-Elasticsearch and OpenSearch client libraries should be scanned via the host language toolchain:
-
-**Python:**
-```bash
-# Scan all installed packages including elasticsearch / opensearch-py
-pip-audit
-
-# Scan with JSON output for CI
-pip-audit --format=json --output=audit-report.json
-```
-
-**JavaScript/TypeScript:**
-```bash
-npm audit --audit-level=high
-```
-
-**Java (Gradle):**
-```bash
-./gradlew dependencyCheckAnalyze
-```
-
-**Java (Maven):**
-```bash
-mvn org.owasp:dependency-check-maven:check
-```
-
-- Run scans in CI on every PR and at least weekly on the main branch
-- Keep client libraries (`elasticsearch`, `opensearch-py`, `@elastic/elasticsearch`) up to date
-
-### B. Cluster Security Configuration
-
-**Elasticsearch X-Pack Security:**
-```yaml
-# elasticsearch.yml
-xpack.security.enabled: true
-xpack.security.transport.ssl.enabled: true
-xpack.security.transport.ssl.verification_mode: certificate
-xpack.security.transport.ssl.keystore.path: elastic-certificates.p12
-xpack.security.transport.ssl.truststore.path: elastic-certificates.p12
-xpack.security.http.ssl.enabled: true
-xpack.security.http.ssl.keystore.path: http.p12
-xpack.security.audit.enabled: true
-```
-
-**OpenSearch Security Plugin:**
-```yaml
-# opensearch.yml
-plugins.security.ssl.transport.enabled: true
-plugins.security.ssl.transport.pemcert_filepath: node.pem
-plugins.security.ssl.transport.pemkey_filepath: node-key.pem
-plugins.security.ssl.transport.pemtrustedcas_filepath: root-ca.pem
-plugins.security.ssl.http.enabled: true
-plugins.security.ssl.http.pemcert_filepath: node.pem
-plugins.security.ssl.http.pemkey_filepath: node-key.pem
-plugins.security.ssl.http.pemtrustedcas_filepath: root-ca.pem
-plugins.security.audit.type: internal_opensearch
-```
-
-- ALWAYS enable TLS for both transport (node-to-node) and HTTP (client-to-node) layers
-- NEVER run clusters with security disabled in production
-
-### C. Role-Based Access Control (RBAC)
-
-**Elasticsearch RBAC:**
+### Query context vs filter context (ES-QRY-01)
+Inside `bool`:
+- **`must` / `should`** = *query context* → compute a relevance `_score`.
+- **`filter` / `must_not`** = *filter context* → yes/no only, **no scoring, and results are cached** in the node filter cache. Put every non-scoring predicate (exact category, range, boolean, geo) in `filter` — it is faster and cacheable.
 ```json
-POST /_security/role/read_only_products
-{
-  "indices": [
-    {
-      "names": ["products*"],
-      "privileges": ["read"],
-      "field_security": {
-        "grant": ["name", "description", "price", "category"]
-      }
-    }
-  ]
-}
-
-POST /_security/user/app_reader
-{
-  "password": "change-me-use-secrets-manager",
-  "roles": ["read_only_products"],
-  "full_name": "Application Reader"
-}
+{ "query": { "bool": {
+  "must":   [ { "match": { "name": "wireless headphones" } } ],     // scored
+  "filter": [ { "term":  { "category": "audio" } },                  // cached, unscored
+              { "range": { "price": { "lte": 200 } } },
+              { "term":  { "in_stock": true } } ],
+  "should": [ { "match": { "brand": "Sony" } } ],                    // boosts score
+  "minimum_should_match": 0 }}}
 ```
 
-**OpenSearch RBAC:**
+### Relevance & boosting
+Default scoring is **BM25** (term frequency saturated, length-normalized, rarer terms weighted higher via IDF). Tune relevance with field boosts (`"fields": ["title^3", "body"]`), `boost` on clauses, `function_score`/`rank_feature` for business signals, and `match_phrase`+`slop` for proximity. Profile a slow/ wrong-scoring query with `_search?profile=true` or `_explain`. Keep heavy `script`/`script_score` and leading-wildcard/unbounded `regexp` off the hot path (ES-QRY-02).
+
+---
+
+## 7. Aggregations — the analytics powerhouse
+
+Aggregations run server-side over the matched set (apply `"size": 0` to skip hits when you only want analytics). Two families compose into trees:
+- **Bucket** aggs group docs: `terms` (top values), `date_histogram` (time series), `histogram`, `range`, `filters`, `nested`, `composite` (paginated, exhaustive bucketing for exports).
+- **Metric** aggs compute over a bucket: `avg`/`sum`/`min`/`max`/`stats`, `cardinality` (approx distinct, HyperLogLog), `percentiles`, `top_hits`.
 ```json
-PUT /_plugins/_security/api/roles/read_only_products
-{
-  "cluster_permissions": [],
-  "index_permissions": [
-    {
-      "index_patterns": ["products*"],
-      "allowed_actions": ["read"],
-      "fls": ["name", "description", "price", "category"]
-    }
-  ]
-}
+{ "size": 0, "query": { "bool": { "filter": [ { "range": { "created": { "gte": "now-7d" } } } ] } },
+  "aggs": { "per_day": { "date_histogram": { "field": "created", "calendar_interval": "day" },
+    "aggs": { "revenue": { "sum": { "field": "price" } },
+              "buyers":  { "cardinality": { "field": "user_id" } } } } } }
 ```
-
-- Follow the principle of least privilege: grant only the permissions each service requires
-- Use **field-level security** (FLS) to restrict access to sensitive fields
-- Use **document-level security** (DLS) to restrict access to specific documents by filter
-
-### D. Audit Logging
-
-- Enable audit logging to track access and changes:
-
-```yaml
-# Elasticsearch
-xpack.security.audit.enabled: true
-xpack.security.audit.logfile.events.include: ["access_granted", "access_denied", "authentication_failed"]
-
-# OpenSearch
-plugins.security.audit.type: internal_opensearch
-plugins.security.audit.config.disabled_rest_categories: NONE
-plugins.security.audit.config.disabled_transport_categories: NONE
-```
-
-- Ship audit logs to a separate index or SIEM for tamper-proof retention
-- Alert on repeated authentication failures and unauthorized access attempts
-
-### E. Secret Management
-
-- NEVER hardcode cluster credentials in source code or configuration files
-- Use environment variables, Kubernetes secrets, or a secrets manager:
-
-```python
-import os
-from elasticsearch import Elasticsearch
-
-es = Elasticsearch(
-    hosts=[os.environ["ELASTICSEARCH_URL"]],
-    basic_auth=(
-        os.environ["ELASTICSEARCH_USER"],
-        os.environ["ELASTICSEARCH_PASSWORD"]
-    ),
-    ca_certs=os.environ.get("ELASTICSEARCH_CA_PATH"),
-    verify_certs=True
-)
-```
-
-- Rotate credentials regularly; use API keys with expiration where possible
-
-### F. Security Checklist
-
-- [ ] Client library vulnerability scanning configured in CI
-- [ ] TLS enabled on both transport and HTTP layers
-- [ ] X-Pack Security / OpenSearch Security plugin enabled
-- [ ] RBAC roles follow least-privilege principle
-- [ ] Field-level security restricts access to sensitive fields
-- [ ] Audit logging enabled and shipped to SIEM
-- [ ] No credentials in source code or version control
-- [ ] API keys use expiration and scoped permissions
-- [ ] Cluster not exposed to the public internet
-- [ ] Dependencies updated at least monthly
+Aggregate on `keyword`/numeric/date (doc values), never analyzed `text`. `terms` aggs on very high-cardinality fields are memory-heavy — bound with `size`, or use `composite` to paginate. Prefer aggregations over pulling raw docs to the client to count.
 
 ---
 
-## 6. Deployment Checklist
+## 8. Index design — shards, replicas, ILM, data streams
 
-### Agent-Generated Code Verification (MANDATORY)
+Shard sizing is the defining operational decision.
 
-#### Build & Compilation
-- [ ] Code compiles/runs without errors
-- [ ] All imports/dependencies resolved (elasticsearch/opensearch client libraries)
-- [ ] Code formatted per project standards
-
-#### Testing
-- [ ] All tests pass
-- [ ] Coverage meets minimum threshold (>80%)
-- [ ] Integration tests pass against test cluster (Docker)
-
-#### Security
-- [ ] Dependency scan: 0 HIGH/CRITICAL vulnerabilities
-- [ ] No hardcoded credentials or secrets
-- [ ] Connection strings use environment variables
-
-#### Agent Workflow Completed
-- [ ] Agent verified code builds successfully
-- [ ] Agent ran all tests and verified they pass
-- [ ] Agent verified documentation
+- **Primary count is immutable** (changing it = reindex); replicas are live-adjustable. Target **~10–50 GB per shard**; too-small shards waste heap on overhead (the **oversharding** footgun: thousands of tiny shards exhaust master/heap), too-large shards slow recovery/rebalance (ES-IDX-01). For a fixed corpus, fewer larger shards; for growth, plan with rollover.
+- **Replicas** (default 1) provide HA and add read throughput; 0 replicas risks data loss on node failure — set ≥1 in production.
+- **Data streams (ES) / rollover aliases (OS)** are the right model for append-only time-series (logs, metrics, events): one write alias over auto-rolled backing indices named by generation. Combine with **ILM (Elastic) / ISM (OpenSearch)** to move indices through hot → warm → cold → frozen tiers and delete on age/size — never hand-manage `logs-2026.06.27` indices.
+```json
+PUT /_index_template/logs            // ES: data stream + ILM
+{ "index_patterns": ["logs-*"], "data_stream": {},
+  "template": { "settings": { "number_of_shards": 1, "number_of_replicas": 1,
+                              "index.lifecycle.name": "logs-policy" } } }
+```
+ILM policy: rollover at e.g. 50 GB / 1 day, warm after 7d (fewer replicas, force-merge), delete after retention. OpenSearch ISM expresses the same as a state-machine policy. Use `_cat/shards`, `_cat/indices` to audit.
 
 ---
 
-## 7. Why This Configuration Works
+## 9. Read/write path, refresh & near-real-time
 
-**Inverted Index Architecture for Sub-Second Full-Text Search**: The Lucene-based inverted index enables complex full-text queries across billions of documents with relevance scoring, returning results in milliseconds.
-
-**Horizontal Scaling Through Automatic Sharding**: Data is distributed across shards and replicas automatically, allowing the cluster to scale read and write throughput linearly by adding nodes without application changes.
-
-**Near Real-Time Indexing with Configurable Refresh**: Documents become searchable within one second of indexing by default, balancing the need for fresh results with indexing throughput for high-volume workloads.
-
-**Aggregation Framework for Real-Time Analytics**: Bucket, metric, and pipeline aggregations enable building dashboards and analytics directly on the search engine, eliminating the need for a separate analytics database.
+- **Write path:** doc → primary shard → translog (durability) + in-memory buffer → replicated to replicas. A **refresh** (default every `1s`, `index.refresh_interval`) makes new docs *searchable* by opening a new segment — this is the **near-real-time** delay (a just-indexed doc isn't instantly visible). A **flush** fsyncs segments and trims the translog.
+- **Tuning:** for high-throughput bulk loads, raise/disable `refresh_interval` (e.g. `-1`) and restore it after — refreshing too often kills indexing throughput. For read-your-write needs, index with `?refresh=wait_for` (not `refresh=true`, which forces an expensive refresh). The common "search returns 0 hits right after indexing" bug is a missing refresh, not a lost write.
+- **Updates** are read-delete-reindex of the whole doc (segments are immutable) — ES/OS is append-optimized; very high update rates are an anti-pattern. Use optimistic concurrency (`if_seq_no`/`if_primary_term`, or `version`) to avoid lost updates (409 on conflict).
+- **Bulk API (ES-BULK-01):** batch index/update/delete in one request (NDJSON action+source lines). Bulk responses are **HTTP 200 even when individual items fail** — you MUST inspect `response.errors` and each item's status; route permanent failures to a DLQ, retry only the rejected (429) items. Tune batch size to a few MB / a few thousand docs, not "all of them". Error/retry policy is owned by [`error-handling.md`](guides://error-handling.md).
 
 ---
 
-## 8. Quick Reference
+## 10. Vector / kNN / semantic search
 
-### Common Commands
+Model embeddings as a vector field and use the engine's **approximate nearest-neighbor (ANN, HNSW)** index — never brute-force cosine in a painless `script_score` over all docs (ES-KNN-01).
+
+- **Elasticsearch 8.x:** `dense_vector` with `index: true`, `dims`, `similarity` (`cosine`/`dot_product`/`l2_norm`); query with the top-level `knn` clause (or `knn` inside `_search`), combine with filters and lexical queries; **hybrid search** via reciprocal-rank-fusion (`rank: { rrf: {} }`) or `sub_searches` blends BM25 + vector. Elastic also offers ELSER (sparse `text_expansion`) and `semantic_text` for managed embeddings.
+- **OpenSearch 2.x:** the **k-NN plugin** with `knn_vector` (engines: Lucene HNSW / `nmslib` / `faiss`), `space_type`, queried via the `knn` query; neural-search plugin + ml-commons for managed embeddings/hybrid pipelines.
+- **Common discipline:** declare dims/similarity up front (immutable); pre-filter to shrink the candidate set; vectors are RAM-hungry (HNSW graphs live in memory) — size nodes accordingly; consider quantization (`int8`/`bbq`) for large corpora. For a pure/very-large vector workload a dedicated store may fit better — see [`chroma-vectordb.md`](guides://chroma-vectordb.md).
+
+---
+
+## 11. Pagination (ES-PAGE-01)
+
+- **`from`/`size`** is fine only for the first few shallow pages. It is **O(from+size) per shard** (each shard returns `from+size` to the coordinator) and is hard-capped by `index.max_result_window` (10 000) — deep `from` is a cluster-killer.
+- **`search_after`** is the correct deep/infinite pagination: sort by a unique tiebreaker (e.g. `[ {"created":"desc"}, {"_shard_doc":"asc"} ]`), pass the last hit's `sort` values as `search_after` on the next request. Pair with a **Point-in-Time** (`_pit`, ES) / PIT (OS) for a consistent snapshot across pages.
+- **`_search/scroll`** is legacy for one-shot exports — prefer `search_after`+PIT; reserve scroll for backward compatibility. For exhaustive aggregation export use a **`composite`** aggregation.
+
+---
+
+## 12. Performance binding (for `performance.md`)
+
+Methodology owned by [`performance.md`](guides://performance.md). ES/OS specifics:
+- **Filter, don't score:** non-scoring predicates in filter context cache and skip BM25 (ES-QRY-01); reuse stable filters so the node query cache hits.
+- **Right-size shards** (§8, ES-IDX-01); force-merge read-only (warm/cold) indices to one segment; avoid heap pressure from huge `terms` aggs and `fielddata` on `text`.
+- **Bulk + tuned refresh** for ingest (§9): batch writes, raise `refresh_interval` during loads, increase replicas only after the load.
+- **`_source` filtering / `docvalue_fields`:** return only needed fields; disable `_source` only if you never need the original doc.
+- **Profile** slow queries with `_search?profile=true`, `_search/_explain`, and the **slow log** (`index.search.slowlog.*`, `index.indexing.slowlog.*`). Watch leading wildcards, regexp, scripts, and deep pagination (ES-QRY-02, ES-PAGE-01).
+
+---
+
+## 13. Security binding (for `secure-coding.md`)
+
+Policy owned by [`secure-coding.md`](guides://secure-coding.md). ES/OS hardening (ES-SEC-01/02) — the historical, repeated cause of mass data leaks is **an unsecured cluster bound to a public interface**:
+- **Never expose the cluster to the internet.** `network.host` to private interfaces, firewall to app hosts; put a gateway/VPC boundary in front. Default-deny.
+- **Security plugin ON** (it is the default and MUST stay on): Elastic `xpack.security.enabled: true`; OpenSearch Security plugin enabled. Disabling it in prod is forbidden.
+- **TLS on both layers** — transport (node-to-node) *and* HTTP (client-to-node); verify certs.
+- **RBAC, least privilege:** scoped roles per service (index patterns + actions); **field-level** (FLS) and **document-level** (DLS) security for sensitive data; prefer time-bounded **API keys** over shared user passwords.
+- **Audit logging** to a separate index/SIEM; alert on auth failures.
+- Cluster URL, credentials, and CA come from secrets/config (see [`env-config.md`](guides://env-config.md)) — never literals in source or committed YAML.
+
+---
+
+## 14. Error-handling binding (for `error-handling.md`)
+
+Policy owned by [`error-handling.md`](guides://error-handling.md). ES/OS bindings (ES-ERR-01, ES-BULK-01):
+- **Bulk partial failure:** a bulk request returns 200 with `errors: true` and per-item status — inspect every item, retry only rejected (429) ones with backoff, DLQ permanent mapping/parse errors. Never assume bulk success from the HTTP code.
+- **429 / backpressure:** the cluster rejects writes/searches under load — retry with exponential backoff + jitter, cap in-flight bulk size; do not hammer.
+- **Version conflicts (409):** optimistic concurrency mismatch — reread and retry or surface a conflict, don't blind-overwrite.
+- **Timeouts & failover:** bounded `request_timeout`, sniff/round-robin across nodes, retry on connection errors. Official clients (`elasticsearch`/`opensearch-py` and JS equivalents) have built-in retry/backoff — enable it; pin the client to the matching server.
+
+---
+
+## 15. Observability binding (for `observability.md`)
+
+Policy owned by [`observability.md`](guides://observability.md). Note ES/OS is frequently *itself* the storage/search tier for logs and APM — keep that cluster's own monitoring separate. Signals to scrape/alert (ES-OBS-01):
+- **Cluster health** `GET /_cluster/health` (status green/yellow/red, unassigned shards, pending tasks); **`_cat/`** APIs (`_cat/shards`, `_cat/nodes`, `_cat/thread_pool`).
+- **Node stats** `GET /_nodes/stats`: JVM heap pressure & GC, indexing/search rate & latency, **rejected** thread-pool counts (write/search), disk watermarks, segment/merge load, field-data/query-cache.
+- **Slow logs** for search and indexing (ES-OBS-01) to catch heavy queries/mappings.
+- Export via Prometheus exporter / Elastic Stack monitoring / OpenSearch monitoring; alert on red status, unassigned shards, heap >75%, write rejections, low disk watermark.
+
+---
+
+## 16. Anti-patterns
+
+- No explicit mapping / `dynamic: true` in production → mapping explosion and mistyped fields.
+- `text` where you need exact-match/aggregate/sort (or `term` on a `text` field → zero hits); forgetting the multi-field.
+- Non-scoring predicates in `must` instead of `filter` (no cache, wasted scoring).
+- Deep `from`/`size` pagination; scroll for live pagination instead of `search_after`+PIT.
+- N single-document index calls instead of bulk; ignoring the bulk `errors` flag.
+- Hand-managed daily log indices instead of data streams + ILM/ISM; oversharding (thousands of tiny shards) or one giant shard.
+- 0 replicas in production; treating ES/OS as the only copy of critical data.
+- Searching immediately after indexing without refresh and calling it a lost write.
+- Brute-force vector scoring in painless instead of an ANN `dense_vector`/`knn_vector` field.
+- Cluster on a public interface / security disabled; credentials hardcoded.
+- Assuming an Elasticsearch query/setting works unchanged on OpenSearch (or wrong client against the server).
+
+---
+
+## 17. Quick Reference
 
 ```bash
-# Check cluster health
-curl -X GET "localhost:9200/_cluster/health?pretty"
-
-# List all indices
-curl -X GET "localhost:9200/_cat/indices?v"
-
-# Create an index with mappings
-curl -X PUT "localhost:9200/myindex" -H 'Content-Type: application/json' \
-  -d '{"mappings":{"properties":{"title":{"type":"text"},"status":{"type":"keyword"}}}}'
-
-# Index a document
-curl -X POST "localhost:9200/myindex/_doc" -H 'Content-Type: application/json' \
-  -d '{"title":"Hello World","status":"active"}'
-
-# Search with a match query
-curl -X GET "localhost:9200/myindex/_search?pretty" -H 'Content-Type: application/json' \
-  -d '{"query":{"match":{"title":"hello"}}}'
-
-# Force refresh an index
-curl -X POST "localhost:9200/myindex/_refresh"
-
-# Check node stats
-curl -X GET "localhost:9200/_nodes/stats?pretty"
+# cluster & shards
+curl -s localhost:9200/_cluster/health?pretty
+curl -s 'localhost:9200/_cat/indices?v'  ;  curl -s 'localhost:9200/_cat/shards?v'
+curl -s 'localhost:9200/_cat/nodes?v&h=name,heap.percent,ram.percent,cpu'
+# mapping & analysis
+curl -s localhost:9200/products/_mapping?pretty
+curl -s -XPOST localhost:9200/products/_analyze -H 'Content-Type: application/json' \
+  -d '{"analyzer":"english","text":"Running Shoes"}'
+# query profiling
+curl -s 'localhost:9200/products/_search?profile=true' -H 'Content-Type: application/json' \
+  -d '{"query":{"bool":{"filter":[{"term":{"category":"audio"}}]}}}'
+# lifecycle (ES ILM / OS ISM)
+curl -s localhost:9200/_data_stream?pretty            # ES data streams
+curl -s localhost:9200/_ilm/policy?pretty             # ES
 ```
 
 ---
 
-## References and Resources
+## 18. Deployment Checklist
 
-### Official Documentation
-- **Elasticsearch:** https://www.elastic.co/guide/en/elasticsearch/reference/current/index.html
-- **OpenSearch:** https://opensearch.org/docs/latest/
-- **Elastic Blog:** https://www.elastic.co/blog/
-- **OpenSearch Blog:** https://opensearch.org/blog/
+Generated from §2 — one box per requirement ID.
 
-### Tools and Plugins
-- **Kibana:** Visualization and dashboarding
-- **OpenSearch Dashboards:** OpenSearch visualization
-- **Logstash:** Data processing pipeline
-- **Filebeat:** Log shipper
-- **Metricbeat:** Metrics collector
-- **APM:** Application performance monitoring
-
-### Books and Courses
-- "Elasticsearch: The Definitive Guide" (O'Reilly)
-- "Relevant Search" by Doug Turnbull
-- Elastic Certified Engineer training
-- OpenSearch documentation and tutorials
-
-### Community
-- Elastic Forums: https://discuss.elastic.co/
-- OpenSearch Forums: https://forum.opensearch.org/
-- Stack Overflow: `[elasticsearch]` `[opensearch]` tags
-- GitHub: https://github.com/elastic/elasticsearch
-- GitHub: https://github.com/opensearch-project/OpenSearch
+- [ ] ES-MAP-01 — production indices have explicit mapping, `dynamic: strict`
+- [ ] ES-MAP-02 — `text` vs `keyword` chosen deliberately; multi-fields where both needed
+- [ ] ES-IDX-01 — shards right-sized (~10–50 GB), no oversharding
+- [ ] ES-IDX-02 — time-series/logs on data streams + ILM/ISM
+- [ ] ES-QRY-01 — non-scoring predicates in filter context (cached)
+- [ ] ES-QRY-02 — no leading-wildcard/unbounded-regexp/script on hot path
+- [ ] ES-PAGE-01 — deep pagination via `search_after`+PIT, not `from`/`size`
+- [ ] ES-BULK-01 — bulk API used; per-item `errors` inspected (see `error-handling.md`)
+- [ ] ES-KNN-01 — vector search via ANN `dense_vector`/`knn_vector`, not scripts
+- [ ] ES-SEC-01 — security on, TLS both layers, RBAC least-privilege, not internet-exposed (see `secure-coding.md`)
+- [ ] ES-SEC-02 — cluster URL/credentials/CA from secrets (see `env-config.md`)
+- [ ] ES-ERR-01 — client retries with backoff; 429/bulk rejections handled (see `error-handling.md`)
+- [ ] ES-OBS-01 — cluster health, slow logs, node stats monitored (see `observability.md`)
+- [ ] Agent ran the §17 inspection commands and documented any fixes
 
 ---
-
-**Document Maintenance:**
-- Review quarterly for version updates
-- Update with new features and best practices
-- Validate deployment patterns
-- Incorporate community feedback
-
-**Last Updated:** February 2026
-**Next Review:** May 2026
-
----
-
-**End of Elasticsearch & OpenSearch Development Guidelines**
+**End of Elasticsearch & OpenSearch Guidelines**

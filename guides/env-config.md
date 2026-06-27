@@ -1,811 +1,248 @@
-# Environment Configuration Guidelines
-Mandatory standards for managing environment variables and configuration across different deployment environments. dotenv, docker-compose, Kubernetes ConfigMaps/Secrets, AWS SSM, HashiCorp Vault.
+# Configuration & Environment Guidelines
+The canonical owner of application configuration: 12-factor config, env vars, layering & precedence, per-environment separation, fail-fast validation, no hardcoding. Language-agnostic; tools include dotenv, Viper, Dynaconf, node-config, python-decouple, envalid, zod/pydantic schemas.
+
+---
+name: env-config
+title: Configuration & Environment Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: cross-cutting
+tools: [dotenv, viper, dynaconf, node-config, python-decouple, envalid, zod, pydantic-settings]
+requires: []
+recommends:
+  - secure-coding
+  - feature-flags
+provides:
+  - 12-factor-config
+  - env-vars
+  - config-validation
+  - env-separation
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): this guide is the **canonical owner** of configuration & environment management. Other guides reference it instead of restating config rules. It references — never restates — secret handling, runtime flags, and deployment-time injection.
 
 ---
 
-**Agent Profile**: The Configuration Expert
-**Role**: Senior Platform Engineer & Security Specialist
-**Objective**: Generate secure, maintainable configuration management strategies for multi-environment deployments.
-**Tools**: dotenv, docker-compose, Kubernetes ConfigMaps/Secrets, AWS SSM, HashiCorp Vault.
+## 0. Prerequisites & References
+
+This guide owns *config policy*. It defers the adjacent concerns below to their owners and binds to them where they touch configuration.
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`secure-coding.md`](guides://secure-coding.md) — **owns secret handling depth**: storage, rotation, encryption, leak scanning, vaults. This guide owns *where secrets sit in the config layering* and *that they are never hardcoded*; the *how* of protecting them is `secure-coding.md`.
+> - [`feature-flags.md`](guides://feature-flags.md) — **owns runtime flags**: targeting, rollout, kill-switches. Flags are the highest-precedence config layer (§2 `CFG-LAYER-*`) but their lifecycle lives there, not here.
+
+> 📎 **SEE ALSO (deployment-time config injection — fetch for the relevant platform):**
+> - [`docker-compose.md`](guides://docker-compose.md) · [`dockerfile.md`](guides://dockerfile.md) — `env_file`, `environment:`, build vs runtime config.
+> - [`kubernetes.md`](guides://kubernetes.md) — ConfigMaps, Secrets, `envFrom`, projected volumes.
+> - [`ci-cd.md`](guides://ci-cd.md) — pipeline env/secret injection per environment.
+> - [`aws.md`](guides://aws.md) · [`azure.md`](guides://azure.md) · [`gcp.md`](guides://gcp.md) — managed parameter/secret stores (SSM, Key Vault, Secret Manager).
+> - [`logging.md`](guides://logging.md) — redaction of config values in logs.
+
+> Language bindings live in the language guides and reference back here: e.g. [`python.md`](guides://python.md) (Dynaconf), [`nodejs.md`](guides://nodejs.md)/[`typescript.md`](guides://typescript.md) (dotenv + zod/envalid), [`go.md`](guides://go.md) (Viper).
 
 ---
 
 ## 1. Core Philosophies: CONFIG-FIRST
 
-- **C**entralized: Single source of truth for configuration
-- **O**verrideable: Environment-specific values
-- **N**ever hardcoded: No secrets in code
-- **F**ail-fast: Validate configuration at startup
-- **I**mmutable: Config changes trigger deployments
-- **G**uarded: Secrets encrypted and access-controlled
+Configuration is **strict separation of config from code** ([12-factor](https://12factor.net/config)): anything that varies between deploys is config, everything else is code.
+
+- **C**onfig-from-environment: read config from the environment (env vars / mounted files), never compile it in. One build artifact, every environment.
+- **O**verrideable: a deterministic precedence chain lets any layer override the one below it (§2 `CFG-LAYER-*`).
+- **N**ever hardcoded: no literals, magic numbers, hostnames, or secrets in source (`CFG-NOHARD-01`). Secrets specifically are handled per [`secure-coding.md`](guides://secure-coding.md).
+- **F**ail-fast: the full config is parsed, typed, and validated at startup; an invalid or missing required value aborts boot (`CFG-VALID-*`).
+- **I**mmutable per deploy: config is resolved once at boot into a typed, read-only object; runtime mutation is forbidden. Changing config means a new deploy (or a flag flip, see [`feature-flags.md`](guides://feature-flags.md)).
+- **G**uarded: config values are typed and schema-validated; secret-bearing values are redacted in logs and error output.
+
+> **Config vs flag vs secret.** *Config* = environment-varying input resolved at boot (this guide). *Feature flag* = runtime-toggleable behavior switch ([`feature-flags.md`](guides://feature-flags.md)). *Secret* = a credential whose protection is governed by [`secure-coding.md`](guides://secure-coding.md). A secret is delivered *through* the config layering but its handling is not owned here.
+
+**Verified Code**: agent-generated config handling MUST pass every gate in §2 before delivery.
 
 ---
 
-## 2. Configuration Hierarchy (MANDATORY)
+## 2. Requirements (MANDATORY, auditable)
 
-### A. Priority Order (Lowest to Highest)
+RFC-2119 keywords. IDs `CFG-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a referenced concern cite its owner.
 
-```markdown
-1. Default values in code
-2. Configuration files (.env.defaults)
-3. Environment-specific files (.env.development)
-4. Environment variables
-5. Command-line arguments
-6. Runtime overrides (feature flags)
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| CFG-NOHARD-01 | No environment-varying value (host, port, URL, path, credential, magic number) MUST be hardcoded in source | grep/lint for literals; review | no literals |
+| CFG-NOHARD-02 | No secret MUST appear in source, fixtures, or VCS history (delegates depth to `secure-coding.md`) | secret scanner (e.g. gitleaks/trufflehog) | 0 findings |
+| CFG-12F-01 | One build artifact MUST run unchanged across all environments; only the supplied config differs | review build vs deploy | no per-env builds |
+| CFG-LAYER-01 | Config MUST resolve through a single documented precedence chain (defaults → file → env-file → env vars → CLI args → runtime flags) | review config loader | one chain |
+| CFG-LAYER-02 | A higher layer MUST override a lower one for the same key, deterministically | unit test on precedence | override holds |
+| CFG-ENV-01 | Env var names MUST be `UPPER_SNAKE_CASE`, app-prefixed (`<APP>_<GROUP>_<NAME>`) | lint/review | conforms |
+| CFG-ENV-02 | All consumed env vars MUST be declared in a committed `.env.example` (or schema) with type + default + required flag | diff schema vs `.env.example` | in sync |
+| CFG-VALID-01 | Full config MUST be parsed against a typed schema at startup; on failure the process MUST exit non-zero before serving | run with bad config | exits ≠ 0, no serve |
+| CFG-VALID-02 | Every value MUST be coerced to its target type at the boundary (no raw `string` env reads downstream) | type check / review | typed config object |
+| CFG-VALID-03 | Production-only invariants (TLS on, no `localhost`, secret length, no placeholder values) MUST be asserted when env=production | startup validator test | asserts present |
+| CFG-SEP-01 | Each environment (dev/test/staging/prod) MUST have its own resolved config; test config MUST NOT reach a production resource | review per-env files | isolated |
+| CFG-SEP-02 | Dangerous dev conveniences (schema auto-sync, verbose logging, mock externals, long-lived tokens) MUST be off in production | review prod config | disabled |
+| CFG-IMMUT-01 | Resolved config MUST be a read-only object; code MUST NOT mutate `process.env`/`os.environ` after boot | review / freeze | immutable |
+| CFG-SECRET-01 | Secrets MUST be injected from a secret store/manager at deploy time, never from a committed file (see `secure-coding.md`) | review deploy | from store |
+| CFG-LOG-01 | Secret-bearing config MUST be redacted in logs, error messages, and config dumps (see `logging.md`) | log review / redaction test | redacted |
+| CFG-DOC-01 | Each config key MUST be documented (purpose, type, default, required, per-env value) — generated from the schema where possible | docs build / review | documented |
+
+> **Forbidden**: hardcoding any environment-varying value or secret; reading raw `process.env`/`os.environ` deep inside business logic instead of a validated config object; booting with missing/invalid required config; per-environment build artifacts; mutating config at runtime; committing real secrets or a populated `.env`.
+
+---
+
+## 3. Configuration Layering & Precedence (OWNED)
+
+Resolve every key through one deterministic chain, **lowest to highest**:
+
+```
+1. In-code defaults          # safe fallbacks; the only literals allowed (CFG-NOHARD ok here)
+2. Base config file          # config/default.{toml,yaml,json}  — non-secret, committed
+3. Env-specific file         # config/{development,test,staging,production}.* — committed, no secrets
+4. Local env file            # .env / .env.local — gitignored, developer machine only
+5. Process environment vars  # <APP>_* — what containers/CI/K8s actually inject
+6. CLI arguments / flags      # explicit operator overrides
+7. Runtime feature flags      # highest — see feature-flags.md (this guide does not own their lifecycle)
 ```
 
-### B. File Structure
+A key set at layer N is overridden by any value present at N+1 (`CFG-LAYER-02`). Document the chain once; do not let different subsystems invent their own ordering.
 
 ```
 project/
 ├── config/
-│   ├── default.js           # Default values
-│   ├── development.js       # Development overrides
-│   ├── test.js              # Test environment
-│   ├── staging.js           # Staging environment
-│   ├── production.js        # Production environment
-│   └── custom-environment-variables.js  # Env var mapping
-├── .env.example             # Template with all variables
-├── .env                     # Local overrides (gitignored)
-├── .env.development         # Development defaults
-├── .env.test                # Test defaults
-└── docker-compose.yml       # Container environment
+│   ├── default.toml          # base, committed, NO secrets
+│   ├── development.toml       # per-env overrides (CFG-SEP-01)
+│   ├── test.toml
+│   ├── staging.toml
+│   ├── production.toml        # NO secrets — references store keys only
+│   └── schema.*               # the validation schema (CFG-VALID-01)
+├── .env.example               # committed template: every var, typed, with required flag (CFG-ENV-02)
+├── .env                        # gitignored local overrides (CFG-NOHARD-02)
+└── .env.{development,test}      # committed non-secret per-env defaults
 ```
 
----
-
-## 3. Environment Variables (MANDATORY)
-
-### A. Naming Convention
-
-```bash
-# Format: [APP]_[CATEGORY]_[NAME]
-# All uppercase, underscore separated
-
-# Database
-MYAPP_DB_HOST=localhost
-MYAPP_DB_PORT=5432
-MYAPP_DB_NAME=myapp
-MYAPP_DB_USER=postgres
-MYAPP_DB_PASSWORD=secret
-MYAPP_DB_POOL_SIZE=10
-MYAPP_DB_SSL_ENABLED=true
-
-# Redis
-MYAPP_REDIS_URL=redis://localhost:6379
-MYAPP_REDIS_PASSWORD=
-
-# API Keys (external services)
-MYAPP_STRIPE_API_KEY=sk_test_xxx
-MYAPP_SENDGRID_API_KEY=SG.xxx
-
-# Feature Flags
-MYAPP_FEATURE_NEW_CHECKOUT=true
-MYAPP_FEATURE_BETA_UI=false
-
-# Application
-MYAPP_PORT=3000
-MYAPP_HOST=0.0.0.0
-MYAPP_LOG_LEVEL=info
-MYAPP_NODE_ENV=development
-
-# URLs
-MYAPP_API_URL=https://api.example.com
-MYAPP_WEB_URL=https://www.example.com
-MYAPP_CDN_URL=https://cdn.example.com
-```
-
-### B. Variable Types
-
-```typescript
-// config/schema.ts
-import { z } from 'zod';
-
-const envSchema = z.object({
-  // Required strings
-  NODE_ENV: z.enum(['development', 'test', 'staging', 'production']),
-  DATABASE_URL: z.string().url(),
-
-  // Optional with defaults
-  PORT: z.coerce.number().default(3000),
-  LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
-
-  // Booleans (various formats)
-  ENABLE_CACHE: z.preprocess(
-    (val) => val === 'true' || val === '1' || val === 'yes',
-    z.boolean()
-  ).default(true),
-
-  // Numbers with validation
-  DB_POOL_SIZE: z.coerce.number().min(1).max(100).default(10),
-  REQUEST_TIMEOUT: z.coerce.number().positive().default(30000),
-
-  // Optional secrets
-  API_KEY: z.string().min(1).optional(),
-  SECRET_KEY: z.string().min(32),
-
-  // Arrays (comma-separated)
-  ALLOWED_ORIGINS: z.preprocess(
-    (val) => typeof val === 'string' ? val.split(',').map(s => s.trim()) : [],
-    z.array(z.string().url())
-  ).default(['http://localhost:3000']),
-
-  // JSON values
-  FEATURE_FLAGS: z.preprocess(
-    (val) => typeof val === 'string' ? JSON.parse(val) : val,
-    z.record(z.boolean())
-  ).default({}),
-});
-
-export type Env = z.infer<typeof envSchema>;
-```
-
----
-
-## 4. Configuration Loading (MANDATORY)
-
-### A. Node.js Configuration Module
-
-```typescript
-// config/index.ts
-import dotenv from 'dotenv';
-import path from 'path';
-import { z } from 'zod';
-
-// Load environment-specific .env file
-const envFile = process.env.NODE_ENV === 'test'
-  ? '.env.test'
-  : process.env.NODE_ENV === 'production'
-    ? '.env.production'
-    : '.env';
-
-dotenv.config({ path: path.resolve(process.cwd(), envFile) });
-
-// Schema definition
-const configSchema = z.object({
-  env: z.enum(['development', 'test', 'staging', 'production']),
-  port: z.coerce.number(),
-  host: z.string(),
-
-  database: z.object({
-    url: z.string().url(),
-    poolSize: z.coerce.number(),
-    ssl: z.boolean(),
-  }),
-
-  redis: z.object({
-    url: z.string(),
-    password: z.string().optional(),
-  }),
-
-  auth: z.object({
-    jwtSecret: z.string().min(32),
-    jwtExpiresIn: z.string(),
-    bcryptRounds: z.coerce.number(),
-  }),
-
-  logging: z.object({
-    level: z.enum(['debug', 'info', 'warn', 'error']),
-    format: z.enum(['json', 'pretty']),
-  }),
-
-  features: z.object({
-    newCheckout: z.boolean(),
-    betaUI: z.boolean(),
-  }),
-});
-
-// Parse and validate
-function loadConfig() {
-  const raw = {
-    env: process.env.NODE_ENV || 'development',
-    port: process.env.PORT || 3000,
-    host: process.env.HOST || '0.0.0.0',
-
-    database: {
-      url: process.env.DATABASE_URL,
-      poolSize: process.env.DB_POOL_SIZE || 10,
-      ssl: process.env.DB_SSL === 'true',
-    },
-
-    redis: {
-      url: process.env.REDIS_URL || 'redis://localhost:6379',
-      password: process.env.REDIS_PASSWORD,
-    },
-
-    auth: {
-      jwtSecret: process.env.JWT_SECRET,
-      jwtExpiresIn: process.env.JWT_EXPIRES_IN || '1h',
-      bcryptRounds: process.env.BCRYPT_ROUNDS || 10,
-    },
-
-    logging: {
-      level: process.env.LOG_LEVEL || 'info',
-      format: process.env.LOG_FORMAT || 'json',
-    },
-
-    features: {
-      newCheckout: process.env.FEATURE_NEW_CHECKOUT === 'true',
-      betaUI: process.env.FEATURE_BETA_UI === 'true',
-    },
-  };
-
-  const result = configSchema.safeParse(raw);
-
-  if (!result.success) {
-    console.error('Invalid configuration:');
-    console.error(result.error.format());
-    process.exit(1);
-  }
-
-  return result.data;
-}
-
-export const config = loadConfig();
-export type Config = z.infer<typeof configSchema>;
-```
-
-### B. Fail-Fast Validation
-
-```typescript
-// Validate at startup
-import { config } from './config';
-
-// This runs immediately when imported
-// If validation fails, process.exit(1) is called
-
-// Additional runtime checks
-function validateConfig(config: Config): void {
-  const errors: string[] = [];
-
-  // Check required secrets in production
-  if (config.env === 'production') {
-    if (!config.auth.jwtSecret || config.auth.jwtSecret.length < 32) {
-      errors.push('JWT_SECRET must be at least 32 characters in production');
-    }
-
-    if (config.database.url.includes('localhost')) {
-      errors.push('DATABASE_URL should not point to localhost in production');
-    }
-
-    if (!config.database.ssl) {
-      errors.push('Database SSL should be enabled in production');
-    }
-  }
-
-  // Check for placeholder values
-  const placeholders = ['your-api-key', 'change-me', 'xxx', 'TODO'];
-  const checkPlaceholder = (value: string, name: string) => {
-    if (placeholders.some(p => value.toLowerCase().includes(p))) {
-      errors.push(`${name} appears to contain a placeholder value`);
-    }
-  };
-
-  if (config.auth.jwtSecret) {
-    checkPlaceholder(config.auth.jwtSecret, 'JWT_SECRET');
-  }
-
-  if (errors.length > 0) {
-    console.error('Configuration validation failed:');
-    errors.forEach(e => console.error(`  - ${e}`));
-    process.exit(1);
-  }
-}
-
-validateConfig(config);
-```
-
----
-
-## 5. Secrets Management (MANDATORY)
-
-### A. Never Commit Secrets
+`.gitignore` MUST exclude populated env/secret files:
 
 ```gitignore
-# .gitignore
 .env
 .env.local
 .env.*.local
 *.pem
 *.key
-credentials.json
 secrets/
 ```
 
-```yaml
-# .env.example - Template for developers
-# Copy to .env and fill in values
-
-# Database
-DATABASE_URL=postgresql://user:password@localhost:5432/myapp
-
-# Authentication
-JWT_SECRET=generate-a-secure-random-string-at-least-32-chars
-
-# External Services
-STRIPE_API_KEY=sk_test_your_key_here
-SENDGRID_API_KEY=SG.your_key_here
-
-# Feature Flags
-FEATURE_NEW_CHECKOUT=false
-FEATURE_BETA_UI=false
-```
-
-### B. Secrets in Production
-
-```typescript
-// Using AWS Secrets Manager
-import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
-
-async function loadSecrets(secretName: string): Promise<Record<string, string>> {
-  const client = new SecretsManagerClient({ region: process.env.AWS_REGION });
-
-  const response = await client.send(
-    new GetSecretValueCommand({ SecretId: secretName })
-  );
-
-  if (response.SecretString) {
-    return JSON.parse(response.SecretString);
-  }
-
-  throw new Error('Secret not found');
-}
-
-// Load secrets before starting app
-async function bootstrap() {
-  if (process.env.NODE_ENV === 'production') {
-    const secrets = await loadSecrets('myapp/production');
-
-    // Inject into environment
-    process.env.DATABASE_URL = secrets.DATABASE_URL;
-    process.env.JWT_SECRET = secrets.JWT_SECRET;
-    process.env.STRIPE_API_KEY = secrets.STRIPE_API_KEY;
-  }
-
-  // Now load config
-  const { config } = await import('./config');
-  return config;
-}
-```
-
-### C. Kubernetes Secrets
-
-```yaml
-# k8s/secrets.yaml (use external-secrets or sealed-secrets in practice)
-apiVersion: v1
-kind: Secret
-metadata:
-  name: myapp-secrets
-type: Opaque
-stringData:
-  DATABASE_URL: postgresql://user:pass@db:5432/myapp
-  JWT_SECRET: your-secret-key
-
----
-# k8s/configmap.yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: myapp-config
-data:
-  NODE_ENV: production
-  LOG_LEVEL: info
-  PORT: "3000"
-
----
-# k8s/deployment.yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: myapp
-spec:
-  template:
-    spec:
-      containers:
-        - name: myapp
-          envFrom:
-            - configMapRef:
-                name: myapp-config
-            - secretRef:
-                name: myapp-secrets
-          env:
-            - name: DATABASE_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: myapp-secrets
-                  key: DATABASE_PASSWORD
-```
-
 ---
 
-## 6. Environment-Specific Configuration (MANDATORY)
+## 4. Environment Variables (OWNED)
 
-### A. Development
+### A. Naming (`CFG-ENV-01`)
 
-```typescript
-// config/development.ts
-export default {
-  database: {
-    url: 'postgresql://postgres:postgres@localhost:5432/myapp_dev',
-    logging: true,
-    synchronize: true, // Auto-sync schema (dev only!)
-  },
-
-  redis: {
-    url: 'redis://localhost:6379',
-  },
-
-  logging: {
-    level: 'debug',
-    format: 'pretty',
-  },
-
-  auth: {
-    jwtExpiresIn: '7d', // Longer for dev convenience
-  },
-
-  cors: {
-    origins: ['http://localhost:3000', 'http://localhost:3001'],
-  },
-
-  features: {
-    // Enable all features in dev
-    newCheckout: true,
-    betaUI: true,
-  },
-};
-```
-
-### B. Testing
-
-```typescript
-// config/test.ts
-export default {
-  database: {
-    url: process.env.TEST_DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/myapp_test',
-    logging: false,
-    dropSchema: true, // Clean slate for each test run
-  },
-
-  redis: {
-    url: 'redis://localhost:6379/1', // Different DB index
-  },
-
-  logging: {
-    level: 'error', // Quiet during tests
-  },
-
-  auth: {
-    jwtSecret: 'test-secret-not-for-production',
-    jwtExpiresIn: '1h',
-  },
-
-  // Mock external services
-  external: {
-    stripe: { useMock: true },
-    sendgrid: { useMock: true },
-  },
-};
-```
-
-### C. Production
-
-```typescript
-// config/production.ts
-export default {
-  database: {
-    // URL from secrets manager
-    ssl: true,
-    poolSize: 20,
-    logging: false,
-    synchronize: false, // Never auto-sync in production!
-  },
-
-  redis: {
-    // URL from secrets manager
-    tls: true,
-  },
-
-  logging: {
-    level: 'info',
-    format: 'json',
-  },
-
-  auth: {
-    jwtExpiresIn: '15m', // Short-lived tokens
-    bcryptRounds: 12, // Higher security
-  },
-
-  cors: {
-    origins: ['https://www.example.com', 'https://app.example.com'],
-  },
-
-  rateLimit: {
-    windowMs: 60000,
-    max: 100,
-  },
-};
-```
-
----
-
-## 7. Docker Configuration (MANDATORY)
-
-### A. Docker Compose
-
-```yaml
-# docker-compose.yml
-version: '3.8'
-
-services:
-  app:
-    build: .
-    ports:
-      - "${PORT:-3000}:3000"
-    environment:
-      - NODE_ENV=development
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/myapp
-      - REDIS_URL=redis://redis:6379
-    env_file:
-      - .env
-    depends_on:
-      - db
-      - redis
-
-  db:
-    image: postgres:15
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: myapp
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
-  redis:
-    image: redis:7
-    volumes:
-      - redis_data:/data
-
-volumes:
-  postgres_data:
-  redis_data:
-
-# docker-compose.override.yml (dev-specific, gitignored)
-version: '3.8'
-services:
-  app:
-    volumes:
-      - .:/app
-      - /app/node_modules
-    command: npm run dev
-```
-
-### B. Dockerfile
-
-```dockerfile
-FROM node:20-alpine AS base
-
-# Production dependencies
-FROM base AS deps
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-
-# Build
-FROM base AS build
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY . .
-RUN npm run build
-
-# Production image
-FROM base AS production
-WORKDIR /app
-
-# Security: Run as non-root
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
-
-COPY --from=deps --chown=nodejs:nodejs /app/node_modules ./node_modules
-COPY --from=build --chown=nodejs:nodejs /app/dist ./dist
-COPY --from=build --chown=nodejs:nodejs /app/package.json ./
-
-USER nodejs
-
-# Config via environment
-ENV NODE_ENV=production
-ENV PORT=3000
-
-EXPOSE 3000
-
-CMD ["node", "dist/index.js"]
-```
-
----
-
-## 8. Multi-Environment Deployment (MANDATORY)
-
-### A. Environment Matrix
-
-```markdown
-| Variable          | Development | Staging           | Production         |
-|-------------------|-------------|-------------------|-------------------|
-| NODE_ENV          | development | staging           | production        |
-| LOG_LEVEL         | debug       | info              | info              |
-| DB_SSL            | false       | true              | true              |
-| DB_POOL_SIZE      | 5           | 10                | 20                |
-| JWT_EXPIRES_IN    | 7d          | 1h                | 15m               |
-| RATE_LIMIT_MAX    | 1000        | 100               | 100               |
-| FEATURE_BETA      | true        | true              | false             |
-```
-
-### B. CI/CD Environment Variables
-
-```yaml
-# .github/workflows/deploy.yml
-name: Deploy
-
-on:
-  push:
-    branches: [main, staging]
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Deploy
-        env:
-          # From GitHub environment secrets
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          JWT_SECRET: ${{ secrets.JWT_SECRET }}
-          # From GitHub environment variables
-          NODE_ENV: ${{ vars.NODE_ENV }}
-          LOG_LEVEL: ${{ vars.LOG_LEVEL }}
-        run: ./deploy.sh
-```
-
----
-
-## 9. Configuration Documentation (MANDATORY)
-
-### A. Generate Docs from Schema
-
-```typescript
-// scripts/generate-env-docs.ts
-import { configSchema } from '../config/schema';
-
-function generateDocs(schema: z.ZodObject<any>, prefix = ''): string {
-  let docs = '';
-
-  for (const [key, value] of Object.entries(schema.shape)) {
-    const envKey = prefix ? `${prefix}_${key}`.toUpperCase() : key.toUpperCase();
-
-    if (value instanceof z.ZodObject) {
-      docs += generateDocs(value, envKey);
-    } else {
-      const description = value._def.description || 'No description';
-      const defaultValue = value._def.defaultValue?.() ?? 'Required';
-
-      docs += `### ${envKey}\n`;
-      docs += `${description}\n\n`;
-      docs += `- Type: ${getZodType(value)}\n`;
-      docs += `- Default: \`${defaultValue}\`\n\n`;
-    }
-  }
-
-  return docs;
-}
-
-console.log('# Environment Variables\n\n');
-console.log(generateDocs(configSchema));
-```
-
-### B. Example Documentation Output
-
-```markdown
-# Environment Variables
-
-## Required Variables
-
-### DATABASE_URL
-PostgreSQL connection string.
-
-- Type: string (URL)
-- Required: Yes
-- Example: `postgresql://user:pass@host:5432/dbname`
-
-### JWT_SECRET
-Secret key for signing JWT tokens. Must be at least 32 characters.
-
-- Type: string
-- Required: Yes
-- Minimum length: 32
-
-## Optional Variables
-
-### PORT
-HTTP server port.
-
-- Type: number
-- Default: `3000`
-
-### LOG_LEVEL
-Application log level.
-
-- Type: enum
-- Values: `debug`, `info`, `warn`, `error`
-- Default: `info`
-```
-
----
-
-## 10. Deployment Checklist
-
-### Development Setup
-- [ ] `.env.example` is up to date
-- [ ] All developers have `.env` configured
-- [ ] Local services (DB, Redis) documented
-
-### Before Deployment
-- [ ] All required secrets configured
-- [ ] No placeholder values in production
-- [ ] SSL/TLS enabled for databases
-- [ ] Secrets not logged
-
-### Production
-- [ ] Secrets in secure storage (SSM, Vault)
-- [ ] Config validation at startup
-- [ ] Sensitive values redacted in logs
-- [ ] Rotation plan for secrets
-
----
-
-## 11. Quick Reference
+`UPPER_SNAKE_CASE`, app-prefixed `<APP>_<GROUP>_<NAME>` to avoid collisions with the OS/other processes:
 
 ```bash
-# Common patterns
-MYAPP_CATEGORY_NAME=value
-
-# Types
-STRING=hello
-NUMBER=42
-BOOLEAN=true
-URL=https://example.com
-JSON='{"key":"value"}'
-ARRAY=a,b,c
-
-# Files
-.env              # Local (gitignored)
-.env.example      # Template (committed)
-.env.development  # Dev defaults
-.env.production   # Prod defaults (no secrets!)
-
-# Never commit
-- Passwords
-- API keys
-- Private keys
-- Connection strings with credentials
+MYAPP_DB_HOST=db.internal
+MYAPP_DB_PORT=5432
+MYAPP_DB_POOL_SIZE=10
+MYAPP_DB_SSL_ENABLED=true
+MYAPP_REDIS_URL=redis://cache:6379
+MYAPP_HTTP_PORT=3000
+MYAPP_LOG_LEVEL=info
+MYAPP_ENV=production
 ```
 
+Prefer a single `*_URL` (DSN) over scattered host/port/user/pass parts when a library accepts it — fewer keys, atomic, harder to half-configure. Secret-bearing keys (passwords, API keys, tokens) follow `secure-coding.md` for storage but still flow through this layering.
+
+### B. Typed, declared, defaulted (`CFG-ENV-02`, `CFG-VALID-02`)
+
+Every consumed variable is declared once in a schema with type, default, and required flag, and mirrored in `.env.example`. Strings from the environment are **coerced at the boundary** — no `string` env values leak downstream. The schema is language-specific; the *contract* (typed, validated, declared) is owned here. Examples below are illustrative of the contract, not a mandated stack:
+
+```typescript
+// schema as the single source of truth (zod / envalid / pydantic-settings / Viper+struct ...)
+const Env = z.object({
+  MYAPP_ENV:        z.enum(['development','test','staging','production']),
+  MYAPP_HTTP_PORT:  z.coerce.number().int().min(1).max(65535).default(3000),
+  MYAPP_LOG_LEVEL:  z.enum(['debug','info','warn','error']).default('info'),
+  MYAPP_DB_URL:     z.string().url(),
+  MYAPP_DB_SSL:     z.coerce.boolean().default(false),
+  MYAPP_DB_POOL:    z.coerce.number().int().min(1).max(100).default(10),
+  MYAPP_ALLOWED_ORIGINS: z.string().transform(s => s.split(',').map(x => x.trim())),
+  MYAPP_JWT_SECRET: z.string().min(32),   // value from secret store; schema enforces shape
+});
+```
+
+Boolean coercion MUST be explicit (`"true"`/`"1"`/`"yes"` → `true`); never rely on truthiness of the raw string (`"false"` is a non-empty, truthy string).
+
 ---
 
-## 12. Why This Configuration Works
+## 5. Fail-Fast Validation (OWNED)
 
-- **Fail-fast validation prevents runtime surprises**: Validating all configuration at startup with Zod schemas ensures misconfigurations are caught immediately during deployment, not at 2 AM when a code path finally touches an unset variable.
-- **Secrets never touch version control**: The strict separation between committed templates (.env.example) and gitignored local overrides (.env), combined with production secrets management (Vault, SSM, Kubernetes Secrets), eliminates the most common vector for credential leaks.
-- **Hierarchical overrides support all environments**: The layered configuration approach (defaults, environment files, environment variables, CLI arguments) allows a single codebase to run correctly across development, test, staging, and production without code changes.
-- **Schema-driven documentation stays in sync**: Generating configuration documentation from the same schema used for validation guarantees that docs always reflect reality, eliminating stale or incomplete environment variable documentation.
-- **Typed configuration prevents subtle bugs**: Parsing environment strings into proper types (numbers, booleans, arrays, URLs) at the configuration boundary means application code works with correct types throughout, avoiding string comparison bugs and type coercion surprises.
+Parse and validate the **entire** config at startup, before binding ports or accepting traffic (`CFG-VALID-01`). On any failure: print actionable errors and exit non-zero — never silently fall back.
+
+```typescript
+const parsed = Env.safeParse(process.env);
+if (!parsed.success) {
+  console.error('Invalid configuration:\n' + parsed.error.toString());
+  process.exit(1);                       // CFG-VALID-01: abort before serving
+}
+export const config = Object.freeze(toConfig(parsed.data));  // CFG-IMMUT-01
+```
+
+### Production invariants (`CFG-VALID-03`, `CFG-SEP-02`)
+
+When `env === 'production'`, assert hardening that lower environments may relax:
+
+- secrets present and of required length; **no placeholder** values (`change-me`, `xxx`, `TODO`, `your-...`);
+- TLS/SSL enabled for datastores and caches;
+- no `localhost`/`127.0.0.1` in external endpoints;
+- dev conveniences off: schema auto-sync, query logging, mock externals, debug log level, long-lived tokens.
+
+A failed invariant aborts boot, same as a schema error.
 
 ---
 
-**Last Updated:** 2026-01-31
-**Version:** 1.0
-**Maintainer:** Platform Team
+## 6. Per-Environment Separation (OWNED)
 
+One artifact, distinct resolved config per environment (`CFG-12F-01`, `CFG-SEP-01`). Capture intended differences in a committed matrix so drift is reviewable:
 
-**End of Environment Configuration Guidelines**
+| Key | development | test | staging | production |
+|-----|-------------|------|---------|------------|
+| `MYAPP_ENV` | development | test | staging | production |
+| `MYAPP_LOG_LEVEL` | debug | error | info | info |
+| `MYAPP_DB_SSL` | false | false | true | true |
+| `MYAPP_DB_POOL` | 5 | 2 | 10 | 20 |
+| schema auto-sync | on | on | off | off |
+| token TTL | 7d | 1h | 1h | 15m |
+| externals | real/local | mocked | real | real |
+
+Rules: test config MUST be isolated (separate DB/index, never a prod resource); production overrides default to *secure* (SSL on, short TTLs, no auto-sync); committed per-env files hold **non-secret** values only — secrets come from the store at deploy time (`CFG-SECRET-01`).
+
+---
+
+## 7. Boundaries with referenced owners (bindings only)
+
+- **Secrets** — this guide governs that secrets are never hardcoded (`CFG-NOHARD-02`), flow through the layering, are injected from a store at deploy (`CFG-SECRET-01`), and are redacted in output (`CFG-LOG-01`). All depth — rotation, encryption-at-rest, vault setup, scanning policy — is [`secure-coding.md`](guides://secure-coding.md). Do not restate it here.
+- **Deployment-time injection** — how env/Secrets/ConfigMaps reach the process is platform-owned: [`docker-compose.md`](guides://docker-compose.md) (`env_file`/`environment`), [`kubernetes.md`](guides://kubernetes.md) (`envFrom`, `secretKeyRef`), [`ci-cd.md`](guides://ci-cd.md) (per-environment pipeline secrets/vars), and the cloud guides ([`aws.md`](guides://aws.md)/[`azure.md`](guides://azure.md)/[`gcp.md`](guides://gcp.md)) for managed stores. This guide only requires that the *result* is a validated, typed, immutable config object.
+- **Runtime flags** — the top precedence layer is owned by [`feature-flags.md`](guides://feature-flags.md). Treat a flag as the highest-priority override of a config key; its targeting/rollout/lifecycle is not config and lives there.
+- **Log redaction** — the *mechanism* of redaction is [`logging.md`](guides://logging.md); this guide only mandates that secret-bearing config is redacted (`CFG-LOG-01`).
+
+---
+
+## 8. Configuration Documentation (`CFG-DOC-01`)
+
+Generate config docs from the schema so they cannot drift: for each key emit purpose, type, default, required flag, and per-environment value. Keep generation in the build (and CI) so a new/renamed key fails the docs check until documented. `.env.example` is the minimal machine-checkable form of this requirement (`CFG-ENV-02`).
+
+---
+
+## Deployment Checklist
+
+Generated from §2 — one box per requirement ID. No new requirements here.
+
+- [ ] CFG-NOHARD-01/02 — no hardcoded env-varying values or secrets; secret scan clean
+- [ ] CFG-12F-01 — single artifact across environments
+- [ ] CFG-LAYER-01/02 — one documented precedence chain; overrides deterministic
+- [ ] CFG-ENV-01/02 — names conform; every var declared in `.env.example`/schema
+- [ ] CFG-VALID-01/02/03 — startup validation aborts on bad config; values typed; prod invariants asserted
+- [ ] CFG-SEP-01/02 — per-env config isolated; dev conveniences off in prod
+- [ ] CFG-IMMUT-01 — resolved config read-only; no runtime env mutation
+- [ ] CFG-SECRET-01 — secrets injected from a store at deploy (see `secure-coding.md`)
+- [ ] CFG-LOG-01 — secret-bearing config redacted in logs/errors (see `logging.md`)
+- [ ] CFG-DOC-01 — every key documented (generated from schema)
+
+---
+**End of Configuration & Environment Guidelines**

@@ -1,1449 +1,233 @@
 # Logging Guidelines
-Mandatory standards for application logging, structured logging, and log management across all programming languages. Structured logging libraries, ELK Stack, Loki, CloudWatch, Datadog, Splunk.
+Mandatory, language-agnostic standards for application logging: structured/JSON events, log levels, correlation/trace IDs, context propagation, log hygiene, sampling, and retention.
+
+---
+name: logging
+title: Logging Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: cross-cutting
+tools: [structured-logging, json-logs, opentelemetry-logs]
+requires: []
+recommends:
+  - observability
+  - secure-coding
+  - error-handling
+provides:
+  - structured-logging
+  - log-levels
+  - correlation-ids
+  - log-hygiene
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): this is the canonical owner of **structured logging**. Other guides reference it instead of restating log rules. It owns log levels, structured events, correlation IDs, context propagation, hygiene, sampling, and retention — and references the owners of metrics/tracing, secrets/PII, and error strategy rather than duplicating them.
 
 ---
 
-**Agent Profile**: The Observability Specialist
-**Role**: Senior SRE & Logging Architecture Expert
-**Objective**: Generate consistent, searchable, and actionable logs that enable effective debugging and monitoring.
-**Tools**: Structured logging libraries, ELK Stack, Loki, CloudWatch, Datadog, Splunk.
+## 0. Prerequisites & References
+
+Logging is **one pillar of observability**, not all of it. This guide owns log events; it does not restate how metrics or traces work, how secrets are classified, or what the error-handling strategy is.
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`observability.md`](guides://observability.md) — metrics, distributed tracing, the three-pillars model. *Logging binding: a log line carries `trace_id`/`span_id` so logs join the trace; metrics and span instrumentation are owned there, not here.*
+> - [`secure-coding.md`](guides://secure-coding.md) — what counts as a secret/PII, classification, retention-of-secrets policy. *Logging binding: never serialize those classes into a log event (§2 LOG-HYG rows).*
+> - [`error-handling.md`](guides://error-handling.md) — error strategy, wrapping, propagation, when to retry vs. fail. *Logging binding: an error is logged once at the boundary that handles it, with cause chain and stack (§2 LOG-ERR-01); the decision to swallow/re-raise belongs there.*
+
+> 📎 **SEE ALSO:** [`env-config.md`](guides://env-config.md) (log level/format from config) · [`microservices.md`](guides://microservices.md) (cross-service propagation) · [`kubernetes.md`](guides://kubernetes.md) · [`docker-compose.md`](guides://docker-compose.md) (stdout collection).
+
+Language guides (e.g. [`python.md`](guides://python.md), [`go.md`](guides://go.md), [`nodejs.md`](guides://nodejs.md), [`java.md`](guides://java.md)) own only the *binding* — which library and API implements these rules in that ecosystem.
 
 ---
 
 ## 1. Core Philosophies: LOG-FIRST
 
-The agent must adhere to the **LOG-FIRST** principles:
+Principles unique to logging. Tracing/metrics philosophy comes from `observability.md`; secret classification from `secure-coding.md`.
 
-- **L**evels Matter: Use appropriate log levels consistently
-- **O**bservable: Logs should answer "what happened and why"
-- **G**reppable: Use structured logging for easy searching
-- **F**ast: Logging should not impact application performance
-- **I**dentifiable: Include correlation IDs for request tracing
-- **R**edacted: Never log sensitive data (passwords, tokens, PII)
-- **S**tandardized: Consistent format across all services
-- **T**imestamped: Always include accurate timestamps with timezone
+- **L**evels mean something: every event maps to exactly one level by the §3 decision matrix; level is the primary alerting and retention axis.
+- **O**bservable intent: a log answers *what happened and why*, in fields — not prose. Log facts and identifiers, not narration.
+- **G**reppable: emit **structured key/value events** (JSON in prod), never interpolated free-text. Stable event names, stable field names.
+- **F**ast & non-blocking: logging MUST NOT add latency on the hot path — no synchronous network/disk writes in request handling (§2 LOG-PERF).
+- **I**dentifiable: every request-scoped log carries a propagated correlation/`trace_id`, set once at the boundary via context, not threaded by hand.
+- **R**edacted by default: secrets/PII never reach a log sink — enforced by a pipeline processor, not developer discipline (see `secure-coding.md`).
+- **S**tandardized: one schema, one timestamp format (RFC 3339 / ISO 8601, UTC), identical field names across all services.
+- **T**o stdout: apps log to **stdout/stderr as a stream**; rotation, shipping, retention, and storage are the platform's job, not the app's.
 
----
-
-## 2. Log Levels (MANDATORY)
-
-### A. Level Definitions
-
-```
-FATAL/CRITICAL: Application is unusable, immediate action required
-    - Database connection permanently lost
-    - Out of memory
-    - Critical security breach
-
-ERROR: Operation failed, but application continues
-    - Failed API call after retries
-    - Invalid data that cannot be processed
-    - Unexpected exceptions
-
-WARN: Unexpected situation, but handled gracefully
-    - Deprecated API usage
-    - Retry attempt succeeded
-    - Resource usage approaching limits
-    - Configuration fallback used
-
-INFO: Normal operations, business-relevant events
-    - Application started/stopped
-    - User login/logout
-    - Order placed
-    - Payment processed
-
-DEBUG: Detailed information for debugging
-    - Function entry/exit
-    - Variable values
-    - SQL queries
-    - External API requests/responses
-
-TRACE: Most detailed level (rarely used in production)
-    - Loop iterations
-    - Byte-level data
-    - Protocol-level details
-```
-
-### B. Level Usage Examples
-
-```python
-# Python with structlog
-import structlog
-
-logger = structlog.get_logger()
-
-# CRITICAL - Application cannot continue
-logger.critical("database_connection_lost",
-    error="Connection refused",
-    host="db.example.com",
-    retry_count=10)
-
-# ERROR - Operation failed
-logger.error("payment_processing_failed",
-    order_id="ORD-123",
-    error="Card declined",
-    error_code="CARD_DECLINED")
-
-# WARNING - Potential issue
-logger.warning("rate_limit_approaching",
-    current_rate=95,
-    limit=100,
-    window="1m")
-
-# INFO - Business events
-logger.info("order_placed",
-    order_id="ORD-123",
-    user_id="USR-456",
-    total_amount=99.99)
-
-# DEBUG - Technical details
-logger.debug("cache_lookup",
-    key="user:123:profile",
-    hit=True,
-    ttl_remaining=3600)
-
-# TRACE - Very detailed (usually disabled)
-logger.trace("http_request_body",
-    method="POST",
-    path="/api/users",
-    body_size=1024)
-```
+**Verified Code**: agent-generated logging MUST satisfy every gate in §2 before delivery.
 
 ---
 
-## 3. Structured Logging (MANDATORY)
+## 2. Requirements (MANDATORY, auditable)
 
-### A. Log Format
+RFC-2119 keywords. IDs `LOG-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a shared rule cite its owner.
+
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| LOG-FMT-01 | Production logs MUST be machine-parseable structured records (one JSON object per line) | Pipe sample to `jq .` | every line parses |
+| LOG-FMT-02 | Free-text/printf-style log calls (string concatenation/interpolation as the message) MUST NOT be used; pass fields as key/values | lint / grep for `log.*+`, f-string in log call | 0 hits |
+| LOG-FMT-03 | Timestamps MUST be RFC 3339 / ISO 8601 in UTC with millisecond precision | inspect emitter config / sample | matches `…Z` |
+| LOG-FMT-04 | Every record MUST carry `timestamp`, `level`, `service`, `message`/`event` | `jq 'select(.level==null or .service==null)'` | empty |
+| LOG-LVL-01 | Each event MUST use exactly the level defined by the §3 matrix | review against §3 | no misclassification |
+| LOG-LVL-02 | Runtime level MUST be config-driven (env/config), not hardcoded; default `INFO` in prod (see `env-config.md`) | grep for hardcoded level; check config | level from config |
+| LOG-LVL-03 | `DEBUG`/`TRACE` MUST be disabled by default in production | inspect prod config | not enabled |
+| LOG-CID-01 | Every request-scoped log MUST include a propagated correlation id (`trace_id`/`correlation_id`) | sample request logs | id present & stable per request |
+| LOG-CID-02 | Correlation/trace context MUST be carried implicitly (context/ALS/MDC), not passed as a parameter through business code | review call sites | no logger threading |
+| LOG-CID-03 | Inbound trace context MUST be honored and outbound calls MUST propagate it (W3C `traceparent`/`X-Correlation-ID`) (see `observability.md`) | trace a 2-service call | same id end-to-end |
+| LOG-HYG-01 | Secrets MUST NOT be logged (passwords, tokens, keys, connection strings) (see `secure-coding.md`) | redaction test + grep | 0 secrets in sink |
+| LOG-HYG-02 | PII MUST NOT be logged in cleartext; use IDs, masked, or hashed values (see `secure-coding.md`) | redaction test | 0 raw PII |
+| LOG-HYG-03 | A centralized redaction processor MUST run in the pipeline (deny-list of fields + value scanning), not be left to call sites | inspect pipeline config | processor present & tested |
+| LOG-ERR-01 | A handled error MUST be logged once, at the handling boundary, with `error_type`, `error_message`, cause chain, and stack (see `error-handling.md`) | review; assert single log per error | no log-and-rethrow dup |
+| LOG-PERF-01 | Logging MUST be non-blocking on the request path; no synchronous remote sink writes inline | review handler/sink config | async/buffered sink |
+| LOG-PERF-02 | High-volume/diagnostic logs MUST be sampled or rate-limited (not per-event in hot loops) | review hot paths | sampling applied |
+| LOG-OUT-01 | Apps MUST write logs to stdout/stderr; the app MUST NOT manage files, rotation, or shipping | inspect handlers | stream-only sink |
+| LOG-RET-01 | Retention MUST be defined per level/environment at the platform (not unbounded) | inspect retention policy | policy exists |
+
+> **Forbidden**: logging a secret or raw PII (violates `secure-coding.md`); log-and-rethrow that double-logs the same error (violates `error-handling.md`); free-text-interpolated messages; hardcoded log level; synchronous remote logging on the hot path; the app writing/rotating its own log files; re-implementing metrics or span creation here (owned by `observability.md`).
+
+---
+
+## 3. Log Levels (the level matrix)
+
+Level is the contract between developers and operators. One event → one level. This matrix is canonical; language guides do not redefine it.
+
+| Level | Trigger | Action required | Examples | Prod volume |
+|-------|---------|-----------------|----------|-------------|
+| **FATAL/CRITICAL** | Process cannot continue and will exit | Immediate page | cannot bind port; OOM; corrupt schema after failed migration; required config absent at boot | 0–1 per incident |
+| **ERROR** | An operation failed; the request/job could not be fulfilled | Investigate within alert SLA | charge failed after retries; downstream 5xx after retry budget; unhandled exception at a boundary | < 0.1% of requests (ideal) |
+| **WARN** | Unexpected but handled; degraded, not failed | Trend-watch, next business day | retry succeeded; cache miss → DB fallback; deprecated endpoint hit; quota at 80% | moderate (watch trends) |
+| **INFO** | Normal, business-relevant milestone | None | service started; user logged in; order placed; scheduled job processed N records | a few per request/event |
+| **DEBUG** | Technical detail for diagnosis | Viewed only while investigating | resolved config path; cache key/hit; chosen branch; outbound call target | off by default in prod |
+| **TRACE** | Extremely fine execution flow | Local/dev only | function entry/exit; loop iteration; raw payload bytes | never in prod |
+
+Decision tree: *Will the process exit?* → FATAL. *Did an operation fail?* → ERROR. *Unexpected but handled?* → WARN. *Normal milestone?* → INFO. *Diagnostic detail?* → DEBUG. *Byte/iteration-level?* → TRACE.
+
+Rules: choose the level by **consequence**, not by how much you care; never use ERROR for an expected/handled condition (that hides real failures); WARN is for the alertable trend, not the satisfying log. Logging an error does **not** decide whether to retry/swallow/re-raise — that is `error-handling.md`.
+
+---
+
+## 4. Structured Event Schema
+
+A log record is a flat (or shallowly grouped) JSON object with **stable names**. Treat the schema as an API: renaming a field breaks dashboards and alerts.
 
 ```json
 {
-  "timestamp": "2024-01-15T10:30:45.123Z",
+  "timestamp": "2026-06-05T10:30:45.123Z",
   "level": "INFO",
-  "logger": "com.example.OrderService",
-  "message": "Order placed successfully",
   "service": "order-service",
   "version": "1.2.3",
   "environment": "production",
-  "trace_id": "abc123def456",
-  "span_id": "789xyz",
+  "event": "order_placed",
+  "message": "Order placed successfully",
+  "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+  "span_id": "00f067aa0ba902b7",
   "user_id": "USR-456",
   "order_id": "ORD-123",
-  "total_amount": 99.99,
-  "items_count": 3,
   "duration_ms": 245
 }
 ```
 
-### B. Required Fields
+**Field tiers** (names are normative; values illustrative):
 
-```python
-# Base fields for every log entry
-BASE_FIELDS = {
-    "timestamp": "ISO 8601 format with timezone",
-    "level": "Log level (DEBUG, INFO, WARN, ERROR, FATAL)",
-    "logger": "Logger name / source",
-    "message": "Human-readable description",
-    "service": "Service/application name",
-    "version": "Application version",
-    "environment": "Environment (dev, staging, prod)",
-}
+- **Always**: `timestamp` (RFC 3339 UTC), `level`, `service`, `version`, `environment`, `event` (stable machine name) + `message` (human gloss).
+- **Request-scoped**: `trace_id`, `span_id`, `correlation_id`/`request_id`, `user_id` (or other non-PII subject id), `session_id`.
+- **Errors**: `error_type`, `error_message`, `error_code`, `stack_trace`, `cause`. The error *strategy* is owned by `error-handling.md`; these fields are how an error is *represented* in a log.
+- **Performance**: `duration_ms`, `status_code`, `method`, `path`.
 
-# Request context fields (when applicable)
-REQUEST_FIELDS = {
-    "trace_id": "Distributed trace ID",
-    "span_id": "Current span ID",
-    "request_id": "Unique request identifier",
-    "user_id": "Authenticated user ID (if applicable)",
-    "session_id": "Session identifier",
-}
-
-# Error fields (for ERROR and FATAL)
-ERROR_FIELDS = {
-    "error_type": "Exception class name",
-    "error_message": "Error description",
-    "error_code": "Application error code",
-    "stack_trace": "Stack trace (in non-production or for fatals)",
-}
-```
-
-### C. Implementation Examples
-
-```python
-# Python with structlog
-import structlog
-from datetime import datetime
-
-structlog.configure(
-    processors=[
-        structlog.stdlib.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.JSONRenderer()
-    ],
-    wrapper_class=structlog.BoundLogger,
-    context_class=dict,
-    logger_factory=structlog.PrintLoggerFactory(),
-)
-
-logger = structlog.get_logger()
-
-# Bind context for all subsequent logs
-logger = logger.bind(
-    service="order-service",
-    version="1.2.3",
-    environment="production"
-)
-
-# Add request context
-logger = logger.bind(
-    trace_id=request.trace_id,
-    user_id=request.user_id
-)
-
-# Log with additional fields
-logger.info("order_placed",
-    order_id=order.id,
-    total_amount=order.total,
-    items_count=len(order.items))
-```
-
-```javascript
-// Node.js with pino
-const pino = require('pino');
-
-const logger = pino({
-  level: process.env.LOG_LEVEL || 'info',
-  formatters: {
-    level: (label) => ({ level: label }),
-  },
-  timestamp: pino.stdTimeFunctions.isoTime,
-  base: {
-    service: 'order-service',
-    version: process.env.APP_VERSION,
-    environment: process.env.NODE_ENV,
-  },
-});
-
-// Create child logger with request context
-const requestLogger = logger.child({
-  traceId: req.traceId,
-  userId: req.userId,
-});
-
-// Log event
-requestLogger.info({
-  msg: 'Order placed',
-  orderId: order.id,
-  totalAmount: order.total,
-  itemsCount: order.items.length,
-});
-```
-
-```go
-// Go with zerolog
-package main
-
-import (
-    "os"
-    "github.com/rs/zerolog"
-    "github.com/rs/zerolog/log"
-)
-
-func init() {
-    zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-
-    log.Logger = zerolog.New(os.Stdout).With().
-        Timestamp().
-        Str("service", "order-service").
-        Str("version", os.Getenv("APP_VERSION")).
-        Str("environment", os.Getenv("ENVIRONMENT")).
-        Logger()
-}
-
-func handleOrder(ctx context.Context, order Order) {
-    logger := log.With().
-        Str("trace_id", ctx.Value("traceId").(string)).
-        Str("user_id", ctx.Value("userId").(string)).
-        Logger()
-
-    logger.Info().
-        Str("order_id", order.ID).
-        Float64("total_amount", order.Total).
-        Int("items_count", len(order.Items)).
-        Msg("Order placed")
-}
-```
-
-### D. Go slog (Standard Library, Go 1.21+)
-
-```go
-package main
-
-import (
-    "context"
-    "log/slog"
-    "os"
-    "time"
-)
-
-func initLogger() *slog.Logger {
-    // JSON handler for structured output
-    handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-        Level:     slog.LevelInfo,
-        AddSource: true, // Include file/line in logs
-    })
-
-    logger := slog.New(handler).With(
-        "service", "order-service",
-        "version", os.Getenv("APP_VERSION"),
-        "environment", os.Getenv("ENVIRONMENT"),
-    )
-
-    slog.SetDefault(logger)
-    return logger
-}
-
-func processOrder(ctx context.Context, orderID string, total float64) error {
-    logger := slog.Default().With(
-        "order_id", orderID,
-        "trace_id", ctx.Value("traceId"),
-    )
-
-    start := time.Now()
-    logger.Info("order processing started",
-        "total_amount", total,
-    )
-
-    // ... process order ...
-
-    logger.Info("order processing completed",
-        "total_amount", total,
-        "duration_ms", time.Since(start).Milliseconds(),
-    )
-    return nil
-}
-
-// Log groups for organizing related fields
-func logWithGroups(logger *slog.Logger) {
-    logger.Info("request handled",
-        slog.Group("request",
-            slog.String("method", "POST"),
-            slog.String("path", "/api/orders"),
-            slog.Int("status", 201),
-        ),
-        slog.Group("response",
-            slog.Int64("duration_ms", 45),
-            slog.Int("body_bytes", 1024),
-        ),
-    )
-    // Output: {"request":{"method":"POST","path":"/api/orders","status":201},"response":{"duration_ms":45,"body_bytes":1024}}
-}
-```
-
-### E. Python structlog Advanced Patterns
-
-```python
-import structlog
-import logging
-import sys
-
-def configure_structlog():
-    """Production-ready structlog configuration."""
-    structlog.configure(
-        processors=[
-            # Add contextvars (from middleware bindings)
-            structlog.contextvars.merge_contextvars,
-            # Add log level
-            structlog.stdlib.add_log_level,
-            # Add logger name
-            structlog.stdlib.add_logger_name,
-            # Filter by log level
-            structlog.stdlib.filter_by_level,
-            # Add timestamp
-            structlog.processors.TimeStamper(fmt="iso"),
-            # Add call site info (file, function, line)
-            structlog.processors.CallsiteParameterAdder(
-                [
-                    structlog.processors.CallsiteParameter.FILENAME,
-                    structlog.processors.CallsiteParameter.FUNC_NAME,
-                    structlog.processors.CallsiteParameter.LINENO,
-                ],
-            ),
-            # Format stack traces
-            structlog.processors.StackInfoRenderer(),
-            structlog.processors.format_exc_info,
-            # Render as JSON in production, colored console in dev
-            structlog.processors.JSONRenderer()
-            if os.getenv("ENVIRONMENT") == "production"
-            else structlog.dev.ConsoleRenderer(),
-        ],
-        wrapper_class=structlog.stdlib.BoundLogger,
-        context_class=dict,
-        logger_factory=structlog.stdlib.LoggerFactory(),
-        cache_logger_on_first_use=True,
-    )
-
-# Usage with exception chains
-logger = structlog.get_logger()
-
-try:
-    result = process_payment(order)
-except PaymentGatewayError as e:
-    logger.error("payment_gateway_failed",
-        order_id=order.id,
-        gateway="stripe",
-        error_code=e.code,
-        retriable=e.is_retriable,
-        exc_info=True,  # Includes full stack trace
-    )
-```
-
-### F. Log Level Decision Matrix
-
-```yaml
-# Use this matrix to decide the correct log level for any event
-
-decision_matrix:
-  FATAL:
-    trigger: "Application cannot continue running"
-    action_required: "Immediate page, wake someone up"
-    examples:
-      - "Cannot bind to port, another process is using it"
-      - "Out of memory, cannot allocate"
-      - "Database migration failed, schema inconsistent"
-      - "License expired, cannot start"
-    production_volume: "0-1 per incident (application exits)"
-
-  ERROR:
-    trigger: "Operation failed, request could not be fulfilled"
-    action_required: "Investigate within alert SLA"
-    examples:
-      - "Payment charge failed after 3 retries"
-      - "External API returned unexpected 500"
-      - "Database query timeout after 30s"
-      - "Failed to send email notification"
-      - "Unhandled exception in request handler"
-    production_volume: "Low (< 0.1% of requests ideally)"
-
-  WARN:
-    trigger: "Something unexpected happened, but was handled"
-    action_required: "Review in next business day, trend-watch"
-    examples:
-      - "Retry succeeded on second attempt"
-      - "Cache miss, falling back to database"
-      - "Deprecated API endpoint called"
-      - "Request took longer than expected (but succeeded)"
-      - "Configuration value missing, using default"
-      - "Rate limit approaching threshold (80%)"
-    production_volume: "Moderate (monitor trends, not individual events)"
-
-  INFO:
-    trigger: "Normal business operation completed"
-    action_required: "None - this is expected behavior"
-    examples:
-      - "Application started on port 8080"
-      - "User logged in successfully"
-      - "Order ORD-123 placed, total $99.99"
-      - "Scheduled job completed: processed 1500 records"
-      - "Configuration reloaded"
-      - "Health check passed"
-    production_volume: "1-5 per request or business event"
-
-  DEBUG:
-    trigger: "Technical detail useful for diagnosing issues"
-    action_required: "Only viewed when investigating a problem"
-    examples:
-      - "SQL query: SELECT * FROM users WHERE id = ?"
-      - "Cache lookup: key=user:123, hit=true, ttl=3600"
-      - "HTTP request to downstream: POST /api/charge"
-      - "Parsing config file: /etc/app/config.yaml"
-    production_volume: "Disabled by default in production"
-
-  TRACE:
-    trigger: "Extremely detailed execution flow"
-    action_required: "Never in production, local dev only"
-    examples:
-      - "Entering function processItem(id=123)"
-      - "Loop iteration 45/100"
-      - "Raw HTTP response body: {bytes}"
-    production_volume: "Never enabled in production"
-```
+Schema discipline:
+- Prefer a stable `event` name (e.g. `payment_declined`) over encoding facts in `message`; humans read `message`, machines group by `event`.
+- Use consistent units and suffixes (`_ms`, `_bytes`, `_count`); never mix seconds and milliseconds under one name.
+- Bind service/version/environment **once** at logger init; bind request fields **once** at the boundary; do not re-pass them per call.
+- Group only when it aids querying (e.g. an `http` group); deep nesting hurts indexing in most sinks.
 
 ---
 
-## 4. Sensitive Data Handling (MANDATORY)
+## 5. Correlation & Context Propagation
 
-### A. Never Log These
+This is the highest-value, logging-owned mechanic: a single id that joins every log of one logical request, across threads and services. Trace/span *semantics* and sampling of traces are owned by `observability.md`; here we own getting the id **into every log line implicitly**.
 
-```python
-# ❌ NEVER log sensitive data
+### A. Set once, at the boundary
+At the inbound edge (HTTP/gRPC/queue consumer), extract an existing correlation id from headers, or mint one; store it in the ambient request context, and bind it to the logger context so **every** subsequent log inherits it. Never accept logs that thread a `logger`/`trace_id` argument through business functions (LOG-CID-02).
 
-# Credentials
-logger.info("User login", password=password)           # NEVER!
-logger.info("API call", api_key=api_key)               # NEVER!
-logger.info("Database", connection_string=conn_str)    # NEVER!
+Ambient-context primitive per ecosystem (binding owned by the language guide):
+- Python: `contextvars` (e.g. `structlog.contextvars`) bound in middleware.
+- Go: `context.Context` carrying the id; a context-aware `*slog.Logger`.
+- Node/TS: `AsyncLocalStorage` holding the request-scoped logger.
+- JVM: SLF4J **MDC** (thread/scope-local).
 
-# Personal Identifiable Information (PII)
-logger.info("User", ssn=user.ssn)                      # NEVER!
-logger.info("User", credit_card=card_number)           # NEVER!
-logger.info("User", full_address=user.address)         # NEVER!
-logger.info("User", date_of_birth=user.dob)            # NEVER!
+### B. Align with W3C Trace Context
+Prefer the standard `traceparent`/`tracestate` headers and OpenTelemetry's `trace_id`/`span_id` so logs and traces share one id space and can be pivoted between in the backend. If you also accept a human-friendly `X-Correlation-ID`, map it onto the same field; do not invent a third id.
 
-# Tokens and secrets
-logger.info("Auth", jwt_token=token)                   # NEVER!
-logger.info("Session", session_token=session)          # NEVER!
-logger.info("OAuth", refresh_token=refresh)            # NEVER!
+### C. Propagate outbound
+Any outbound call (HTTP client, message publish, job enqueue) MUST forward the correlation/trace headers so the next service continues the same id (LOG-CID-03). Cross-service propagation patterns live in `microservices.md`; the **logging requirement** is that the id is unbroken end-to-end.
 
-# Health data
-logger.info("User", medical_records=records)           # NEVER!
-```
-
-### B. Safe Logging Patterns
-
-```python
-# ✅ CORRECT - Log identifiers, not values
-
-# Use IDs instead of sensitive data
-logger.info("user_login",
-    user_id=user.id,                    # ✅ ID only
-    email_domain=user.email.split('@')[1],  # ✅ Partial, non-identifying
-    login_method="password")            # ✅ Method, not credential
-
-# Mask sensitive values
-def mask_email(email):
-    name, domain = email.split('@')
-    return f"{name[:2]}***@{domain}"
-
-logger.info("email_sent",
-    to_email=mask_email(recipient.email),  # ✅ Masked
-    template="welcome")
-
-# Mask credit cards
-def mask_card(card_number):
-    return f"****{card_number[-4:]}"
-
-logger.info("payment_processed",
-    card_last_four=card_number[-4:],    # ✅ Last 4 only
-    card_type="visa")                   # ✅ Type, not number
-
-# Use hashes for comparison logging
-import hashlib
-
-def hash_value(value):
-    return hashlib.sha256(value.encode()).hexdigest()[:8]
-
-logger.debug("token_validated",
-    token_hash=hash_value(token))       # ✅ Hash for debugging
-```
-
-### C. Automatic Redaction
-
-```python
-# Implement automatic redaction for common patterns
-import re
-
-REDACTION_PATTERNS = [
-    (r'password["\']?\s*[:=]\s*["\']?[^"\'&\s]+', 'password=***REDACTED***'),
-    (r'api[_-]?key["\']?\s*[:=]\s*["\']?[^"\'&\s]+', 'api_key=***REDACTED***'),
-    (r'\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b', '****-****-****-****'),
-    (r'\b\d{3}[- ]?\d{2}[- ]?\d{4}\b', '***-**-****'),  # SSN
-    (r'Bearer\s+[A-Za-z0-9\-._~+/]+=*', 'Bearer ***REDACTED***'),
-]
-
-def redact_sensitive(message):
-    for pattern, replacement in REDACTION_PATTERNS:
-        message = re.sub(pattern, replacement, message, flags=re.IGNORECASE)
-    return message
-
-class RedactingFilter(logging.Filter):
-    def filter(self, record):
-        record.msg = redact_sensitive(str(record.msg))
-        return True
-```
-
-### D. Advanced Redaction with structlog Processors
-
-```python
-import structlog
-import re
-from typing import Any
-
-# Sensitive field names to always redact (case-insensitive matching)
-SENSITIVE_FIELDS = {
-    'password', 'passwd', 'secret', 'token', 'api_key', 'apikey',
-    'authorization', 'auth', 'credential', 'private_key',
-    'ssn', 'social_security', 'credit_card', 'card_number',
-    'cvv', 'cvc', 'pin', 'account_number',
-}
-
-# Fields to partially mask (show last N characters)
-PARTIAL_MASK_FIELDS = {
-    'email': lambda v: _mask_email(v),
-    'phone': lambda v: f"***{v[-4:]}" if len(v) >= 4 else "***",
-    'ip_address': lambda v: '.'.join(v.split('.')[:2] + ['*', '*']),
-}
-
-def _mask_email(email: str) -> str:
-    if '@' not in email:
-        return '***'
-    name, domain = email.rsplit('@', 1)
-    return f"{name[0]}***@{domain}"
-
-def redact_sensitive_processor(logger, method_name, event_dict):
-    """structlog processor that automatically redacts sensitive fields."""
-    for key, value in list(event_dict.items()):
-        key_lower = key.lower()
-
-        # Full redaction for sensitive fields
-        if key_lower in SENSITIVE_FIELDS:
-            event_dict[key] = '***REDACTED***'
-            continue
-
-        # Partial masking
-        if key_lower in PARTIAL_MASK_FIELDS and isinstance(value, str):
-            event_dict[key] = PARTIAL_MASK_FIELDS[key_lower](value)
-            continue
-
-        # Scan string values for embedded sensitive data
-        if isinstance(value, str):
-            event_dict[key] = _redact_embedded_secrets(value)
-
-    return event_dict
-
-def _redact_embedded_secrets(text: str) -> str:
-    """Catch secrets embedded in URLs, connection strings, etc."""
-    # Redact passwords in URLs: postgres://user:password@host
-    text = re.sub(
-        r'(://[^:]+:)[^@]+(@)',
-        r'\1***REDACTED***\2',
-        text
-    )
-    # Redact Bearer tokens
-    text = re.sub(
-        r'(Bearer\s+)\S+',
-        r'\1***REDACTED***',
-        text,
-        flags=re.IGNORECASE
-    )
-    return text
-
-# Register in structlog configuration
-structlog.configure(
-    processors=[
-        structlog.contextvars.merge_contextvars,
-        structlog.stdlib.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        redact_sensitive_processor,  # Add before renderer
-        structlog.processors.JSONRenderer(),
-    ],
-)
-
-# Now these are automatically safe:
-logger = structlog.get_logger()
-logger.info("user_created",
-    user_id="USR-123",
-    email="john.doe@example.com",     # Masked to j***@example.com
-    password="secret123",              # Redacted to ***REDACTED***
-    api_key="sk_live_abc123",          # Redacted to ***REDACTED***
-    db_url="postgres://app:s3cret@db:5432/mydb",  # Password redacted
-)
-```
-
-```go
-// Go: Redacting sensitive fields with a custom slog handler
-package logging
-
-import (
-    "context"
-    "log/slog"
-    "strings"
-)
-
-var sensitiveKeys = map[string]bool{
-    "password": true, "token": true, "secret": true,
-    "api_key": true, "authorization": true, "credit_card": true,
-}
-
-type RedactingHandler struct {
-    inner slog.Handler
-}
-
-func NewRedactingHandler(inner slog.Handler) *RedactingHandler {
-    return &RedactingHandler{inner: inner}
-}
-
-func (h *RedactingHandler) Enabled(ctx context.Context, level slog.Level) bool {
-    return h.inner.Enabled(ctx, level)
-}
-
-func (h *RedactingHandler) Handle(ctx context.Context, r slog.Record) error {
-    redacted := slog.NewRecord(r.Time, r.Level, r.Message, r.PC)
-    r.Attrs(func(a slog.Attr) bool {
-        if sensitiveKeys[strings.ToLower(a.Key)] {
-            redacted.AddAttrs(slog.String(a.Key, "***REDACTED***"))
-        } else {
-            redacted.AddAttrs(a)
-        }
-        return true
-    })
-    return h.inner.Handle(ctx, redacted)
-}
-
-func (h *RedactingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-    return &RedactingHandler{inner: h.inner.WithAttrs(attrs)}
-}
-
-func (h *RedactingHandler) WithGroup(name string) slog.Handler {
-    return &RedactingHandler{inner: h.inner.WithGroup(name)}
-}
-```
+> OpenTelemetry note: when an OTel SDK is present, install its log-correlation hook so emitted logs are stamped with the active span's `trace_id`/`span_id` automatically. The SDK setup itself is `observability.md`; logging just consumes the active context.
 
 ---
 
-## 5. Correlation and Tracing
+## 6. Log Hygiene — Secrets & PII
 
-### A. Request Tracing
+`secure-coding.md` owns *what* is a secret/PII and the data-classification policy. This guide owns *that it never lands in a log sink* and *how the pipeline guarantees it*.
 
-```python
-# Middleware to add trace context
-import uuid
-from contextvars import ContextVar
+- **Never log** credentials, tokens (JWT/refresh/session), API/private keys, connection strings, full PANs, CVV, SSN/national IDs, full address, DOB, health/biometric data (LOG-HYG-01/02).
+- **Log the safe surrogate instead**: a stable id (`user_id`), a masked value (`****1234`, `j***@example.com`), a non-reversible hash for correlation, or a non-identifying derivative (e.g. email domain).
+- **Enforce centrally** (LOG-HYG-03): a redaction processor in the logging pipeline runs on every record before the sink — a deny-list of field names (case-insensitive) plus value scanning for embedded secrets in URLs/connection strings/`Authorization` headers. Call-site discipline is a backstop, not the control.
+- **Test it**: a redaction unit test feeds known secrets/PII through the pipeline and asserts they are absent from output — this is the gate for LOG-HYG-01/02/03.
+- **Defense in depth**: redact at the source even though the sink may also scrub; a secret should never have existed in the stream.
 
-trace_id_var: ContextVar[str] = ContextVar('trace_id', default='')
-span_id_var: ContextVar[str] = ContextVar('span_id', default='')
-
-class TracingMiddleware:
-    def __init__(self, app):
-        self.app = app
-
-    async def __call__(self, scope, receive, send):
-        # Extract or generate trace ID
-        trace_id = scope.get('headers', {}).get(
-            b'x-trace-id',
-            str(uuid.uuid4())
-        )
-        span_id = str(uuid.uuid4())[:8]
-
-        # Set context variables
-        trace_id_var.set(trace_id)
-        span_id_var.set(span_id)
-
-        # Add to response headers
-        async def send_with_trace(message):
-            if message['type'] == 'http.response.start':
-                headers = list(message.get('headers', []))
-                headers.append((b'x-trace-id', trace_id.encode()))
-                message['headers'] = headers
-            await send(message)
-
-        await self.app(scope, receive, send_with_trace)
-
-# Logger automatically includes trace context
-class TracingLogger:
-    def __init__(self, logger):
-        self.logger = logger
-
-    def _log(self, level, message, **kwargs):
-        kwargs['trace_id'] = trace_id_var.get()
-        kwargs['span_id'] = span_id_var.get()
-        getattr(self.logger, level)(message, **kwargs)
-
-    def info(self, message, **kwargs):
-        self._log('info', message, **kwargs)
-
-    def error(self, message, **kwargs):
-        self._log('error', message, **kwargs)
-```
-
-### B. Cross-Service Tracing
-
-```python
-# Propagate trace context in HTTP calls
-import httpx
-
-async def call_external_service(url: str, data: dict):
-    headers = {
-        'X-Trace-ID': trace_id_var.get(),
-        'X-Span-ID': span_id_var.get(),
-    }
-
-    logger.info("external_service_call",
-        url=url,
-        method="POST")
-
-    async with httpx.AsyncClient() as client:
-        response = await client.post(url, json=data, headers=headers)
-
-    logger.info("external_service_response",
-        url=url,
-        status_code=response.status_code,
-        duration_ms=response.elapsed.total_seconds() * 1000)
-
-    return response
-```
-
-### C. Correlation ID Propagation Across Services
-
-```python
-# Python: Full correlation ID propagation with structlog
-import structlog
-import uuid
-from contextvars import ContextVar
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
-
-correlation_id_ctx: ContextVar[str] = ContextVar('correlation_id', default='')
-
-class CorrelationIDMiddleware(BaseHTTPMiddleware):
-    """Extract or generate correlation ID and propagate to all logs and downstream calls."""
-
-    async def dispatch(self, request: Request, call_next):
-        # Extract from incoming headers or generate new
-        correlation_id = (
-            request.headers.get('X-Correlation-ID')
-            or request.headers.get('X-Request-ID')
-            or str(uuid.uuid4())
-        )
-        correlation_id_ctx.set(correlation_id)
-
-        # Bind to structlog context for all logs in this request
-        structlog.contextvars.clear_contextvars()
-        structlog.contextvars.bind_contextvars(
-            correlation_id=correlation_id,
-            request_method=request.method,
-            request_path=str(request.url.path),
-        )
-
-        response = await call_next(request)
-        response.headers['X-Correlation-ID'] = correlation_id
-        return response
-
-# Propagate to downstream HTTP calls
-import httpx
-
-async def call_downstream(url: str, payload: dict):
-    """Automatically forward correlation ID to downstream services."""
-    headers = {
-        'X-Correlation-ID': correlation_id_ctx.get(),
-        'Content-Type': 'application/json',
-    }
-    async with httpx.AsyncClient() as client:
-        response = await client.post(url, json=payload, headers=headers)
-    return response
-```
-
-```go
-// Go: Correlation ID propagation with slog
-package middleware
-
-import (
-    "context"
-    "log/slog"
-    "net/http"
-
-    "github.com/google/uuid"
-)
-
-type contextKey string
-
-const correlationIDKey contextKey = "correlation_id"
-
-func CorrelationIDMiddleware(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        correlationID := r.Header.Get("X-Correlation-ID")
-        if correlationID == "" {
-            correlationID = uuid.New().String()
-        }
-
-        // Add to context
-        ctx := context.WithValue(r.Context(), correlationIDKey, correlationID)
-
-        // Add to response headers
-        w.Header().Set("X-Correlation-ID", correlationID)
-
-        // Create a logger with the correlation ID bound
-        logger := slog.With("correlation_id", correlationID)
-        ctx = context.WithValue(ctx, "logger", logger)
-
-        next.ServeHTTP(w, r.WithContext(ctx))
-    })
-}
-
-func LoggerFromContext(ctx context.Context) *slog.Logger {
-    if logger, ok := ctx.Value("logger").(*slog.Logger); ok {
-        return logger
-    }
-    return slog.Default()
-}
-
-// Usage in handler
-func handleOrder(w http.ResponseWriter, r *http.Request) {
-    logger := LoggerFromContext(r.Context())
-    logger.Info("processing order",
-        "order_id", orderID,
-        "user_id", userID,
-    )
-}
-```
-
-```typescript
-// Node.js: Correlation ID with AsyncLocalStorage and pino
-import { AsyncLocalStorage } from 'async_hooks';
-import pino from 'pino';
-import { Request, Response, NextFunction } from 'express';
-import { v4 as uuidv4 } from 'uuid';
-
-interface RequestContext {
-  correlationId: string;
-  logger: pino.Logger;
-}
-
-const asyncStore = new AsyncLocalStorage<RequestContext>();
-
-const baseLogger = pino({
-  level: process.env.LOG_LEVEL || 'info',
-  base: { service: 'order-service', version: process.env.APP_VERSION },
-});
-
-export function correlationMiddleware(req: Request, res: Response, next: NextFunction) {
-  const correlationId = (req.headers['x-correlation-id'] as string) || uuidv4();
-  const logger = baseLogger.child({ correlationId });
-
-  res.setHeader('X-Correlation-ID', correlationId);
-
-  asyncStore.run({ correlationId, logger }, () => {
-    next();
-  });
-}
-
-// Get logger anywhere in the call stack
-export function getLogger(): pino.Logger {
-  const store = asyncStore.getStore();
-  return store?.logger ?? baseLogger;
-}
-
-// Get correlation ID for downstream calls
-export function getCorrelationId(): string {
-  return asyncStore.getStore()?.correlationId ?? '';
-}
-
-// Usage in any module (no need to pass logger around)
-import { getLogger } from './correlation';
-
-function processPayment(orderId: string, amount: number) {
-  const logger = getLogger();
-  logger.info({ orderId, amount }, 'Processing payment');
-  // ...
-}
-```
+Implementation is a single pipeline stage (structlog processor / `slog.Handler` wrapper / pino redact paths / Logback masking converter) — the language guide supplies the exact hook.
 
 ---
 
-## 6. Log Aggregation Patterns
+## 7. Performance: Async, Sampling, Rate-Limiting
 
-### A. ELK Stack Configuration
+Observability MUST NOT degrade the system it observes (LOG-PERF-01/02).
 
-```yaml
-# filebeat.yml
-filebeat.inputs:
-  - type: container
-    paths:
-      - '/var/lib/docker/containers/*/*.log'
-    processors:
-      - add_docker_metadata: ~
-      - decode_json_fields:
-          fields: ["message"]
-          target: ""
-          overwrite_keys: true
+- **Non-blocking sinks**: write to stdout/an in-process buffer; ship asynchronously. Never make a synchronous network call to a log aggregator on the request path.
+- **Guard expensive payloads**: gate costly field construction behind a level check so it is skipped when the level is disabled.
+- **Sample high-volume events**: for chatty diagnostic logs, emit a fraction (e.g. 1–10%) and stamp the record with the sample rate so downstream counts can be scaled. Always keep WARN/ERROR/FATAL at 100%.
+- **Rate-limit repeats**: collapse log storms (e.g. "logged N times in the last 10s") instead of one line per event in a tight loop.
+- **No logging inside hot loops** at INFO+; aggregate and log a summary.
 
-output.elasticsearch:
-  hosts: ["elasticsearch:9200"]
-  index: "logs-%{[service]}-%{+yyyy.MM.dd}"
-
-# Logstash pipeline (if needed)
-input {
-  beats {
-    port => 5044
-  }
-}
-
-filter {
-  json {
-    source => "message"
-  }
-
-  date {
-    match => ["timestamp", "ISO8601"]
-    target => "@timestamp"
-  }
-
-  # Add geo-location for IPs
-  geoip {
-    source => "client_ip"
-  }
-}
-
-output {
-  elasticsearch {
-    hosts => ["elasticsearch:9200"]
-    index => "logs-%{service}-%{+YYYY.MM.dd}"
-  }
-}
-```
-
-### B. Grafana Loki Configuration
-
-```yaml
-# promtail config for shipping logs to Loki
-server:
-  http_listen_port: 9080
-  grpc_listen_port: 0
-
-positions:
-  filename: /tmp/positions.yaml
-
-clients:
-  - url: http://loki:3100/loki/api/v1/push
-
-scrape_configs:
-  - job_name: containers
-    static_configs:
-      - targets:
-          - localhost
-        labels:
-          job: docker
-          __path__: /var/log/containers/*.log
-
-    pipeline_stages:
-      # Parse JSON logs
-      - json:
-          expressions:
-            level: level
-            service: service
-            trace_id: trace_id
-            message: message
-            timestamp: timestamp
-
-      # Set labels from parsed fields
-      - labels:
-          level:
-          service:
-
-      # Set timestamp from log entry
-      - timestamp:
-          source: timestamp
-          format: "2006-01-02T15:04:05.000Z"
-
-      # Drop debug logs in production to save storage
-      - match:
-          selector: '{level="DEBUG"}'
-          stages:
-            - drop:
-                expression: ".*"
-          drop_counter_reason: debug_logs_dropped
-```
-
-```bash
-# Loki LogQL query examples
-
-# Find errors for a specific service
-{service="order-service"} |= "error" | json | level="ERROR"
-
-# Find logs with a specific correlation ID across all services
-{job="docker"} | json | trace_id="abc123def456"
-
-# Count errors per service over time
-sum by (service) (count_over_time({job="docker"} | json | level="ERROR" [5m]))
-
-# Find slow requests (duration > 1000ms)
-{service="api-gateway"} | json | duration_ms > 1000
-
-# Parse and filter by specific field values
-{service="payment-service"} | json | error_code="CARD_DECLINED" | line_format "{{.order_id}} - {{.error_message}}"
-```
-
-### C. CloudWatch Logs
-
-```python
-# AWS CloudWatch structured logging
-import watchtower
-import logging
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
-handler = watchtower.CloudWatchLogHandler(
-    log_group='/application/order-service',
-    stream_name='{strftime:%Y-%m-%d}',
-    create_log_group=True,
-)
-
-# Use JSON formatter
-class JSONFormatter(logging.Formatter):
-    def format(self, record):
-        log_entry = {
-            'timestamp': self.formatTime(record),
-            'level': record.levelname,
-            'logger': record.name,
-            'message': record.getMessage(),
-        }
-        if hasattr(record, 'extra'):
-            log_entry.update(record.extra)
-        return json.dumps(log_entry)
-
-handler.setFormatter(JSONFormatter())
-logger.addHandler(handler)
-```
-
----
-
-## 7. Performance Considerations
-
-### A. Async Logging
-
-```python
-# Use async logging for high-throughput applications
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
-
-class AsyncLogger:
-    def __init__(self, logger, max_workers=4):
-        self.logger = logger
-        self.executor = ThreadPoolExecutor(max_workers=max_workers)
-        self.queue = asyncio.Queue()
-
-    async def log(self, level, message, **kwargs):
-        # Non-blocking log submission
-        await self.queue.put((level, message, kwargs))
-
-    async def process_logs(self):
-        while True:
-            level, message, kwargs = await self.queue.get()
-            await asyncio.get_event_loop().run_in_executor(
-                self.executor,
-                lambda: getattr(self.logger, level)(message, **kwargs)
-            )
-```
-
-### B. Log Sampling
-
-```python
-# Sample high-volume logs to reduce overhead
-import random
-
-class SampledLogger:
-    def __init__(self, logger, sample_rate=0.1):
-        self.logger = logger
-        self.sample_rate = sample_rate
-
-    def debug(self, message, **kwargs):
-        # Sample debug logs
-        if random.random() < self.sample_rate:
-            kwargs['sampled'] = True
-            kwargs['sample_rate'] = self.sample_rate
-            self.logger.debug(message, **kwargs)
-
-    def info(self, message, **kwargs):
-        # Always log info and above
-        self.logger.info(message, **kwargs)
-
-    def error(self, message, **kwargs):
-        # Always log errors
-        self.logger.error(message, **kwargs)
-```
-
-### C. Buffered Logging
-
-```python
-# Buffer logs and flush periodically
-class BufferedLogger:
-    def __init__(self, logger, buffer_size=100, flush_interval=5):
-        self.logger = logger
-        self.buffer = []
-        self.buffer_size = buffer_size
-        self.flush_interval = flush_interval
-        self._start_flush_timer()
-
-    def log(self, level, message, **kwargs):
-        self.buffer.append((level, message, kwargs))
-        if len(self.buffer) >= self.buffer_size:
-            self.flush()
-
-    def flush(self):
-        for level, message, kwargs in self.buffer:
-            getattr(self.logger, level)(message, **kwargs)
-        self.buffer.clear()
-
-    def _start_flush_timer(self):
-        import threading
-        def flush_periodically():
-            while True:
-                time.sleep(self.flush_interval)
-                self.flush()
-        threading.Thread(target=flush_periodically, daemon=True).start()
-```
+Trace sampling (head/tail) is owned by `observability.md` — keep log sampling and trace sampling decisions aligned but don't restate trace policy here.
 
 ---
 
 ## 8. Error Logging
 
-### A. Exception Logging
+The error-handling *strategy* (wrap, propagate, retry, fail) is owned by `error-handling.md`. The **logging** rules:
 
-```python
-import traceback
-import sys
-
-def log_exception(logger, exception, context=None):
-    """Log exception with full context."""
-    exc_type, exc_value, exc_tb = sys.exc_info()
-
-    logger.error("exception_occurred",
-        error_type=type(exception).__name__,
-        error_message=str(exception),
-        stack_trace=traceback.format_exc(),
-        context=context or {},
-        # Include cause chain
-        cause=str(exception.__cause__) if exception.__cause__ else None,
-    )
-
-# Usage
-try:
-    process_order(order)
-except PaymentError as e:
-    log_exception(logger, e, context={
-        "order_id": order.id,
-        "user_id": order.user_id,
-        "operation": "payment_processing"
-    })
-    raise
-
-# Context manager for automatic exception logging
-from contextlib import contextmanager
-
-@contextmanager
-def log_exceptions(logger, operation, **context):
-    try:
-        yield
-    except Exception as e:
-        log_exception(logger, e, context={
-            "operation": operation,
-            **context
-        })
-        raise
-
-# Usage
-with log_exceptions(logger, "order_processing", order_id=order.id):
-    process_order(order)
-```
-
-### B. Error Aggregation
-
-```python
-# Track error rates for alerting
-from collections import defaultdict
-from datetime import datetime, timedelta
-
-class ErrorTracker:
-    def __init__(self, window_seconds=60):
-        self.errors = defaultdict(list)
-        self.window = timedelta(seconds=window_seconds)
-
-    def record_error(self, error_type):
-        now = datetime.now()
-        self.errors[error_type].append(now)
-        self._cleanup(error_type, now)
-
-    def _cleanup(self, error_type, now):
-        cutoff = now - self.window
-        self.errors[error_type] = [
-            t for t in self.errors[error_type] if t > cutoff
-        ]
-
-    def get_error_rate(self, error_type):
-        now = datetime.now()
-        self._cleanup(error_type, now)
-        return len(self.errors[error_type]) / self.window.total_seconds()
-
-    def should_alert(self, error_type, threshold=0.1):
-        return self.get_error_rate(error_type) > threshold
-```
+- Log a handled error **once**, at the boundary that actually handles it, with `error_type`, `error_message`, `error_code`, the full `cause` chain, and `stack_trace` (LOG-ERR-01). Do **not** log-and-rethrow at every layer — that produces N copies of one failure and pollutes error-rate metrics.
+- Attach the request context (already bound via §5) plus operation-specific fields (`order_id`, `operation`).
+- Stack traces: include for ERROR/FATAL. They are generally not needed (and noisy) for WARN.
+- Use the level matrix: a caught, recovered condition is WARN, not ERROR.
+- Deriving alerting from error logs (rates, thresholds) is an alerting/observability concern — define those rules in `observability.md`, not as bespoke in-app counters.
 
 ---
 
-## 9. Log Retention and Rotation
+## 9. Output, Shipping & Retention
 
-### A. Rotation Configuration
-
-```python
-# Python logging with rotation
-import logging
-from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
-
-# Size-based rotation
-size_handler = RotatingFileHandler(
-    'app.log',
-    maxBytes=10*1024*1024,  # 10 MB
-    backupCount=5
-)
-
-# Time-based rotation
-time_handler = TimedRotatingFileHandler(
-    'app.log',
-    when='midnight',
-    interval=1,
-    backupCount=30  # Keep 30 days
-)
-```
-
-### B. Retention Policy
-
-```yaml
-# Log retention policy by level and environment
-retention:
-  production:
-    error: 90d    # Keep error logs for 90 days
-    warn: 30d     # Keep warnings for 30 days
-    info: 14d     # Keep info logs for 14 days
-    debug: 0d     # Don't store debug in production
-
-  staging:
-    error: 30d
-    warn: 14d
-    info: 7d
-    debug: 3d
-
-  development:
-    error: 7d
-    warn: 3d
-    info: 1d
-    debug: 1d
-```
+- **Twelve-factor logs** (LOG-OUT-01): the app writes an event stream to stdout/stderr and is done. It does not open files, rotate, or push to Elasticsearch/Loki/CloudWatch directly. The platform (sidecar/agent/driver — promtail, Fluent Bit, Filebeat, the container runtime, CloudWatch agent) collects, parses, ships, and stores.
+- **Parsing**: because records are already JSON (LOG-FMT-01), collectors index fields directly with no fragile regex; map `level`, `service`, `trace_id` to searchable labels/fields.
+- **Retention** (LOG-RET-01): set per level and environment at the platform, e.g. prod ERROR 90d / WARN 30d / INFO 14d / DEBUG off; tighten in lower environments. Retention is a storage/compliance policy, configured where logs are stored — not in application code.
+- **Local files only as a fallback**: if a runtime genuinely cannot stream (rare), use the platform's rotating handler — but prefer fixing the deployment so stdout is collected.
 
 ---
 
-## 10. Alerting on Logs
+## Deployment Checklist
 
-### A. Alert Conditions
+Generated from §2 — one box per requirement ID. No new requirements.
 
-```yaml
-# Alert rules based on log patterns
-alerts:
-  - name: high_error_rate
-    condition: |
-      count(level="ERROR") / count(*) > 0.05
-      over 5m window
-    severity: critical
-    notify: [pagerduty, slack]
-
-  - name: payment_failures
-    condition: |
-      count(message="payment_failed") > 10
-      over 1m window
-    severity: high
-    notify: [slack]
-
-  - name: security_events
-    condition: |
-      any(message contains "authentication_failed"
-          AND count > 5
-          AND same user_id)
-      over 1m window
-    severity: critical
-    notify: [security-team, pagerduty]
-
-  - name: slow_requests
-    condition: |
-      percentile(duration_ms, 95) > 5000
-      over 5m window
-    severity: warning
-    notify: [slack]
-```
+- [ ] LOG-FMT-01/02 — JSON-per-line, no interpolated free-text messages
+- [ ] LOG-FMT-03 — timestamps RFC 3339 / ISO 8601, UTC, ms precision
+- [ ] LOG-FMT-04 — `timestamp`/`level`/`service`/`event` present on every record
+- [ ] LOG-LVL-01/02/03 — correct levels; level from config; DEBUG/TRACE off in prod
+- [ ] LOG-CID-01/02 — correlation/trace id on every request log, carried via context (not threaded)
+- [ ] LOG-CID-03 — inbound honored, outbound propagated end-to-end (see `observability.md`)
+- [ ] LOG-HYG-01/02 — no secrets, no raw PII (see `secure-coding.md`)
+- [ ] LOG-HYG-03 — centralized redaction processor present and unit-tested
+- [ ] LOG-ERR-01 — errors logged once at the boundary with cause chain + stack (see `error-handling.md`)
+- [ ] LOG-PERF-01/02 — non-blocking sink; high-volume logs sampled/rate-limited
+- [ ] LOG-OUT-01 — app streams to stdout; platform handles rotation/shipping
+- [ ] LOG-RET-01 — per-level/per-env retention policy defined at the platform
 
 ---
-
-## 11. Deployment Checklist
-
-### Configuration
-- [ ] Structured logging implemented (JSON format)
-- [ ] Log levels configured appropriately per environment
-- [ ] Correlation IDs (trace_id) implemented
-- [ ] Timestamp format is ISO 8601 with timezone
-
-### Security
-- [ ] Sensitive data redaction implemented
-- [ ] No passwords, tokens, or PII in logs
-- [ ] Log access controls configured
-- [ ] Audit logging enabled for compliance
-
-### Performance
-- [ ] Async logging for high-throughput services
-- [ ] Log sampling configured for debug/trace levels
-- [ ] Log rotation configured
-- [ ] Buffer sizes optimized
-
-### Operations
-- [ ] Log aggregation configured (ELK, CloudWatch, etc.)
-- [ ] Alerting rules defined
-- [ ] Retention policies set
-- [ ] Dashboard created for key metrics
-
----
-
-## 12. Quick Reference
-
-```python
-# Log level decision tree
-"""
-Is the application unable to continue?
-  YES → FATAL/CRITICAL
-
-Did an operation fail?
-  YES → ERROR
-
-Is something unusual but handled?
-  YES → WARN
-
-Is it a normal business event?
-  YES → INFO
-
-Is it technical debugging info?
-  YES → DEBUG
-
-Is it extremely detailed tracing?
-  YES → TRACE
-"""
-
-# Required fields checklist
-"""
-Every log: timestamp, level, service, message
-Requests: + trace_id, user_id
-Errors: + error_type, error_message, stack_trace
-Performance: + duration_ms
-"""
-
-# Common structured fields
-"""
-timestamp, level, service, version, environment
-trace_id, span_id, request_id, user_id
-error_type, error_message, error_code, stack_trace
-duration_ms, status_code, method, path
-"""
-```
-
----
-
-## 13. Why This Configuration Works
-
-- **Structured JSON logging enables machine analysis**: Consistent JSON-formatted logs with standardized fields allow log aggregation tools (ELK, Loki, CloudWatch) to index, search, and alert on specific fields without fragile regex parsing, turning logs from text files into queryable data.
-- **Correlation IDs connect distributed requests**: Including trace and request IDs in every log entry makes it possible to reconstruct the full journey of a request across multiple services, transforming cross-service debugging from guesswork into a deterministic trace-following exercise.
-- **Automatic redaction prevents data breaches**: Pattern-based redaction of passwords, tokens, credit card numbers, and PII ensures that sensitive data never reaches log storage, protecting against both compliance violations and the security risk of credentials appearing in log aggregation systems.
-- **Consistent log levels drive effective alerting**: A well-defined level hierarchy (FATAL through TRACE) with clear usage guidelines ensures that alerts fire on genuinely actionable events. When INFO means business events and ERROR means operation failures, monitoring rules become simple and reliable.
-- **Performance-conscious patterns prevent logging from becoming a bottleneck**: Async logging, sampling for high-volume debug entries, and buffered writes ensure that observability does not degrade the very application performance it is meant to monitor.
-
----
-
-**Last Updated:** 2026-01-31
-**Version:** 1.0
-**Maintainer:** SRE Team
-
-
 **End of Logging Guidelines**

@@ -1,838 +1,307 @@
 # Accessibility (a11y) Guidelines
-Mandatory standards for building accessible web applications following WCAG 2.1 AA guidelines. Inclusive, WCAG-compliant. axe-core, WAVE, Lighthouse, NVDA, VoiceOver, JAWS.
+Mandatory, auditable standards for accessible web and app UIs: WCAG 2.2 AA, semantic structure, ARIA, keyboard & focus, contrast, screen-reader support, automated + manual a11y testing. axe-core, Lighthouse, Pa11y, NVDA/VoiceOver/JAWS.
+
+---
+name: accessibility
+title: Accessibility (a11y) Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: cross-cutting
+tools: [axe-core, "@axe-core/playwright", jest-axe, lighthouse, pa11y, eslint-plugin-jsx-a11y, NVDA, VoiceOver, JAWS]
+requires: []
+recommends:
+  - html
+  - css
+  - ui
+  - e2e-testing
+provides:
+  - wcag
+  - aria
+  - keyboard-nav
+  - a11y-testing
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide is the canonical owner of accessibility. Semantic markup detail lives in [`html.md`](guides://html.md), visual/contrast styling in [`css.md`](guides://css.md), component patterns in [`ui.md`](guides://ui.md), and a11y test automation in [`e2e-testing.md`](guides://e2e-testing.md).
 
 ---
 
-**Agent Profile**: The Accessibility Expert
-**Role**: Senior Accessibility Engineer & Inclusive Design Advocate
-**Objective**: Generate inclusive, WCAG-compliant interfaces that work for all users regardless of ability.
-**Tools**: axe-core, WAVE, Lighthouse, NVDA, VoiceOver, JAWS.
+## 0. Prerequisites & References
+
+This guide owns the accessibility *rules*. The guides below own the *mechanics* it builds on — fetch them when the task touches their surface; do not restate them here.
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`html.md`](guides://html.md) — semantic elements, landmarks, document structure, `<track>`/media markup. *(a11y binding: semantics MUST carry meaning, not just layout.)*
+> - [`css.md`](guides://css.md) — visual styling, focus-visible styling, `prefers-reduced-motion`, responsive/zoom layout. *(a11y binding: never remove focus outline without a replacement; meet contrast in §6.)*
+> - [`ui.md`](guides://ui.md) — reusable component patterns (dialog, menu, combobox, tabs). *(a11y binding: components MUST implement the WAI-ARIA Authoring Practices keyboard model.)*
+> - [`e2e-testing.md`](guides://e2e-testing.md) — running automated a11y scans in the E2E pipeline. *(a11y binding: gate the build on `@axe-core/playwright`, see §10.)*
+
+> 📎 **SEE ALSO:** WAI-ARIA Authoring Practices Guide (APG) for canonical keyboard interaction patterns; WCAG 2.2 spec and Understanding documents for normative success criteria.
 
 ---
 
 ## 1. Core Philosophies: A11Y-FIRST
 
-- **A**ll users: Design for everyone from the start
-- **1**st class: Accessibility is a requirement, not an afterthought
-- **1** experience: Same content and functionality for all users
-- **Y**es to testing: Test with real assistive technologies
+Accessibility-specific principles only. Markup, styling, component, and test mechanics come from §0.
+
+- **A**ll users from the start: accessibility is a requirement, not a retrofit; bake it into design and the first commit.
+- **1** equivalent experience: same content and functionality for everyone — never a degraded "accessible version".
+- **1**st, native HTML: prefer a native element to ARIA every time; ARIA is a patch for what HTML cannot express (§7).
+- **Y**es to real testing: automated scans catch ~30–50% of issues; the rest require keyboard-only and screen-reader passes (§10–11).
+
+**Verified UI**: Agent-generated interfaces MUST pass every gate in §2 before delivery.
 
 ---
 
-## 2. WCAG 2.1 Principles (MANDATORY)
+## 2. Requirements (MANDATORY, auditable)
 
-### A. POUR Framework
+RFC-2119 keywords. IDs `A11Y-<TOPIC>-<NN>`. Each row has a binary gate. WCAG criteria are cited by number; "AA" is the conformance target unless stated.
 
-```markdown
-## Perceivable
-Information and UI components must be presentable in ways users can perceive.
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| A11Y-WCAG-01 | UI MUST meet WCAG 2.2 Level AA for every shipped page/flow | `npx lighthouse <url> --only-categories=accessibility` + manual §11 | a11y score 100 & §11 checklist complete |
+| A11Y-WCAG-02 | New AA criteria in WCAG 2.2 MUST hold: focus not obscured (2.4.11), target size ≥ 24×24 CSS px (2.5.8), dragging has a single-pointer alt (2.5.7), no cognitive-test auth without alt (3.3.8) | review + axe scan | all four satisfied |
+| A11Y-SEM-01 | Structure MUST use semantic elements & one logical heading order; no level skips (1.3.1, 2.4.6) (markup: see `html.md`) | `axe` rule `heading-order`, `landmark-*` | 0 violations |
+| A11Y-IMG-01 | Every `<img>`/icon MUST have a correct text alternative; decorative = `alt=""` (1.1.1) | `axe` rule `image-alt` | 0 violations |
+| A11Y-MEDIA-01 | Video MUST have captions; audio MUST have a transcript; no autoplay > 3s without a stop control (1.2.x, 1.4.2) (markup: see `html.md`) | review of `<track>`/transcript | present for all media |
+| A11Y-FORM-01 | Every control MUST have a programmatic label & correct `autocomplete`; errors MUST be programmatically associated (1.3.1, 3.3.1/2, 1.3.5) | `axe` rule `label`, manual SR pass | 0 violations |
+| A11Y-KBD-01 | All functionality MUST be keyboard-operable with no traps; focus order logical (2.1.1, 2.1.2, 2.4.3) | manual keyboard pass §11 | full operation, no trap |
+| A11Y-KBD-02 | Visible focus indicator MUST be present and not obscured (2.4.7, 2.4.11) (styling: see `css.md`) | manual + `:focus-visible` review | indicator visible everywhere |
+| A11Y-ARIA-01 | ARIA MUST be valid, follow the 5 rules (§7), and prefer native HTML; no invalid roles/attrs/refs (4.1.2) | `axe` rules `aria-*` | 0 violations |
+| A11Y-ARIA-02 | Status changes MUST be announced via live regions / `role=alert`/`status` (4.1.3) | manual SR pass | announced |
+| A11Y-COLOR-01 | Contrast MUST meet AA: 4.5:1 text, 3:1 large text & UI/graphics (1.4.3, 1.4.11) (palette: see `css.md`) | `axe` rule `color-contrast` + manual graphics | 0 violations |
+| A11Y-COLOR-02 | Information MUST NOT be conveyed by color alone (1.4.1) | review | text/icon backup present |
+| A11Y-ZOOM-01 | Content MUST reflow & remain usable at 400% zoom / 320px width; text resizable to 200% (1.4.4, 1.4.10) (layout: see `css.md`) | resize/zoom check | no loss/clipping, no 2-axis scroll |
+| A11Y-MOTION-01 | Respect `prefers-reduced-motion`; no content flashes > 3×/s (2.3.1, 2.3.3) | review + media query | honored |
+| A11Y-TEST-01 | An automated a11y scan MUST run in CI and gate the build (see `e2e-testing.md`) | `@axe-core/playwright` / `jest-axe` in pipeline | 0 violations, build fails on regress |
+| A11Y-TEST-02 | `eslint-plugin-jsx-a11y` (or framework equivalent) MUST pass clean for component code | `eslint` | exit 0 |
 
-## Operable
-UI components and navigation must be operable by all users.
-
-## Understandable
-Information and UI operation must be understandable.
-
-## Robust
-Content must be robust enough to work with assistive technologies.
-```
-
----
-
-## 3. Semantic HTML (MANDATORY)
-
-### A. Document Structure
-
-```html
-<!-- ✅ CORRECT: Semantic HTML structure -->
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Page Title - Site Name</title>
-</head>
-<body>
-  <a href="#main-content" class="skip-link">Skip to main content</a>
-
-  <header role="banner">
-    <nav aria-label="Main navigation">
-      <ul>
-        <li><a href="/" aria-current="page">Home</a></li>
-        <li><a href="/products">Products</a></li>
-        <li><a href="/about">About</a></li>
-      </ul>
-    </nav>
-  </header>
-
-  <main id="main-content" role="main">
-    <article>
-      <h1>Page Title</h1>
-      <p>Main content...</p>
-
-      <section aria-labelledby="section-heading">
-        <h2 id="section-heading">Section Title</h2>
-        <p>Section content...</p>
-      </section>
-    </article>
-
-    <aside aria-label="Related content">
-      <h2>Related Articles</h2>
-      <!-- Related content -->
-    </aside>
-  </main>
-
-  <footer role="contentinfo">
-    <nav aria-label="Footer navigation">
-      <!-- Footer links -->
-    </nav>
-    <p>&copy; 2024 Company Name</p>
-  </footer>
-</body>
-</html>
-
-<!-- ❌ WRONG: Div soup with no semantics -->
-<div class="header">
-  <div class="nav">
-    <div class="nav-item">Home</div>
-  </div>
-</div>
-<div class="main">
-  <div class="title">Page Title</div>
-</div>
-```
-
-### B. Heading Hierarchy
-
-```html
-<!-- ✅ CORRECT: Logical heading hierarchy -->
-<h1>Main Page Title</h1>
-  <h2>First Section</h2>
-    <h3>Subsection</h3>
-    <h3>Another Subsection</h3>
-  <h2>Second Section</h2>
-    <h3>Subsection</h3>
-      <h4>Deep Subsection</h4>
-
-<!-- ❌ WRONG: Skipping heading levels -->
-<h1>Main Page Title</h1>
-<h3>Section</h3>  <!-- Skipped h2 -->
-<h5>Subsection</h5>  <!-- Skipped h4 -->
-
-<!-- ❌ WRONG: Using headings for styling -->
-<h3>This text just needs to be big</h3>  <!-- Use CSS instead -->
-```
+> **Forbidden**: removing focus outlines without an equivalent indicator; `<div>`/`<span>` as a button or link; positive `tabindex`; placeholder used as the only label; `aria-hidden="true"` on a focusable element; conveying required/error/status by color alone; shipping media without captions/transcript.
 
 ---
 
-## 4. Images and Media (MANDATORY)
+## 3. Conformance Target & Scope
 
-### A. Alt Text
-
-```html
-<!-- ✅ CORRECT: Descriptive alt text -->
-<img src="chart.png" alt="Bar chart showing sales increased 25% from Q1 to Q2">
-
-<!-- ✅ CORRECT: Decorative images -->
-<img src="decorative-border.png" alt="" role="presentation">
-
-<!-- ✅ CORRECT: Complex images with long description -->
-<figure>
-  <img
-    src="complex-diagram.png"
-    alt="System architecture diagram"
-    aria-describedby="diagram-description"
-  >
-  <figcaption id="diagram-description">
-    The system consists of three main components: a React frontend,
-    a Node.js API server, and a PostgreSQL database. The frontend
-    communicates with the API via REST endpoints..
-  </figcaption>
-</figure>
-
-<!-- ❌ WRONG: Non-descriptive alt text -->
-<img src="chart.png" alt="chart">
-<img src="chart.png" alt="image">
-<img src="chart.png" alt="chart.png">
-
-<!-- ❌ WRONG: Missing alt attribute -->
-<img src="important-info.png">
-```
-
-### B. Video and Audio
-
-```html
-<!-- ✅ CORRECT: Accessible video -->
-<video controls>
-  <source src="video.mp4" type="video/mp4">
-  <track
-    kind="captions"
-    src="captions-en.vtt"
-    srclang="en"
-    label="English captions"
-    default
-  >
-  <track
-    kind="descriptions"
-    src="descriptions-en.vtt"
-    srclang="en"
-    label="English audio descriptions"
-  >
-  <!-- Fallback content -->
-  <p>Your browser doesn't support video.
-     <a href="video.mp4">Download the video</a> or
-     <a href="transcript.html">read the transcript</a>.
-  </p>
-</video>
-
-<!-- ✅ CORRECT: Audio with transcript -->
-<audio controls aria-describedby="audio-transcript">
-  <source src="podcast.mp3" type="audio/mpeg">
-</audio>
-<div id="audio-transcript">
-  <h3>Transcript</h3>
-  <p>Full transcript text...</p>
-</div>
-```
+- **Target: WCAG 2.2 Level AA** for all public and authenticated UI. Pursue AAA criteria (e.g. 7:1 contrast, 1.4.6) where cheap, but AA is the gate.
+- WCAG 2.2 is backward-compatible with 2.1; meeting 2.2 AA meets 2.1 AA. It removed 4.1.1 (Parsing) and added six new criteria — the four AA ones are gated in A11Y-WCAG-02.
+- **POUR** is the mental model, not a checklist:
+  - **Perceivable** — text alternatives, captions, contrast, reflow.
+  - **Operable** — keyboard, no traps, enough time, target size, no seizure risk.
+  - **Understandable** — readable, predictable, input assistance.
+  - **Robust** — valid, name/role/value exposed to AT, status messages.
+- Legal baselines (ADA, EU EAA/EN 301 549, Section 508) all reference WCAG AA; meeting §2 satisfies them. Publish an accessibility statement and keep a VPAT/known-issues log (§11).
 
 ---
 
-## 5. Forms (MANDATORY)
+## 4. Semantic Structure & Landmarks
 
-### A. Form Labels and Structure
+Markup syntax is owned by [`html.md`](guides://html.md). The a11y *rules* on top of it:
+
+- Use one `<main>`, a single top-level `<h1>`, and a heading outline with **no skipped levels** — headings convey structure to screen-reader users who navigate by them.
+- Map regions to native landmark elements (`header`/`banner`, `nav`, `main`, `aside`/`complementary`, `footer`/`contentinfo`). Redundant `role` attributes on these are unnecessary in modern HTML — omit them.
+- Disambiguate repeated landmarks with `aria-label` (e.g. `<nav aria-label="Pagination">` vs `<nav aria-label="Primary">`).
+- Provide a **skip link** as the first focusable element so keyboard users bypass repeated nav:
 
 ```html
-<!-- ✅ CORRECT: Properly labeled form -->
-<form>
-  <fieldset>
-    <legend>Personal Information</legend>
+<a href="#main" class="skip-link">Skip to main content</a>
+...
+<main id="main" tabindex="-1">…</main>
+```
+Style it visible on `:focus` (positioning/animation: see [`css.md`](guides://css.md)).
 
-    <div class="form-group">
-      <label for="full-name">Full Name <span aria-hidden="true">*</span></label>
-      <input
-        type="text"
-        id="full-name"
-        name="fullName"
-        required
-        aria-required="true"
-        autocomplete="name"
-      >
-    </div>
+- Set `<html lang>` (and `lang` on inline foreign-language passages) so AT picks the right pronunciation (3.1.1/2).
 
-    <div class="form-group">
-      <label for="email">Email Address <span aria-hidden="true">*</span></label>
-      <input
-        type="email"
-        id="email"
-        name="email"
-        required
-        aria-required="true"
-        aria-describedby="email-hint"
-        autocomplete="email"
-      >
-      <p id="email-hint" class="hint">We'll never share your email.</p>
-    </div>
-  </fieldset>
+---
 
-  <fieldset>
-    <legend>Notification Preferences</legend>
+## 5. Names, Forms & Error Handling
 
-    <div class="checkbox-group">
-      <input type="checkbox" id="email-updates" name="emailUpdates">
-      <label for="email-updates">Receive email updates</label>
-    </div>
+A control's **accessible name** is what AT announces. Compute it from a `<label for>`, `aria-labelledby`, `aria-label`, or content — in that priority. Rules:
 
-    <div class="checkbox-group">
-      <input type="checkbox" id="sms-updates" name="smsUpdates">
-      <label for="sms-updates">Receive SMS updates</label>
-    </div>
-  </fieldset>
+- Every input/select/textarea MUST have a programmatic label. Placeholder text is **not** a label (it vanishes on input and often fails contrast).
+- Add the correct `autocomplete` token (`name`, `email`, `current-password`, …) — required for 1.3.5 and a usability win.
+- Group related controls (radios, address fieldsets) in `<fieldset>` with a `<legend>`.
+- Icon-only controls MUST get a name via `aria-label`; decorative inline SVG gets `aria-hidden="true"` + `focusable="false"`.
 
-  <button type="submit">Submit</button>
-</form>
-
-<!-- ❌ WRONG: Missing labels -->
-<input type="text" placeholder="Enter name">
-
-<!-- ❌ WRONG: Label not associated -->
-<label>Name</label>
-<input type="text">
+```html
+<label for="email">Email address</label>
+<input id="email" type="email" name="email" autocomplete="email"
+       aria-describedby="email-hint email-err" aria-invalid="true" required>
+<p id="email-hint">We never share your address.</p>
+<p id="email-err" role="alert">Enter a valid email address.</p>
 ```
 
-### B. Error Handling
+Error handling (3.3.1/2/3):
+- Mark invalid fields with `aria-invalid="true"` and point `aria-describedby` at the message.
+- Announce the message in an `role="alert"` (assertive) or live region so it reaches AT without a focus move.
+- On submit failure, render an **error summary** at the top, focus it, and link each item to its field:
 
 ```html
-<!-- ✅ CORRECT: Accessible error messages -->
-<div class="form-group" aria-live="polite">
-  <label for="password">Password</label>
-  <input
-    type="password"
-    id="password"
-    name="password"
-    aria-invalid="true"
-    aria-describedby="password-error password-requirements"
-    required
-  >
-  <p id="password-error" class="error" role="alert">
-    Password must be at least 8 characters.
-  </p>
-  <ul id="password-requirements" class="requirements">
-    <li>At least 8 characters</li>
-    <li>At least one uppercase letter</li>
-    <li>At least one number</li>
-  </ul>
-</div>
-
-<!-- ✅ CORRECT: Form-level error summary -->
-<div role="alert" aria-labelledby="error-summary-title" class="error-summary">
-  <h2 id="error-summary-title">There are 2 errors in your form</h2>
+<div role="alert" tabindex="-1" id="errors">
+  <h2>There are 2 problems</h2>
   <ul>
-    <li><a href="#email">Email address is required</a></li>
-    <li><a href="#password">Password is too short</a></li>
+    <li><a href="#email">Enter a valid email address</a></li>
+    <li><a href="#pwd">Password is too short</a></li>
   </ul>
 </div>
 ```
 
 ---
 
-## 6. Interactive Components (MANDATORY)
+## 6. Color, Contrast & Sensory
 
-### A. Buttons and Links
+Palette and styling mechanics are owned by [`css.md`](guides://css.md); the a11y thresholds and rules:
 
-```html
-<!-- ✅ CORRECT: Button for actions -->
-<button type="button" onclick="openModal()">
-  Open Settings
-</button>
-
-<!-- ✅ CORRECT: Link for navigation -->
-<a href="/settings">Go to Settings</a>
-
-<!-- ✅ CORRECT: Button with icon and text -->
-<button type="button">
-  <svg aria-hidden="true" focusable="false">...</svg>
-  <span>Delete Item</span>
-</button>
-
-<!-- ✅ CORRECT: Icon-only button with accessible name -->
-<button type="button" aria-label="Close dialog">
-  <svg aria-hidden="true" focusable="false">
-    <use href="#icon-close"></use>
-  </svg>
-</button>
-
-<!-- ❌ WRONG: Div as button -->
-<div onclick="submit()" class="button">Submit</div>
-
-<!-- ❌ WRONG: Link for action -->
-<a href="#" onclick="deleteItem()">Delete</a>
-
-<!-- ❌ WRONG: Empty link -->
-<a href="/page"><img src="icon.png"></a>
-```
-
-### B. Custom Components
-
-```tsx
-// ✅ CORRECT: Accessible custom dropdown
-function Dropdown({ label, options, value, onChange }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [activeIndex, setActiveIndex] = useState(-1);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const listRef = useRef<HTMLUListElement>(null);
-
-  const handleKeyDown = (e: KeyboardEvent) => {
-    switch (e.key) {
-      case 'ArrowDown':
-        e.preventDefault();
-        if (!isOpen) {
-          setIsOpen(true);
-        } else {
-          setActiveIndex(i => Math.min(i + 1, options.length - 1));
-        }
-        break;
-      case 'ArrowUp':
-        e.preventDefault();
-        setActiveIndex(i => Math.max(i - 1, 0));
-        break;
-      case 'Enter':
-      case ' ':
-        e.preventDefault();
-        if (isOpen && activeIndex >= 0) {
-          onChange(options[activeIndex]);
-          setIsOpen(false);
-          buttonRef.current?.focus();
-        } else {
-          setIsOpen(true);
-        }
-        break;
-      case 'Escape':
-        setIsOpen(false);
-        buttonRef.current?.focus();
-        break;
-      case 'Home':
-        e.preventDefault();
-        setActiveIndex(0);
-        break;
-      case 'End':
-        e.preventDefault();
-        setActiveIndex(options.length - 1);
-        break;
-    }
-  };
-
-  return (
-    <div className="dropdown">
-      <label id="dropdown-label">{label}</label>
-      <button
-        ref={buttonRef}
-        type="button"
-        aria-haspopup="listbox"
-        aria-expanded={isOpen}
-        aria-labelledby="dropdown-label"
-        onClick={() => setIsOpen(!isOpen)}
-        onKeyDown={handleKeyDown}
-      >
-        {value || 'Select an option'}
-        <span aria-hidden="true">▼</span>
-      </button>
-
-      {isOpen && (
-        <ul
-          ref={listRef}
-          role="listbox"
-          aria-labelledby="dropdown-label"
-          aria-activedescendant={activeIndex >= 0 ? `option-${activeIndex}` : undefined}
-          tabIndex={-1}
-        >
-          {options.map((option, index) => (
-            <li
-              key={option.value}
-              id={`option-${index}`}
-              role="option"
-              aria-selected={value === option.value}
-              className={index === activeIndex ? 'active' : ''}
-              onClick={() => {
-                onChange(option);
-                setIsOpen(false);
-              }}
-            >
-              {option.label}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-```
+- **Contrast (AA):** ≥ 4.5:1 normal text, ≥ 3:1 large text (≥ 24px, or ≥ 18.66px bold) and for UI component boundaries, focus indicators, and meaningful graphics (1.4.3, 1.4.11).
+- **Never rely on color alone** (1.4.1): pair it with text, an icon, a pattern, or `text-decoration`. Required fields, errors, statuses, chart series, and links-in-text all need a non-color signal.
+- Support both themes: verify contrast in light **and** dark mode; honor `prefers-color-scheme`.
+- **Motion:** respect `prefers-reduced-motion: reduce` — disable non-essential animation/parallax. Nothing may flash more than 3 times per second (2.3.1).
+- **Zoom/reflow:** content stays usable at 400% zoom and 320 CSS px wide with no loss of content or two-dimensional scrolling (1.4.10); use relative units so text scales to 200% (1.4.4).
 
 ---
 
-## 7. Keyboard Navigation (MANDATORY)
+## 7. ARIA — the five rules
 
-### A. Focus Management
+ARIA changes how AT perceives an element; misused, it makes things *worse* than no ARIA. Apply in order:
 
-```css
-/* ✅ CORRECT: Visible focus indicators */
-:focus {
-  outline: 2px solid #005fcc;
-  outline-offset: 2px;
-}
+1. **Use native HTML first.** A `<button>`, `<a href>`, `<input>`, `<select>`, `<dialog>` already carries role, state, and keyboard behavior. Reach for ARIA only when no native element fits.
+2. **Don't override native semantics.** Never `<h1 role="button">` — wrap a real `<button>` instead.
+3. **All interactive ARIA widgets MUST be keyboard-operable** per the WAI-ARIA APG pattern (§8).
+4. **Don't put `role="presentation"`/`aria-hidden="true"` on a focusable element** — you orphan it from AT while it still takes focus.
+5. **Every interactive element needs an accessible name** (§5).
 
-/* ✅ CORRECT: Enhanced focus for better visibility */
-:focus-visible {
-  outline: 3px solid #005fcc;
-  outline-offset: 2px;
-  box-shadow: 0 0 0 4px rgba(0, 95, 204, 0.3);
-}
+State & relationship attributes you actually maintain in sync with the UI:
 
-/* ❌ WRONG: Removing focus outline */
-:focus {
-  outline: none;
-}
+```text
+aria-expanded   aria-selected   aria-checked   aria-pressed   aria-current
+aria-disabled   aria-controls   aria-owns      aria-haspopup  aria-activedescendant
+aria-labelledby / aria-label / aria-describedby
 ```
 
-```tsx
-// ✅ CORRECT: Focus trap for modals
-function Modal({ isOpen, onClose, children }) {
-  const modalRef = useRef<HTMLDivElement>(null);
-  const previousActiveElement = useRef<HTMLElement | null>(null);
-
-  useEffect(() => {
-    if (isOpen) {
-      // Store current focus
-      previousActiveElement.current = document.activeElement as HTMLElement;
-
-      // Focus the modal
-      modalRef.current?.focus();
-
-      // Trap focus
-      const handleTab = (e: KeyboardEvent) => {
-        if (e.key !== 'Tab') return;
-
-        const focusableElements = modalRef.current?.querySelectorAll(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-        );
-
-        if (!focusableElements?.length) return;
-
-        const firstElement = focusableElements[0] as HTMLElement;
-        const lastElement = focusableElements[focusableElements.length - 1] as HTMLElement;
-
-        if (e.shiftKey && document.activeElement === firstElement) {
-          e.preventDefault();
-          lastElement.focus();
-        } else if (!e.shiftKey && document.activeElement === lastElement) {
-          e.preventDefault();
-          firstElement.focus();
-        }
-      };
-
-      document.addEventListener('keydown', handleTab);
-      return () => document.removeEventListener('keydown', handleTab);
-    } else {
-      // Restore focus
-      previousActiveElement.current?.focus();
-    }
-  }, [isOpen]);
-
-  if (!isOpen) return null;
-
-  return (
-    <div
-      ref={modalRef}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="modal-title"
-      tabIndex={-1}
-    >
-      <h2 id="modal-title">Modal Title</h2>
-      {children}
-      <button onClick={onClose}>Close</button>
-    </div>
-  );
-}
-```
-
-### B. Skip Links
+**Live regions** (4.1.3) announce dynamic changes without moving focus:
 
 ```html
-<!-- ✅ CORRECT: Skip links for keyboard users -->
-<body>
-  <a href="#main-content" class="skip-link">Skip to main content</a>
-  <a href="#main-nav" class="skip-link">Skip to navigation</a>
-
-  <header>
-    <nav id="main-nav">...</nav>
-  </header>
-
-  <main id="main-content">...</main>
-</body>
-
-<style>
-.skip-link {
-  position: absolute;
-  top: -40px;
-  left: 0;
-  background: #000;
-  color: #fff;
-  padding: 8px;
-  z-index: 100;
-  transition: top 0.3s;
-}
-
-.skip-link:focus {
-  top: 0;
-}
-</style>
+<div aria-live="polite" aria-atomic="true" class="sr-only"></div> <!-- non-urgent status -->
+<div role="alert"></div>                                          <!-- assertive, urgent -->
+<div role="status"></div>                                         <!-- polite status -->
 ```
+The region MUST exist in the DOM *before* you inject text; injecting region + text together may not announce.
 
 ---
 
-## 8. Color and Contrast (MANDATORY)
+## 8. Keyboard, Focus & Components
 
-### A. Contrast Requirements
+This guide owns the keyboard model; reusable component shells live in [`ui.md`](guides://ui.md). The rules every interactive widget MUST follow:
 
-```css
-/* WCAG AA requires:
-   - Normal text: 4.5:1 contrast ratio
-   - Large text (18pt+ or 14pt+ bold): 3:1 contrast ratio
-   - UI components: 3:1 contrast ratio
-*/
+- **Reachable & operable by keyboard alone**, in a logical Tab order. Never positive `tabindex`; use DOM order. `tabindex="-1"` only for programmatic focus targets (skip-link target, dialog, error summary).
+- Custom widgets implement the **WAI-ARIA APG** keyboard contract: Enter/Space activate; Arrow keys move within a composite (menu, listbox, tabs, radiogroup, grid); Esc closes/cancels; Home/End jump to ends; a roving `tabindex` or `aria-activedescendant` tracks the active item.
+- **Focus management on view change:** when opening a dialog, move focus into it; trap focus while open; on close, restore focus to the trigger. Prefer the native `<dialog>` element (`showModal()`) which gives focus trap, `Esc`, and inertness for free — only hand-roll a trap when `<dialog>` is unavailable.
+- **Never destroy the focus indicator.** If you restyle it, the replacement MUST meet 3:1 contrast and not be obscured by sticky headers (2.4.11). Use `:focus-visible` to scope rings to keyboard use (styling: see [`css.md`](guides://css.md)).
+- **Target size** ≥ 24×24 CSS px (AA, 2.5.8); 44×44 is the comfortable AAA/touch target.
+- Provide a **single-pointer / keyboard alternative** to any drag-and-drop interaction (2.5.7).
 
-/* ✅ CORRECT: Sufficient contrast */
-.text-primary {
-  color: #1a1a1a; /* On white: 16:1 ratio */
-}
-
-.text-secondary {
-  color: #595959; /* On white: 7:1 ratio */
-}
-
-.button-primary {
-  background-color: #0066cc;
-  color: #ffffff; /* 4.5:1 ratio */
-}
-
-/* ❌ WRONG: Insufficient contrast */
-.low-contrast {
-  color: #999999; /* On white: 2.85:1 - fails AA */
-}
-```
-
-### B. Don't Rely on Color Alone
-
-```html
-<!-- ✅ CORRECT: Color + icon + text -->
-<span class="status status-error">
-  <svg aria-hidden="true"><!-- Error icon --></svg>
-  Error: Invalid email address
-</span>
-
-<span class="status status-success">
-  <svg aria-hidden="true"><!-- Checkmark icon --></svg>
-  Success: Form submitted
-</span>
-
-<!-- ✅ CORRECT: Links distinguished by more than color -->
-<p>
-  Read our <a href="/terms" class="underline">Terms of Service</a>
-  for more information.
-</p>
-
-<style>
-a {
-  color: #0066cc;
-  text-decoration: underline;
-}
-</style>
-
-<!-- ❌ WRONG: Only color indicates state -->
-<span class="status-error" style="color: red;">Invalid</span>
-```
+Pattern reference instead of code dump: build dialogs, menus, comboboxes, tabs, and disclosures from the APG patterns and the shells in [`ui.md`](guides://ui.md); wire `aria-expanded`/`aria-controls`/`aria-activedescendant` per §7. Show only the framework binding, not a generic re-implementation.
 
 ---
 
-## 9. ARIA (MANDATORY)
+## 9. Screen-Reader Support
 
-### A. ARIA Rules
-
-```html
-<!-- Rule 1: Don't use ARIA if native HTML works -->
-<!-- ❌ WRONG -->
-<div role="button" tabindex="0">Click me</div>
-
-<!-- ✅ CORRECT -->
-<button>Click me</button>
-
-<!-- Rule 2: Don't change native semantics -->
-<!-- ❌ WRONG -->
-<h1 role="button">Heading</h1>
-
-<!-- ✅ CORRECT -->
-<h1><button>Heading</button></h1>
-
-<!-- Rule 3: Interactive elements must be keyboard accessible -->
-<!-- ❌ WRONG: Not keyboard accessible -->
-<span role="button" onclick="doSomething()">Click</span>
-
-<!-- ✅ CORRECT: Keyboard accessible -->
-<span
-  role="button"
-  tabindex="0"
-  onclick="doSomething()"
-  onkeydown="if(event.key === 'Enter' || event.key === ' ') doSomething()"
->
-  Click
-</span>
-```
-
-### B. Live Regions
-
-```html
-<!-- Announcements -->
-<div aria-live="polite" aria-atomic="true" class="sr-only">
-  <!-- Dynamic content announced when changed -->
-</div>
-
-<!-- Urgent alerts -->
-<div role="alert" aria-live="assertive">
-  Session expires in 2 minutes
-</div>
-
-<!-- Status messages -->
-<div role="status" aria-live="polite">
-  3 items added to cart
-</div>
-
-<!-- Progress updates -->
-<div
-  role="progressbar"
-  aria-valuenow="75"
-  aria-valuemin="0"
-  aria-valuemax="100"
-  aria-label="Upload progress"
->
-  75%
-</div>
-```
+- Decide what AT announces by controlling the **accessible name and description** (§5), not by stuffing visible text.
+- Use a visually-hidden `.sr-only` utility (clip, not `display:none`, which removes it from AT) for context only AT needs (e.g. "(opens in new tab)").
+- Hide purely decorative/duplicate content from AT with `aria-hidden="true"`; never hide content a user needs.
+- Test the real announcement, don't assume: at minimum one screen reader per platform pairing — **NVDA + Firefox/Chrome** (Windows), **VoiceOver + Safari** (macOS/iOS), **TalkBack + Chrome** (Android). JAWS for enterprise coverage.
 
 ---
 
-## 10. Testing (MANDATORY)
+## 10. Automated Testing
 
-### A. Automated Testing
+Test automation infrastructure is owned by [`e2e-testing.md`](guides://e2e-testing.md); the a11y bindings:
 
-```typescript
-// Jest + axe-core testing
+```bash
+npx eslint .                       # A11Y-TEST-02: eslint-plugin-jsx-a11y (or vuejs-accessibility, etc.)
+npx lighthouse <url> --only-categories=accessibility   # A11Y-WCAG-01 score
+npx pa11y <url>                    # CLI scan in CI
+```
+
+```ts
+// Component-level — jest-axe (A11Y-TEST-01)
 import { axe, toHaveNoViolations } from 'jest-axe';
-
 expect.extend(toHaveNoViolations);
-
-describe('Accessibility', () => {
-  test('home page has no accessibility violations', async () => {
-    const { container } = render(<HomePage />);
-    const results = await axe(container);
-    expect(results).toHaveNoViolations();
-  });
-
-  test('form has no accessibility violations', async () => {
-    const { container } = render(<SignupForm />);
-    const results = await axe(container);
-    expect(results).toHaveNoViolations();
-  });
+test('signup form has no a11y violations', async () => {
+  const { container } = render(<SignupForm />);
+  expect(await axe(container)).toHaveNoViolations();
 });
 
-// Playwright accessibility testing
-import { test, expect } from '@playwright/test';
+// E2E — @axe-core/playwright (A11Y-TEST-01; pipeline owned by e2e-testing.md)
 import AxeBuilder from '@axe-core/playwright';
-
-test.describe('Accessibility', () => {
-  test('should not have any automatically detectable accessibility issues', async ({ page }) => {
-    await page.goto('/');
-
-    const accessibilityScanResults = await new AxeBuilder({ page }).analyze();
-
-    expect(accessibilityScanResults.violations).toEqual([]);
-  });
+test('home page passes axe', async ({ page }) => {
+  await page.goto('/');
+  const { violations } = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag22aa']).analyze();
+  expect(violations).toEqual([]);
 });
 ```
 
-### B. Manual Testing Checklist
-
-```markdown
-## Keyboard Testing
-- [ ] All interactive elements reachable with Tab
-- [ ] Focus order is logical
-- [ ] Focus indicator is visible
-- [ ] No keyboard traps
-- [ ] Skip links work
-- [ ] Modals trap focus correctly
-
-## Screen Reader Testing
-- [ ] Page title is descriptive
-- [ ] Headings hierarchy is logical
-- [ ] Images have appropriate alt text
-- [ ] Forms have proper labels
-- [ ] Error messages are announced
-- [ ] Dynamic content updates are announced
-
-## Visual Testing
-- [ ] Text meets contrast requirements
-- [ ] Page is usable at 200% zoom
-- [ ] No horizontal scrolling at 320px width
-- [ ] Information not conveyed by color alone
-- [ ] Focus indicators visible
-
-## Cognitive Testing
-- [ ] Instructions are clear
-- [ ] Error messages are helpful
-- [ ] No time limits without warnings
-- [ ] Consistent navigation
-```
+Automated tools catch only structural issues (missing labels, contrast, invalid ARIA) — roughly a third to a half of WCAG. A green scan is necessary, not sufficient: §11 manual passes are mandatory.
 
 ---
 
-## 11. Deployment Checklist
+## 11. Manual Verification Protocol
 
-### Development
-- [ ] Semantic HTML used throughout
-- [ ] All images have alt text
-- [ ] Forms properly labeled
-- [ ] Keyboard navigation works
-- [ ] ARIA used correctly
+Run before presenting UI; automated green does not waive these.
 
-### Design
-- [ ] Color contrast meets AA
-- [ ] Focus states designed
-- [ ] Touch targets 44x44px minimum
-- [ ] Responsive down to 320px
+```text
+Keyboard-only (A11Y-KBD-01/02)
+- [ ] Every control reachable & operable by Tab/Shift+Tab/Arrows/Enter/Space/Esc
+- [ ] Focus order matches visual order; no keyboard trap
+- [ ] Focus indicator visible and not obscured everywhere
+- [ ] Skip link works; dialogs trap then restore focus
 
-### Testing
-- [ ] Automated tests pass
-- [ ] Screen reader tested
-- [ ] Keyboard-only testing done
-- [ ] Zoom testing complete
+Screen reader (A11Y-FORM-01, ARIA-01/02, MEDIA-01)
+- [ ] Page title, headings, landmarks announced & logical
+- [ ] Images/controls have correct names; errors & status announced
+- [ ] Dynamic updates reach AT via live regions
 
-### Documentation
-- [ ] VPAT completed
-- [ ] Accessibility statement published
-- [ ] Known issues documented
+Visual (COLOR-01/02, ZOOM-01, MOTION-01)
+- [ ] Contrast passes in light & dark; info not color-only
+- [ ] Usable at 400% zoom / 320px; text scales to 200%
+- [ ] reduced-motion honored; no >3Hz flashing
+
+Governance
+- [ ] VPAT / accessibility statement current; known issues logged
+```
 
 ---
 
 ## 12. Quick Reference
 
-```html
-<!-- Landmarks -->
-<header role="banner">
-<nav role="navigation">
-<main role="main">
-<aside role="complementary">
-<footer role="contentinfo">
-
-<!-- Live regions -->
-aria-live="polite"    <!-- Non-urgent updates -->
-aria-live="assertive" <!-- Urgent updates -->
-role="alert"          <!-- Important messages -->
-role="status"         <!-- Status updates -->
-
-<!-- Forms -->
-aria-required="true"
-aria-invalid="true"
-aria-describedby="hint-id"
-aria-errormessage="error-id"
-
-<!-- Interactive states -->
-aria-expanded="true|false"
-aria-selected="true|false"
-aria-checked="true|false|mixed"
-aria-pressed="true|false"
-aria-disabled="true"
-
-<!-- Relationships -->
-aria-labelledby="id"
-aria-describedby="id"
-aria-controls="id"
-aria-owns="id"
+```text
+Names      label[for] > aria-labelledby > aria-label > content
+States     aria-expanded / selected / checked / pressed / current / disabled / invalid
+Relations  aria-controls / owns / haspopup / activedescendant / describedby
+Live       aria-live=polite|assertive · role=alert · role=status
+Contrast   4.5:1 text · 3:1 large/UI/focus · target 24×24 (AA)
+WCAG 2.2   focus-not-obscured 2.4.11 · target-size 2.5.8 · dragging 2.5.7
+Keys       Enter/Space activate · Arrows within widget · Esc close · Home/End ends
 ```
 
 ---
 
-## 13. Why This Configuration Works
+## 13. Deployment Checklist
 
-- **Inclusive by default**: Designing for accessibility from the start means all users, including those with disabilities, can use the application without retrofitting. Retrofitting accessibility is significantly more expensive and error-prone than building it in from day one.
-- **Legal and compliance confidence**: Following WCAG 2.1 AA standards provides a defensible, internationally recognized baseline that satisfies accessibility regulations across jurisdictions (ADA, EAA, Section 508) and reduces legal risk.
-- **Improved usability for everyone**: Accessibility best practices like semantic HTML, clear focus management, and proper form labeling improve the experience for all users, not just those using assistive technologies. Keyboard navigation benefits power users, captions help in noisy environments, and good contrast helps in bright sunlight.
-- **Automated testing catches regressions early**: Integrating axe-core and Lighthouse into CI/CD ensures accessibility violations are caught during development rather than reported by users in production, keeping remediation costs low.
-- **Structured checklists reduce human error**: The combination of automated checks, manual testing protocols, and deployment checklists creates multiple layers of verification, ensuring that no single oversight results in an inaccessible experience.
+Generated from §2 — one box per requirement ID. No new requirements.
+
+- [ ] A11Y-WCAG-01 — WCAG 2.2 AA met; Lighthouse a11y 100
+- [ ] A11Y-WCAG-02 — new 2.2 AA criteria (2.4.11 / 2.5.8 / 2.5.7 / 3.3.8) satisfied
+- [ ] A11Y-SEM-01 — semantic structure & heading order, 0 axe violations
+- [ ] A11Y-IMG-01 — correct text alternatives on all images/icons
+- [ ] A11Y-MEDIA-01 — captions/transcripts present; no rogue autoplay
+- [ ] A11Y-FORM-01 — labels, autocomplete, associated errors
+- [ ] A11Y-KBD-01/02 — full keyboard operation, no trap, visible focus
+- [ ] A11Y-ARIA-01/02 — valid ARIA, native-first, status announced
+- [ ] A11Y-COLOR-01/02 — contrast AA; never color-alone
+- [ ] A11Y-ZOOM-01 — reflow at 400% / 320px, text to 200%
+- [ ] A11Y-MOTION-01 — reduced-motion honored, no seizure-risk flashing
+- [ ] A11Y-TEST-01/02 — CI axe scan gates build; jsx-a11y lint clean
+- [ ] Agent ran every §10 command and the §11 manual passes, documenting fixes
 
 ---
-
-**Last Updated:** 2026-01-31
-**Version:** 1.0
-**Maintainer:** UX Team
-
-
 **End of Accessibility (a11y) Guidelines**

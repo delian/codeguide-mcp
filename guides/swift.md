@@ -1,1089 +1,321 @@
 # Swift Development Guidelines
-Mandatory standards for Swift development, following Apple's guidelines and community best practices. Xcode, Swift 6.0+, SwiftLint, SwiftFormat, Instruments.
+Mandatory coding standards for Swift: value-typed, optional-safe, protocol-oriented, concurrency-safe. Swift 6.x, SwiftPM, Swift Testing, swiftformat, swiftlint.
+
+---
+name: swift
+title: Swift Development Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: language
+tools: [swift@6.0, swiftpm, swift-testing, xctest, swiftformat, swiftlint]
+requires:
+  - tdd
+  - secure-coding
+  - error-handling
+recommends:
+  - ios
+  - hexagonal
+  - comments
+  - parallelism
+provides:
+  - value-types
+  - optionals
+  - protocol-oriented
+  - swift-concurrency
+  - arc-memory
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide covers only what is unique to Swift the language. Apple-platform UI (UIKit/SwiftUI) lives in [`ios.md`](guides://ios.md).
 
 ---
 
-**Agent Profile**: The Swift Expert
-**Role**: Senior iOS/macOS Developer & Swift Architect
-**Objective**: Generate clean, safe, and performant Swift code following Apple's Human Interface Guidelines and Swift API Design Guidelines.
-**Tools**: Xcode, Swift 6.0+, SwiftLint, SwiftFormat, Instruments.
+## 0. Prerequisites & References
+
+Fetch and apply these **before** generating Swift code. Their rules are assumed below and not repeated.
+
+> 📎 **REQUIRED — fetch & apply first:**
+> - [`tdd.md`](guides://tdd.md) — test-first, Red-Green-Refactor, regression-test-before-fix, coverage. *(Swift binding: runner is `swift test`; frameworks are Swift Testing / XCTest.)*
+> - [`secure-coding.md`](guides://secure-coding.md) — supply chain, secrets, CVE policy. *(Swift binding: pin SPM deps, scan with Snyk/OWASP/Trivy, Keychain for secrets.)*
+> - [`error-handling.md`](guides://error-handling.md) — error strategy & propagation. *(Swift binding: typed `throws` vs `Result`, §5.E.)*
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`ios.md`](guides://ios.md) — SwiftUI/UIKit, app lifecycle, Apple-platform UI *(this guide stays framework-agnostic; all UI rules live there)*
+> - [`hexagonal.md`](guides://hexagonal.md) — layering, ports/adapters, dependency inversion *(Swift binding: protocols as ports, §5.C)*
+> - [`parallelism.md`](guides://parallelism.md) — concurrency strategy, data races *(Swift binding: actors, async/await, `Sendable`, §5.F)*
+> - [`comments.md`](guides://comments.md) — doc-comment policy *(binding: `///` DocC markup)*
+
+> 📎 **SEE ALSO:** [`designpatterns.md`](guides://designpatterns.md) · [`code-review.md`](guides://code-review.md) · [`ci-cd.md`](guides://ci-cd.md) · [`semver.md`](guides://semver.md)
 
 ---
 
 ## 1. Core Philosophies: SWIFT-FIRST
 
-**Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory).
-**Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression.
+Swift-specific principles only. TDD, security, error-handling strategy, and concurrency policy come from §0.
 
-- **S**afe: Leverage optionals, guard statements, and type safety
-- **W**ell-named: Clear, expressive API names that read like prose
-- **I**mmutable: Prefer `let` over `var`, value types over reference types
-- **F**ast: Write performant code with proper memory management
-- **T**estable: Design for testability with protocols and dependency injection
+- **S**afe optionals: model absence with `Optional`; unwrap with `if let`/`guard let`/`??`. Never force-unwrap (`!`) outside tests or proven invariants.
+- **W**ell-named APIs: follow the Swift API Design Guidelines — names read at the call site like prose; argument labels clarify role, not type.
+- **I**mmutable by default: `let` over `var`; value types (`struct`/`enum`) over `class`; mutate by returning new values.
+- **F**irst-class protocols: program to protocols with default implementations and generics; reference types only for identity, inheritance, or Obj-C interop.
+- **T**yped concurrency: structured `async`/`await`, actors for shared mutable state, `Sendable` checked under Swift 6 strict concurrency.
 
----
-
-## 2. Naming Conventions (MANDATORY)
-
-### A. General Rules
-
-```swift
-// ✅ Types: UpperCamelCase
-struct UserProfile { }
-class NetworkManager { }
-enum LoadingState { }
-protocol DataFetching { }
-
-// ✅ Properties, methods, variables: lowerCamelCase
-var userName: String
-func fetchUserData() { }
-let maximumRetryCount = 3
-
-// ✅ Boolean properties: read as assertions
-var isEmpty: Bool
-var hasContent: Bool
-var canSubmit: Bool
-var shouldRefresh: Bool
-var isLoading: Bool
-
-// ✅ Methods that perform actions: verb phrases
-func removeItem(at index: Int)
-func insert(_ item: Item, at index: Int)
-func update(with newData: Data)
-
-// ✅ Methods that return values: noun phrases
-func distance(to point: Point) -> Double
-func makeIterator() -> Iterator
-func successor() -> Self
-
-// ✅ Protocols describing capability: -able, -ible, or -ing
-protocol Equatable { }
-protocol ProgressReporting { }
-protocol Cacheable { }
-
-// ✅ Protocols describing what something is: nouns
-protocol Collection { }
-protocol Sequence { }
-```
-
-### B. Argument Labels
-
-```swift
-// ✅ CORRECT: Clear argument labels
-func move(from start: Point, to end: Point)
-func copy(section: Range, to destination: Buffer)
-func remove(at index: Int) -> Element
-
-// ✅ CORRECT: Omit first argument when it's clear from function name
-func contains(_ element: Element) -> Bool
-func append(_ item: Item)
-func insert(_ item: Item, at index: Int)
-
-// ✅ CORRECT: Use prepositions for clarity
-func moveTo(x: Int, y: Int)
-func fadeIn(withDuration duration: TimeInterval)
-func compare(with other: Self) -> ComparisonResult
-
-// ❌ WRONG: Redundant type information
-func addColor(_ color: Color)     // ❌
-func add(_ color: Color)          // ✅
-
-// ❌ WRONG: Unclear argument purpose
-func set(_ value: Int, _ flag: Bool)      // ❌
-func set(_ value: Int, animated: Bool)    // ✅
-```
+**Verified Code**: Agent-generated Swift MUST pass every gate in §2 before delivery.
 
 ---
 
-## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+## 2. Requirements (MANDATORY, auditable)
 
-**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
+RFC-2119 keywords. IDs `SWIFT-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a shared rule cite its owner.
 
-### TDD Cycle
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| SWIFT-TST-01 | Every feature MUST be test-first (see `tdd.md`) | `swift test` | exit 0, 0 skips |
+| SWIFT-TST-02 | Each bug MUST get a regression test before the fix (see `tdd.md`) | `swift test` | failing→passing |
+| SWIFT-TST-03 | Business logic coverage MUST meet the project gate | `swift test --enable-code-coverage` | ≥ gate |
+| SWIFT-FMT-01 | Code MUST be formatted | `swiftformat --lint .` | no diff |
+| SWIFT-LINT-01 | Linter MUST pass clean | `swiftlint --strict` | 0 violations |
+| SWIFT-TYP-01 | Build MUST be warning-free under strict concurrency | `swift build -Xswiftc -warnings-as-errors` | exit 0 |
+| SWIFT-SAFE-01 | No force-unwrap/force-try/force-cast in non-test code | `swiftlint` (`force_unwrapping`, `force_try`, `force_cast`) | 0 violations |
+| SWIFT-CONC-01 | Concurrency MUST be data-race-safe (see `parallelism.md`) | `swift build` (Swift 6 strict concurrency) | 0 `Sendable` warnings |
+| SWIFT-DOC-01 | Public APIs MUST have doc comments (see `comments.md`) | `swift package generate-documentation` | builds clean |
+| SWIFT-SEC-01 | 0 known CVEs in deps (see `secure-coding.md`) | `snyk test` / `trivy fs .` | 0 high/critical |
+| SWIFT-DEP-01 | Lockfile in sync & committed | `swift package resolve` + `git diff --exit-code Package.resolved` | no diff |
 
-```
-1. RED: Write a failing test first
-   ↓
-2. GREEN: Write minimal code to make it pass
-   ↓
-3. REFACTOR: Improve code while keeping tests green
-   ↓
-   Repeat
-```
-
-### Example TDD Workflow for Swift
-
-```swift
-// Step 1: RED - Write failing test first
-import XCTest
-@testable import MyApp
-
-final class EmailValidatorTests: XCTestCase {
-
-    func test_validate_withValidEmail_returnsEmail() throws {
-        let result = try EmailValidator.validate("user@example.com")
-        XCTAssertEqual(result, "user@example.com")
-    }
-
-    func test_validate_withoutAtSymbol_throwsInvalidFormat() {
-        XCTAssertThrowsError(try EmailValidator.validate("invalid-email")) { error in
-            XCTAssertEqual(error as? EmailValidationError, .invalidFormat)
-        }
-    }
-
-    func test_validate_withEmptyString_throwsInvalidFormat() {
-        XCTAssertThrowsError(try EmailValidator.validate("")) { error in
-            XCTAssertEqual(error as? EmailValidationError, .invalidFormat)
-        }
-    }
-}
-
-// Run: swift test --filter EmailValidatorTests
-// FAILS - EmailValidator type does not exist
-
-// Step 2: GREEN - Write minimal implementation
-enum EmailValidationError: Error, Equatable {
-    case invalidFormat
-}
-
-struct EmailValidator {
-    static func validate(_ email: String) throws -> String {
-        guard email.contains("@") else {
-            throw EmailValidationError.invalidFormat
-        }
-        return email
-    }
-}
-
-// Run: swift test --filter EmailValidatorTests
-// PASSES - all tests pass
-
-// Step 3: REFACTOR - Improve with regex validation
-struct EmailValidator {
-    private static let emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-
-    static func validate(_ email: String) throws -> String {
-        guard (try? emailPattern.wholeMatch(in: email)) != nil else {
-            throw EmailValidationError.invalidFormat
-        }
-        return email.lowercased()
-    }
-}
-// Tests still pass
-```
+> **Forbidden**: shipping implementation before its test (violates `tdd.md`), fixing a bug without a regression test first, force-unwrapping optionals in production to silence a failure, `@unchecked Sendable` without a documented invariant, or disabling App Transport Security.
 
 ---
 
-## 2B. Bug Fix Protocol (MANDATORY)
+## 3. Verification Protocol
 
-**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
+Run, in order, before presenting code. Fix → re-run until every gate is green.
 
-### Bug Fix Workflow
-
-```
-1. Bug Reported/Discovered
-   ↓
-2. Write a test that REPRODUCES the bug (test will FAIL)
-   ↓
-3. Verify the test fails for the right reason
-   ↓
-4. Fix the bug (make the test pass)
-   ↓
-5. Verify the test now PASSES
-   ↓
-6. Document the bug in test comments (include bug ID)
-   ↓
-7. Deploy with confidence (regression prevented)
+```bash
+swiftformat --lint .                          # SWIFT-FMT-01
+swiftlint --strict                            # SWIFT-LINT-01 / SWIFT-SAFE-01
+swift build -Xswiftc -warnings-as-errors      # SWIFT-TYP-01 / SWIFT-CONC-01 (strict concurrency)
+swift test --enable-code-coverage             # SWIFT-TST-01/03
+swift package resolve                         # SWIFT-DEP-01 (then check Package.resolved is unchanged)
+snyk test          # or: trivy fs .           # SWIFT-SEC-01
 ```
 
-### Example Bug Fix
-
-```swift
-// Bug Report #1042: EmailValidator accepts emails with spaces like "user @example.com"
-
-// Step 1-2: Write test that reproduces the bug
-final class EmailValidatorTests: XCTestCase {
-
-    // Regression test for Bug #1042
-    func test_validate_withSpacesInEmail_throwsInvalidFormat() {
-        XCTAssertThrowsError(try EmailValidator.validate("user @example.com"))
-        XCTAssertThrowsError(try EmailValidator.validate(" user@example.com"))
-        XCTAssertThrowsError(try EmailValidator.validate("user@example.com "))
-    }
-}
-
-// Run: swift test --filter EmailValidatorTests
-// FAILS - validate does not throw for emails with spaces
-
-// Step 3: Fix the bug
-struct EmailValidator {
-    private static let emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-
-    static func validate(_ email: String) throws -> String {
-        guard email == email.trimmingCharacters(in: .whitespaces) else {
-            throw EmailValidationError.invalidFormat
-        }
-        guard (try? emailPattern.wholeMatch(in: email)) != nil else {
-            throw EmailValidationError.invalidFormat
-        }
-        return email.lowercased()
-    }
-}
-
-// Run: swift test --filter EmailValidatorTests
-// PASSES - bug fixed, regression prevented
-```
-
-### Prohibited Practices for Bug Fixes
-
-**NEVER:**
-- Fix a bug without adding a regression test first
-- Write implementation before writing tests (violates TDD)
-- Skip the Red-Green-Refactor cycle
-- Commit code with failing tests
-- Remove tests to make code pass
-- Force-unwrap (`!`) optionals in production code to work around test failures
+The *why* behind each gate lives in its §0 owner; do not re-derive it here.
 
 ---
 
-## 3. Optionals and Safety (MANDATORY)
+## 4. Project Structure
 
-### A. Optional Handling
+Idiomatic SwiftPM layout. Architectural principles (dependency direction, ports/adapters, acyclic deps) are owned by [`hexagonal.md`](guides://hexagonal.md); below is only their Swift mapping.
 
-```swift
-// ✅ CORRECT: Optional binding
-if let user = fetchUser() {
-    print(user.name)
-}
-
-// ✅ CORRECT: Guard for early exit
-func process(data: Data?) {
-    guard let data = data else {
-        print("No data provided")
-        return
-    }
-    // Use data safely
-    processValidData(data)
-}
-
-// ✅ CORRECT: Multiple optional binding
-if let name = user?.name,
-   let email = user?.email,
-   !email.isEmpty {
-    sendWelcome(to: name, email: email)
-}
-
-// ✅ CORRECT: Guard with multiple conditions
-guard
-    let user = currentUser,
-    user.isAuthenticated,
-    let token = user.accessToken
-else {
-    throw AuthenticationError.notAuthenticated
-}
-
-// ✅ CORRECT: Optional chaining
-let count = user?.posts?.count ?? 0
-user?.profile?.updateLastSeen()
-
-// ✅ CORRECT: Nil coalescing
-let displayName = user?.name ?? "Anonymous"
-let items = fetchItems() ?? []
-
-// ❌ WRONG: Force unwrapping without certainty
-let name = user!.name  // Crashes if nil
-
-// ❌ WRONG: Implicit unwrap without guarantee
-var delegate: Delegate!  // Only if guaranteed set before use
+```
+MyPackage/
+├── Package.swift            # manifest: targets, deps, platforms
+├── Package.resolved         # committed lockfile (SWIFT-DEP-01)
+├── Sources/
+│   ├── Domain/              # pure value types & protocols — no UIKit/SwiftUI/IO imports
+│   ├── Application/         # use cases; depends on protocol "ports"
+│   └── Adapters/            # URLSession/persistence/CLI implementations of ports
+├── Tests/
+│   └── MyPackageTests/      # mirrors Sources/ (see tdd.md)
+└── README.md
 ```
 
-### B. Guard Statements
-
-```swift
-// ✅ CORRECT: Guard for preconditions
-func processOrder(_ order: Order?) throws {
-    guard let order = order else {
-        throw OrderError.missingOrder
-    }
-
-    guard order.items.count > 0 else {
-        throw OrderError.emptyOrder
-    }
-
-    guard order.totalAmount > 0 else {
-        throw OrderError.invalidAmount
-    }
-
-    // Process valid order
-    submitOrder(order)
-}
-
-// ✅ CORRECT: Guard in loops
-for item in items {
-    guard item.isValid else { continue }
-    guard let price = item.price else { continue }
-
-    total += price
-}
-```
+- One public `protocol` per port; domain depends on the protocol, adapters conform to it (dependency inversion).
+- Group by feature/domain, not by type. No circular module dependencies — split targets to enforce boundaries at compile time.
+- Keep Apple-platform UI targets thin and out of `Domain`; UI guidance is owned by [`ios.md`](guides://ios.md).
 
 ---
 
-## 4. Value Types vs Reference Types (MANDATORY)
+## 5. Swift Specifics
 
-### A. Prefer Structs
+The unique value of this guide.
+
+### A. Value vs reference types
+
+Default to `struct`/`enum`; reach for `class` only for identity, inheritance, deinit-based cleanup, or Obj-C interop. Value types give copy semantics, no shared mutable state, and free thread-safety.
 
 ```swift
-// ✅ CORRECT: Use struct for data models
-struct User: Codable, Equatable {
+struct User: Codable, Equatable, Sendable {   // value model — copied, never aliased
     let id: UUID
     var name: String
     var email: String
-    var createdAt: Date
 }
 
-struct Point: Equatable {
-    var x: Double
-    var y: Double
-
-    func distance(to other: Point) -> Double {
-        let dx = x - other.x
-        let dy = y - other.y
-        return sqrt(dx * dx + dy * dy)
-    }
-}
-
-// ✅ CORRECT: Use struct for view models
-struct UserViewModel {
-    let displayName: String
-    let avatarURL: URL?
-    let memberSince: String
-
-    init(user: User) {
-        self.displayName = user.name.isEmpty ? "Anonymous" : user.name
-        self.avatarURL = URL(string: user.avatarURLString ?? "")
-        self.memberSince = Self.dateFormatter.string(from: user.createdAt)
-    }
-
-    private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        return formatter
-    }()
-}
-```
-
-### B. Use Classes When Needed
-
-```swift
-// ✅ CORRECT: Use class for identity, inheritance, or Objective-C interop
-class NetworkManager {
+final class NetworkManager {                  // class: shared identity + lifecycle
     static let shared = NetworkManager()
-
-    private let session: URLSession
-    private var activeTasks: [UUID: URLSessionTask] = [:]
-
-    private init() {
-        self.session = URLSession(configuration: .default)
-    }
-
-    func cancelAllTasks() {
-        activeTasks.values.forEach { $0.cancel() }
-        activeTasks.removeAll()
-    }
-}
-
-// ✅ CORRECT: Use class for delegation and callbacks
-class DataFetcher: NSObject, URLSessionDelegate {
-    weak var delegate: DataFetcherDelegate?
-
-    // ..
+    private init() {}
 }
 ```
 
----
+Mark every reference type `final` unless it is explicitly designed for subclassing — it enables devirtualization and signals intent. Prefer `enum` for closed sets of states (`enum LoadingState { case idle, loading, loaded(Data), failed(Error) }`).
 
-## 5. Protocols and Extensions (MANDATORY)
+### B. Optionals & safety
 
-### A. Protocol-Oriented Design
+Model absence with `Optional`; unwrap explicitly. Never force-unwrap in production.
 
 ```swift
-// Define focused protocols
-protocol Identifiable {
-    associatedtype ID: Hashable
-    var id: ID { get }
+guard let order, !order.items.isEmpty else {   // early-exit, keeps happy path un-nested
+    throw OrderError.empty
 }
-
-protocol Timestamped {
-    var createdAt: Date { get }
-    var updatedAt: Date { get }
-}
-
-protocol Persistable: Identifiable, Codable {
-    static var storageKey: String { get }
-}
-
-// Default implementations via extensions
-extension Persistable {
-    static var storageKey: String {
-        String(describing: Self.self)
-    }
-
-    func save() throws {
-        let data = try JSONEncoder().encode(self)
-        UserDefaults.standard.set(data, forKey: Self.storageKey + "-\(id)")
-    }
-
-    static func load(id: ID) throws -> Self? {
-        guard let data = UserDefaults.standard.data(forKey: storageKey + "-\(id)") else {
-            return nil
-        }
-        return try JSONDecoder().decode(Self.self, from: data)
-    }
-}
-
-// Conform to protocols
-struct Document: Persistable {
-    let id: UUID
-    var title: String
-    var content: String
-}
-
-// Use protocol as constraint
-func process<T: Persistable>(_ item: T) throws {
-    try item.save()
-}
+let name = user?.profile?.name ?? "Anonymous"  // optional chaining + nil-coalescing
+if let token = session?.token, token.isValid { /* ... */ }
 ```
 
-### B. Extensions for Organization
+Footguns → fixes:
+- Force-unwrap `value!` → `guard let` / `??`. Banned by SWIFT-SAFE-01.
+- Implicitly-unwrapped `var x: T!` → only for IBOutlets or two-phase init that is *guaranteed* set before use.
+- `try?` swallowing errors → use `do/catch` unless `nil` truly means "absent" (see `error-handling.md`).
+
+### C. Protocol-oriented programming
+
+Compose behavior from focused protocols with default implementations; use them as ports for dependency injection (the Swift binding of [`hexagonal.md`](guides://hexagonal.md)).
 
 ```swift
-// MARK: - Core Model
-struct User {
-    let id: UUID
-    var name: String
-    var email: String
+protocol UserRepository: Sendable {                 // a "port"
+    func user(id: UUID) async throws -> User
 }
 
-// MARK: - Codable
-extension User: Codable {
-    enum CodingKeys: String, CodingKey {
-        case id
-        case name
-        case email
-    }
-}
+protocol Identifiable { associatedtype ID: Hashable; var id: ID { get } }
 
-// MARK: - Equatable & Hashable
-extension User: Equatable, Hashable {
-    static func == (lhs: User, rhs: User) -> Bool {
-        lhs.id == rhs.id
-    }
-
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(id)
-    }
-}
-
-// MARK: - Display
-extension User {
-    var displayName: String {
-        name.isEmpty ? "Anonymous" : name
-    }
-
-    var initials: String {
-        name.split(separator: " ")
-            .compactMap { $0.first }
-            .map(String.init)
-            .joined()
+extension Sequence where Element: Identifiable {    // protocol-constrained extension
+    func indexed() -> [Element.ID: Element] {
+        Dictionary(uniqueKeysWithValues: map { ($0.id, $0) })
     }
 }
 ```
 
----
+Use `some`/`any` deliberately: `some P` (opaque, static dispatch, one concrete type) for returns; `any P` (existential, dynamic dispatch) only when you must store heterogeneous conformers. Prefer protocol witnesses over class inheritance.
 
-## 6. Error Handling (MANDATORY)
+### D. Generics
 
-### A. Custom Errors
+Constrain with `where`; use `associatedtype` and primary associated types (`Collection<Element>`) for expressive, type-safe APIs.
 
 ```swift
-// Define domain-specific errors
-enum NetworkError: LocalizedError {
-    case noConnection
-    case timeout
-    case invalidResponse(statusCode: Int)
-    case decodingFailed(underlying: Error)
-    case unauthorized
-
-    var errorDescription: String? {
-        switch self {
-        case .noConnection:
-            return "No internet connection"
-        case .timeout:
-            return "Request timed out"
-        case .invalidResponse(let code):
-            return "Server returned error: \(code)"
-        case .decodingFailed:
-            return "Failed to process server response"
-        case .unauthorized:
-            return "Please log in again"
-        }
-    }
-
-    var recoverySuggestion: String? {
-        switch self {
-        case .noConnection:
-            return "Please check your internet connection and try again"
-        case .timeout:
-            return "Please try again later"
-        case .unauthorized:
-            return "Your session has expired"
-        default:
-            return nil
-        }
-    }
+func first<C: Collection>(in c: C, where p: (C.Element) -> Bool) -> C.Element? {
+    c.first(where: p)
 }
 
-enum ValidationError: Error {
-    case emptyField(fieldName: String)
-    case invalidFormat(fieldName: String, expected: String)
-    case tooShort(fieldName: String, minimum: Int)
-    case tooLong(fieldName: String, maximum: Int)
+func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+    try JSONDecoder().decode(T.self, from: data)
 }
 ```
 
-### B. Throwing Functions
+### E. Error handling — throws vs Result
+
+Strategy (when to recover vs propagate) is owned by [`error-handling.md`](guides://error-handling.md). Swift binding: prefer `throws` for synchronous/`async` flows; use `Result` only to *store* or transport an outcome (e.g. completion handlers, caching a fetch). Model domain errors as `enum: Error`; conform to `LocalizedError` only at the boundary that shows them to a user.
 
 ```swift
-// ✅ CORRECT: Throwing functions for recoverable errors
+enum NetworkError: Error, Equatable {
+    case unauthorized, timeout, badStatus(Int)
+}
+
 func fetchUser(id: UUID) async throws -> User {
-    guard let url = URL(string: "\(baseURL)/users/\(id)") else {
-        throw NetworkError.invalidResponse(statusCode: 0)
-    }
-
-    let (data, response) = try await session.data(from: url)
-
-    guard let httpResponse = response as? HTTPURLResponse else {
-        throw NetworkError.invalidResponse(statusCode: 0)
-    }
-
-    switch httpResponse.statusCode {
-    case 200...299:
-        do {
-            return try decoder.decode(User.self, from: data)
-        } catch {
-            throw NetworkError.decodingFailed(underlying: error)
-        }
-    case 401:
-        throw NetworkError.unauthorized
-    default:
-        throw NetworkError.invalidResponse(statusCode: httpResponse.statusCode)
-    }
-}
-
-// ✅ CORRECT: Handle errors at call site
-func loadUserProfile() async {
-    do {
-        let user = try await fetchUser(id: currentUserId)
-        updateUI(with: user)
-    } catch NetworkError.unauthorized {
-        showLoginScreen()
-    } catch NetworkError.noConnection {
-        showOfflineMessage()
-    } catch {
-        showError(error.localizedDescription)
+    let (data, response) = try await session.data(from: endpoint(id))
+    guard let http = response as? HTTPURLResponse else { throw NetworkError.timeout }
+    switch http.statusCode {
+    case 200...299: return try JSONDecoder().decode(User.self, from: data)
+    case 401:       throw NetworkError.unauthorized
+    default:        throw NetworkError.badStatus(http.statusCode)
     }
 }
 ```
 
-### C. Result Type
+Swift 6 supports typed throws (`func f() throws(NetworkError)`) — use it where the error set is closed and stable. Catch specific cases (`catch NetworkError.unauthorized`) before a generic `catch`.
+
+### F. Structured concurrency
+
+Policy (race-freedom, cancellation, structured lifetimes) is owned by [`parallelism.md`](guides://parallelism.md). Swift binding under Swift 6 **strict concurrency**:
 
 ```swift
-// Use Result for async callbacks
-func fetchData(completion: @escaping (Result<Data, NetworkError>) -> Void) {
-    // ..
-    completion(.success(data))
-    // or
-    completion(.failure(.noConnection))
+// Parallel children, structured: both awaited or both cancelled together.
+func profile(id: UUID) async throws -> Profile {
+    async let user = fetchUser(id: id)
+    async let posts = fetchPosts(of: id)
+    return try await Profile(user: user, posts: posts)
 }
 
-// Handle Result
-fetchData { result in
-    switch result {
-    case .success(let data):
-        process(data)
-    case .failure(let error):
-        handle(error)
-    }
-}
-
-// Map and flatMap on Result
-let parsedResult = result.map { data in
-    try? JSONDecoder().decode(User.self, from: data)
-}
-```
-
----
-
-## 7. Concurrency (MANDATORY)
-
-### A. Async/Await
-
-```swift
-// ✅ CORRECT: Async function
-func fetchUserProfile(userId: UUID) async throws -> UserProfile {
-    async let user = fetchUser(id: userId)
-    async let posts = fetchPosts(userId: userId)
-    async let followers = fetchFollowers(userId: userId)
-
-    // Await all in parallel
-    return try await UserProfile(
-        user: user,
-        posts: posts,
-        followers: followers
-    )
-}
-
-// ✅ CORRECT: Actor for thread-safe state
+// Actor: serializes access to mutable state — no manual locks.
 actor ImageCache {
-    private var cache: [URL: UIImage] = [:]
-
-    func image(for url: URL) -> UIImage? {
-        cache[url]
-    }
-
-    func store(_ image: UIImage, for url: URL) {
-        cache[url] = image
-    }
-
-    func clear() {
-        cache.removeAll()
-    }
+    private var store: [URL: Data] = [:]
+    func data(for url: URL) -> Data? { store[url] }
+    func insert(_ d: Data, for url: URL) { store[url] = d }
 }
 
-// ✅ CORRECT: MainActor for UI updates
-@MainActor
-class ViewModel: ObservableObject {
-    @Published var users: [User] = []
-    @Published var isLoading = false
-    @Published var error: Error?
-
-    func loadUsers() async {
-        isLoading = true
-        defer { isLoading = false }
-
-        do {
-            users = try await userService.fetchAllUsers()
-        } catch {
-            self.error = error
-        }
-    }
-}
-
-// ✅ CORRECT: Task groups for concurrent operations
-func processImages(_ urls: [URL]) async throws -> [UIImage] {
-    try await withThrowingTaskGroup(of: UIImage.self) { group in
-        for url in urls {
-            group.addTask {
-                try await downloadImage(from: url)
-            }
-        }
-
-        var images: [UIImage] = []
-        for try await image in group {
-            images.append(image)
-        }
-        return images
+// Dynamic fan-out with cooperative cancellation.
+func download(_ urls: [URL]) async throws -> [Data] {
+    try await withThrowingTaskGroup(of: Data.self) { group in
+        for url in urls { group.addTask { try await fetch(url) } }
+        return try await group.reduce(into: []) { $0.append($1) }
     }
 }
 ```
 
-### B. Task Cancellation
+Rules: cross actor/`Task` boundaries only with `Sendable` types; honor cancellation (`try Task.checkCancellation()` / `Task.isCancelled`); isolate UI state to `@MainActor` (UI specifics → `ios.md`); never `@unchecked Sendable` without a written invariant. Reserve raw `Task.detached` and GCD (`DispatchQueue`) for legacy interop.
+
+### G. ARC & memory
+
+ARC is deterministic — break reference cycles explicitly. Use `[weak self]` when the captured object may outlive the closure (callbacks, timers, stored closures); `[unowned self]` only when lifetime is *guaranteed* (e.g. child→parent back-reference).
 
 ```swift
-// ✅ CORRECT: Check for cancellation
-func processLargeDataset(_ items: [Item]) async throws {
-    for item in items {
-        // Check if task was cancelled
-        try Task.checkCancellation()
+timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+    self?.tick()                       // no retain cycle
+}
+deinit { timer?.invalidate() }
+```
 
-        await process(item)
-    }
+Footguns: strong `self` in an escaping closure stored on `self` → cycle; capturing the whole object when one field suffices (`let id = user.id`) → capture the field. Value types do not participate in cycles — another reason to prefer them.
+
+### H. Codable
+
+Synthesize `Codable` on value types; override `CodingKeys` for wire-format mapping, custom `init(from:)` only when the JSON shape diverges.
+
+```swift
+struct Event: Codable {
+    let id: UUID
+    let createdAt: Date
+    enum CodingKeys: String, CodingKey { case id, createdAt = "created_at" }
+}
+let decoder = JSONDecoder()
+decoder.dateDecodingStrategy = .iso8601          // configure once, reuse
+decoder.keyDecodingStrategy = .convertFromSnakeCase   // alternative to CodingKeys
+```
+
+### I. Testing — Swift Testing & XCTest
+
+Test policy (Red-Green-Refactor, regression-first) is owned by [`tdd.md`](guides://tdd.md). Swift binding: prefer the modern **Swift Testing** framework (`@Test`, `#expect`, `#require`) for new code; XCTest remains valid for existing suites and UI tests. Inject protocol dependencies for fakes/mocks (§5.C).
+
+```swift
+import Testing
+@testable import MyPackage
+
+@Test func validatesEmail() throws {
+    #expect(try EmailValidator.validate("a@b.com") == "a@b.com")
 }
 
-// ✅ CORRECT: Handle cancellation gracefully
-func searchAsUserTypes(_ query: String) async -> [SearchResult] {
-    // Artificial delay to avoid too many requests
-    try? await Task.sleep(nanoseconds: 300_000_000)
-
-    // Check if cancelled during delay
-    guard !Task.isCancelled else {
-        return []
-    }
-
-    return await performSearch(query)
+@Test(arguments: ["invalid", "", "a @b.com"])     // parameterized — one case each
+func rejectsBadEmail(_ input: String) {
+    #expect(throws: EmailValidationError.self) { try EmailValidator.validate(input) }
 }
 ```
+
+Run a subset with `swift test --filter`. For async code, `await` directly inside `@Test`; no expectations boilerplate.
+
+> For design patterns applied in Swift, reference [`designpatterns.md`](guides://designpatterns.md) and show only the Swift binding (protocol witnesses, enums-with-associated-values, value-type strategies).
 
 ---
 
-## 8. SwiftUI Best Practices (MANDATORY)
+## 6. Tooling & Dependencies
 
-### A. View Composition
-
-```swift
-// ✅ CORRECT: Small, focused views
-struct UserRow: View {
-    let user: User
-
-    var body: some View {
-        HStack(spacing: 12) {
-            AvatarView(url: user.avatarURL)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(user.name)
-                    .font(.headline)
-                Text(user.email)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-            if user.isVerified {
-                Image(systemName: "checkmark.seal.fill")
-                    .foregroundStyle(.blue)
-            }
-        }
-        .padding(.vertical, 8)
-    }
-}
-
-// ✅ CORRECT: Extract subviews for readability
-struct UserProfileView: View {
-    @StateObject private var viewModel: UserProfileViewModel
-
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                headerSection
-                statsSection
-                postsSection
-            }
-            .padding()
-        }
-        .navigationTitle("Profile")
-        .task { await viewModel.load() }
-    }
-
-    private var headerSection: some View {
-        VStack(spacing: 12) {
-            AsyncImage(url: viewModel.avatarURL) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
-                ProgressView()
-            }
-            .frame(width: 100, height: 100)
-            .clipShape(Circle())
-
-            Text(viewModel.displayName)
-                .font(.title2.bold())
-        }
-    }
-
-    private var statsSection: some View {
-        HStack(spacing: 40) {
-            StatView(title: "Posts", value: viewModel.postCount)
-            StatView(title: "Followers", value: viewModel.followerCount)
-            StatView(title: "Following", value: viewModel.followingCount)
-        }
-    }
-
-    private var postsSection: some View {
-        LazyVStack(spacing: 16) {
-            ForEach(viewModel.posts) { post in
-                PostCard(post: post)
-            }
-        }
-    }
-}
-```
-
-### B. State Management
-
-```swift
-// ✅ CORRECT: Use appropriate property wrappers
-struct SettingsView: View {
-    // Local view state
-    @State private var notificationsEnabled = true
-
-    // Binding from parent
-    @Binding var theme: Theme
-
-    // Observable object owned by this view
-    @StateObject private var viewModel = SettingsViewModel()
-
-    // Observable object from environment
-    @EnvironmentObject private var userSession: UserSession
-
-    // Environment value
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        Form {
-            Toggle("Notifications", isOn: $notificationsEnabled)
-
-            Picker("Theme", selection: $theme) {
-                ForEach(Theme.allCases) { theme in
-                    Text(theme.displayName).tag(theme)
-                }
-            }
-        }
-    }
-}
-
-// ✅ CORRECT: ViewModel with @Published
-@MainActor
-class SettingsViewModel: ObservableObject {
-    @Published var settings: Settings?
-    @Published var isLoading = false
-    @Published var errorMessage: String?
-
-    private let settingsService: SettingsService
-
-    init(settingsService: SettingsService = .shared) {
-        self.settingsService = settingsService
-    }
-
-    func load() async {
-        isLoading = true
-        defer { isLoading = false }
-
-        do {
-            settings = try await settingsService.fetch()
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-}
-```
-
----
-
-## 9. Memory Management (MANDATORY)
-
-### A. Capture Lists
-
-```swift
-// ✅ CORRECT: Weak capture to avoid retain cycles
-class DataLoader {
-    var onComplete: ((Data) -> Void)?
-
-    func load() {
-        networkManager.fetch { [weak self] data in
-            guard let self = self else { return }
-            self.process(data)
-            self.onComplete?(data)
-        }
-    }
-}
-
-// ✅ CORRECT: Unowned when guaranteed to exist
-class Parent {
-    var child: Child?
-
-    init() {
-        child = Child(parent: self)
-    }
-}
-
-class Child {
-    unowned let parent: Parent
-
-    init(parent: Parent) {
-        self.parent = parent
-    }
-}
-
-// ✅ CORRECT: Capture specific values
-func processUser(user: User) {
-    let userId = user.id  // Capture just the ID, not whole user
-
-    DispatchQueue.global().async {
-        self.sendAnalytics(userId: userId)
-    }
-}
-```
-
-### B. Avoiding Retain Cycles
-
-```swift
-// ❌ WRONG: Retain cycle with closure
-class ViewController: UIViewController {
-    var timer: Timer?
-
-    func startTimer() {
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
-            self.updateUI()  // Strong reference to self!
-        }
-    }
-}
-
-// ✅ CORRECT: Break the cycle
-class ViewController: UIViewController {
-    var timer: Timer?
-
-    func startTimer() {
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            self?.updateUI()
-        }
-    }
-
-    deinit {
-        timer?.invalidate()
-    }
-}
-```
-
----
-
-## 10. Testing (MANDATORY)
-
-### A. Unit Tests
-
-```swift
-import XCTest
-@testable import MyApp
-
-final class UserServiceTests: XCTestCase {
-    var sut: UserService!
-    var mockNetworkClient: MockNetworkClient!
-
-    override func setUp() {
-        super.setUp()
-        mockNetworkClient = MockNetworkClient()
-        sut = UserService(networkClient: mockNetworkClient)
-    }
-
-    override func tearDown() {
-        sut = nil
-        mockNetworkClient = nil
-        super.tearDown()
-    }
-
-    func test_fetchUser_withValidId_returnsUser() async throws {
-        // Given
-        let expectedUser = User(id: UUID(), name: "Test", email: "test@example.com")
-        mockNetworkClient.mockResponse = expectedUser
-
-        // When
-        let result = try await sut.fetchUser(id: expectedUser.id)
-
-        // Then
-        XCTAssertEqual(result.id, expectedUser.id)
-        XCTAssertEqual(result.name, expectedUser.name)
-    }
-
-    func test_fetchUser_withNetworkError_throwsError() async {
-        // Given
-        mockNetworkClient.mockError = NetworkError.noConnection
-
-        // When/Then
-        do {
-            _ = try await sut.fetchUser(id: UUID())
-            XCTFail("Expected error to be thrown")
-        } catch {
-            XCTAssertTrue(error is NetworkError)
-        }
-    }
-}
-```
-
-### B. Mocking with Protocols
-
-```swift
-// Protocol for dependency
-protocol NetworkClientProtocol {
-    func fetch<T: Decodable>(_ type: T.Type, from url: URL) async throws -> T
-}
-
-// Production implementation
-class NetworkClient: NetworkClientProtocol {
-    func fetch<T: Decodable>(_ type: T.Type, from url: URL) async throws -> T {
-        let (data, _) = try await URLSession.shared.data(from: url)
-        return try JSONDecoder().decode(T.self, from: data)
-    }
-}
-
-// Mock for testing
-class MockNetworkClient: NetworkClientProtocol {
-    var mockResponse: Any?
-    var mockError: Error?
-    var fetchCallCount = 0
-    var lastRequestedURL: URL?
-
-    func fetch<T: Decodable>(_ type: T.Type, from url: URL) async throws -> T {
-        fetchCallCount += 1
-        lastRequestedURL = url
-
-        if let error = mockError {
-            throw error
-        }
-
-        guard let response = mockResponse as? T else {
-            fatalError("Mock response not set or wrong type")
-        }
-
-        return response
-    }
-}
-```
-
----
-
-## 11. Security & Dependency Management (MANDATORY)
-
-### A. Automated Dependency Management
+Security/supply-chain *policy* → [`secure-coding.md`](guides://secure-coding.md); versioning → [`semver.md`](guides://semver.md). Swift binding via SwiftPM:
 
 ```bash
-# Update all SPM dependencies to latest compatible versions
-swift package update
-
-# Resolve dependencies (regenerates Package.resolved)
-swift package resolve
-
-# Show dependency tree
-swift package show-dependencies --format json
-
-# Generate Software Bill of Materials (SBOM)
-swift package generate-sbom
+swift build                       # compile
+swift test                        # run tests
+swift package resolve             # resolve deps → Package.resolved (commit it)
+swift package update              # update to latest allowed versions
+swift package show-dependencies   # inspect the graph
+snyk test    # or trivy fs .      # SWIFT-SEC-01: CVE scan (SPM has no native audit)
 ```
 
-**Package.resolved** is the lockfile for SPM. Always commit it to version control for reproducible builds.
-
-### B. Vulnerability Scanning & Security
-
-Swift Package Manager does not include a native `audit` command. Use third-party tools:
-
-```bash
-# Snyk: scan Swift dependencies for known vulnerabilities
-snyk test --all-projects
-
-# OWASP Dependency-Check (supports Swift/CocoaPods/SPM)
-dependency-check --project "MyApp" --scan .
-
-# Trivy: filesystem scan for vulnerabilities in vendored dependencies
-trivy fs --scanners vuln .
-```
-
-**Security best practices:**
-- Pin dependency versions in `Package.swift` using `.exact()` or `.upToNextMinor()` instead of `.upToNextMajor()`
-- Review dependency source code before adding new packages
-- Monitor Apple Security Updates and CVE databases for Swift runtime vulnerabilities
-- Enable App Transport Security (ATS) — never disable it in production
-- Use Keychain for secrets storage, never hardcode credentials
-
-### C. Dependency File
+Pin direct deps tightly in `Package.swift` (`.upToNextMinor(from:)` or `.exact(_:)` for security-sensitive packages); avoid `.upToNextMajor` for transitive-heavy deps. Commit `Package.resolved`. Review new packages before adding. Store secrets in the Keychain, never in source.
 
 ```swift
 // Package.swift
@@ -1092,108 +324,54 @@ import PackageDescription
 
 let package = Package(
     name: "MyApp",
-    platforms: [
-        .iOS(.v17),
-        .macOS(.v14)
-    ],
+    platforms: [.iOS(.v17), .macOS(.v14)],
     dependencies: [
-        // Pin to exact versions for reproducibility
-        .package(url: "https://github.com/Alamofire/Alamofire.git", exact: "5.9.1"),
-        .package(url: "https://github.com/apple/swift-log.git", .upToNextMinor(from: "1.5.0")),
+        .package(url: "https://github.com/apple/swift-log.git", .upToNextMinor(from: "1.6.0")),
     ],
     targets: [
-        .target(
-            name: "MyApp",
-            dependencies: [
-                .product(name: "Alamofire", package: "Alamofire"),
-                .product(name: "Logging", package: "swift-log"),
-            ]
-        ),
-        .testTarget(
-            name: "MyAppTests",
-            dependencies: ["MyApp"]
-        ),
+        .target(name: "MyApp", dependencies: [.product(name: "Logging", package: "swift-log")],
+                swiftSettings: [.enableUpcomingFeature("StrictConcurrency")]),
+        .testTarget(name: "MyAppTests", dependencies: ["MyApp"]),
     ]
 )
 ```
 
 ---
 
-## 12. Deployment Checklist
+## 7. Quick Reference
 
-### Code Quality
-- [ ] No force unwraps without safety comments
-- [ ] No compiler warnings
-- [ ] SwiftLint passes
-- [ ] All tests passing
-
-### Memory
-- [ ] No retain cycles (use weak/unowned appropriately)
-- [ ] Large objects released when done
-- [ ] Instruments shows no memory leaks
-
-### Performance
-- [ ] Avoid work on main thread
-- [ ] Use lazy loading where appropriate
-- [ ] Profile with Instruments
-
-### App Store
-- [ ] Proper error handling
-- [ ] Accessibility labels present
-- [ ] Localization ready
-- [ ] Privacy permissions explained
-
----
-
-## 13. Quick Reference
+```bash
+swift build                          # build
+swift test                           # test
+swiftlint --strict                   # lint
+swiftformat .                        # format
+swift run                            # run executable
+swift package generate-documentation # DocC docs
+```
 
 ```swift
-// Optional handling
-guard let value = optional else { return }
-let unwrapped = optional ?? defaultValue
-optional?.method()
-if let value = optional { }
-
-// Async/Await
-async let result = asyncFunction()
-try await result
-Task { await doWork() }
-Task.detached { await doWork() }
-
-// Property wrappers (SwiftUI)
-@State           // Local view state
-@Binding         // Two-way binding
-@StateObject     // Own observable object
-@ObservedObject  // Don't own observable object
-@EnvironmentObject // From environment
-@Environment     // Environment value
-
-// Access control
-public    // Visible everywhere
-internal  // Default, visible in module
-fileprivate // Visible in file
-private   // Visible in enclosing scope
+guard let value else { return }      // optional unwrap, early exit
+let x = optional ?? fallback         // nil-coalescing
+async let a = work(); try await a    // structured parallel child
+actor Box { private var v = 0 }      // race-safe mutable state
 ```
 
 ---
 
-## 14. Why This Configuration Works
+## 8. Deployment Checklist
 
-1. **Protocol-Oriented Design for Testability**: Defining dependencies as protocols and injecting them via initializers makes every component independently testable with mock implementations. This eliminates the need for heavyweight test frameworks and keeps unit tests fast.
+Generated from §2 — one box per requirement ID.
 
-2. **Value Types with Struct-First Approach**: Preferring structs and enums over classes eliminates shared mutable state, retain cycles, and data races by default. Value semantics make code behavior predictable and thread-safe without explicit synchronization.
-
-3. **Swift Concurrency with async/await**: Structured concurrency with `async let`, `TaskGroup`, and actors replaces callback pyramids and Combine chains with linear, readable code. The compiler enforces `Sendable` compliance, catching data races at compile time.
-
-4. **SwiftLint + SwiftFormat Enforcement**: Automated linting catches API design guideline violations, force-unwrap abuse, and naming inconsistencies before code review. Combined with SwiftFormat, every file follows identical formatting regardless of author.
-
-5. **Guard-Let for Early Return Pattern**: Using `guard let` to unwrap optionals at the top of functions eliminates nested pyramid-of-doom `if let` chains. The forced `else { return }` clause ensures the failure path is handled immediately, keeping the happy path at the top indentation level.
+- [ ] SWIFT-FMT-01 — `swiftformat --lint` clean
+- [ ] SWIFT-LINT-01 — `swiftlint --strict` clean
+- [ ] SWIFT-TYP-01 — builds warning-free (`-warnings-as-errors`)
+- [ ] SWIFT-SAFE-01 — no force-unwrap/force-try/force-cast in production
+- [ ] SWIFT-CONC-01 — Swift 6 strict concurrency, 0 `Sendable` warnings
+- [ ] SWIFT-TST-01/02/03 — tests pass, bugs have regression tests, coverage ≥ gate
+- [ ] SWIFT-DOC-01 — public APIs documented, DocC builds
+- [ ] SWIFT-SEC-01 — 0 high/critical CVEs in deps
+- [ ] SWIFT-DEP-01 — `Package.resolved` in sync, committed
+- [ ] Agent ran every §3 command and documented any fixes
 
 ---
-
-**Last Updated:** 2026-01-31
-**Version:** 1.0
-**Maintainer:** iOS Team
-
-
-**End of Swift Development Guidelines**
+**End of Swift Guidelines**

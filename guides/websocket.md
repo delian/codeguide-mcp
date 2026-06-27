@@ -1,1367 +1,329 @@
 # WebSocket Development Guidelines
+Mandatory standards for real-time bidirectional comms over WebSocket: connection lifecycle, heartbeats, reconnection/backoff, framing, backpressure, and pub/sub fan-out scaling. RFC 6455, ws (Node), gorilla/websocket (Go), Django Channels, Socket.IO.
 
-Mandatory standards for implementing WebSocket-based real-time communication. WebSocket API, Socket.IO, ws (Node.js), gorilla/websocket, Django Channels.
+---
+name: websocket
+title: WebSocket Development Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: cross-cutting
+tools: [rfc6455, ws@8, gorilla-websocket, django-channels@4, socket.io@4]
+requires: []
+recommends:
+  - secure-coding
+  - oauth
+  - error-handling
+  - observability
+  - rest
+provides:
+  - ws-lifecycle
+  - heartbeats
+  - reconnection
+  - backpressure
+  - realtime-scaling
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide owns WebSocket / real-time bidirectional communication and spends its tokens on the protocol's unique surface.
 
 ---
 
-**Agent Profile**: The WebSocket Expert
-**Role**: Senior Real-Time Systems Engineer
-**Objective**: Generate reliable, scalable, and secure WebSocket implementations for real-time applications.
-**Tools**: WebSocket API, Socket.IO, ws (Node.js), gorilla/websocket, Django Channels.
+## 0. Prerequisites & References
+
+This guide has no hard prerequisites, but real-world WebSocket work almost always crosses these owners. Fetch them when the task touches their concern; do not restate their rules here.
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`secure-coding.md`](guides://secure-coding.md) — input validation, secrets, TLS, CVE policy. *(WS binding: `wss://` only, `Origin` allow-list, validate every frame as untrusted input.)*
+> - [`oauth.md`](guides://oauth.md) — token issuance/verification, scopes, refresh. *(WS binding: authenticate on the HTTP **upgrade**, never trust a query-string token without TLS.)*
+> - [`error-handling.md`](guides://error-handling.md) — error strategy, timeouts, retries/backoff. *(WS binding: reconnect backoff + jitter, request timeouts, close-code semantics.)*
+> - [`observability.md`](guides://observability.md) — metrics, tracing, SLOs. *(WS binding: connection gauge, message throughput, close-code histogram, RTT from ping/pong.)*
+> - [`rest.md`](guides://rest.md) — request/response API style; consult to decide REST vs WS (see §1).
+
+> 📎 **SEE ALSO:** [`redis.md`](guides://redis.md) · [`kafka.md`](guides://kafka.md) (durable fan-out) · [`graphql.md`](guides://graphql.md) (subscriptions) · [`grpc.md`](guides://grpc.md) (server streaming) · [`logging.md`](guides://logging.md) · [`zod.md`](guides://zod.md) (frame schemas)
 
 ---
 
 ## 1. Core Philosophies: REALTIME-FIRST
 
-- **R**eliable: Handle disconnections gracefully with reconnection
-- **E**fficient: Minimize message size and frequency
-- **A**uthenticated: Secure connections from the start
-- **L**ightweight: Use binary protocols when appropriate
-- **T**hrottled: Implement rate limiting and backpressure
-- **I**dempotent: Design for message replay safety
-- **M**onitored: Track connection health and metrics
-- **E**rror-handled: Graceful degradation on failures
-- **F**irewall-friendly: Prefer libraries like Socket.IO (or similar) with fallback transports when available on both frontend and backend; use raw WebSockets only if such libraries are unavailable.
+WebSocket-specific principles only. Auth, validation, error policy, and metrics come from §0.
+
+- **R**econnect-resilient: the client owns recovery — backoff + jitter, resumable subscriptions, an outbound queue. Treat every disconnect as expected, not exceptional.
+- **E**nvelope-everything: one typed message envelope multiplexes logical channels; never send naked strings.
+- **A**uth-on-upgrade: identity is established during the HTTP handshake, before a frame flows (see `oauth.md`).
+- **L**iveness-by-heartbeat: ping/pong (not TCP) is the source of truth for "is this peer alive".
+- **T**hrottle & backpressure: bound per-connection send buffers and inbound rate; a slow consumer MUST NOT exhaust server memory.
+- **I**dempotent & ordered: messages carry IDs/sequence so replays after reconnect are safe.
+- **M**onitored: connection count, message rate, and close codes are first-class metrics (see `observability.md`).
+- **E**dge-aware: prefer `wss://` end to end; tune proxy/idle timeouts to outlive the heartbeat interval.
+
+**When NOT to use WebSocket:** if traffic is request/response or client-initiated polling, use REST (see [`rest.md`](guides://rest.md)). If it is server→client one-way streaming only, prefer SSE. Reach for WebSocket only when you need **low-latency bidirectional** frames over one long-lived connection.
+
+**Verified Code**: Agent-generated WebSocket code MUST pass every gate in §2 before delivery.
 
 ---
 
-## 2. Connection Management (MANDATORY)
+## 2. Requirements (MANDATORY, auditable)
 
-### A. Server Setup (Node.js)
+RFC-2119 keywords. IDs `WS-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a shared rule cite its owner.
+
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| WS-SEC-01 | Production endpoints MUST be `wss://` (TLS); plaintext `ws://` only on loopback in tests (see `secure-coding.md`) | grep configs / scheme audit | no `ws://` to a public host |
+| WS-SEC-02 | Server MUST validate the `Origin` header against an allow-list on upgrade | unit test: forged Origin → 403 | non-allowed Origin rejected |
+| WS-AUTH-01 | Connections MUST be authenticated during the HTTP upgrade, before any app frame (see `oauth.md`) | unit test: no/invalid token → handshake rejected | 401/403 before `connection` |
+| WS-AUTH-02 | Token expiry MUST close the socket (close `4001`); short-lived tokens MUST be refreshable without dropping (see `oauth.md`) | test: expire token → socket closes 4001 | closed, no zombie session |
+| WS-VAL-01 | Every inbound frame MUST be schema-validated before handling (see `secure-coding.md`) | test: malformed frame → typed `error`, no throw | rejected, connection survives |
+| WS-LIFE-01 | Each connection MUST run ping/pong heartbeat; unanswered → terminate | test: silent peer terminated within 2 intervals | dead peers reaped |
+| WS-LIFE-02 | `close`/`error` handlers MUST release all per-connection resources (rooms, subs, timers) | test: close → maps/intervals empty | no leak |
+| WS-LIFE-03 | Server MUST drain/close sockets gracefully on shutdown (close `1001`) | test: SIGTERM → clients get 1001 | clean drain |
+| WS-RECON-01 | Client MUST reconnect with exponential backoff + jitter, capped (see `error-handling.md`) | test: server bounce → reconnect, no thundering herd | bounded reconnect |
+| WS-BP-01 | Per-connection send buffer MUST be bounded; over-limit slow consumers MUST be shed (close `1013`/`1011`) | load test: slow reader does not grow server RSS unbounded | memory bounded |
+| WS-RATE-01 | Inbound messages MUST be rate-limited per connection (see `secure-coding.md`) | test: flood → `RATE_LIMITED`, throttled | limit enforced |
+| WS-SCALE-01 | Multi-node deployments MUST fan out via an external broker (pub/sub), not in-process lists | integration: msg from node A reaches node B client | cross-node delivery |
+| WS-OBS-01 | Connection count, message rate, and close-code distribution MUST be exported (see `observability.md`) | scrape `/metrics` | gauges/counters present |
+| WS-TST-01 | Lifecycle (open/message/close/error), reconnect, and routing MUST be tested (see `tdd.md`) | test suite | exit 0, 0 skips |
+
+> **Forbidden**: trusting a client-supplied identity after upgrade without verifying a token; unbounded server-side send buffers; reconnect loops without backoff; broadcasting from in-process state across a horizontally-scaled fleet; sending secrets in the URL query string over `ws://`.
+
+---
+
+## 3. Connection Lifecycle (owned)
+
+A WebSocket is an HTTP `Upgrade` (RFC 6455) that yields a long-lived full-duplex frame stream. The lifecycle is: **handshake → authenticated upgrade → open → frames (+ heartbeats) → close**. Auth policy lives in `oauth.md`; this section owns the *protocol mechanics*.
+
+### A. Authenticated upgrade (the only safe place to authenticate)
+Authenticate in the `upgrade`/handshake handler so unauthorized clients never get an open socket. Bind identity to the connection object and proceed only on success.
 
 ```javascript
-const WebSocket = require('ws');
-const http = require('http');
-const url = require('url');
+// Node 'ws' — handle the raw upgrade, gate on auth + Origin
+const wss = new WebSocketServer({ noServer: true });
 
-const server = http.createServer();
-const wss = new WebSocket.Server({ noServer: true });
-
-// Connection upgrade with authentication
-server.on('upgrade', async (request, socket, head) => {
-  try {
-    const { query } = url.parse(request.url, true);
-    const token = query.token || request.headers['sec-websocket-protocol'];
-
-    // Authenticate
-    const user = await authenticateToken(token);
-    if (!user) {
-      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-      socket.destroy();
-      return;
-    }
-
-    // Complete upgrade
-    wss.handleUpgrade(request, socket, head, (ws) => {
-      ws.user = user;
-      wss.emit('connection', ws, request);
-    });
-  } catch (error) {
-    socket.write('HTTP/1.1 500 Internal Server Error\r\n\r\n');
-    socket.destroy();
+server.on('upgrade', async (req, socket, head) => {
+  if (!ORIGIN_ALLOWLIST.has(req.headers.origin)) {        // WS-SEC-02
+    return abort(socket, 403, 'Forbidden Origin');
   }
+  const user = await verifyToken(extractToken(req));       // oauth.md owns verifyToken
+  if (!user) return abort(socket, 401, 'Unauthorized');    // WS-AUTH-01
+
+  wss.handleUpgrade(req, socket, head, (ws) => {
+    ws.user = user;                                         // identity bound to the socket
+    wss.emit('connection', ws, req);
+  });
 });
 
-// Connection handler
-wss.on('connection', (ws, request) => {
-  console.log(`Client connected: ${ws.user.id}`);
+function abort(socket, code, msg) {                         // reject before opening the socket
+  socket.write(`HTTP/1.1 ${code} ${msg}\r\n\r\n`);
+  socket.destroy();
+}
+```
 
-  // Set up ping/pong for keepalive
-  ws.isAlive = true;
-  ws.on('pong', () => {
-    ws.isAlive = true;
-  });
+**Token transport, ranked:** (1) `Sec-WebSocket-Protocol` subprotocol header or an `Authorization` header on the upgrade (browsers can't set arbitrary upgrade headers — use the subprotocol trick); (2) a short-lived, single-use ticket fetched over HTTPS then passed as a query param. A query-string token is only acceptable over `wss://` and SHOULD be short-lived, because URLs leak into logs/proxies. Verification, scopes, and refresh are owned by [`oauth.md`](guides://oauth.md).
 
-  // Handle messages
-  ws.on('message', (data) => {
-    handleMessage(ws, data);
-  });
+### B. Close codes — use the standard semantics
+| Code | Meaning | Reconnect? |
+|---|---|---|
+| 1000 | Normal closure | no (intentional) |
+| 1001 | Going away (server shutdown — WS-LIFE-03) | yes, after delay |
+| 1006 | Abnormal (no close frame — network drop) | yes, with backoff |
+| 1008 | Policy violation | no (fix request) |
+| 1011 | Server error | yes, with backoff |
+| 1013 | Try again later (overload/backpressure shed) | yes, honor delay |
+| 4000–4999 | Application-defined (e.g. `4001` = auth expired) | per app policy |
 
-  // Handle close
-  ws.on('close', (code, reason) => {
-    console.log(`Client disconnected: ${ws.user.id}, code: ${code}`);
-    cleanupConnection(ws);
-  });
+Clients decide reconnect behavior from the close code: never auto-reconnect on `1000`/`1008`; always back off on `1006`/`1011`/`1013`.
 
-  // Handle errors
-  ws.on('error', (error) => {
-    console.error(`WebSocket error for ${ws.user.id}:`, error);
-  });
+### C. Resource cleanup (WS-LIFE-02)
+Every per-connection resource (room memberships, broker subscriptions, refresh timers, rate-limiter entries) MUST be torn down in the `close` *and* `error` paths — both fire for a dead connection, so make cleanup idempotent. Leaks here are the #1 cause of WebSocket memory growth.
 
-  // Send welcome message
-  ws.send(JSON.stringify({
-    type: 'connected',
-    userId: ws.user.id,
-    timestamp: Date.now()
-  }));
-});
+---
 
-// Keepalive interval
-const keepaliveInterval = setInterval(() => {
-  wss.clients.forEach((ws) => {
-    if (!ws.isAlive) {
-      ws.terminate();
-      return;
-    }
+## 4. Heartbeats & Liveness (owned)
+
+TCP will not promptly tell you a peer vanished (half-open connections survive for minutes). Application-level ping/pong is the only reliable liveness signal.
+
+```javascript
+// Server: reap peers that miss a pong (WS-LIFE-01)
+const HEARTBEAT_MS = 30_000;
+const beat = setInterval(() => {
+  for (const ws of wss.clients) {
+    if (ws.isAlive === false) { ws.terminate(); continue; } // missed last pong → dead
     ws.isAlive = false;
-    ws.ping();
-  });
-}, 30000);
-
-// Cleanup on server close
-wss.on('close', () => {
-  clearInterval(keepaliveInterval);
-});
-
-server.listen(8080);
+    ws.ping();                                              // protocol-level PING frame
+  }
+}, HEARTBEAT_MS);
+wss.on('connection', (ws) => { ws.isAlive = true; ws.on('pong', () => { ws.isAlive = true; }); });
+wss.on('close', () => clearInterval(beat));
 ```
 
-### B. Client Connection (Browser)
+Rules:
+- Use **protocol** ping/pong frames (opcodes 0x9/0xA), not an application `{"type":"ping"}` message, for liveness — the runtime answers pongs even while app code is busy. Reserve app-level ping only where the platform hides protocol frames (some browsers/load balancers).
+- Heartbeat interval MUST be shorter than every idle timeout in the path (proxy `proxy_read_timeout`, LB idle timeout, cloud gateway). A 30 s ping behind a 60 s idle proxy is safe; behind a 25 s proxy it is not.
+- Derive connection **RTT** from ping→pong and export it (see `observability.md`).
+
+---
+
+## 5. Reconnection & Message Delivery (owned)
+
+The client is responsible for recovery. Retry *strategy* (backoff, jitter, caps) is owned by [`error-handling.md`](guides://error-handling.md); below is the WebSocket binding.
 
 ```javascript
-class WebSocketClient {
-  constructor(url, options = {}) {
-    this.url = url;
-    this.options = {
-      reconnect: true,
-      reconnectInterval: 1000,
-      maxReconnectInterval: 30000,
-      reconnectDecay: 1.5,
-      maxReconnectAttempts: null,
-      ...options
-    };
-
-    this.ws = null;
-    this.reconnectAttempts = 0;
-    this.messageQueue = [];
-    this.listeners = new Map();
-    this.isConnecting = false;
-  }
-
-  connect() {
-    if (this.isConnecting || (this.ws && this.ws.readyState === WebSocket.OPEN)) {
-      return;
-    }
-
-    this.isConnecting = true;
-
-    try {
-      this.ws = new WebSocket(this.url);
-      this.setupEventHandlers();
-    } catch (error) {
-      console.error('WebSocket connection error:', error);
-      this.handleReconnect();
-    }
-  }
-
-  setupEventHandlers() {
-    this.ws.onopen = () => {
-      console.log('WebSocket connected');
-      this.isConnecting = false;
-      this.reconnectAttempts = 0;
-      this.flushMessageQueue();
-      this.emit('open');
-    };
-
-    this.ws.onclose = (event) => {
-      console.log(`WebSocket closed: ${event.code} - ${event.reason}`);
-      this.isConnecting = false;
-      this.emit('close', event);
-
-      if (this.options.reconnect && event.code !== 1000) {
-        this.handleReconnect();
-      }
-    };
-
-    this.ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-      this.emit('error', error);
-    };
-
-    this.ws.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        this.emit('message', message);
-        this.emit(message.type, message.payload);
-      } catch (error) {
-        console.error('Failed to parse message:', error);
-      }
-    };
-  }
-
-  handleReconnect() {
-    if (this.options.maxReconnectAttempts !== null &&
-        this.reconnectAttempts >= this.options.maxReconnectAttempts) {
-      console.log('Max reconnect attempts reached');
-      this.emit('maxReconnectAttempts');
-      return;
-    }
-
-    const delay = Math.min(
-      this.options.reconnectInterval * Math.pow(this.options.reconnectDecay, this.reconnectAttempts),
-      this.options.maxReconnectInterval
-    );
-
-    console.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts + 1})`);
-    this.reconnectAttempts++;
-
-    setTimeout(() => this.connect(), delay);
-  }
-
-  send(type, payload) {
-    const message = JSON.stringify({ type, payload, timestamp: Date.now() });
-
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(message);
-    } else {
-      // Queue message for when connection is restored
-      this.messageQueue.push(message);
-    }
-  }
-
-  flushMessageQueue() {
-    while (this.messageQueue.length > 0) {
-      const message = this.messageQueue.shift();
-      this.ws.send(message);
-    }
-  }
-
-  on(event, callback) {
-    if (!this.listeners.has(event)) {
-      this.listeners.set(event, []);
-    }
-    this.listeners.get(event).push(callback);
-  }
-
-  off(event, callback) {
-    if (this.listeners.has(event)) {
-      const callbacks = this.listeners.get(event);
-      const index = callbacks.indexOf(callback);
-      if (index !== -1) {
-        callbacks.splice(index, 1);
-      }
-    }
-  }
-
-  emit(event, data) {
-    if (this.listeners.has(event)) {
-      this.listeners.get(event).forEach(callback => callback(data));
-    }
-  }
-
-  close() {
-    this.options.reconnect = false;
-    if (this.ws) {
-      this.ws.close(1000, 'Client closing connection');
-    }
-  }
+// Backoff with full jitter, capped — avoids thundering herd on server bounce (WS-RECON-01)
+function nextDelay(attempt, base = 1000, cap = 30_000) {
+  const ceil = Math.min(cap, base * 2 ** attempt);
+  return Math.random() * ceil;                  // full jitter
 }
-
-// Usage
-const client = new WebSocketClient('wss://api.example.com/ws?token=xxx');
-
-client.on('open', () => {
-  console.log('Connected!');
-  client.send('subscribe', { channels: ['orders', 'notifications'] });
-});
-
-client.on('order_update', (data) => {
-  console.log('Order updated:', data);
-});
-
-client.connect();
 ```
 
----
-
-## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
-
-**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new code.**
-
-### TDD Cycle
-
-```
-1. RED: Write a failing test first
-   ↓
-2. GREEN: Write minimal code to make it pass
-   ↓
-3. REFACTOR: Improve code while keeping tests green
-   ↓
-   Repeat
-```
-
-### Example TDD Workflow for WebSocket
+Delivery guarantees the protocol does **not** give you (you must build these):
+- **At-least-once on reconnect:** buffer unacked outbound frames; replay on reopen. Each frame carries a unique `id`; consumers dedupe (idempotency) — naked WebSocket has no redelivery.
+- **Resume subscriptions:** on reopen, re-send `subscribe`/`join` and (if supported) a `last-seen sequence` so the server replays the gap. Without a sequence cursor, a reconnect silently drops everything sent during the outage.
+- **Outbound queue:** while `readyState !== OPEN`, enqueue; flush in order on `open`. Bound the queue and drop-oldest or fail-fast when full (this is client-side backpressure).
 
 ```javascript
-// Step 1: RED - Write failing test
-const WebSocket = require('ws');
-const { createServer } = require('http');
-
-describe('Chat Message Handler', () => {
-  let server, wss, client;
-
-  beforeEach((done) => {
-    server = createServer();
-    wss = new WebSocket.Server({ server });
-    setupMessageHandlers(wss); // function under test
-    server.listen(0, done);
-  });
-
-  afterEach((done) => {
-    if (client) client.close();
-    wss.close(() => server.close(done));
-  });
-
-  test('broadcasts chat message to all clients in the room', (done) => {
-    const port = server.address().port;
-
-    // Connect two clients
-    const client1 = new WebSocket(`ws://localhost:${port}?token=valid-token`);
-    const client2 = new WebSocket(`ws://localhost:${port}?token=valid-token`);
-
-    let connectedCount = 0;
-    const onOpen = () => {
-      connectedCount++;
-      if (connectedCount === 2) {
-        // Both clients join the same room
-        client1.send(JSON.stringify({
-          type: 'join_room',
-          id: 'msg-001',
-          payload: { roomId: 'room-1' }
-        }));
-        client2.send(JSON.stringify({
-          type: 'join_room',
-          id: 'msg-002',
-          payload: { roomId: 'room-1' }
-        }));
-
-        // Client 1 sends a chat message
-        setTimeout(() => {
-          client1.send(JSON.stringify({
-            type: 'chat_message',
-            id: 'msg-003',
-            payload: { roomId: 'room-1', content: 'Hello room!' }
-          }));
-        }, 100);
-      }
-    };
-
-    client1.on('open', onOpen);
-    client2.on('open', onOpen);
-
-    // Client 2 should receive the broadcast
-    client2.on('message', (data) => {
-      const message = JSON.parse(data);
-      if (message.type === 'chat_message') {
-        expect(message.payload.content).toBe('Hello room!');
-        client1.close();
-        client2.close();
-        done();
-      }
-    });
-  });
-});
-// FAILS - setupMessageHandlers not implemented yet
-
-// Step 2: GREEN - Implement the handler
-function setupMessageHandlers(wss) {
-  const rooms = new Map();
-
-  wss.on('connection', (ws) => {
-    ws.on('message', (data) => {
-      const message = JSON.parse(data);
-
-      if (message.type === 'join_room') {
-        const roomId = message.payload.roomId;
-        if (!rooms.has(roomId)) rooms.set(roomId, new Set());
-        rooms.get(roomId).add(ws);
-      }
-
-      if (message.type === 'chat_message') {
-        const { roomId, content } = message.payload;
-        const room = rooms.get(roomId);
-        if (room) {
-          const broadcast = JSON.stringify({
-            type: 'chat_message',
-            id: `${Date.now()}`,
-            payload: { roomId, content },
-            timestamp: new Date().toISOString()
-          });
-          room.forEach(client => {
-            if (client !== ws && client.readyState === WebSocket.OPEN) {
-              client.send(broadcast);
-            }
-          });
-        }
-      }
-    });
-  });
-}
-// PASSES
-
-// Step 3: REFACTOR - Extract room manager, add validation, handle edge cases
-// All tests still PASS
-```
-
-### WebSocket-Specific TDD Practices
-
-- Use `ws` (Node.js) or equivalent test WebSocket clients to simulate connections.
-- Test connection lifecycle: open, message, close, and error events.
-- Test reconnection logic with simulated disconnections.
-- Validate message routing: broadcast, room-scoped, and direct messages.
-- Test rate limiting and backpressure behavior under load.
-- Always clean up server and client connections in `afterEach` hooks.
-
----
-
-## 2B. Bug Fix Protocol (MANDATORY)
-
-**CRITICAL: Every bug MUST receive a regression test BEFORE fixing.**
-
-### Bug Fix Workflow
-
-```
-1. Bug Reported/Discovered
-   ↓
-2. Write a test that REPRODUCES the bug (test will FAIL)
-   ↓
-3. Verify the test fails for the right reason
-   ↓
-4. Fix the bug (make the test pass)
-   ↓
-5. Verify the test now PASSES
-   ↓
-6. Document the bug in test comments (include bug ID)
-   ↓
-7. Deploy with confidence (regression prevented)
-```
-
-### Example Bug Fix
-
-```javascript
-// Bug Report: BUG-1755 - Messages are lost when client reconnects
-// because the message queue is not flushed after WebSocket 'open' event.
-
-describe('BUG-1755: Message queue flush on reconnect', () => {
-  test('queued messages are sent after reconnection', (done) => {
-    const client = new WebSocketClient('ws://localhost:8080?token=valid');
-    const sentMessages = [];
-
-    // Simulate: connection drops, messages are queued, connection restores
-    client.connect();
-
-    client.on('open', () => {
-      // Queue messages while "disconnected" by closing and reopening
-      client.ws.close();
-    });
-
-    client.on('close', () => {
-      // Queue messages while disconnected
-      client.send('chat_message', { roomId: 'room-1', content: 'queued-msg-1' });
-      client.send('chat_message', { roomId: 'room-1', content: 'queued-msg-2' });
-
-      expect(client.messageQueue.length).toBe(2);
-
-      // Simulate reconnection
-      client.connect();
-    });
-
-    // After reconnection, the queue should be flushed
-    let reconnected = false;
-    const originalOnOpen = client.ws?.onopen;
-    client.on('open', () => {
-      if (reconnected) return;
-      reconnected = true;
-
-      // BUG-1755: messageQueue was not being flushed
-      setTimeout(() => {
-        expect(client.messageQueue.length).toBe(0);
-        client.close();
-        done();
-      }, 100);
-    });
-  });
-});
-
-// Fix: Added flushMessageQueue() call inside the onopen handler
-// in WebSocketClient.setupEventHandlers():
-//   this.ws.onopen = () => {
-//     this.reconnectAttempts = 0;
-//     this.flushMessageQueue(); // BUG-1755: was missing
-//     this.emit('open');
-//   };
-```
-
-### Prohibited Practices for Bug Fixes
-
-**NEVER:**
-- Fix a bug without adding a regression test first
-- Write implementation before writing tests (violates TDD)
-- Skip the Red-Green-Refactor cycle
-- Commit code with failing tests
-- Remove tests to make code pass
-- Skip validation of WebSocket message schemas and connection state transitions
-
----
-
-## 3. Message Protocol (MANDATORY)
-
-### A. Message Format
-
-```javascript
-// Standard message envelope
-const MessageSchema = {
-  // Message type for routing
-  type: 'string',
-
-  // Unique message ID for tracking
-  id: 'string',
-
-  // Actual payload
-  payload: 'object',
-
-  // ISO timestamp
-  timestamp: 'string',
-
-  // Optional correlation ID for request/response
-  correlationId: 'string?',
-
-  // Optional sequence number for ordering
-  sequence: 'number?'
-};
-
-// Message types
-const MessageTypes = {
-  // Client -> Server
-  SUBSCRIBE: 'subscribe',
-  UNSUBSCRIBE: 'unsubscribe',
-  PUBLISH: 'publish',
-  REQUEST: 'request',
-  ACK: 'ack',
-
-  // Server -> Client
-  SUBSCRIBED: 'subscribed',
-  UNSUBSCRIBED: 'unsubscribed',
-  MESSAGE: 'message',
-  RESPONSE: 'response',
-  ERROR: 'error',
-
-  // Bidirectional
-  PING: 'ping',
-  PONG: 'pong'
-};
-
-// Example messages
-const subscribeMessage = {
-  type: 'subscribe',
-  id: 'msg-001',
-  payload: {
-    channels: ['orders', 'notifications'],
-    filters: {
-      orderId: '12345'
-    }
-  },
-  timestamp: '2024-01-15T10:30:00Z'
-};
-
-const serverMessage = {
-  type: 'message',
-  id: 'msg-002',
-  payload: {
-    channel: 'orders',
-    event: 'order_updated',
-    data: {
-      orderId: '12345',
-      status: 'shipped'
-    }
-  },
-  timestamp: '2024-01-15T10:30:05Z'
-};
-
-const errorMessage = {
-  type: 'error',
-  id: 'msg-003',
-  payload: {
-    code: 'RATE_LIMITED',
-    message: 'Too many requests',
-    retryAfter: 5000
-  },
-  correlationId: 'msg-001',
-  timestamp: '2024-01-15T10:30:00Z'
-};
-```
-
-### B. Message Handler
-
-```javascript
-class MessageHandler {
-  constructor(ws) {
-    this.ws = ws;
-    this.handlers = new Map();
-    this.pendingRequests = new Map();
-    this.requestTimeout = 30000;
-  }
-
-  registerHandler(type, handler) {
-    this.handlers.set(type, handler);
-  }
-
-  async handleMessage(rawData) {
-    let message;
-    try {
-      message = JSON.parse(rawData);
-    } catch (error) {
-      this.sendError('INVALID_JSON', 'Failed to parse message');
-      return;
-    }
-
-    // Validate message structure
-    if (!message.type || !message.id) {
-      this.sendError('INVALID_MESSAGE', 'Missing required fields');
-      return;
-    }
-
-    // Handle response to pending request
-    if (message.correlationId && this.pendingRequests.has(message.correlationId)) {
-      const { resolve, reject, timer } = this.pendingRequests.get(message.correlationId);
-      clearTimeout(timer);
-      this.pendingRequests.delete(message.correlationId);
-
-      if (message.type === 'error') {
-        reject(new Error(message.payload.message));
-      } else {
-        resolve(message.payload);
-      }
-      return;
-    }
-
-    // Find and execute handler
-    const handler = this.handlers.get(message.type);
-    if (!handler) {
-      this.sendError('UNKNOWN_TYPE', `Unknown message type: ${message.type}`, message.id);
-      return;
-    }
-
-    try {
-      const result = await handler(message.payload, message);
-      if (result !== undefined) {
-        this.sendResponse(message.id, result);
-      }
-    } catch (error) {
-      this.sendError('HANDLER_ERROR', error.message, message.id);
-    }
-  }
-
-  // Send and wait for response
-  async request(type, payload, timeout = this.requestTimeout) {
-    const id = this.generateId();
-
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pendingRequests.delete(id);
-        reject(new Error('Request timeout'));
-      }, timeout);
-
-      this.pendingRequests.set(id, { resolve, reject, timer });
-
-      this.send({
-        type,
-        id,
-        payload,
-        timestamp: new Date().toISOString()
-      });
-    });
-  }
-
-  send(message) {
-    if (this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(message));
-    }
-  }
-
-  sendResponse(correlationId, payload) {
-    this.send({
-      type: 'response',
-      id: this.generateId(),
-      payload,
-      correlationId,
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  sendError(code, message, correlationId = null) {
-    this.send({
-      type: 'error',
-      id: this.generateId(),
-      payload: { code, message },
-      correlationId,
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  generateId() {
-    return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-  }
+send(frame) {
+  if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(frame));
+  else if (this.queue.length < this.maxQueue) this.queue.push(frame); // bounded
+  else this.onDrop(frame);                                            // shed, don't grow unbounded
 }
 ```
 
 ---
 
-## 4. Room/Channel Management (MANDATORY)
+## 6. Message Framing & Protocol (owned)
 
-### A. Room Manager
+Multiplex logical streams over the single connection with a typed envelope. Validate every inbound frame as untrusted input (see [`secure-coding.md`](guides://secure-coding.md)); schema enforcement via Zod/Ajv/JSON-Schema (see [`zod.md`](guides://zod.md)).
 
-```javascript
-class RoomManager {
-  constructor() {
-    this.rooms = new Map(); // roomId -> Set of ws connections
-    this.userRooms = new Map(); // ws -> Set of roomIds
-  }
-
-  join(ws, roomId) {
-    // Add to room
-    if (!this.rooms.has(roomId)) {
-      this.rooms.set(roomId, new Set());
-    }
-    this.rooms.get(roomId).add(ws);
-
-    // Track user's rooms
-    if (!this.userRooms.has(ws)) {
-      this.userRooms.set(ws, new Set());
-    }
-    this.userRooms.get(ws).add(roomId);
-
-    console.log(`User ${ws.user.id} joined room ${roomId}`);
-
-    // Notify room
-    this.broadcast(roomId, {
-      type: 'user_joined',
-      payload: {
-        userId: ws.user.id,
-        roomId,
-        memberCount: this.rooms.get(roomId).size
-      }
-    }, ws); // Exclude the joining user
-  }
-
-  leave(ws, roomId) {
-    const room = this.rooms.get(roomId);
-    if (room) {
-      room.delete(ws);
-      if (room.size === 0) {
-        this.rooms.delete(roomId);
-      }
-    }
-
-    const userRooms = this.userRooms.get(ws);
-    if (userRooms) {
-      userRooms.delete(roomId);
-    }
-
-    console.log(`User ${ws.user.id} left room ${roomId}`);
-
-    // Notify room
-    this.broadcast(roomId, {
-      type: 'user_left',
-      payload: {
-        userId: ws.user.id,
-        roomId,
-        memberCount: room ? room.size : 0
-      }
-    });
-  }
-
-  leaveAll(ws) {
-    const rooms = this.userRooms.get(ws);
-    if (rooms) {
-      rooms.forEach(roomId => this.leave(ws, roomId));
-      this.userRooms.delete(ws);
-    }
-  }
-
-  broadcast(roomId, message, exclude = null) {
-    const room = this.rooms.get(roomId);
-    if (!room) return;
-
-    const data = JSON.stringify({
-      ...message,
-      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      timestamp: new Date().toISOString()
-    });
-
-    room.forEach(ws => {
-      if (ws !== exclude && ws.readyState === WebSocket.OPEN) {
-        ws.send(data);
-      }
-    });
-  }
-
-  sendTo(roomId, userId, message) {
-    const room = this.rooms.get(roomId);
-    if (!room) return false;
-
-    for (const ws of room) {
-      if (ws.user.id === userId && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-          ...message,
-          id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          timestamp: new Date().toISOString()
-        }));
-        return true;
-      }
-    }
-    return false;
-  }
-
-  getRoomMembers(roomId) {
-    const room = this.rooms.get(roomId);
-    if (!room) return [];
-    return Array.from(room).map(ws => ({
-      userId: ws.user.id,
-      username: ws.user.username
-    }));
-  }
+```ts
+// One envelope for every direction. type → routing; id → tracking; correlationId → req/resp; seq → ordering.
+interface Envelope<T = unknown> {
+  type: string;            // 'subscribe' | 'publish' | 'message' | 'error' | 'ack' | ...
+  id: string;              // unique per frame (dedupe + ack target)
+  payload: T;
+  ts: string;              // ISO 8601
+  correlationId?: string;  // ties a response to its request
+  seq?: number;            // per-stream ordering / resume cursor
 }
 ```
 
-### B. Pub/Sub Integration
-
-```javascript
-const Redis = require('ioredis');
-
-class PubSubManager {
-  constructor(redisUrl) {
-    this.publisher = new Redis(redisUrl);
-    this.subscriber = new Redis(redisUrl);
-    this.localSubscriptions = new Map(); // channel -> Set of ws
-
-    this.subscriber.on('message', (channel, message) => {
-      this.handleRemoteMessage(channel, message);
-    });
-  }
-
-  subscribe(ws, channel) {
-    if (!this.localSubscriptions.has(channel)) {
-      this.localSubscriptions.set(channel, new Set());
-      // First local subscriber, subscribe to Redis
-      this.subscriber.subscribe(channel);
-    }
-    this.localSubscriptions.get(channel).add(ws);
-  }
-
-  unsubscribe(ws, channel) {
-    const subscribers = this.localSubscriptions.get(channel);
-    if (subscribers) {
-      subscribers.delete(ws);
-      if (subscribers.size === 0) {
-        this.localSubscriptions.delete(channel);
-        // No more local subscribers, unsubscribe from Redis
-        this.subscriber.unsubscribe(channel);
-      }
-    }
-  }
-
-  unsubscribeAll(ws) {
-    this.localSubscriptions.forEach((subscribers, channel) => {
-      this.unsubscribe(ws, channel);
-    });
-  }
-
-  async publish(channel, message) {
-    const payload = JSON.stringify({
-      type: 'message',
-      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      payload: {
-        channel,
-        ...message
-      },
-      timestamp: new Date().toISOString()
-    });
-
-    await this.publisher.publish(channel, payload);
-  }
-
-  handleRemoteMessage(channel, message) {
-    const subscribers = this.localSubscriptions.get(channel);
-    if (!subscribers) return;
-
-    subscribers.forEach(ws => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(message);
-      }
-    });
-  }
-}
-```
+Conventions:
+- **Request/response over a stream:** sender sets `id`; responder echoes it as `correlationId`. Track pending requests with a timeout (timeout policy → `error-handling.md`); reject on timeout, resolve on matching `correlationId`.
+- **Acknowledgement:** for at-least-once, the receiver emits an `ack` referencing the frame `id`; the sender clears it from the replay buffer.
+- **Text vs binary:** JSON text is fine for control and low-rate data. For high-throughput or large payloads use a binary codec (MessagePack/CBOR/Protobuf) over binary frames — measure first (see [`performance.md`](guides://performance.md)).
+- **Versioning:** negotiate the protocol version via `Sec-WebSocket-Protocol` (subprotocol) at handshake; bump it under SemVer (see [`semver.md`](guides://semver.md)) and reject unknown versions on upgrade.
 
 ---
 
-## 5. Security (MANDATORY)
+## 7. Backpressure (owned)
 
-### A. Authentication
+A WebSocket can deliver faster than a peer drains. Unbounded buffering is a memory-exhaustion DoS — this is the failure mode unique to long-lived streaming connections.
 
-```javascript
-const jwt = require('jsonwebtoken');
+**Server → client (slow consumer):** watch `ws.bufferedAmount` (browser) / the socket write buffer (Node `ws` exposes `_socket.writableLength`; Go: a bounded send channel per client). Policy when the buffer exceeds a high-water mark (WS-BP-01): for **droppable** data (telemetry, presence) drop-oldest or coalesce; for **must-deliver** data, stop reading from the producer (pause the source) or shed the slow client with close `1013`. Never let one slow reader grow server RSS without bound.
 
-// Token-based authentication during handshake
-async function authenticateToken(token) {
-  if (!token) return null;
-
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await getUserById(decoded.userId);
-
-    if (!user || user.isBlocked) {
-      return null;
-    }
-
-    return {
-      id: user.id,
-      username: user.username,
-      roles: user.roles
-    };
-  } catch (error) {
-    return null;
-  }
-}
-
-// Periodic token refresh
-function setupTokenRefresh(ws) {
-  const refreshInterval = setInterval(async () => {
-    if (ws.readyState !== WebSocket.OPEN) {
-      clearInterval(refreshInterval);
-      return;
-    }
-
-    try {
-      const newToken = await refreshUserToken(ws.user.id);
-      ws.send(JSON.stringify({
-        type: 'token_refresh',
-        payload: { token: newToken }
-      }));
-    } catch (error) {
-      console.error('Token refresh failed:', error);
-      ws.close(4001, 'Authentication failed');
-    }
-  }, 15 * 60 * 1000); // Every 15 minutes
-
-  ws.on('close', () => clearInterval(refreshInterval));
+```go
+// Go (gorilla/websocket): one bounded send channel per client; full channel ⇒ shed
+select {
+case client.send <- frame:                 // ok
+default:                                    // buffer full — slow consumer
+    close(client.send); hub.unregister <- client   // shed (peer gets 1011/abnormal)
 }
 ```
 
-### B. Rate Limiting
+**Client → server (flood):** rate-limit inbound per connection (WS-RATE-01); on breach reply `{type:"error", payload:{code:"RATE_LIMITED", retryAfter}}` and optionally close `1008` on repeat abuse. The rate-limit *policy* is part of [`secure-coding.md`](guides://secure-coding.md); the per-socket enforcement point is owned here.
 
-```javascript
-class RateLimiter {
-  constructor(options = {}) {
-    this.windowMs = options.windowMs || 60000; // 1 minute
-    this.maxRequests = options.maxRequests || 100;
-    this.clients = new Map();
-  }
-
-  isAllowed(clientId) {
-    const now = Date.now();
-    const client = this.clients.get(clientId);
-
-    if (!client) {
-      this.clients.set(clientId, {
-        count: 1,
-        windowStart: now
-      });
-      return { allowed: true, remaining: this.maxRequests - 1 };
-    }
-
-    // Reset window if expired
-    if (now - client.windowStart > this.windowMs) {
-      client.count = 1;
-      client.windowStart = now;
-      return { allowed: true, remaining: this.maxRequests - 1 };
-    }
-
-    // Check limit
-    if (client.count >= this.maxRequests) {
-      const retryAfter = this.windowMs - (now - client.windowStart);
-      return { allowed: false, remaining: 0, retryAfter };
-    }
-
-    client.count++;
-    return { allowed: true, remaining: this.maxRequests - client.count };
-  }
-
-  cleanup() {
-    const now = Date.now();
-    this.clients.forEach((client, clientId) => {
-      if (now - client.windowStart > this.windowMs) {
-        this.clients.delete(clientId);
-      }
-    });
-  }
-}
-
-// Usage in message handler
-const rateLimiter = new RateLimiter({ maxRequests: 60 });
-
-function handleMessage(ws, data) {
-  const result = rateLimiter.isAllowed(ws.user.id);
-
-  if (!result.allowed) {
-    ws.send(JSON.stringify({
-      type: 'error',
-      payload: {
-        code: 'RATE_LIMITED',
-        message: 'Too many requests',
-        retryAfter: result.retryAfter
-      }
-    }));
-    return;
-  }
-
-  // Process message...
-}
-```
-
-### C. Input Validation
-
-```javascript
-const Ajv = require('ajv');
-const ajv = new Ajv();
-
-// Define message schemas
-const schemas = {
-  subscribe: {
-    type: 'object',
-    properties: {
-      channels: {
-        type: 'array',
-        items: { type: 'string', maxLength: 100 },
-        maxItems: 10
-      }
-    },
-    required: ['channels'],
-    additionalProperties: false
-  },
-
-  chat_message: {
-    type: 'object',
-    properties: {
-      roomId: { type: 'string', maxLength: 50 },
-      content: { type: 'string', minLength: 1, maxLength: 5000 }
-    },
-    required: ['roomId', 'content'],
-    additionalProperties: false
-  }
-};
-
-// Compile validators
-const validators = Object.fromEntries(
-  Object.entries(schemas).map(([type, schema]) => [type, ajv.compile(schema)])
-);
-
-function validateMessage(type, payload) {
-  const validator = validators[type];
-  if (!validator) {
-    return { valid: false, error: 'Unknown message type' };
-  }
-
-  const valid = validator(payload);
-  if (!valid) {
-    return {
-      valid: false,
-      error: validator.errors.map(e => `${e.instancePath} ${e.message}`).join(', ')
-    };
-  }
-
-  return { valid: true };
-}
-```
+The reader loop must also **pause** when downstream is full — apply `ws.pause()`/stop the read pump rather than spawning unbounded goroutines/promises per frame.
 
 ---
 
-## 6. Scaling (MANDATORY)
+## 8. Scaling: Pub/Sub Fan-Out (owned)
 
-### A. Horizontal Scaling with Redis
+A single process holds connections in memory, so an in-process broadcast list only reaches clients on *that* node. Across a fleet, fan out through an external broker (WS-SCALE-01).
 
-```javascript
-const Redis = require('ioredis');
-const { createAdapter } = require('@socket.io/redis-adapter');
-
-// For Socket.IO
-const pubClient = new Redis(process.env.REDIS_URL);
-const subClient = pubClient.duplicate();
-
-io.adapter(createAdapter(pubClient, subClient));
-
-// For raw WebSocket, use pub/sub pattern
-class ScalableWebSocketServer {
-  constructor(options) {
-    this.nodeId = `node-${process.pid}-${Date.now()}`;
-    this.redis = new Redis(options.redisUrl);
-    this.pubsub = new Redis(options.redisUrl);
-
-    this.setupPubSub();
-  }
-
-  setupPubSub() {
-    this.pubsub.subscribe('ws:broadcast');
-
-    this.pubsub.on('message', (channel, message) => {
-      const data = JSON.parse(message);
-
-      // Don't process our own messages
-      if (data.nodeId === this.nodeId) return;
-
-      // Broadcast to local clients
-      if (data.roomId) {
-        this.localBroadcast(data.roomId, data.message);
-      } else if (data.userId) {
-        this.localSendToUser(data.userId, data.message);
-      }
-    });
-  }
-
-  // Broadcast across all nodes
-  async broadcast(roomId, message) {
-    // Broadcast locally
-    this.localBroadcast(roomId, message);
-
-    // Publish for other nodes
-    await this.redis.publish('ws:broadcast', JSON.stringify({
-      nodeId: this.nodeId,
-      roomId,
-      message
-    }));
-  }
-
-  // Track user location across nodes
-  async registerConnection(userId, ws) {
-    await this.redis.hset('ws:users', userId, this.nodeId);
-    // Store locally
-    this.connections.set(userId, ws);
-  }
-
-  async unregisterConnection(userId) {
-    await this.redis.hdel('ws:users', userId);
-    this.connections.delete(userId);
-  }
-
-  // Send to specific user (might be on different node)
-  async sendToUser(userId, message) {
-    // Try local first
-    if (this.localSendToUser(userId, message)) {
-      return true;
-    }
-
-    // Check Redis for user location
-    const nodeId = await this.redis.hget('ws:users', userId);
-    if (nodeId && nodeId !== this.nodeId) {
-      await this.redis.publish('ws:broadcast', JSON.stringify({
-        nodeId: this.nodeId,
-        userId,
-        message
-      }));
-      return true;
-    }
-
-    return false;
-  }
-}
+```
+client ── LB (sticky) ──► node A ─┐
+                                  ├─► broker (Redis pub/sub / Kafka topic) ─► every node
+client ── LB (sticky) ──► node B ─┘            re-broadcasts to its LOCAL sockets
 ```
 
-### B. Load Balancing
+- **Pattern:** each node subscribes to broker channels for the rooms/users it hosts; on publish it (a) delivers to local sockets and (b) publishes to the broker, tagging its own `nodeId` so it ignores the echo. Other nodes re-broadcast to their local sockets.
+- **Broker choice:** Redis pub/sub for fire-and-forget fan-out (see [`redis.md`](guides://redis.md)); Kafka/streams when you need durability, replay, or a resume cursor (see [`kafka.md`](guides://kafka.md)). Socket.IO ships a Redis adapter that implements this pattern.
+- **Connection directory:** to target a user who may be on another node, keep a `userId → nodeId` map in the broker/store and route via the broker rather than broadcasting blindly.
+- **Sticky sessions:** a connection lives on one node for its lifetime, so the LB MUST pin it (`ip_hash`, cookie, or consistent-hash) — but state that must survive a node loss MUST live in the broker/store, not in process. Externalized state (WS-LIFE-02) is what lets any node accept the reconnect.
 
 ```nginx
-# nginx.conf for WebSocket load balancing
-upstream websocket_servers {
-    ip_hash;  # Sticky sessions for WebSocket
-    server ws1.example.com:8080;
-    server ws2.example.com:8080;
-    server ws3.example.com:8080;
-}
-
-server {
-    listen 443 ssl;
-    server_name ws.example.com;
-
-    ssl_certificate /etc/ssl/certs/server.crt;
-    ssl_certificate_key /etc/ssl/private/server.key;
-
-    location / {
-        proxy_pass http://websocket_servers;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        # WebSocket specific timeouts
-        proxy_connect_timeout 7d;
-        proxy_send_timeout 7d;
-        proxy_read_timeout 7d;
-    }
+# nginx: WebSocket upgrade + sticky + idle timeout > heartbeat (see §4)
+upstream ws_pool { ip_hash; server ws1:8080; server ws2:8080; }
+location /ws {
+  proxy_pass http://ws_pool;
+  proxy_http_version 1.1;
+  proxy_set_header Upgrade $http_upgrade;
+  proxy_set_header Connection "upgrade";
+  proxy_read_timeout 75s;          # MUST exceed the 30s heartbeat
 }
 ```
 
 ---
 
-## 7. Testing (MANDATORY)
+## 9. Observability (binding)
 
-### A. Unit Tests
+Metrics/tracing policy is owned by [`observability.md`](guides://observability.md). Export at minimum (WS-OBS-01): active connections (gauge), connect/disconnect rate, messages in/out (counter, by type), frame bytes, close codes (histogram/counter — a spike in `1006`/`1011` is your alarm), heartbeat RTT, and send-buffer high-water occurrences. Propagate a trace/correlation context in the envelope so a frame can be linked to upstream HTTP/event spans. Structured connection logs (with `userId`, `nodeId`, close code) per [`logging.md`](guides://logging.md).
+
+---
+
+## 10. Testing (binding)
+
+Test-first, Red-Green-Refactor, and regression-test-before-fix are owned by [`tdd.md`](guides://tdd.md). The WebSocket-specific surface to cover (WS-TST-01):
+
+- **Lifecycle:** open with valid/invalid token (handshake accept/reject), message echo/route, clean close (`1000`), abnormal close (`1006`), and `error`. Always close clients and `wss`/server in teardown to avoid leaked handles.
+- **Heartbeat:** a silent peer is terminated within ≤ 2 intervals; pong resets liveness.
+- **Reconnect:** simulate a server bounce; assert backoff timing and that the outbound queue flushes in order on reopen.
+- **Backpressure:** a deliberately slow reader does not grow server memory unbounded; over-limit producers are shed.
+- **Routing:** broadcast, room-scoped, and direct-to-user delivery; and (multi-node) a message published on one node reaches a client on another (use two server instances + the broker).
+- **Validation:** malformed/oversized/forbidden-Origin frames are rejected without crashing the connection.
 
 ```javascript
-const WebSocket = require('ws');
-const { createServer } = require('http');
-
-describe('WebSocket Server', () => {
-  let server;
-  let wss;
-  let client;
-
-  beforeEach((done) => {
-    server = createServer();
-    wss = new WebSocket.Server({ server });
-    server.listen(0, done);
-  });
-
-  afterEach((done) => {
-    if (client) client.close();
-    wss.close(() => server.close(done));
-  });
-
-  test('accepts connection with valid token', (done) => {
-    const port = server.address().port;
-    client = new WebSocket(`ws://localhost:${port}?token=valid-token`);
-
-    client.on('open', () => {
-      expect(client.readyState).toBe(WebSocket.OPEN);
-      done();
-    });
-  });
-
-  test('rejects connection with invalid token', (done) => {
-    const port = server.address().port;
-    client = new WebSocket(`ws://localhost:${port}?token=invalid`);
-
-    client.on('error', (err) => {
-      expect(err.message).toContain('401');
-      done();
-    });
-  });
-
-  test('echoes messages', (done) => {
-    const port = server.address().port;
-    client = new WebSocket(`ws://localhost:${port}?token=valid-token`);
-
-    wss.on('connection', (ws) => {
-      ws.on('message', (data) => {
-        ws.send(data);
-      });
-    });
-
-    client.on('open', () => {
-      client.send(JSON.stringify({ type: 'test', payload: 'hello' }));
-    });
-
-    client.on('message', (data) => {
-      const message = JSON.parse(data);
-      expect(message.payload).toBe('hello');
-      done();
-    });
-  });
-
-  test('handles disconnection gracefully', (done) => {
-    const port = server.address().port;
-    client = new WebSocket(`ws://localhost:${port}?token=valid-token`);
-
-    wss.on('connection', (ws) => {
-      ws.on('close', (code, reason) => {
-        expect(code).toBe(1000);
-        done();
-      });
-    });
-
-    client.on('open', () => {
-      client.close(1000, 'Test complete');
-    });
-  });
+test('rejects connection with invalid token', (done) => {
+  const c = new WebSocket(`ws://localhost:${port}/ws?token=bad`);
+  c.on('error', () => done());          // handshake fails before open (WS-AUTH-01)
+  c.on('open', () => done(new Error('should not open')));
 });
 ```
 
 ---
 
-## 8. Deployment Checklist
-
-### Connection Management
-- [ ] Ping/pong keepalive configured
-- [ ] Reconnection with exponential backoff
-- [ ] Graceful shutdown handling
-- [ ] Connection limits enforced
-
-### Security
-- [ ] TLS/SSL required in production
-- [ ] Token-based authentication
-- [ ] Rate limiting implemented
-- [ ] Input validation on all messages
-
-### Scalability
-- [ ] Redis pub/sub for multi-node
-- [ ] Sticky sessions for load balancing
-- [ ] Connection state externalized
-
-### Monitoring
-- [ ] Connection count metrics
-- [ ] Message throughput metrics
-- [ ] Error rate tracking
-- [ ] Latency monitoring
-
----
-
-## 9. Quick Reference
+## 11. Quick Reference
 
 ```javascript
-// Connection states
-WebSocket.CONNECTING // 0
-WebSocket.OPEN       // 1
-WebSocket.CLOSING    // 2
-WebSocket.CLOSED     // 3
+// readyState
+WebSocket.CONNECTING /*0*/  OPEN /*1*/  CLOSING /*2*/  CLOSED /*3*/
 
-// Close codes
-1000 // Normal closure
-1001 // Going away
-1002 // Protocol error
-1003 // Unsupported data
-1006 // Abnormal closure (no close frame)
-1008 // Policy violation
-1011 // Server error
-4000-4999 // Application-specific
-
-// Common patterns
-ws.send(JSON.stringify(message));
-ws.ping();
-ws.terminate(); // Force close
-ws.close(1000, 'reason');
+ws.ping();                 // protocol PING (liveness)
+ws.send(JSON.stringify(envelope));
+ws.close(1000, 'done');    // graceful, no reconnect
+ws.terminate();            // force-close a dead peer (server)
+ws.bufferedAmount;         // backpressure signal (browser)
+// Origin allow-list + token verify happen on the UPGRADE, not after.
 ```
 
 ---
 
-## 10. Why This Configuration Works
+## 12. Deployment Checklist
 
-1. **Token-Based Authentication on Upgrade**: Authenticating during the HTTP upgrade handshake rather than after connection establishment prevents unauthorized clients from consuming server resources. Rejecting invalid tokens before the WebSocket is opened eliminates an entire class of abuse vectors.
+Generated from §2 — one box per requirement ID.
 
-2. **Heartbeat with Ping/Pong Frames**: Regular ping/pong exchanges detect dead connections that the TCP stack has not yet noticed (half-open connections). This prevents resource leaks from zombie connections and allows clients to implement automatic reconnection.
-
-3. **Structured Message Protocol with Type Fields**: Using a consistent message envelope with `type`, `payload`, and `id` fields enables multiplexing multiple logical channels over a single WebSocket, correlating requests with responses, and implementing reliable delivery through message acknowledgment.
-
-4. **Exponential Backoff for Reconnection**: Reconnecting with exponential backoff and jitter prevents thundering herd problems where all clients reconnect simultaneously after a server restart, which would create a load spike that crashes the server again.
-
-5. **Redis Pub/Sub for Multi-Node Scaling**: Publishing messages through Redis rather than maintaining in-process subscriber lists allows horizontal scaling across multiple server nodes. Any node can accept a connection and deliver messages published by any other node.
+- [ ] WS-SEC-01 — `wss://`/TLS in production; no public `ws://`
+- [ ] WS-SEC-02 — `Origin` allow-list enforced on upgrade
+- [ ] WS-AUTH-01 — authenticated on upgrade before any frame (see `oauth.md`)
+- [ ] WS-AUTH-02 — token expiry closes socket (4001); refresh without drop
+- [ ] WS-VAL-01 — every inbound frame schema-validated (see `secure-coding.md`)
+- [ ] WS-LIFE-01 — ping/pong heartbeat reaps dead peers
+- [ ] WS-LIFE-02 — close/error release all per-connection resources
+- [ ] WS-LIFE-03 — graceful drain on shutdown (1001)
+- [ ] WS-RECON-01 — client backoff + jitter, capped (see `error-handling.md`)
+- [ ] WS-BP-01 — bounded send buffers; slow consumers shed
+- [ ] WS-RATE-01 — inbound rate limiting per connection
+- [ ] WS-SCALE-01 — external broker fan-out for multi-node
+- [ ] WS-OBS-01 — connection/throughput/close-code metrics exported (see `observability.md`)
+- [ ] WS-TST-01 — lifecycle, reconnect, routing, backpressure tested (see `tdd.md`)
+- [ ] Agent ran every §2 verification and documented any fixes
 
 ---
-
-**Last Updated:** 2026-01-31
-**Version:** 1.0
-**Maintainer:** Platform Team
-
-
-**End of WebSocket Development Guidelines**
+**End of WebSocket Guidelines**

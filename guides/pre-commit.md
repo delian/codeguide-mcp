@@ -1,1507 +1,262 @@
 # Pre-commit Framework Guidelines
-Mandatory standards for using the pre-commit framework to enforce code quality, security, and consistency across all programming languages.
+Mandatory standards for fast, deterministic local git gates with the pre-commit framework: hook configuration, staged-file checks, secret scanning at commit time, and keeping local hooks in sync with CI. pre-commit 4.x, language-agnostic.
+
+---
+name: pre-commit
+title: Pre-commit Framework Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: cross-cutting
+tools: [pre-commit@4]
+requires: []
+recommends:
+  - git
+  - ci-cd
+  - secure-coding
+  - code-review
+provides:
+  - pre-commit-hooks
+  - local-gates
+  - hook-config
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide owns the pre-commit framework and local git-hook gates; the *policy* behind each gate lives in its owner guide.
 
 ---
 
-**Agent Profile**: The Quality Gate Enforcer
-**Role**: Senior DevOps Engineer & Code Quality Specialist
-**Objective**: Ensure all code passes comprehensive quality and security checks before entering version control.
-**Tools**: pre-commit framework, language-specific linters, security scanners, formatters, type checkers, test runners.
+## 0. Prerequisites & References
+
+This guide has no hard prerequisites. Fetch these when the task touches them — they own concerns this guide only *wires up*, and their rules are not repeated here.
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`git.md`](guides://git.md) — the git-hook mechanism (`core.hooksPath`, hook lifecycle, branch policy). *(Binding: pre-commit installs into `.git/hooks/` or a managed hooks path.)*
+> - [`ci-cd.md`](guides://ci-cd.md) — the same gates run server-side; this guide keeps local and CI configs identical. *(Binding: CI runs `pre-commit run --all-files`.)*
+> - [`secure-coding.md`](guides://secure-coding.md) — secret-scanning and supply-chain policy. *(Binding: this guide adds the commit-time secret-scan hook.)*
+> - [`code-review.md`](guides://code-review.md) — what humans review after the automated gate passes.
+
+> 📎 **SEE ALSO:** the per-tool guides supply the *hook IDs and versions* a project pins — e.g. [`python.md`](guides://python.md) (ruff, bandit), [`typescript.md`](guides://typescript.md) / [`javascript.md`](guides://javascript.md) (eslint, prettier), [`go.md`](guides://go.md), [`rust.md`](guides://rust.md), [`dockerfile.md`](guides://dockerfile.md) (hadolint), [`bash.md`](guides://bash.md) (shellcheck), [`markdown.md`](guides://markdown.md), [`terraform.md`](guides://terraform.md). This guide does **not** restate their tool configs.
 
 ---
 
-## 1. Core Philosophies: PRECOMMIT-FIRST
+## 1. Core Philosophies
 
-The agent must adhere to the **PRECOMMIT-FIRST** principles:
+Principles unique to a *local commit-time gate*. Security, CI, git, and review policy come from §0.
 
-**Test-Driven Development (TDD)**: Pre-commit hooks MUST include test execution to verify code correctness.
-**Regression Shield**: Security and quality checks prevent regressions from entering the codebase.
+- **Local mirror of CI, not a replacement.** Every gate that runs in CI MUST be runnable locally via the same `.pre-commit-config.yaml`; CI re-runs the identical hooks so a green local commit means a green pipeline. The gate is duplicated *for fast feedback*, never *for different rules* (see `ci-cd.md`).
+- **Fast or it gets disabled.** Hooks on the `pre-commit` stage MUST be near-instant on a typical diff. Anything slow (full test suite, dependency audit, integration checks) moves to the `pre-push` stage or CI only. A hook that adds seconds to every commit will be bypassed by developers.
+- **Staged-files only by default.** Hooks act on the **staged** files pre-commit passes them, not the whole tree. Whole-tree runs are reserved for `--all-files` (CI / first install). Hooks that ignore their file arguments (`pass_filenames: false`) MUST be the exception and MUST be scoped with `files:`/`types:`.
+- **Deterministic & pinned.** Every `repo` is pinned to an immutable `rev` (tag/SHA). `pre-commit autoupdate` is the only way revs change, and that change is reviewed like any dependency bump.
+- **Auto-fix, then re-verify.** Formatters and fixers modify files and exit non-zero so the commit aborts; the developer re-stages and re-commits. The gate never silently rewrites a passing commit.
+- **Bypass is auditable.** `--no-verify` / `SKIP=` exist for genuine emergencies only and are surfaced in review; the server-side gate (`ci-cd.md`) catches anything bypassed locally.
 
-- **P**revent Bad Commits: Block commits that fail quality, security, or formatting checks
-- **R**un Checks Automatically: Automate all verification before code enters version control
-- **E**nforce Consistency: Apply the same standards across all developers and CI/CD
-- **C**atch Issues Early: Find problems at commit time, not in CI or production
-- **O**ptimize for Speed: Fast hooks encourage developers to keep them enabled
-- **M**andatory Verification: ALWAYS run `pre-commit run -a` before committing
-- **M**CP Integration: Consult MCP servers and web resources for optimal configurations
-- **I**nfrastructure Agnostic: Same hooks work locally and in CI/CD pipelines
-- **T**horough Validation: Check security, dependencies, build, types, lint, tests, docs
-
-**Agent Mandatory Behavior**: ALWAYS run `pre-commit run -a` before creating any commit, even if pre-commit is not installed as a git hook.
+**Verified Code**: code is not "done" until `pre-commit run --all-files` is clean and the same hooks pass in CI.
 
 ---
 
-## 2. Agent Pre-Commit Requirements (MANDATORY)
+## 2. Requirements (MANDATORY, auditable)
 
-### A. Agent Verification Protocol
+RFC-2119 keywords. IDs `PC-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a shared rule cite its owner.
 
-**CRITICAL: Agents MUST run `pre-commit run -a` before EVERY commit operation.**
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| PC-STRUCT-01 | A `.pre-commit-config.yaml` MUST exist at repo root and be valid | `pre-commit validate-config` | exit 0 |
+| PC-STRUCT-02 | Hooks MUST be installed into git (commit + commit-msg + pre-push) | `pre-commit install -t pre-commit -t commit-msg -t pre-push` then inspect git hooks (see `git.md`) | hooks present |
+| PC-DEP-01 | Every `repo` MUST pin an immutable `rev`; none floating/`HEAD` | `grep -nE '^\s*rev:' .pre-commit-config.yaml` review | all pinned |
+| PC-CFG-01 | Whole-suite run MUST pass clean | `pre-commit run --all-files` | exit 0 |
+| PC-SEC-01 | A commit-time secret scan MUST run on staged files (see `secure-coding.md`) | `pre-commit run gitleaks --all-files` (or detect-secrets) | 0 findings |
+| PC-PERF-01 | `pre-commit`-stage hooks MUST be fast; slow checks live on `pre-push`/CI | review stage assignments; time a representative run | commit-stage run quick |
+| PC-CI-01 | CI MUST run the identical config server-side (see `ci-cd.md`) | CI job runs `pre-commit run --all-files --show-diff-on-failure` | gate blocks merge |
+| PC-SYNC-01 | Local hooks MUST match the project's lint/format/type/test gates (no drift) | compare hook IDs to language guide's §2 commands | no missing gate |
+| PC-BRANCH-01 | Direct commits to protected branches MUST be blocked locally (see `git.md`) | `no-commit-to-branch` hook present | configured |
+| PC-MSG-01 | Commit messages SHOULD be validated against the project convention | `conventional-pre-commit` (or commitlint) on `commit-msg` | exit 0 |
+| PC-MNT-01 | Hook revs MUST be updated and reviewed on a schedule | `pre-commit autoupdate` in a reviewed PR | revs current |
 
-#### Pre-Commit Execution (MANDATORY)
+> **Forbidden**: floating revs; slow hooks on the commit stage; secret-scan disabled; local config that diverges from CI; routine use of `--no-verify`/`SKIP` to land code.
 
-**Before creating ANY commit, the agent MUST:**
+---
+
+## 3. Verification Protocol
+
+Run before presenting any change that touches hooks or before a commit:
 
 ```bash
-# Step 1: Check if pre-commit is available
-if command -v pre-commit &> /dev/null; then
-    echo "pre-commit found, running all hooks..."
-    pre-commit run -a
-    if [ $? -ne 0 ]; then
-        echo "ERROR: pre-commit checks failed"
-        echo "Fix issues before committing"
-        exit 1
-    fi
-else
-    echo "WARNING: pre-commit not installed"
-    echo "Installing pre-commit..."
-    pip install pre-commit || pipx install pre-commit
-fi
-
-# Step 2: Verify .pre-commit-config.yaml exists
-if [ ! -f ".pre-commit-config.yaml" ]; then
-    echo "WARNING: .pre-commit-config.yaml not found"
-    echo "Creating recommended configuration..."
-    # Agent should create or suggest configuration
-fi
-
-# Step 3: Run all hooks on all files
-pre-commit run -a
-
-# Step 4: Only proceed with commit if all hooks pass
-if [ $? -eq 0 ]; then
-    echo "All pre-commit checks passed"
-    git commit -m "..."
-else
-    echo "BLOCKED: Fix pre-commit issues first"
-fi
+pre-commit validate-config                       # PC-STRUCT-01
+pre-commit run --all-files --show-diff-on-failure # PC-CFG-01 (mirrors CI, PC-CI-01)
+pre-commit run gitleaks --all-files              # PC-SEC-01 (secret scan)
 ```
 
-### B. Agent Configuration Discovery Protocol
-
-**CRITICAL: When setting up pre-commit, agents MUST consult available resources.**
-
-#### Configuration Discovery Steps
-
-```markdown
-## Agent Configuration Discovery Protocol
-
-1. **Check Project Type**
-   - Detect language(s): package.json, pyproject.toml, Cargo.toml, go.mod, etc.
-   - Detect frameworks: React, Django, FastAPI, Spring, etc.
-   - Detect infrastructure: Docker, Kubernetes, Terraform, etc.
-
-2. **Consult MCP Servers**
-   - Query code-guide MCP for language-specific recommendations
-   - Check for project-specific hook requirements
-   - Gather security scanning tool recommendations
-
-3. **Search Web Resources**
-   - Search: "best pre-commit hooks for [language] 2026"
-   - Search: "pre-commit config [framework] security"
-   - Search: "[tool] pre-commit hook configuration"
-   - Check GitHub for popular pre-commit-config.yaml examples
-   - Reference: https://pre-commit.com/hooks.html
-
-4. **Evaluate and Select Hooks**
-   - Prioritize: security > build > types > lint > format > tests
-   - Consider: speed (fast hooks first, slow hooks optional)
-   - Validate: hooks work with project's language/framework versions
-
-5. **Generate Configuration**
-   - Create .pre-commit-config.yaml with selected hooks
-   - Include comments explaining each hook's purpose
-   - Test configuration with `pre-commit run -a`
-```
-
-### C. Prohibited Practices
-
-**NEVER commit code that:**
-- [ ] Has not been validated with `pre-commit run -a`
-- [ ] Bypasses pre-commit with `--no-verify` (unless explicitly requested)
-- [ ] Fails security scanning
-- [ ] Has dependency vulnerabilities
-- [ ] Fails to build/compile
-- [ ] Has type errors (in typed languages)
-- [ ] Fails linting
-- [ ] Has formatting issues
-- [ ] Has failing unit tests
-- [ ] Lacks required documentation
+If a hook fails: read the output, fix the root cause (or re-stage auto-fixes), re-run until green. Do not bypass. The *why* behind each gate lives in its §0 owner.
 
 ---
 
-## 3. Pre-commit Installation & Setup (MANDATORY)
+## 4. Config Anatomy
 
-### A. Installation
-
-```bash
-# Using pip (recommended)
-pip install pre-commit
-
-# Using pipx (isolated environment)
-pipx install pre-commit
-
-# Using Homebrew (macOS)
-brew install pre-commit
-
-# Using conda
-conda install -c conda-forge pre-commit
-
-# Verify installation
-pre-commit --version
-```
-
-### B. Project Setup
-
-```bash
-# Initialize pre-commit in project
-cd /path/to/project
-
-# Create configuration file (or use agent-generated config)
-touch .pre-commit-config.yaml
-
-# Install hooks into git
-pre-commit install
-
-# Install additional hook types
-pre-commit install --hook-type commit-msg
-pre-commit install --hook-type pre-push
-
-# Run on all files (first-time setup)
-pre-commit run -a
-
-# Update hooks to latest versions
-pre-commit autoupdate
-```
-
-### C. Git Hook Installation
-
-```bash
-# Install all hook types for comprehensive coverage
-pre-commit install                        # pre-commit hook
-pre-commit install --hook-type commit-msg # commit message validation
-pre-commit install --hook-type pre-push   # pre-push validation
-
-# Verify hooks are installed
-ls -la .git/hooks/
-# Should show: pre-commit, commit-msg, pre-push -> pre-commit scripts
-```
-
----
-
-## 4. Comprehensive Hook Configuration (MANDATORY)
-
-### A. Core Configuration Structure
+`.pre-commit-config.yaml` lives at repo root. The shape — top-level keys, stages, and selectors — is what this guide owns; the specific tool hooks come from each language/tool guide.
 
 ```yaml
 # .pre-commit-config.yaml
-# Comprehensive pre-commit configuration for code quality and security
-# Generated following pre-commit.md guidelines
+minimum_pre_commit_version: "4.0.0"
 
-# Global settings
-default_language_version:
-  python: python3
-  node: "18.17.0"
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
+default_stages: [pre-commit]        # modern stage name (NOT the legacy "commit")
+fail_fast: false                     # run all hooks; report every failure at once
 
-# Run hooks in parallel for speed
-default_stages: [commit]
-
-# Fail fast on first failure (optional, for speed)
-fail_fast: false
-
-# CI-specific settings
-ci:
-  autofix_prs: true
-  autoupdate_schedule: weekly
-  autoupdate_commit_msg: "chore(deps): update pre-commit hooks"
-
-repos:
-  # ═══════════════════════════════════════════════════════════════════
-  # SECTION 1: SECURITY SCANNING (HIGHEST PRIORITY)
-  # These hooks detect secrets, vulnerabilities, and security issues
-  # ═══════════════════════════════════════════════════════════════════
-
-  # Secret Detection - MANDATORY
-  - repo: https://github.com/Yelp/detect-secrets
-    rev: v1.4.0
-    hooks:
-      - id: detect-secrets
-        name: "Security: Detect secrets"
-        args: ['--baseline', '.secrets.baseline']
-        exclude: package-lock\.json|yarn\.lock|pnpm-lock\.yaml
-
-  # Alternative: Gitleaks (more comprehensive)
-  - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.18.0
-    hooks:
-      - id: gitleaks
-        name: "Security: Detect secrets (gitleaks)"
-
-  # Security linting for Python
-  - repo: https://github.com/PyCQA/bandit
-    rev: 1.7.5
-    hooks:
-      - id: bandit
-        name: "Security: Python security linter"
-        args: ['-r', '-ll', '-ii']
-        types: [python]
-
-  # Security linting for JavaScript/TypeScript
-  - repo: local
-    hooks:
-      - id: npm-audit
-        name: "Security: npm audit"
-        entry: npm audit --audit-level=high
-        language: system
-        pass_filenames: false
-        files: package\.json|package-lock\.json
-        stages: [commit, push]
-
-  # ═══════════════════════════════════════════════════════════════════
-  # SECTION 2: DEPENDENCY VALIDATION
-  # Ensure dependencies are secure and properly managed
-  # ═══════════════════════════════════════════════════════════════════
-
-  - repo: local
-    hooks:
-      # Python dependencies
-      - id: pip-audit
-        name: "Dependencies: Python vulnerability check"
-        entry: pip-audit
-        language: system
-        pass_filenames: false
-        files: requirements.*\.txt|pyproject\.toml|setup\.py
-        stages: [commit, push]
-
-      # Node.js dependencies
-      - id: npm-outdated-check
-        name: "Dependencies: Check for outdated packages"
-        entry: bash -c 'npm outdated --json | jq -e "length == 0"'
-        language: system
-        pass_filenames: false
-        files: package\.json
-        stages: [push]  # Only on push (slower)
-
-  # ═══════════════════════════════════════════════════════════════════
-  # SECTION 3: BUILD & COMPILATION
-  # Verify code compiles/builds successfully
-  # ═══════════════════════════════════════════════════════════════════
-
-  - repo: local
-    hooks:
-      # TypeScript compilation
-      - id: typescript-compile
-        name: "Build: TypeScript compilation"
-        entry: npx tsc --noEmit
-        language: system
-        types: [ts, tsx]
-        pass_filenames: false
-
-      # Rust compilation
-      - id: cargo-check
-        name: "Build: Rust compilation"
-        entry: cargo check
-        language: system
-        types: [rust]
-        pass_filenames: false
-
-      # Go compilation
-      - id: go-build
-        name: "Build: Go compilation"
-        entry: go build ./..
-        language: system
-        types: [go]
-        pass_filenames: false
-
-      # Python syntax check
-      - id: python-compile
-        name: "Build: Python syntax check"
-        entry: python -m py_compile
-        language: system
-        types: [python]
-
-  # ═══════════════════════════════════════════════════════════════════
-  # SECTION 4: TYPE CHECKING
-  # Static type analysis for typed languages
-  # ═══════════════════════════════════════════════════════════════════
-
-  # Python type checking with mypy
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.5.1
-    hooks:
-      - id: mypy
-        name: "Types: Python type checking"
-        additional_dependencies: [types-all]
-        args: [--ignore-missing-imports, --strict]
-
-  # Python type checking with pyright (faster)
-  - repo: local
-    hooks:
-      - id: pyright
-        name: "Types: Python type checking (pyright)"
-        entry: pyright
-        language: node
-        types: [python]
-        pass_filenames: false
-        additional_dependencies: ['pyright@1.1.325']
-
-  # TypeScript strict mode (already covered by tsc --noEmit above)
-
-  # ═══════════════════════════════════════════════════════════════════
-  # SECTION 5: LINTING
-  # Code quality and style enforcement
-  # ═══════════════════════════════════════════════════════════════════
-
-  # General linters
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
-    hooks:
-      - id: check-yaml
-        name: "Lint: YAML syntax"
-      - id: check-json
-        name: "Lint: JSON syntax"
-      - id: check-toml
-        name: "Lint: TOML syntax"
-      - id: check-xml
-        name: "Lint: XML syntax"
-      - id: check-merge-conflict
-        name: "Lint: Check merge conflicts"
-      - id: check-case-conflict
-        name: "Lint: Check case conflicts"
-      - id: check-symlinks
-        name: "Lint: Check symlinks"
-      - id: check-added-large-files
-        name: "Lint: Check large files"
-        args: ['--maxkb=1000']
-      - id: end-of-file-fixer
-        name: "Lint: Fix end of file"
-      - id: trailing-whitespace
-        name: "Lint: Trailing whitespace"
-      - id: mixed-line-ending
-        name: "Lint: Mixed line endings"
-        args: ['--fix=lf']
-      - id: no-commit-to-branch
-        name: "Lint: Prevent direct commits to main/develop"
-        args: ['--branch', 'main', '--branch', 'develop']
-
-  # Python linting with Ruff (fast, comprehensive)
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.1.6
-    hooks:
-      - id: ruff
-        name: "Lint: Python (ruff)"
-        args: [--fix, --exit-non-zero-on-fix]
-      - id: ruff-format
-        name: "Format: Python (ruff)"
-
-  # JavaScript/TypeScript linting
-  - repo: https://github.com/pre-commit/mirrors-eslint
-    rev: v8.52.0
-    hooks:
-      - id: eslint
-        name: "Lint: JavaScript/TypeScript"
-        types: [javascript, tsx, ts]
-        additional_dependencies:
-          - eslint@8.52.0
-          - '@typescript-eslint/parser@6.9.0'
-          - '@typescript-eslint/eslint-plugin@6.9.0'
-
-  # Go linting
-  - repo: https://github.com/golangci/golangci-lint
-    rev: v1.55.2
-    hooks:
-      - id: golangci-lint
-        name: "Lint: Go"
-
-  # Rust linting
-  - repo: local
-    hooks:
-      - id: clippy
-        name: "Lint: Rust (clippy)"
-        entry: cargo clippy -- -D warnings
-        language: system
-        types: [rust]
-        pass_filenames: false
-
-  # Shell script linting
-  - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.9.0.6
-    hooks:
-      - id: shellcheck
-        name: "Lint: Shell scripts"
-
-  # Dockerfile linting
-  - repo: https://github.com/hadolint/hadolint
-    rev: v2.12.0
-    hooks:
-      - id: hadolint
-        name: "Lint: Dockerfile"
-
-  # Markdown linting
-  - repo: https://github.com/igorshubovych/markdownlint-cli
-    rev: v0.37.0
-    hooks:
-      - id: markdownlint
-        name: "Lint: Markdown"
-        args: ['--fix']
-
-  # ═══════════════════════════════════════════════════════════════════
-  # SECTION 6: FORMATTING
-  # Consistent code formatting
-  # ═══════════════════════════════════════════════════════════════════
-
-  # Prettier for web files
-  - repo: https://github.com/pre-commit/mirrors-prettier
-    rev: v3.0.3
-    hooks:
-      - id: prettier
-        name: "Format: Prettier"
-        types_or: [javascript, jsx, ts, tsx, css, scss, json, yaml, markdown, html]
-
-  # Python formatting with Black
-  - repo: https://github.com/psf/black
-    rev: 23.10.1
-    hooks:
-      - id: black
-        name: "Format: Python (black)"
-
-  # Python import sorting
-  - repo: https://github.com/pycqa/isort
-    rev: 5.12.0
-    hooks:
-      - id: isort
-        name: "Format: Python imports"
-        args: ['--profile', 'black']
-
-  # Go formatting
-  - repo: local
-    hooks:
-      - id: go-fmt
-        name: "Format: Go"
-        entry: gofmt -w
-        language: system
-        types: [go]
-
-  # Rust formatting
-  - repo: local
-    hooks:
-      - id: rustfmt
-        name: "Format: Rust"
-        entry: cargo fmt --
-        language: system
-        types: [rust]
-
-  # ═══════════════════════════════════════════════════════════════════
-  # SECTION 7: UNIT TESTS (BASIC)
-  # Run fast unit tests before commit
-  # ═══════════════════════════════════════════════════════════════════
-
-  - repo: local
-    hooks:
-      # Python tests
-      - id: pytest
-        name: "Test: Python unit tests"
-        entry: pytest -x -q --tb=short
-        language: system
-        types: [python]
-        pass_filenames: false
-        stages: [commit]
-
-      # JavaScript/TypeScript tests
-      - id: jest
-        name: "Test: JavaScript unit tests"
-        entry: npm test -- --passWithNoTests --bail
-        language: system
-        pass_filenames: false
-        files: \.(js|jsx|ts|tsx)$
-        stages: [commit]
-
-      # Go tests
-      - id: go-test
-        name: "Test: Go unit tests"
-        entry: go test -short ./..
-        language: system
-        types: [go]
-        pass_filenames: false
-        stages: [commit]
-
-      # Rust tests
-      - id: cargo-test
-        name: "Test: Rust unit tests"
-        entry: cargo test --no-fail-fast
-        language: system
-        types: [rust]
-        pass_filenames: false
-        stages: [commit]
-
-  # ═══════════════════════════════════════════════════════════════════
-  # SECTION 8: API DOCUMENTATION
-  # Ensure API documentation is included and up-to-date
-  # ═══════════════════════════════════════════════════════════════════
-
-  - repo: local
-    hooks:
-      # OpenAPI/Swagger validation
-      - id: openapi-validate
-        name: "Docs: Validate OpenAPI spec"
-        entry: npx @openapitools/openapi-generator-cli validate -i
-        language: system
-        files: (openapi|swagger)\.(yaml|yml|json)$
-
-      # Python docstring coverage
-      - id: docstring-coverage
-        name: "Docs: Python docstring coverage"
-        entry: interrogate -vv --fail-under=80
-        language: system
-        types: [python]
-        pass_filenames: false
-
-      # TypeDoc validation
-      - id: typedoc-check
-        name: "Docs: TypeScript documentation"
-        entry: npx typedoc --validation
-        language: system
-        files: \.tsx?$
-        pass_filenames: false
-        stages: [push]
-
-  # ═══════════════════════════════════════════════════════════════════
-  # SECTION 9: COMMIT MESSAGE VALIDATION
-  # Enforce conventional commits format
-  # ═══════════════════════════════════════════════════════════════════
-
-  - repo: https://github.com/compilerla/conventional-pre-commit
-    rev: v3.0.0
-    hooks:
-      - id: conventional-pre-commit
-        name: "Commit: Conventional commit message"
-        stages: [commit-msg]
-        args:
-          - feat
-          - fix
-          - docs
-          - style
-          - refactor
-          - perf
-          - test
-          - build
-          - ci
-          - chore
-          - revert
-
-  # Alternative: commitlint
-  - repo: https://github.com/alessandrojcm/commitlint-pre-commit-hook
-    rev: v9.10.0
-    hooks:
-      - id: commitlint
-        name: "Commit: Commitlint validation"
-        stages: [commit-msg]
-        additional_dependencies: ['@commitlint/config-conventional']
-
-  # ═══════════════════════════════════════════════════════════════════
-  # SECTION 10: ADDITIONAL QUALITY CHECKS
-  # Miscellaneous quality and safety checks
-  # ═══════════════════════════════════════════════════════════════════
-
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
-    hooks:
-      - id: check-executables-have-shebangs
-        name: "Quality: Check executables have shebangs"
-      - id: check-shebang-scripts-are-executable
-        name: "Quality: Check shebang scripts are executable"
-      - id: debug-statements
-        name: "Quality: Check for debug statements"
-      - id: detect-private-key
-        name: "Security: Detect private keys"
-
-  # Check for TODO/FIXME comments
-  - repo: local
-    hooks:
-      - id: check-todo-fixme
-        name: "Quality: Warn on TODO/FIXME"
-        entry: bash -c 'git diff --cached --name-only | xargs grep -l "TODO\|FIXME" && echo "WARNING: Found TODO/FIXME comments" && exit 0 || exit 0'
-        language: system
-        pass_filenames: false
-        verbose: true
-```
-
-### B. Language-Specific Configurations
-
-#### Python Projects
-
-```yaml
-# .pre-commit-config.yaml for Python projects
-repos:
-  # Security
-  - repo: https://github.com/Yelp/detect-secrets
-    rev: v1.4.0
-    hooks:
-      - id: detect-secrets
-        args: ['--baseline', '.secrets.baseline']
-
-  - repo: https://github.com/PyCQA/bandit
-    rev: 1.7.5
-    hooks:
-      - id: bandit
-        args: ['-r', 'src/', '-ll']
-
-  # Dependencies
-  - repo: local
-    hooks:
-      - id: pip-audit
-        name: pip-audit
-        entry: pip-audit
-        language: system
-        pass_filenames: false
-
-  # Build
-  - repo: local
-    hooks:
-      - id: python-compile
-        name: Compile Python
-        entry: python -m py_compile
-        language: system
-        types: [python]
-
-  # Types
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.5.1
-    hooks:
-      - id: mypy
-        additional_dependencies: [types-all]
-        args: [--strict]
-
-  # Lint & Format
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.1.6
-    hooks:
-      - id: ruff
-        args: [--fix]
-      - id: ruff-format
-
-  - repo: https://github.com/pycqa/isort
-    rev: 5.12.0
-    hooks:
-      - id: isort
-        args: ['--profile', 'black']
-
-  # Tests
-  - repo: local
-    hooks:
-      - id: pytest
-        name: pytest
-        entry: pytest -x -q
-        language: system
-        pass_filenames: false
-        types: [python]
-
-  # Docs
-  - repo: local
-    hooks:
-      - id: interrogate
-        name: docstring-coverage
-        entry: interrogate -vv --fail-under=80
-        language: system
-        pass_filenames: false
-
-  # Commit
-  - repo: https://github.com/compilerla/conventional-pre-commit
-    rev: v3.0.0
-    hooks:
-      - id: conventional-pre-commit
-        stages: [commit-msg]
-```
-
-#### JavaScript/TypeScript Projects
-
-```yaml
-# .pre-commit-config.yaml for JavaScript/TypeScript projects
-repos:
-  # Security
-  - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.18.0
-    hooks:
-      - id: gitleaks
-
-  - repo: local
-    hooks:
-      - id: npm-audit
-        name: npm audit
-        entry: npm audit --audit-level=high
-        language: system
-        pass_filenames: false
-
-  # Build
-  - repo: local
-    hooks:
-      - id: tsc
-        name: TypeScript compile
-        entry: npx tsc --noEmit
-        language: system
-        pass_filenames: false
-        types: [ts, tsx]
-
-  # Lint
-  - repo: local
-    hooks:
-      - id: eslint
-        name: ESLint
-        entry: npx eslint --fix
-        language: system
-        types: [javascript, jsx, ts, tsx]
-
-  # Format
-  - repo: https://github.com/pre-commit/mirrors-prettier
-    rev: v3.0.3
-    hooks:
-      - id: prettier
-        types_or: [javascript, jsx, ts, tsx, css, json, yaml, markdown]
-
-  # Tests
-  - repo: local
-    hooks:
-      - id: jest
-        name: Jest tests
-        entry: npm test -- --passWithNoTests --bail
-        language: system
-        pass_filenames: false
-
-  # Commit
-  - repo: https://github.com/alessandrojcm/commitlint-pre-commit-hook
-    rev: v9.10.0
-    hooks:
-      - id: commitlint
-        stages: [commit-msg]
-        additional_dependencies: ['@commitlint/config-conventional']
-```
-
-#### Go Projects
-
-```yaml
-# .pre-commit-config.yaml for Go projects
-repos:
-  # Security
-  - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.18.0
-    hooks:
-      - id: gitleaks
-
-  - repo: local
-    hooks:
-      - id: go-sec
-        name: Go security scan
-        entry: gosec ./..
-        language: system
-        pass_filenames: false
-        types: [go]
-
-  # Build
-  - repo: local
-    hooks:
-      - id: go-build
-        name: Go build
-        entry: go build ./..
-        language: system
-        pass_filenames: false
-        types: [go]
-
-  # Lint
-  - repo: https://github.com/golangci/golangci-lint
-    rev: v1.55.2
-    hooks:
-      - id: golangci-lint
-
-  # Format
-  - repo: local
-    hooks:
-      - id: go-fmt
-        name: Go format
-        entry: gofmt -w
-        language: system
-        types: [go]
-
-      - id: go-imports
-        name: Go imports
-        entry: goimports -w
-        language: system
-        types: [go]
-
-  # Tests
-  - repo: local
-    hooks:
-      - id: go-test
-        name: Go tests
-        entry: go test -short ./..
-        language: system
-        pass_filenames: false
-        types: [go]
-
-  # Commit
-  - repo: https://github.com/compilerla/conventional-pre-commit
-    rev: v3.0.0
-    hooks:
-      - id: conventional-pre-commit
-        stages: [commit-msg]
-```
-
-#### Rust Projects
-
-```yaml
-# .pre-commit-config.yaml for Rust projects
-repos:
-  # Security
-  - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.18.0
-    hooks:
-      - id: gitleaks
-
-  - repo: local
-    hooks:
-      - id: cargo-audit
-        name: Cargo audit
-        entry: cargo audit
-        language: system
-        pass_filenames: false
-        types: [rust]
-
-  # Build
-  - repo: local
-    hooks:
-      - id: cargo-check
-        name: Cargo check
-        entry: cargo check
-        language: system
-        pass_filenames: false
-        types: [rust]
-
-  # Lint
-  - repo: local
-    hooks:
-      - id: clippy
-        name: Clippy
-        entry: cargo clippy -- -D warnings
-        language: system
-        pass_filenames: false
-        types: [rust]
-
-  # Format
-  - repo: local
-    hooks:
-      - id: rustfmt
-        name: Rust format
-        entry: cargo fmt --
-        language: system
-        types: [rust]
-
-  # Tests
-  - repo: local
-    hooks:
-      - id: cargo-test
-        name: Cargo test
-        entry: cargo test
-        language: system
-        pass_filenames: false
-        types: [rust]
-
-  # Commit
-  - repo: https://github.com/compilerla/conventional-pre-commit
-    rev: v3.0.0
-    hooks:
-      - id: conventional-pre-commit
-        stages: [commit-msg]
-```
-
----
-
-## 5. Hook Categories & Priority (MANDATORY)
-
-### A. Hook Execution Order
-
-**Hooks should be ordered by priority (fastest and most critical first):**
-
-```
-Priority 1: SECURITY (Block commits with secrets/vulnerabilities)
-    ├── detect-secrets
-    ├── gitleaks
-    ├── bandit (Python)
-    ├── npm-audit (Node.js)
-    └── cargo-audit (Rust)
-
-Priority 2: BUILD (Ensure code compiles)
-    ├── tsc --noEmit (TypeScript)
-    ├── cargo check (Rust)
-    ├── go build (Go)
-    └── python -m py_compile (Python)
-
-Priority 3: TYPES (Static type analysis)
-    ├── mypy (Python)
-    ├── pyright (Python)
-    └── TypeScript strict mode
-
-Priority 4: LINT (Code quality)
-    ├── ruff/pylint (Python)
-    ├── eslint (JavaScript/TypeScript)
-    ├── golangci-lint (Go)
-    ├── clippy (Rust)
-    └── shellcheck (Shell)
-
-Priority 5: FORMAT (Code style)
-    ├── black/ruff-format (Python)
-    ├── prettier (Web)
-    ├── gofmt (Go)
-    └── rustfmt (Rust)
-
-Priority 6: TESTS (Verification)
-    ├── pytest (Python)
-    ├── jest/vitest (JavaScript/TypeScript)
-    ├── go test (Go)
-    └── cargo test (Rust)
-
-Priority 7: DOCS (Documentation)
-    ├── interrogate (Python docstrings)
-    ├── typedoc (TypeScript)
-    └── openapi-validate (API specs)
-
-Priority 8: COMMIT (Message format)
-    └── conventional-pre-commit
-```
-
-### B. Hook Stages
-
-```yaml
-# Configure different hooks for different stages
-
-# pre-commit: Fast checks, run on every commit
-stages: [commit]
-# - Security scanning
-# - Formatting
-# - Fast linting
-# - Syntax checks
-
-# commit-msg: Message validation
-stages: [commit-msg]
-# - Conventional commits
-# - Issue reference check
-
-# pre-push: Slower, comprehensive checks
-stages: [push]
-# - Full test suite
-# - Dependency audits
-# - Documentation generation
-# - Integration tests
-```
-
----
-
-## 6. Agent Configuration Discovery (MANDATORY)
-
-### A. Web Search Queries
-
-**When setting up pre-commit, agents MUST search for current best practices:**
-
-```markdown
-## Recommended Search Queries
-
-### By Language
-- "best pre-commit hooks python 2026 security"
-- "pre-commit config typescript eslint prettier 2026"
-- "golang pre-commit hooks golangci-lint 2026"
-- "rust pre-commit cargo clippy rustfmt 2026"
-- "java pre-commit checkstyle spotbugs 2026"
-
-### By Framework
-- "pre-commit hooks react next.js 2026"
-- "pre-commit config django fastapi 2026"
-- "spring boot pre-commit hooks 2026"
-- "flutter dart pre-commit hooks 2026"
-
-### By Use Case
-- "pre-commit security scanning secrets detection"
-- "pre-commit dependency vulnerability scanning"
-- "pre-commit commit message validation conventional"
-- "pre-commit api documentation validation openapi"
-
-### By Infrastructure
-- "pre-commit terraform tflint tfsec"
-- "pre-commit dockerfile hadolint trivy"
-- "pre-commit kubernetes yaml validation"
-- "pre-commit helm chart linting"
-```
-
-### B. MCP Server Consultation
-
-```markdown
-## Agent MCP Consultation Protocol
-
-1. **Query code-guide MCP**
-   - Request language-specific recommendations
-   - Get security hook configurations
-   - Obtain formatting standards
-
-2. **Query available tool MCPs**
-   - Get current hook versions
-   - Obtain configuration snippets
-   - Verify compatibility
-
-3. **Cross-reference with project requirements**
-   - Match hooks to detected languages
-   - Apply framework-specific hooks
-   - Include infrastructure hooks (Docker, K8s, etc.)
-```
-
-### C. GitHub Repository Examples
-
-**Reference these popular pre-commit configurations:**
-
-```markdown
-## Example Configurations to Reference
-
-### Python
-- https://github.com/python/cpython (Python itself)
-- https://github.com/pandas-dev/pandas
-- https://github.com/tiangolo/fastapi
-
-### JavaScript/TypeScript
-- https://github.com/facebook/react
-- https://github.com/vercel/next.js
-- https://github.com/microsoft/vscode
-
-### Go
-- https://github.com/kubernetes/kubernetes
-- https://github.com/hashicorp/terraform
-
-### Rust
-- https://github.com/rust-lang/rust
-- https://github.com/denoland/deno
-
-### Multi-language
-- https://github.com/pre-commit/pre-commit-hooks (official examples)
-```
-
----
-
-## 7. CI/CD Integration (MANDATORY)
-
-### A. GitHub Actions
-
-```yaml
-# .github/workflows/pre-commit.yml
-name: Pre-commit
-
-on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main, develop]
-
-jobs:
-  pre-commit:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install pre-commit
-        run: pip install pre-commit
-
-      - name: Run pre-commit on all files
-        run: pre-commit run -a --show-diff-on-failure
-
-      - name: Run pre-commit for commit message (PR only)
-        if: github.event_name == 'pull_request'
-        run: |
-          echo "${{ github.event.pull_request.title }}" | pre-commit run --hook-stage commit-msg --commit-msg-filename /dev/stdin
-```
-
-### B. GitLab CI
-
-```yaml
-# .gitlab-ci.yml
-pre-commit:
-  image: python:3.11
-  stage: test
-  script:
-    - pip install pre-commit
-    - pre-commit run -a --show-diff-on-failure
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "main"
-    - if: $CI_COMMIT_BRANCH == "develop"
-```
-
-### C. Jenkins
-
-```groovy
-// Jenkinsfile
-pipeline {
-    agent any
-
-    stages {
-        stage('Pre-commit') {
-            steps {
-                sh '''
-                    pip install pre-commit
-                    pre-commit run -a --show-diff-on-failure
-                '''
-            }
-        }
-    }
-}
-```
-
----
-
-## 8. Troubleshooting & Performance
-
-### A. Common Issues
-
-```bash
-# Issue: Hook takes too long
-# Solution: Run slow hooks only on push
-stages: [push]
-
-# Issue: Hook fails to install
-# Solution: Clear cache and reinstall
-pre-commit clean
-pre-commit install-hooks
-
-# Issue: Hook version conflict
-# Solution: Update to latest versions
-pre-commit autoupdate
-
-# Issue: Hook needs specific environment
-# Solution: Use system language with proper PATH
-language: system
-entry: /path/to/tool
-
-# Issue: False positives in secret detection
-# Solution: Create baseline file
-detect-secrets scan > .secrets.baseline
-```
-
-### B. Performance Optimization
-
-```yaml
-# Speed optimizations
-
-# 1. Run hooks in parallel (default)
-# No configuration needed - pre-commit runs in parallel by default
-
-# 2. Fail fast on first failure
-fail_fast: true
-
-# 3. Only run on changed files (not -a)
-# Default behavior for pre-commit (not pre-commit run -a)
-
-# 4. Separate slow hooks to pre-push stage
-- repo: local
-  hooks:
-    - id: full-test-suite
-      name: Full test suite
-      entry: npm run test:all
-      stages: [push]  # Only on push, not every commit
-
-# 5. Use faster tool alternatives
-# - ruff instead of pylint/flake8 (10-100x faster)
-# - pyright instead of mypy (faster)
-# - biome instead of eslint+prettier (faster)
-
-# 6. Exclude generated/vendored files
+# Exclude generated/vendored paths once, globally (verbose regex).
 exclude: |
   (?x)^(
-    node_modules/|
-    vendor/|
-    dist/|
-    build/|
-    \.min\.js$|
-    package-lock\.json|
-    yarn\.lock
-  )$
+    .*/node_modules/|
+    dist/|build/|vendor/|
+    .*\.min\.(js|css)$|
+    .*-lock\.(json|yaml)$|uv\.lock$
+  )
+
+repos:
+  - repo: https://github.com/<owner>/<hook-repo>
+    rev: vX.Y.Z                       # PC-DEP-01: pinned, immutable
+    hooks:
+      - id: <hook-id>
+        files: \.py$                  # narrow with files: and/or types:
+        types_or: [python, pyi]
+        stages: [pre-commit]          # or [pre-push] for slow hooks
 ```
 
-### C. Debugging Hooks
+Key selectors and what they mean:
 
-```bash
-# Run single hook
-pre-commit run <hook-id>
+| Key | Purpose |
+|-----|---------|
+| `files` / `exclude` | regex on the staged path; scope a hook to where it applies |
+| `types` / `types_or` / `exclude_types` | identify-based file typing (`python`, `yaml`, `dockerfile`) — prefer over fragile path regexes |
+| `stages` | when the hook runs: `pre-commit`, `commit-msg`, `pre-push`, `manual` |
+| `pass_filenames: false` | hook ignores file args (whole-project tools); pair with a tight `files:`/`types:` trigger |
+| `args` | static flags passed before filenames |
+| `additional_dependencies` | extra packages installed into the hook's isolated env (plugins, type stubs) |
+| `alias` | a name to invoke a specific hook with `pre-commit run <alias>` |
 
-# Run with verbose output
-pre-commit run -a --verbose
+Top-level keys worth knowing: `minimum_pre_commit_version`, `default_language_version`, `default_install_hook_types`, `default_stages`, `fail_fast`, `exclude`, `ci` (for the pre-commit.ci hosted autofix/autoupdate service).
 
-# Run on specific files
-pre-commit run --files path/to/file.py
+> Stage names modernized in pre-commit 3.2+/4.x: use `pre-commit`, `pre-push`, `pre-merge-commit`, `commit-msg`, `post-checkout`, `manual`. The bare `commit`/`push` aliases are deprecated — do not author new configs with them.
 
-# Show hook diff
-pre-commit run -a --show-diff-on-failure
+---
 
-# Skip specific hook (use sparingly!)
-SKIP=hook-id pre-commit run -a
+## 5. Hook Sources & Categories
 
-# Clear cache for fresh install
-pre-commit clean
-pre-commit gc
+Three hook source types, in order of preference:
 
-# Update all hooks
-pre-commit autoupdate
+1. **Published repo + `rev`** — versioned, isolated env, reproducible. Default choice. (`astral-sh/ruff-pre-commit`, `gitleaks/gitleaks`, `pre-commit/pre-commit-hooks`, `hadolint`, `shellcheck-py`, …)
+2. **`repo: meta`** — pre-commit's built-in self-checks (`check-hooks-apply`, `check-useless-excludes`, `identity`). Cheap config hygiene; include them.
+3. **`repo: local`** — project commands run from the dev environment (`language: system` / `script` / `docker_image`). Use when the project must run *its own pinned* toolchain (e.g. `uv run mypy`, `cargo clippy`) rather than a hook author's copy, so the version matches CI exactly.
+
+Functional categories the gate should cover (order: cheapest/most-critical first). For each, the **hook ID and version come from the relevant language/tool guide** — do not hardcode them here:
+
+- **Hygiene** — `pre-commit/pre-commit-hooks`: `trailing-whitespace`, `end-of-file-fixer`, `check-merge-conflict`, `check-added-large-files`, `check-yaml`/`-json`/`-toml`, `mixed-line-ending`, `detect-private-key`, `no-commit-to-branch` (PC-BRANCH-01).
+- **Secrets** (PC-SEC-01, policy → `secure-coding.md`) — `gitleaks` or Yelp `detect-secrets` (with a committed `.secrets.baseline`). Always present.
+- **Format** — the project formatter as a fixer (e.g. ruff-format, prettier, gofmt, rustfmt). See the language guide.
+- **Lint** — the project linter (ruff, eslint, golangci-lint, clippy, shellcheck, hadolint, markdownlint). See the language guide.
+- **Types** — type checker, usually `repo: local` so the version matches the project (mypy/pyright/tsc).
+- **Commit message** (PC-MSG-01) — `conventional-pre-commit` or `commitlint` on the `commit-msg` stage.
+- **Slow checks** (`pre-push` / CI only) — full test suite, dependency/CVE audit, doc-coverage. Never on the commit stage (PC-PERF-01).
+
+---
+
+## 6. Staging, Speed & Stage Assignment
+
+How pre-commit interacts with the index is the core mechanic this guide owns:
+
+- pre-commit runs against a **clean checkout of the staged content**: it stashes unstaged changes, runs hooks on what is staged, restores the stash. Only staged work is gated; a partially staged file is checked as staged, not as on disk.
+- A fixer hook that modifies a file makes pre-commit **fail the commit**; the developer reviews the change, `git add`s it, and re-commits. This is intentional — never auto-`git add` fixer output inside a hook.
+- Assign every hook a stage deliberately:
+
+| Stage | Runs | Put here |
+|-------|------|----------|
+| `pre-commit` | every `git commit` | format, lint, type, hygiene, secret scan — fast, staged-files |
+| `commit-msg` | after message entered | message-convention validation |
+| `pre-push` | every `git push` | full unit suite, dependency audit, slower whole-repo checks |
+| `manual` | only `pre-commit run --hook-stage manual <id>` | expensive opt-in tools |
+
+Performance levers: scope with `files:`/`types:` so hooks no-op on irrelevant diffs; `exclude` generated/vendored paths globally; keep heavy work off the commit stage; prefer fast tools (ruff over flake8+isort, biome/prettier as configured by the language guide). `fail_fast: true` only when you want the first failure to stop the run — usually keep it `false` so one commit surfaces all problems.
+
+---
+
+## 7. Keeping Local Hooks in Sync With CI
+
+The local gate and the server gate MUST be the **same file** producing the **same result** (PC-CI-01, PC-SYNC-01). Policy for the pipeline itself lives in [`ci-cd.md`](guides://ci-cd.md); the binding:
+
+- CI installs pre-commit and runs `pre-commit run --all-files --show-diff-on-failure` against the checkout. A failure blocks the merge. This is the authority — local hooks are the fast preview, CI is enforcement.
+- Cache the pre-commit env in CI keyed on `.pre-commit-config.yaml` so hook environments are not rebuilt every run.
+- The hosted **pre-commit.ci** service (configured via the top-level `ci:` key) can auto-fix PRs and run weekly `autoupdate`; if used, it replaces a hand-written CI job but the rule is identical — same config, server-side enforcement.
+- Drift detection: any lint/format/type/test gate listed in a language guide's §2 MUST have a corresponding hook (PC-SYNC-01). When CI gains a check, add the hook; when a hook changes, CI inherits it because it runs the same config.
+
+```yaml
+# Example CI invocation (engine-agnostic; see ci-cd.md / the engine's guide)
+#   install:  pip install pre-commit   (or pipx/uv tool install)
+#   run:      pre-commit run --all-files --show-diff-on-failure
+#   cache:    key = hash(.pre-commit-config.yaml), path = ~/.cache/pre-commit
 ```
 
 ---
 
-## 9. Agent Workflow (MANDATORY)
-
-### A. Before Every Commit
+## 8. Lifecycle & Maintenance
 
 ```bash
-#!/bin/bash
-# Agent pre-commit workflow
+# Install (idempotent; uses default_install_hook_types from config)
+pre-commit install
 
-echo "=== Agent Pre-Commit Workflow ==="
+# Or install specific hook types explicitly (PC-STRUCT-02)
+pre-commit install -t pre-commit -t commit-msg -t pre-push
 
-# Step 1: Ensure pre-commit is available
-if ! command -v pre-commit &> /dev/null; then
-    echo "Installing pre-commit..."
-    pip install pre-commit
-fi
+# First run / CI / whole-tree audit
+pre-commit run --all-files --show-diff-on-failure   # PC-CFG-01
 
-# Step 2: Check for configuration
-if [ ! -f ".pre-commit-config.yaml" ]; then
-    echo "WARNING: No .pre-commit-config.yaml found"
-    echo "Agent should create configuration based on project type"
-    # Agent creates configuration using discovery protocol
-fi
+# Targeted runs
+pre-commit run <hook-id>                 # one hook, staged files
+pre-commit run --files path/to/file      # specific files
+pre-commit run --hook-stage pre-push     # a stage's hooks
 
-# Step 3: ALWAYS run pre-commit on all files
-echo "Running pre-commit on all files..."
-pre-commit run -a
+# Maintenance
+pre-commit autoupdate                    # bump revs to latest tags (PC-MNT-01) — review the diff
+pre-commit gc                            # drop unused cached hook envs
+pre-commit clean                         # wipe the cache (force re-install of envs)
+pre-commit validate-config               # PC-STRUCT-01
+pre-commit validate-manifest             # validate a hook repo's .pre-commit-hooks.yaml
 
-# Step 4: Check result
-if [ $? -ne 0 ]; then
-    echo "ERROR: Pre-commit checks failed"
-    echo "Agent must fix issues before committing"
-    exit 1
-fi
-
-# Step 5: Stage changes (including auto-fixes)
-git add -A
-
-# Step 6: Run pre-commit again (verify fixes)
-pre-commit run -a
-
-# Step 7: Only commit if all checks pass
-if [ $? -eq 0 ]; then
-    echo "All checks passed - proceeding with commit"
-    git commit -m "..."
-else
-    echo "BLOCKED: Issues remain after auto-fix"
-    exit 1
-fi
+# Emergency bypass (auditable, discouraged — CI still enforces)
+git commit --no-verify                   # skip all hooks
+SKIP=mypy,pytest git commit              # skip named hooks
 ```
 
-### B. Creating New Project Configuration
+Maintenance rules: run `autoupdate` on a schedule and review the rev bumps like dependency upgrades; include `meta` hooks (`check-useless-excludes`, `check-hooks-apply`) so dead config is caught; secret-scan baselines (`.secrets.baseline`) are committed and refreshed deliberately, never to hide a real leak (see `secure-coding.md`).
 
-```markdown
-## Agent Configuration Creation Protocol
+---
 
-When no .pre-commit-config.yaml exists:
+## 9. Common Footguns
 
-1. **Detect Project Type**
-   ```bash
-   # Check for language indicators
-   ls package.json pyproject.toml Cargo.toml go.mod *.csproj
-   ```
-
-2. **Search for Best Practices**
-   - Query web: "best pre-commit config [detected-language] 2026"
-   - Query MCP servers for recommendations
-   - Check project-specific requirements
-
-3. **Generate Configuration**
-   - Start with security hooks (ALWAYS)
-   - Add build verification hooks
-   - Add type checking (if applicable)
-   - Add linting hooks
-   - Add formatting hooks
-   - Add test hooks
-   - Add documentation hooks
-   - Add commit message validation
-
-4. **Validate Configuration**
-   ```bash
-   pre-commit run -a
-   ```
-
-5. **Document Configuration**
-   - Add comments explaining each hook
-   - Note any project-specific customizations
-   - Include in commit message
-```
+- **Floating revs** (`rev: HEAD` / branch name) → non-reproducible, breaks silently on upstream changes. Always pin a tag/SHA (PC-DEP-01).
+- **Slow hook on the commit stage** → developers add `--no-verify` and the gate dies. Move it to `pre-push`/CI (PC-PERF-01).
+- **`pass_filenames: false` without a `files:` trigger** → the hook runs on *every* commit regardless of relevance. Always scope the trigger.
+- **Auto-`git add` inside a fixer hook** → silently rewrites the developer's intended commit. Let the hook fail and have the human re-stage.
+- **Legacy stage names** (`stages: [commit]`/`[push]`) → deprecated; use `pre-commit`/`pre-push`.
+- **Hooks that drift from CI** → "passes locally, fails in CI." Single config, both sides run it (PC-SYNC-01).
+- **Hook version ≠ project version** (e.g. a ruff-pre-commit rev newer than the project's pinned ruff) → use `repo: local` with the project's own tool when exact-version parity matters.
+- **Committing the secret-scan baseline to mask a leak** → forbidden; a baseline records known false positives, not real secrets.
 
 ---
 
 ## 10. Deployment Checklist
 
-### Pre-Commit Configuration
-- [ ] .pre-commit-config.yaml exists
-- [ ] Configuration covers all project languages
-- [ ] Security scanning hooks included
-- [ ] Build verification hooks included
-- [ ] Type checking hooks included (if applicable)
-- [ ] Linting hooks included
-- [ ] Formatting hooks included
-- [ ] Test hooks included
-- [ ] Documentation hooks included
-- [ ] Commit message validation included
+Generated from §2 — one box per requirement ID.
 
-### Hook Installation
-- [ ] `pre-commit install` executed
-- [ ] `pre-commit install --hook-type commit-msg` executed
-- [ ] `pre-commit install --hook-type pre-push` executed
-- [ ] Hooks verified with `pre-commit run -a`
-
-### CI/CD Integration
-- [ ] Pre-commit runs in CI pipeline
-- [ ] Failure blocks merge/deploy
-- [ ] Same configuration as local development
-
-### Agent Compliance
-- [ ] Agent always runs `pre-commit run -a` before commit
-- [ ] Agent does not bypass hooks without explicit user request
-- [ ] Agent consults MCP/web for configuration recommendations
-- [ ] Agent creates configuration if missing
+- [ ] PC-STRUCT-01 — valid `.pre-commit-config.yaml` at root
+- [ ] PC-STRUCT-02 — hooks installed (pre-commit, commit-msg, pre-push)
+- [ ] PC-DEP-01 — every repo pins an immutable `rev`
+- [ ] PC-CFG-01 — `pre-commit run --all-files` clean
+- [ ] PC-SEC-01 — commit-time secret scan present and clean (see `secure-coding.md`)
+- [ ] PC-PERF-01 — commit-stage hooks fast; slow checks on pre-push/CI
+- [ ] PC-CI-01 — CI runs the identical config and blocks merge (see `ci-cd.md`)
+- [ ] PC-SYNC-01 — local hooks match the project's lint/format/type/test gates
+- [ ] PC-BRANCH-01 — direct commits to protected branches blocked (see `git.md`)
+- [ ] PC-MSG-01 — commit-message convention validated
+- [ ] PC-MNT-01 — revs updated via reviewed `autoupdate`
+- [ ] Agent ran every §3 command and documented any fixes
 
 ---
-
-## 11. Quick Reference
-
-### Essential Commands
-
-```bash
-# Installation
-pip install pre-commit
-pre-commit install
-pre-commit install --hook-type commit-msg
-pre-commit install --hook-type pre-push
-
-# Running hooks
-pre-commit run -a                    # Run all hooks on all files
-pre-commit run                       # Run on staged files only
-pre-commit run <hook-id>             # Run specific hook
-pre-commit run --files file.py       # Run on specific files
-
-# Maintenance
-pre-commit autoupdate               # Update hooks to latest
-pre-commit clean                    # Clear cache
-pre-commit gc                       # Garbage collect
-
-# Debugging
-pre-commit run -a --verbose         # Verbose output
-pre-commit run -a --show-diff-on-failure  # Show diffs
-SKIP=hook-id pre-commit run -a      # Skip specific hook
-```
-
-### Minimal Configuration Template
-
-```yaml
-# .pre-commit-config.yaml - Minimal but comprehensive
-
-repos:
-  # Security (ALWAYS INCLUDE)
-  - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.18.0
-    hooks:
-      - id: gitleaks
-
-  # General checks
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
-    hooks:
-      - id: check-yaml
-      - id: check-json
-      - id: check-merge-conflict
-      - id: check-added-large-files
-      - id: end-of-file-fixer
-      - id: trailing-whitespace
-      - id: no-commit-to-branch
-        args: ['--branch', 'main']
-
-  # Commit message
-  - repo: https://github.com/compilerla/conventional-pre-commit
-    rev: v3.0.0
-    hooks:
-      - id: conventional-pre-commit
-        stages: [commit-msg]
-
-  # ADD LANGUAGE-SPECIFIC HOOKS BELOW
-  # (Agent should add based on project type)
-```
-
-### Search Queries for Agent
-
-```
-Pre-commit configuration:
-- "pre-commit hooks [language] [year] best practices"
-- "pre-commit config [framework] security linting"
-- "[tool] pre-commit hook setup"
-
-Security hooks:
-- "pre-commit secret detection gitleaks detect-secrets"
-- "pre-commit security scanning [language]"
-
-Linting/formatting:
-- "pre-commit [linter] [language] configuration"
-- "pre-commit [formatter] setup"
-```
-
----
-
-## 12. Why This Configuration Works
-
-**Prevent Issues at Source**:
-- Catches problems before they enter version control
-- Faster feedback than waiting for CI/CD
-
-**Consistent Quality**:
-- Same checks run for all developers
-- Eliminates "works on my machine" issues
-
-**Security First**:
-- Secrets never make it to repository
-- Vulnerabilities caught before commit
-
-**Automated Enforcement**:
-- No manual review for style/formatting
-- Focus code review on logic and design
-
-**CI/CD Alignment**:
-- Same checks locally and in pipeline
-- No surprises during deployment
-
-**Developer Experience**:
-- Fast hooks don't slow down development
-- Auto-fixes reduce manual work
-
----
-
-## References
-
-- [Pre-commit Framework](https://pre-commit.com/)
-- [Pre-commit Hooks Repository](https://github.com/pre-commit/pre-commit-hooks)
-- [Supported Hooks List](https://pre-commit.com/hooks.html)
-- [Conventional Commits](https://www.conventionalcommits.org/)
-- [Gitleaks](https://github.com/gitleaks/gitleaks)
-- [Ruff](https://github.com/astral-sh/ruff)
-- [ESLint](https://eslint.org/)
-- [golangci-lint](https://golangci-lint.run/)
-
----
-
-**Last Updated:** 2026-01-31
-**Version:** 1.0
-**Maintainer:** Development Team
-
-
 **End of Pre-commit Framework Guidelines**

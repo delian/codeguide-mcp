@@ -1,1635 +1,334 @@
-# Modern Lua Development Guidelines
-Mandatory coding standards and development practices for modern Lua applications with emphasis on minimalistic, clean, readable, well-documented code using hexagonal architecture with focus on performance, portability, and maintainability. Lua 5.4+, LuaRocks, LDoc, Busted, LuaUnit, luacheck, LuaJIT (when applicable).
+# Lua Development Guidelines
+Mandatory coding standards for Lua: minimal, local-scoped, table-driven, test-covered, portable across PUC-Lua and LuaJIT. Lua 5.4, LuaJIT, luacheck, busted, stylua, LuaRocks, LDoc.
+
+---
+name: lua
+title: Lua Development Guidelines
+version: 2.0
+last_reviewed: 2026-06-05
+kind: language
+tools: [lua@5.4, luajit, luacheck, busted, stylua, luarocks, ldoc]
+requires:
+  - tdd
+  - secure-coding
+  - error-handling
+recommends:
+  - comments
+  - performance
+provides:
+  - lua-tables
+  - metatables
+  - coroutines
+  - pcall-errors
+---
+
+> 🧭 Authored per [`CONVENTIONS.md`](guides://CONVENTIONS.md): shared concerns are referenced, not restated. This guide covers only what is unique to Lua.
 
 ---
 
-**Agent Profile**: The Lua Architect  
-**Role**: Senior Lua Engineer & Scripting Specialist  
-**Objective**: Generate production-ready, minimalistic, clean, readable, well-documented Lua code using hexagonal architecture with focus on performance, portability, scalability, and maintainability.  
-**Tools**: Lua 5.4+, LuaRocks, LDoc, Busted, LuaUnit, luacheck, LuaJIT (when applicable).
+## 0. Prerequisites & References
+
+Fetch and apply these **before** generating Lua code. Their rules are assumed below and not repeated.
+
+> 📎 **REQUIRED — fetch & apply first:**
+> - [`tdd.md`](guides://tdd.md) — test-first, Red-Green-Refactor, regression-test-before-fix, coverage. *(Lua binding: runner is `busted`; coverage via `busted --coverage` + `luacov`.)*
+> - [`secure-coding.md`](guides://secure-coding.md) — supply chain, secrets, CVE policy. *(Lua binding: pin rockspec versions; avoid `load`/`loadstring`/`os.execute` on untrusted input.)*
+> - [`error-handling.md`](guides://error-handling.md) — error strategy & propagation. *(Lua binding: `error`/`pcall`/`xpcall`; return `nil, err` for expected failures.)*
+
+> 📎 **RECOMMENDED — fetch when the task touches them:**
+> - [`comments.md`](guides://comments.md) — API-doc policy *(binding: LDoc `---` doc comments)*
+> - [`performance.md`](guides://performance.md) — performance policy *(binding: LuaJIT, local caching, table pre-sizing)*
+
+> 📎 **SEE ALSO:** [`architectures.md`](guides://architectures.md) · [`hexagonal.md`](guides://hexagonal.md) *(if the host app mandates ports/adapters)* · [`semver.md`](guides://semver.md) *(rockspec version policy)*
 
 ---
 
-## 1. Core Philosophies: MODERN-LUA
+## 1. Core Philosophies: LUA-FIRST
 
-The agent must adhere to the **MODERN-LUA** standard for every Lua implementation:
+Lua-specific principles only. TDD, security, and error handling come from §0.
 
-- **Test-Driven Development (TDD)**: ALWAYS write tests BEFORE implementation (Red-Green-Refactor cycle mandatory)
-- **Regression Shield**: EVERY bug discovered MUST receive a test BEFORE fixing to prevent regression
-- **M**inimalistic Code: Clean, concise, readable Lua code
-- **O**ptimized Performance: Local variables, table pre-allocation, efficient algorithms
-- **D**ocumentation as Code: API documentation auto-generatable from code
-- **E**rror Handling: Explicit error handling with pcall/xpcall, no silent failures
-- **R**eusable Modules: Modular design, clear interfaces, separation of concerns
-- **N**ative Features: Leverage Lua's tables, coroutines, metatables effectively
+- **L**ocal by default: every variable, function, and required module is `local`. A bare assignment creates a global — luacheck must flag it. Cache hot globals (`local floor = math.floor`).
+- **U**niform data model: the **table** is Lua's one and only data structure — array, map, object, namespace, and set are all tables. Master it before anything else.
+- **A**ssume embedding: Lua is a guest in a C/host process. Code MUST NOT crash the host: protect IO and untrusted boundaries with `pcall`/`xpcall` (policy: `error-handling.md`).
+- **F**ail loud or return `nil, err`: programmer errors `error()`; expected failures return `nil, message` (the stdlib convention, e.g. `io.open`). Never silently swallow.
+- **I**diomatic & minimal: prefer the small standard library and language idioms over frameworks; no global state; one module = one file returning one value.
+- **R**untime contracts: Lua is dynamically typed — validate at boundaries with `assert`/`type` and document contracts in LDoc (policy: `comments.md`).
+- **S**ame code, two runtimes: keep code portable across PUC-Lua 5.4 and LuaJIT (≈5.1 + extensions); gate version- or FFI-specific paths explicitly.
 
-- **L**ocal Variables: Always use local for performance and scope
-- **U**nit Testing: Comprehensive tests, mandatory for all code
-- **A**rchitectural: Hexagonal architecture, clear separation
-- **T**ype Safety: Runtime validation, clear contracts
-- **E**fficient Execution: Performance-optimized, minimal allocations
-- **S**tandard Patterns: Follow Lua idioms and best practices
-
-**V**erified Scripts: Agent-generated code MUST parse, execute, and pass tests before delivery
-- **E**xplicit Dependencies: Clear dependency management, version pinning
-- **R**obust Error Handling: pcall/xpcall, proper error messages
-- **I**mmutable Patterns: Prefer immutable data where possible
-- **F**unctional Style: Pure functions, minimal side effects
-- **I**dempotent Operations: Safe to retry, no side effects
-- **E**fficient Execution: Performance-optimized, minimal memory usage
+**Verified Code**: Agent-generated Lua MUST pass every gate in §2 before delivery.
 
 ---
 
-## 2. Agent Code Generation Requirements (MANDATORY)
+## 2. Requirements (MANDATORY, auditable)
 
-### A. Script Verification Protocol
+RFC-2119 keywords. IDs `LUA-<TOPIC>-<NN>`. Each row has a binary gate; rows binding a shared rule cite its owner.
 
-**CRITICAL: Agents MUST ALWAYS verify that all generated/modified Lua code parses correctly, executes without breaking, and passes all tests. Verification is MANDATORY for every code change.**
+| ID | Requirement | Verify | Gate |
+|----|-------------|--------|------|
+| LUA-TST-01 | Every feature MUST be test-first (see `tdd.md`) | `busted` | exit 0, 0 pending |
+| LUA-TST-02 | Each bug MUST get a regression test before the fix (see `tdd.md`) | `busted` | failing→passing |
+| LUA-TST-03 | Business-logic coverage MUST meet the project gate | `busted --coverage && luacov` | ≥ threshold |
+| LUA-SYN-01 | Every file MUST compile | `luac -p <files>` (or `luajit -bl`) | exit 0 |
+| LUA-FMT-01 | Code MUST be formatted | `stylua --check .` | no diff |
+| LUA-LINT-01 | Linter MUST pass clean (no globals, no unused) | `luacheck .` | exit 0, 0 warnings |
+| LUA-SEC-01 | No `load`/`loadstring`/`dofile` on untrusted input; no unsanitized `os.execute`/`io.popen` (see `secure-coding.md`) | `luacheck .` + review | 0 findings |
+| LUA-SEC-02 | Dependencies pinned & scanned (see `secure-coding.md`) | rockspec review / `trivy fs .` | exact pins, 0 high/critical |
+| LUA-ERR-01 | Host/IO boundaries protected; expected failures return `nil, err` (see `error-handling.md`) | review / tests | no unguarded boundary |
+| LUA-DOC-01 | Public modules/functions MUST have LDoc (see `comments.md`) | `ldoc -f markdown .` | builds, no warnings |
 
-#### Verification Checklist
-
-**Before delivering ANY Lua code, the agent MUST:**
-
-1. **Syntax Verification (MANDATORY - ALWAYS REQUIRED)**:
-   **CRITICAL: Code MUST parse successfully. This is non-negotiable.**
-   ```bash
-   # Check Lua syntax
-   lua -l script.lua
-   # Exit code MUST be 0
-   
-   # Check with luac (compiler)
-   luac -p script.lua
-   # Exit code MUST be 0
-   
-   # Run luacheck if available
-   if command -v luacheck >/dev/null 2>&1; then
-       luacheck script.lua
-       # Exit code MUST be 0
-   fi
-   ```
-   - **MUST** parse without errors (exit code 0)
-   - No syntax errors or warnings
-   - All modules loadable
-
-2. **Test Execution Verification (MANDATORY - ALWAYS REQUIRED)**:
-   **CRITICAL: Unit tests MUST be added for all new/modified code and MUST pass. This is non-negotiable.**
-   ```bash
-   # Run tests with Busted
-   busted test/
-   # Exit code MUST be 0
-   
-   # OR with LuaUnit
-   lua test/test_suite.lua
-   # Exit code MUST be 0
-   
-   # Run with coverage if available
-   busted --coverage test/
-   ```
-   - **MUST** pass all tests (exit code 0)
-   - **MANDATORY**: Unit tests MUST be added for all new code
-   - **MANDATORY**: All unit tests MUST pass before code delivery
-   - Minimum 80% code coverage for business logic
-   - No flaky tests (run multiple times to verify)
-   - **After ANY code change**: Re-run tests to verify they still pass
-
-3. **Code Quality Verification**:
-   ```bash
-   # Run luacheck if available
-   if command -v luacheck >/dev/null 2>&1; then
-       luacheck --config .luacheckrc src/
-       # Exit code MUST be 0
-   fi
-   ```
-   - **MUST** pass static analysis if luacheck is available
-   - No linter warnings
-
-4. **Documentation Generation**:
-   ```bash
-   # Generate API documentation with LDoc
-   ldoc src/
-   # Exit code MUST be 0
-   
-   # Verify documentation
-   ls doc/
-   ```
-   - **MUST** generate without errors
-   - All public APIs documented
-   - No missing documentation warnings
-
-5. **Post-Modification Verification (MANDATORY)**:
-   ```bash
-   # After ANY modification, ALWAYS run:
-   # 1. Syntax check
-   luac -p script.lua
-   # Exit code MUST be 0
-   
-   # 2. Static analysis (if available)
-   command -v luacheck >/dev/null 2>&1 && luacheck script.lua
-   # Exit code MUST be 0
-   
-   # 3. Run tests
-   busted test/
-   # Exit code MUST be 0
-   
-   # 4. Generate docs
-   ldoc src/
-   # Exit code MUST be 0
-   ```
-
-### B. Error Correction Process
-
-If verification fails:
-
-1. **Read the error message** - syntax errors, test failures, linter issues
-2. **Identify the root cause** - missing local, incorrect syntax, test logic issue, missing documentation
-3. **Fix the issue** in the generated code
-4. **Re-run verification** until all checks pass
-5. **Document fixes** in comments if non-obvious
-6. **Only present working, tested code** to the user
-
-**CRITICAL**: Never provide Lua code to the user that doesn't parse or pass tests. Always verify first, fix issues, then present the working solution.
-
-**MANDATORY RULES:**
-1. **Syntax check is ALWAYS required** - Code MUST parse successfully
-2. **Unit tests are ALWAYS required** - All new/modified code MUST have unit tests
-3. **Tests MUST pass** - All unit tests MUST pass before code delivery
-4. **Re-verify after changes** - After ANY code modification, re-check syntax and re-run tests
-5. **TDD is MANDATORY** - Write tests BEFORE implementation (Red-Green-Refactor)
-6. **Bug regression tests MANDATORY** - Every bug MUST get a test BEFORE fixing
+> **Forbidden**: shipping implementation before its test (violates `tdd.md`), fixing a bug without a regression test first, creating accidental globals, modifying a sequence with `table.remove` while iterating it with `ipairs`, or comparing `1`-based and `0`-based indices across the C boundary without translation.
 
 ---
 
-## 2A. Test-Driven Development (TDD) Protocol (MANDATORY)
+## 3. Verification Protocol
 
-**CRITICAL: Follow the Red-Green-Refactor cycle for ALL new Lua code.**
-
-### TDD Cycle for Lua
-
-```
-1. 🔴 RED: Write a failing test first
-   ↓
-2. 🟢 GREEN: Write minimal code to make it pass
-   ↓
-3. 🔵 REFACTOR: Improve code while keeping tests green
-   ↓
-   Repeat
-```
-
-### Example TDD Workflow for Lua Function
-
-```lua
--- Step 1: RED - Write failing test first
--- test/email_validator_spec.lua
-local validator = require("email_validator")
-
-describe("email validator", function()
-    -- Test will fail - module doesn't exist yet
-    it("accepts valid email addresses", function()
-        assert.is_true(validator.is_valid("user@example.com"))
-        assert.is_true(validator.is_valid("test.user@domain.co.uk"))
-    end)
-
-    it("rejects invalid email addresses", function()
-        assert.is_false(validator.is_valid("invalid"))
-        assert.is_false(validator.is_valid("user@"))
-        assert.is_false(validator.is_valid("@domain.com"))
-    end)
-
-    it("rejects empty strings", function()
-        assert.is_false(validator.is_valid(""))
-        assert.is_false(validator.is_valid(nil))
-    end)
-end)
-
--- Run: busted test/
--- ❌ FAILS - email_validator module doesn't exist yet
-
--- Step 2: GREEN - Write minimal implementation
--- src/email_validator.lua
---- Validates email address formats.
--- @module email_validator
-
-local M = {}
-
---- Validates an email address format.
--- @param email the email address to validate
--- @return true if the email is valid, false otherwise
--- @usage
--- local validator = require("email_validator")
--- if validator.is_valid("user@example.com") then
---     print("Valid email")
--- end
-function M.is_valid(email)
-    if not email or email == "" then
-        return false
-    end
-    return email:match("^[^%s@]+@[^%s@]+%.[^%s@]+$") ~= nil
-end
-
-return M
-
--- Run: busted test/
--- ✅ PASSES - tests pass
-
--- Step 3: REFACTOR - Improve with more robust validation
---- Validates email address formats according to RFC 5322.
---
--- Performs comprehensive email validation including:
--- - Basic format check (user@domain.tld)
--- - Length constraints (3-254 characters)
--- - RFC 5322 compliant pattern
---
--- @module email_validator
-
-local M = {}
-
-local EMAIL_PATTERN = "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+%.[a-zA-Z][a-zA-Z]+$"
-local MIN_LENGTH = 3
-local MAX_LENGTH = 254
-
---- Validates an email address format.
--- @param email the email address to validate
--- @return true if the email is valid, false otherwise
--- @see https://tools.ietf.org/html/rfc5322
-function M.is_valid(email)
-    if not email or type(email) ~= "string" then
-        return false
-    end
-
-    if #email < MIN_LENGTH or #email > MAX_LENGTH then
-        return false
-    end
-
-    return email:match(EMAIL_PATTERN) ~= nil
-end
-
-return M
--- Tests still pass ✓
-```
-
-### Example TDD for Lua Module
-
-```lua
--- Step 1: RED - Write failing test first
--- test/user_spec.lua
-local User = require("user")
-
-describe("User", function()
-    -- Test will fail - User module doesn't exist yet
-    it("creates user with valid data", function()
-        local user = User.new("user-123", "John Doe", "john@example.com")
-        
-        assert.equals("user-123", user.id)
-        assert.equals("John Doe", user.name)
-        assert.equals("john@example.com", user.email)
-    end)
-
-    it("throws on invalid email", function()
-        assert.has_error(function()
-            User.new("user-123", "John", "invalid-email")
-        end, "Invalid email format")
-    end)
-end)
-
--- Run: busted test/
--- ❌ FAILS - User module doesn't exist yet
-
--- Step 2: GREEN - Write minimal implementation
--- src/user.lua
---- User data model.
--- @module user
-
-local M = {}
-
---- Creates a new user.
--- @param id the unique user identifier
--- @param name the user's full name
--- @param email the user's email address
--- @return a new user table
-function M.new(id, name, email)
-    if not email:match("^[^%s@]+@[^%s@]+%.[^%s@]+$") then
-        error("Invalid email format: " .. email)
-    end
-
-    return {
-        id = id,
-        name = name,
-        email = email
-    }
-end
-
-return M
-
--- Run: busted test/
--- ✅ PASSES - tests pass
-
--- Step 3: REFACTOR - Add validation and methods
---- User data model with validation.
---
--- Represents an immutable user in the system.
--- Enforces validation rules:
--- - ID must not be empty
--- - Name must not be empty
--- - Email must be valid format
---
--- @module user
-
-local M = {}
-
-local EMAIL_PATTERN = "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+%.[a-zA-Z][a-zA-Z]+$"
-
---- Creates a new user.
--- @param id the unique user identifier (non-empty)
--- @param name the user's full name (non-empty)
--- @param email the user's email address (valid format)
--- @return a new user table
--- @raise error if validation fails
-function M.new(id, name, email)
-    assert(id and id ~= "", "id cannot be empty")
-    assert(name and name ~= "", "name cannot be empty")
-    assert(email and email:match(EMAIL_PATTERN), "Invalid email format: " .. tostring(email))
-
-    local self = {
-        id = id,
-        name = name,
-        email = email
-    }
-
-    --- Creates a copy of this user with updated name.
-    -- @param new_name the new name
-    -- @return a new user table with the updated name
-    function self.with_name(new_name)
-        return M.new(id, new_name, email)
-    end
-
-    return self
-end
-
-return M
--- Tests still pass ✓
-```
-
----
-
-## 2B. Bug Fix Protocol for Lua (MANDATORY)
-
-**CRITICAL: Every Lua bug MUST receive a regression test BEFORE fixing.**
-
-### Bug Fix Workflow for Lua
-
-```
-1. 🐛 Bug Reported/Discovered
-   ↓
-2. ✍️ Write a test that REPRODUCES the bug (test will FAIL)
-   ↓
-3. ✅ Verify the test fails for the right reason
-   ↓
-4. 🔧 Fix the bug (make the test pass)
-   ↓
-5. 🟢 Verify the test now PASSES
-   ↓
-6. 📝 Document the bug in test comments (include bug ID)
-   ↓
-7. 🚀 Deploy with confidence (regression prevented)
-```
-
-### Example Bug Fix: Nil Handling
-
-```lua
--- Bug Report #5431: get_user_name crashes when user is nil
-
--- Step 1-2: Write test that reproduces the bug
--- test/user_service_spec.lua
-local UserService = require("user_service")
-
-describe("UserService", function()
-    --- Bug #5431: get_user_name crashes when user is nil.
-    -- Discovered: 2026-01-18
-    -- This test prevents regression.
-    it("get_user_name returns nil when user is nil - Bug #5431", function()
-        local service = UserService.new()
-        
-        -- Should return nil, not crash
-        local result = service.get_user_name(nil)
-        assert.is_nil(result)
-    end)
-
-    it("get_user_name returns name when user exists", function()
-        local service = UserService.new()
-        local user = { id = "123", name = "John Doe", email = "john@example.com" }
-        
-        local result = service.get_user_name(user)
-        assert.equals("John Doe", result)
-    end)
-end)
-
--- Run: busted test/
--- ❌ FAILS - Crashes with "attempt to index a nil value"
-
--- Step 3: Fix the bug
--- src/user_service.lua
---- Service for user-related operations.
--- @module user_service
-
-local M = {}
-
-function M.new()
-    local self = {}
-
-    --- Gets the user's name.
-    --
-    -- Bug Fix #5431: Now properly handles nil users by returning
-    -- nil instead of crashing.
-    --
-    -- @param user the user (may be nil)
-    -- @return the user's name, or nil if user is nil
-    function self.get_user_name(user)
-        -- FIX: Check for nil before accessing user
-        if not user then
-            return nil
-        end
-        return user.name
-    end
-
-    return self
-end
-
-return M
-
--- Run: busted test/
--- ✅ PASSES - bug fixed, regression prevented ✓
-```
-
-### Example Bug Fix: Table Modification During Iteration
-
-```lua
--- Bug Report #5432: remove_inactive_users crashes with "invalid key to 'next'"
-
--- Step 1-2: Write test that reproduces the bug
--- test/user_manager_spec.lua
-local UserManager = require("user_manager")
-
-describe("UserManager", function()
-    --- Bug #5432: remove_inactive_users crashes during iteration.
-    -- Discovered: 2026-01-18
-    -- This test prevents regression.
-    it("remove_inactive_users does not crash - Bug #5432", function()
-        local manager = UserManager.new()
-        
-        -- Add multiple users
-        manager.add_user({ id = "1", name = "John", active = false })
-        manager.add_user({ id = "2", name = "Jane", active = true })
-        manager.add_user({ id = "3", name = "Bob", active = false })
-        
-        -- Should not crash
-        assert.has_no_errors(function()
-            manager.remove_inactive_users()
-        end)
-        
-        -- Should only have active users left
-        assert.equals(1, manager.get_user_count())
-    end)
-end)
-
--- Run: busted test/
--- ❌ FAILS - Crashes with "invalid key to 'next'"
-
--- Step 3: Fix the bug
--- src/user_manager.lua
---- Manages a collection of users.
--- @module user_manager
-
-local M = {}
-
-function M.new()
-    local self = {}
-    local users = {}
-
-    function self.add_user(user)
-        table.insert(users, user)
-    end
-
-    --- Removes all inactive users from the collection.
-    --
-    -- Bug Fix #5432: Now safely removes users during iteration
-    -- by building a new table instead of modifying during iteration.
-    function self.remove_inactive_users()
-        -- FIX: Build new table instead of modifying during iteration
-        -- OLD (buggy) code:
-        -- for i, user in ipairs(users) do
-        --     if not user.active then
-        --         table.remove(users, i)  -- Crash!
-        --     end
-        -- end
-        
-        -- NEW (fixed) code:
-        local active_users = {}
-        for _, user in ipairs(users) do
-            if user.active then
-                table.insert(active_users, user)
-            end
-        end
-        users = active_users
-    end
-
-    function self.get_user_count()
-        return #users
-    end
-
-    return self
-end
-
-return M
-
--- Run: busted test/
--- ✅ PASSES - bug fixed, regression prevented ✓
-```
-
-### Prohibited Practices for Lua Bug Fixes
-
-**NEVER:**
-- ❌ Fix a bug without adding a regression test first
-- ❌ Write implementation before writing tests (violates TDD)
-- ❌ Skip the Red-Green-Refactor cycle
-- ❌ Commit code with failing tests
-- ❌ Remove tests to make code pass
-- ❌ Use `pending()` to ignore failing tests
-- ❌ Suppress luacheck warnings instead of fixing root cause
-
-**ALWAYS:**
-- ✅ Write a test that reproduces the bug first
-- ✅ Verify the test fails before fixing
-- ✅ Document bug ID in test comments
-- ✅ Run `busted test/` after fix
-- ✅ Ensure fix doesn't introduce new issues
-- ✅ Keep tests in codebase permanently
-- ✅ Test with both Lua and LuaJIT if applicable
-
----
-
-## 3. Dependency Management (MANDATORY)
-
-### A. LuaRocks Best Practices
-
-**CRITICAL: Use LuaRocks for dependency management. Pin versions for reproducibility.**
-
-#### ✅ CORRECT - Proper rockspec Configuration
-
-```lua
--- myproject-1.0.0-1.rockspec - Proper dependency management
-
-package = "myproject"
-version = "1.0.0-1"
-
-dependencies = {
-   "lua >= 5.4",
-   "busted >= 2.0.0",
-   "ldoc >= 1.4.0",
-   "luacheck >= 1.0.0",
-}
-
-build = {
-   type = "builtin",
-   modules = {
-      myproject = "src/myproject/init.lua",
-      ["myproject.utils"] = "src/myproject/utils.lua",
-      ["myproject.core"] = "src/myproject/core.lua",
-   },
-}
-```
-
-#### ✅ CORRECT - Using Dependencies
-
-```lua
--- Install dependencies
--- luarocks install --only-deps myproject-1.0.0-1.rockspec
-
--- Use dependencies
-local busted = require("busted")
-local ldoc = require("ldoc")
-```
-
-#### ❌ WRONG - Manual Dependency Management
-
-```lua
--- ❌ Manual file copying
--- ❌ No version control
--- ❌ No dependency resolution
-```
-
-### B. Version Pinning
-
-**CRITICAL: Always pin major versions, allow patch updates.**
-
-```lua
--- ✅ CORRECT - Version constraints
-dependencies = {
-   "busted >= 2.0.0, < 3.0.0",  -- Allow 2.x, not 3.0.0
-   "ldoc >= 1.4.0, < 2.0.0",    -- Allow 1.4.x, not 2.0.0
-}
-
--- ❌ WRONG - Too permissive
-dependencies = {
-   "busted",  -- ❌ Could break with major updates
-}
-```
-
----
-
-## 4. Hexagonal Architecture (MANDATORY)
-
-### A. Architecture Principles
-
-**CRITICAL: All Lua applications MUST follow hexagonal architecture (ports and adapters) for clean separation of concerns, testability, and maintainability.**
-
-#### ✅ CORRECT - Hexagonal Architecture Structure
-
-```
-src/
-├── main.lua                    # App entry point
-├── core/                       # Core utilities
-│   ├── constants.lua
-│   ├── utils.lua
-│   └── errors.lua
-├── features/                   # Feature modules (hexagonal)
-│   ├── auth/
-│   │   ├── domain/            # Domain layer (core)
-│   │   │   ├── entities/     # Domain models
-│   │   │   ├── repositories/  # Repository interfaces (ports)
-│   │   │   └── usecases/     # Business logic
-│   │   ├── data/             # Data layer (adapters)
-│   │   │   ├── datasources/  # External data sources
-│   │   │   └── repositories/ # Repository implementations
-│   │   └── presentation/      # Presentation layer (adapters)
-│   │       ├── controllers/   # Controllers
-│   │       └── views/         # Views
-│   ├── game/
-│   └── player/
-└── shared/                     # Shared components
-    ├── modules/
-    └── utils/
-```
-
-### B. Domain Layer (Core)
-
-**CRITICAL: Domain layer contains business logic and is independent of frameworks.**
-
-#### ✅ CORRECT - Domain Entity
-
-```lua
--- features/auth/domain/entities/user.lua - Domain entity
-
---- Represents a user in the system.
---
--- This is a pure domain entity with no framework dependencies.
--- It contains only business logic and data.
---
--- @classmod User
-local User = {}
-User.__index = User
-
---- Creates a new user instance.
---
--- @param id User ID (must be non-empty string)
--- @param email User email (must be valid format)
--- @param name User name (optional but recommended)
--- @return User instance
--- @usage
--- local user = User.new("123", "user@example.com", "John Doe")
-function User.new(id, email, name)
-   assert(type(id) == "string" and #id > 0, "User ID must be non-empty string")
-   assert(type(email) == "string" and email:match("@"), "Invalid email format")
-   
-   local self = setmetatable({}, User)
-   self.id = id
-   self.email = email
-   self.name = name or ""
-   self.created_at = os.time()
-   self.updated_at = os.time()
-   return self
-end
-
---- Updates user fields.
---
--- @param updates Table with fields to update
--- @return Updated user instance
-function User:update(updates)
-   if updates.name then
-      self.name = updates.name
-   end
-   if updates.email then
-      assert(updates.email:match("@"), "Invalid email format")
-      self.email = updates.email
-   end
-   self.updated_at = os.time()
-   return self
-end
-
---- Returns string representation of user.
---
--- @return String representation
-function User:__tostring()
-   return string.format("User(id=%s, email=%s, name=%s)",
-                        self.id, self.email, self.name)
-end
-
-return User
-```
-
-#### ✅ CORRECT - Repository Interface (Port)
-
-```lua
--- features/auth/domain/repositories/user_repository.lua - Repository port
-
---- Repository interface for user operations.
---
--- This defines the contract for user data operations.
--- Implementations are in the data layer.
---
--- @classmod UserRepository
-local UserRepository = {}
-
---- Gets a user by ID.
---
--- @param userId User ID
--- @return User if found, nil otherwise
--- @raise RepositoryException if operation fails
--- @usage
--- local user = repository:getUserById("123")
-function UserRepository:getUserById(userId)
-   error("Not implemented - must be implemented by concrete class")
-end
-
---- Gets the current authenticated user.
---
--- @return User if authenticated, nil otherwise
--- @raise RepositoryException if operation fails
-function UserRepository:getCurrentUser()
-   error("Not implemented - must be implemented by concrete class")
-end
-
---- Updates user profile.
---
--- @param userId User ID to update
--- @param updates Table with fields to update
--- @return Updated user
--- @raise RepositoryException if operation fails
-function UserRepository:updateUser(userId, updates)
-   error("Not implemented - must be implemented by concrete class")
-end
-
---- Signs out the current user.
---
--- @raise RepositoryException if operation fails
-function UserRepository:signOut()
-   error("Not implemented - must be implemented by concrete class")
-end
-
-return UserRepository
-```
-
-### C. Data Layer (Adapters)
-
-**CRITICAL: Data layer implements domain interfaces and handles external data sources.**
-
-#### ✅ CORRECT - Repository Implementation
-
-```lua
--- features/auth/data/repositories/user_repository_impl.lua - Repository adapter
-
-local UserRepository = require("features.auth.domain.repositories.user_repository")
-local User = require("features.auth.domain.entities.user")
-
---- Implementation of UserRepository using database.
---
--- @classmod UserRepositoryImpl
-local UserRepositoryImpl = {}
-UserRepositoryImpl.__index = UserRepositoryImpl
-setmetatable(UserRepositoryImpl, {__index = UserRepository})
-
---- Creates a new repository instance.
---
--- @param db Database connection
--- @return Repository instance
-function UserRepositoryImpl.new(db)
-   local self = setmetatable({}, UserRepositoryImpl)
-   self.db = db
-   return self
-end
-
---- Gets a user by ID.
---
--- @param userId User ID
--- @return User if found, nil otherwise
--- @raise RepositoryException if operation fails
-function UserRepositoryImpl:getUserById(userId)
-   local success, result = pcall(function()
-      local row = self.db:query("SELECT * FROM users WHERE id = ?", userId)
-      if row then
-         return User.new(row.id, row.email, row.name)
-      end
-      return nil
-   end)
-   
-   if not success then
-      error("RepositoryException: Failed to get user: " .. tostring(result))
-   end
-   
-   return result
-end
-
---- Gets the current authenticated user.
---
--- @return User if authenticated, nil otherwise
-function UserRepositoryImpl:getCurrentUser()
-   local session = self.db:getCurrentSession()
-   if not session or not session.user_id then
-      return nil
-   end
-   
-   return self:getUserById(session.user_id)
-end
-
---- Updates user profile.
---
--- @param userId User ID to update
--- @param updates Table with fields to update
--- @return Updated user
-function UserRepositoryImpl:updateUser(userId, updates)
-   local success, result = pcall(function()
-      self.db:update("users", updates, {id = userId})
-      return self:getUserById(userId)
-   end)
-   
-   if not success then
-      error("RepositoryException: Failed to update user: " .. tostring(result))
-   end
-   
-   return result
-end
-
---- Signs out the current user.
-function UserRepositoryImpl:signOut()
-   local success, err = pcall(function()
-      self.db:clearSession()
-   end)
-   
-   if not success then
-      error("RepositoryException: Failed to sign out: " .. tostring(err))
-   end
-end
-
-return UserRepositoryImpl
-```
-
----
-
-## 5. Code Style and Best Practices (MANDATORY)
-
-### A. Naming Conventions
-
-**CRITICAL: Use snake_case for variables and functions, PascalCase for modules/classes.**
-
-#### ✅ CORRECT - Proper Naming
-
-```lua
--- Variables and functions: snake_case
-local player_health = 100
-local function calculate_damage(base_damage, armor)
-   return base_damage - armor
-end
-
--- Modules/classes: PascalCase
-local GameEngine = {}
-local PlayerManager = require("modules.PlayerManager")
-
--- Constants: UPPERCASE
-local MAX_PLAYERS = 4
-local DEFAULT_SPEED = 200
-
--- Private functions/variables: prefix with underscore
-local function _internal_helper()
-   -- Private implementation
-end
-
-local _private_cache = {}
-```
-
-#### ❌ WRONG - Inconsistent Naming
-
-```lua
--- ❌ Mixed naming conventions
-local playerHealth = 100        -- ❌ Should be snake_case
-local function CalculateDamage() -- ❌ Should be snake_case
-local max_players = 4           -- ❌ Should be UPPERCASE
-```
-
-### B. Local Variables
-
-**CRITICAL: Always use local variables for performance and proper scoping.**
-
-#### ✅ CORRECT - Local Variables
-
-```lua
--- Always use local
-local math = math
-local string = string
-local table = table
-
--- Local functions
-local function helper_function()
-   -- Implementation
-end
-
--- Local modules
-local Utils = require("utils")
-```
-
-#### ❌ WRONG - Global Variables
-
-```lua
--- ❌ Global variables (slow, pollutes global namespace)
-function helper_function()  -- ❌ Global function
-   -- Implementation
-end
-
--- ❌ Accessing globals directly (slower)
-result = math.max(a, b)  -- ❌ Should cache math locally
-```
-
-### C. Module Pattern
-
-**CRITICAL: Use proper module pattern with return statement.**
-
-#### ✅ CORRECT - Module Pattern
-
-```lua
--- modules/player.lua - Proper module structure
-
-local Player = {}
-Player.__index = Player
-
--- Module constants
-local DEFAULT_HEALTH = 100
-local MAX_LEVEL = 50
-
--- Private functions
-local function _validate_level(level)
-   return level >= 1 and level <= MAX_LEVEL
-end
-
--- Constructor
-function Player.new(name, level)
-   assert(type(name) == "string", "Player name must be a string")
-   assert(_validate_level(level), "Invalid player level")
-   
-   local self = setmetatable({}, Player)
-   self.name = name
-   self.level = level
-   self.health = DEFAULT_HEALTH
-   self.experience = 0
-   return self
-end
-
--- Public methods
-function Player:take_damage(damage)
-   assert(type(damage) == "number" and damage >= 0, "Invalid damage value")
-   self.health = math.max(0, self.health - damage)
-   return self.health <= 0
-end
-
--- Metamethods
-function Player:__tostring()
-   return string.format("Player(%s, Level %d, HP: %d)",
-                        self.name, self.level, self.health)
-end
-
-return Player
-```
-
----
-
-## 6. Error Handling (MANDATORY)
-
-### A. pcall and xpcall
-
-**CRITICAL: Always use pcall/xpcall for error handling in production code.**
-
-#### ✅ CORRECT - Proper Error Handling
-
-```lua
--- Safe function execution with pcall
-local function safe_divide(a, b)
-   local success, result = pcall(function()
-      if b == 0 then
-         error("Division by zero", 2)
-      end
-      return a / b
-   end)
-   
-   if success then
-      return result
-   else
-      print("Error:", result)
-      return nil
-   end
-end
-
--- Enhanced error handling with xpcall
-local function enhanced_error_handler(err)
-   local trace = debug.traceback(err, 2)
-   print("Error occurred:", trace)
-   -- Log to file or send to error reporting service
-   return err
-end
-
-local function risky_operation(data)
-   local success, result = xpcall(function()
-      -- Complex operation that might fail
-      assert(type(data) == "table", "Data must be a table")
-      assert(data.value, "Data must have a value field")
-      
-      return data.value * 2
-   end, enhanced_error_handler)
-   
-   return success and result or nil
-end
-```
-
-### B. Input Validation
-
-**CRITICAL: Always validate input with clear error messages.**
-
-#### ✅ CORRECT - Input Validation
-
-```lua
--- Input validation utility
-local Validator = {}
-
-function Validator.is_positive_number(value)
-   return type(value) == "number" and value > 0
-end
-
-function Validator.is_valid_string(value, min_length, max_length)
-   if type(value) ~= "string") then return false end
-   local len = #value
-   return len >= (min_length or 1) and len <= (max_length or math.huge)
-end
-
-function Validator.is_in_range(value, min_val, max_val)
-   return type(value) == "number" and value >= min_val and value <= max_val
-end
-
--- Usage
-local function process_user_input(input)
-   assert(Validator.is_valid_string(input.name, 1, 100),
-          "Name must be between 1 and 100 characters")
-   assert(Validator.is_positive_number(input.age),
-          "Age must be a positive number")
-   -- Process input..
-end
-```
-
----
-
-## 7. Performance Optimization (MANDATORY)
-
-### A. Local Variable Caching
-
-**CRITICAL: Cache frequently used globals as local variables.**
-
-#### ✅ CORRECT - Local Caching
-
-```lua
--- Cache globals locally
-local math = math
-local string = string
-local table = table
-local pairs = pairs
-local ipairs = ipairs
-
--- Use cached versions
-local function calculate_stats(numbers)
-   local sum = 0
-   for i, num in ipairs(numbers) do
-      sum = sum + num
-   end
-   return sum / #numbers
-end
-```
-
-### B. Table Pre-allocation
-
-**CRITICAL: Pre-allocate tables when size is known.**
-
-#### ✅ CORRECT - Table Pre-allocation
-
-```lua
--- Pre-allocate table
-local function create_large_table(size)
-   local result = {}
-   for i = 1, size do
-      result[i] = 0  -- Pre-allocate
-   end
-   return result
-end
-
--- Use table.concat for string concatenation
-local function build_string(parts)
-   return table.concat(parts, "")
-end
-```
-
-### C. Object Pooling
-
-**CRITICAL: Use object pooling for frequently created/destroyed objects.**
-
-#### ✅ CORRECT - Object Pooling
-
-```lua
--- Object pool implementation
-local ObjectPool = {}
-ObjectPool.__index = ObjectPool
-
-function ObjectPool.new(create_fn, reset_fn)
-   local self = setmetatable({}, ObjectPool)
-   self.pool = {}
-   self.create_fn = create_fn
-   self.reset_fn = reset_fn
-   return self
-end
-
-function ObjectPool:acquire()
-   if #self.pool > 0 then
-      return table.remove(self.pool)
-   else
-      return self.create_fn()
-   end
-end
-
-function ObjectPool:release(obj)
-   if self.reset_fn then
-      self.reset_fn(obj)
-   end
-   table.insert(self.pool, obj)
-end
-```
-
----
-
-## 8. Testing Requirements (MANDATORY)
-
-### A. Unit Testing (MANDATORY - ALWAYS REQUIRED)
-
-**CRITICAL: All new/modified code MUST have unit tests. Unit tests MUST pass before code delivery. This is non-negotiable.**
-
-**MANDATORY RULES:**
-1. **Unit tests are ALWAYS required** for all new code
-2. **Unit tests are ALWAYS required** for all modified code
-3. **All unit tests MUST pass** before code delivery
-4. **After ANY code change**, re-run tests to verify they still pass
-5. **Minimum 80% code coverage** for business logic
-
-#### ✅ CORRECT - Busted Tests
-
-```lua
--- test/features/auth/domain/entities/user_test.lua - Unit tests
-
-local busted = require("busted")
-local User = require("features.auth.domain.entities.user")
-
-describe("User", function()
-   describe("new", function()
-      it("creates user with required fields", function()
-         local user = User.new("123", "test@example.com", "Test User")
-         
-         assert.are.equal("123", user.id)
-         assert.are.equal("test@example.com", user.email)
-         assert.are.equal("Test User", user.name)
-      end)
-      
-      it("validates email format", function()
-         assert.has_error(function()
-            User.new("123", "invalid-email", "Test")
-         end, "Invalid email format")
-      end)
-   end)
-   
-   describe("update", function()
-      it("updates user fields", function()
-         local user = User.new("123", "test@example.com", "Test")
-         user:update({name = "Updated"})
-         
-         assert.are.equal("Updated", user.name)
-      end)
-   end)
-end)
-```
-
----
-
-## 9. Documentation as Code (MANDATORY)
-
-### A. LDoc Documentation Comments
-
-**CRITICAL: All public APIs MUST have complete LDoc documentation comments for auto-generated API documentation.**
-
-#### ✅ CORRECT - Complete LDoc Documentation
-
-```lua
---- Repository interface for user operations.
---
--- This defines the contract for user data operations.
--- Implementations are in the data layer.
---
--- @classmod UserRepository
--- @usage
--- local repository = UserRepositoryImpl.new(db)
--- local user = repository:getUserById("123")
-local UserRepository = {}
-
---- Gets a user by ID.
---
--- @param userId User ID (string)
--- @return User if found, nil otherwise
--- @raise RepositoryException if operation fails
--- @usage
--- local user = repository:getUserById("123")
--- if user then
---    print("User:", user.name)
--- end
-function UserRepository:getUserById(userId)
-   error("Not implemented")
-end
-
---- Updates user profile.
---
--- @param userId User ID to update (string)
--- @param updates Table with fields to update
--- @return Updated user
--- @raise RepositoryException if operation fails
--- @usage
--- local updated = repository:updateUser("123", {name = "New Name"})
-function UserRepository:updateUser(userId, updates)
-   error("Not implemented")
-end
-
-return UserRepository
-```
-
-### B. Generating Documentation
-
-**CRITICAL: Documentation MUST be generatable from code using LDoc.**
+Run, in order, before presenting code. Fix → re-run until every gate is green.
 
 ```bash
-# Generate API documentation
-ldoc src/
-
-# Documentation will be in doc/
-# View at doc/index.html
+stylua --check .                 # LUA-FMT-01
+luacheck .                       # LUA-LINT-01 / LUA-SEC-01
+luac -p $(find . -name '*.lua')  # LUA-SYN-01  (use luajit -bl for LuaJIT)
+busted --coverage                # LUA-TST-01/02/03
+luacov                           # LUA-TST-03: coverage report
+ldoc -f markdown .               # LUA-DOC-01
 ```
 
-#### ✅ CORRECT - LDoc Configuration
-
-```lua
--- config.ld - LDoc configuration
-
-project = "MyProject"
-title = "MyProject API Documentation"
-description = "Modern Lua application with hexagonal architecture"
-format = "markdown"
-dir = "doc"
-file = {
-   "src",
-}
-```
+The *why* behind each gate lives in its §0 owner; do not re-derive it here.
 
 ---
 
-## 10. Coroutines (MANDATORY when applicable)
+## 4. Project Structure
 
-### A. Coroutine Usage
+Idiomatic LuaRocks layout. Architectural *principles* (dependency direction, ports/adapters) are owned by [`architectures.md`](guides://architectures.md) / [`hexagonal.md`](guides://hexagonal.md); below is only the Lua mapping.
 
-**CRITICAL: Use coroutines for cooperative multitasking and async operations.**
-
-#### ✅ CORRECT - Coroutine Pattern
-
-```lua
--- Coroutine-based task scheduler
-local TaskScheduler = {}
-
-function TaskScheduler.new()
-   local self = {
-      tasks = {},
-   }
-   return self
-end
-
-function TaskScheduler:add_task(task_fn)
-   local co = coroutine.create(task_fn)
-   table.insert(self.tasks, co)
-end
-
-function TaskScheduler:run()
-   while #self.tasks > 0 do
-      for i = #self.tasks, 1, -1 do
-         local co = self.tasks[i]
-         local status = coroutine.status(co)
-         
-         if status == "dead" then
-            table.remove(self.tasks, i)
-         else
-            local success, err = coroutine.resume(co)
-            if not success then
-               print("Task error:", err)
-               table.remove(self.tasks, i)
-            end
-         end
-      end
-   end
-end
-
--- Usage
-local scheduler = TaskScheduler.new()
-scheduler:add_task(function()
-   for i = 1, 10 do
-      print("Task 1:", i)
-      coroutine.yield()
-   end
-end)
-scheduler:run()
 ```
+project/
+├── src/<package>/
+│   ├── init.lua          # module root: returns one table
+│   └── <feature>.lua     # one module per file
+├── spec/                 # busted specs, mirror src/ (see tdd.md)
+│   └── <feature>_spec.lua
+├── <package>-1.0.0-1.rockspec   # deps (pinned) + build.modules map
+├── .luacheckrc           # lint config (std, globals)
+├── stylua.toml           # format config
+├── .luacov               # coverage config
+└── config.ld             # LDoc config
+```
+
+- One module per file; the file `return`s a single value (usually a table). Name it `local M = {}` … `return M`.
+- Map every module path to a file in `build.modules` of the rockspec — `require("pkg.feature")` must resolve.
+- Keep modules side-effect-free at load time: requiring a module must not perform IO.
 
 ---
 
-## 11. Memory Management (MANDATORY)
+## 5. Lua Specifics
 
-### A. Garbage Collection
+The unique value of this guide.
 
-**CRITICAL: Manage memory efficiently with proper garbage collection.**
+### A. Tables — the one data structure
 
-#### ✅ CORRECT - Memory Management
-
-```lua
--- Memory management utilities
-local MemoryManager = {}
-
-function MemoryManager.force_cleanup()
-   collectgarbage("collect")
-end
-
-function MemoryManager.get_memory_usage()
-   return collectgarbage("count")
-end
-
-function MemoryManager.set_gc_params(pause, stepmul)
-   collectgarbage("setpause", pause or 100)
-   collectgarbage("setstepmul", stepmul or 200)
-end
-
--- Weak table for caches
-function MemoryManager.create_weak_cache(mode)
-   local cache = {}
-   setmetatable(cache, {__mode = mode or "v"})  -- "k", "v", or "kv"
-   return cache
-end
-```
-
----
-
-## 12. Security & Dependency Management (MANDATORY)
-
-### A. Automated Dependency Management
-
-```bash
-# Install a specific rock with pinned version
-luarocks install luasocket 3.1.0-1
-
-# List installed rocks and versions
-luarocks list
-
-# Show dependency tree for a rock
-luarocks show <rock>
-
-# Remove outdated or vulnerable rocks
-luarocks remove <rock>
-
-# Update a rock to latest version
-luarocks install <rock>
-```
-
-**LuaRocks does not have a native lockfile.** Pin exact versions in your `.rockspec` file for reproducibility.
-
-### B. Vulnerability Scanning & Security
-
-LuaRocks does not include a native audit command. Use third-party tools:
-
-```bash
-# Snyk: scan project for known vulnerabilities
-snyk test --all-projects
-
-# Trivy: filesystem scan for vulnerabilities in vendored dependencies
-trivy fs --scanners vuln .
-
-# Luacheck: static analysis for common security pitfalls
-luacheck src/ --no-unused --std max
-```
-
-**Security best practices:**
-- Pin exact versions in `.rockspec` files — LuaRocks resolves latest by default
-- Avoid `loadstring()` and `load()` with untrusted input (code injection risk)
-- Use `require()` with explicit paths, never dynamic module loading from user input
-- Sandbox untrusted Lua code by restricting the environment table
-- Validate all external input before passing to `os.execute()` or `io.popen()`
-- Prefer LuaJIT's FFI over `os.execute()` for system operations
-
-### C. Dependency File
+A table is simultaneously an array (sequence) and a hash. The **sequence** part is the contiguous integer keys `1..n`.
 
 ```lua
--- myproject-1.0.0-1.rockspec
-package = "myproject"
-version = "1.0.0-1"
-source = {
-    url = "git+https://github.com/user/myproject.git",
-    tag = "v1.0.0"
-}
-description = {
-    summary = "My Lua project",
-    license = "MIT"
-}
-dependencies = {
-    "lua >= 5.1, < 5.5",
-    "luasocket == 3.1.0-1",       -- Pin exact versions
-    "lua-cjson == 2.1.0.14-1",
-    "luafilesystem == 1.8.0-1",
-    "busted == 2.2.0-1",          -- Test framework
-}
-build = {
-    type = "builtin",
-    modules = {
-        ["myproject.init"] = "src/init.lua",
-        ["myproject.core"] = "src/core.lua",
-    }
-}
+local t = { 10, 20, 30, name = "x" }   -- array part + hash part in one table
+#t            -- 3  (length operator: only valid on a borderless sequence)
+t[#t + 1] = 40                          -- append idiom
 ```
 
----
+- **`#` is undefined when the sequence has holes.** `{1, nil, 3}` may report length 1 *or* 3. Never `nil` out a middle element and then use `#`; track length explicitly or use `table.remove`.
+- `pairs` iterates *all* keys in unspecified order; `ipairs` iterates the sequence `1..n` and stops at the first `nil`.
+- **Do not insert/remove during iteration.** Removing while iterating with `ipairs` skips elements or errors; build a new table or iterate indices downward (`for i = #t, 1, -1`).
 
-## 13. Summary
+### B. 1-based indexing footguns
 
-**CRITICAL Requirements for All Lua Code:**
-
-1. **Dependency Management**: Use LuaRocks, pin versions for reproducibility
-2. **Syntax Verification**: Code MUST ALWAYS parse (mandatory for every change)
-3. **Unit Tests**: ALWAYS required for all new/modified code, MUST pass
-4. **Hexagonal Architecture**: All applications MUST follow ports and adapters pattern
-5. **Local Variables**: Always use local for performance and scope
-6. **Error Handling**: Use pcall/xpcall, explicit error messages
-7. **Documentation**: Complete LDoc documentation, auto-generatable
-8. **Testing**: 80%+ code coverage, comprehensive unit tests, always required
-9. **Performance**: Local caching, table pre-allocation, object pooling
-10. **Code Style**: snake_case for functions, PascalCase for modules
-11. **Module Pattern**: Proper module structure with return statement
-12. **Memory Management**: Efficient garbage collection, weak tables
-13. **Minimalistic Code**: Clean, readable, concise code
-14. **Verification**: Agent MUST parse, test, and generate docs before delivery
-
-**Agent Verification Protocol:**
-- **MANDATORY**: Parse code (`luac -p script.lua`) - ALWAYS required
-- **MANDATORY**: Run unit tests (`busted test/`) - ALWAYS required, MUST pass
-- Generate documentation (`ldoc src/`)
-- **MANDATORY**: After ANY modification, re-parse and re-run tests
-- Only present working, tested, documented code to the user
-
-**Remember**: Minimalistic, clean, readable, well-documented, performant Lua code with hexagonal architecture, proper error handling, comprehensive testing, and focus on portability and speed. Keep it simple, keep it Lua, keep it working.
-
----
-
-## 14. Quick Reference
-
-### Common Commands
-
-```bash
-# Parse syntax check
-luac -p script.lua
-
-# Run
-lua script.lua
-luajit script.lua
-
-# Test
-busted test/
-busted --verbose test/
-
-# Lint
-luacheck src/ test/
-
-# Documentation
-ldoc src/
-
-# Package management
-luarocks install <package>
-luarocks list
-```
-
-### Lua Patterns Cheat Sheet
+Lua sequences start at **1**, not 0. `t[0]` is just another hash key, not part of the sequence.
 
 ```lua
--- Table operations
-local items = {1, 2, 3}
-for i, v in ipairs(items) do end  -- Arrays
-for k, v in pairs(items) do end   -- All keys
+for i = 1, #t do ... end          -- canonical sequence loop
+string.sub(s, 1, 1)               -- first char (1-based, inclusive both ends)
+string.find(s, "x")               -- returns 1-based start, end (or nil)
+```
 
--- Safe nil access
-local value = (obj or {}).field or "default"
+When crossing the **C API / FFI boundary**, C arrays are 0-based — translate indices explicitly (`c_array[i - 1]`). Off-by-one across this boundary is the most common embedding bug (LUA-SEC/ERR boundary).
 
--- Module pattern
+### C. Scoping & closures
+
+`local` is lexically scoped; a function captures *upvalues* by reference, giving closures and private state.
+
+```lua
+local function counter()
+  local n = 0
+  return function() n = n + 1; return n end   -- n is a private upvalue
+end
+```
+
+- A bare name without `local` writes a **global** — the #1 source of action-at-a-distance bugs. luacheck (`LUA-LINT-01`) must reject undeclared globals.
+- Closures replace classes for simple encapsulation; use the metatable pattern (§D) when you need shared methods + `self`.
+
+### D. Metatables & metamethods
+
+Metatables give tables operator overloading, inheritance, and proxy behaviour. Prototype-based OOP is `__index`:
+
+```lua
+local Vec = {}
+Vec.__index = Vec                       -- method lookup falls back to Vec
+function Vec.new(x, y) return setmetatable({ x = x, y = y }, Vec) end
+function Vec:len() return math.sqrt(self.x^2 + self.y^2) end   -- self via `:`
+function Vec.__add(a, b) return Vec.new(a.x + b.x, a.y + b.y) end
+function Vec.__tostring(v) return ("(%g,%g)"):format(v.x, v.y) end
+```
+
+Key metamethods: `__index`/`__newindex` (read/write fallback — inheritance & read-only proxies), `__add`/`__eq`/`__lt`/`__call`, `__tostring`, `__gc` (finalizers, 5.4), `__mode` (weak tables for caches: `__mode = "k"|"v"|"kv"`). Inheritance chains: set the subclass's metatable's `__index` to the superclass.
+
+### E. Modules & `require`
+
+```lua
+-- src/mypkg/math.lua
 local M = {}
-function M.method() end
+function M.add(a, b) return a + b end
+return M                                 -- always return one value
+```
+
+```lua
+local mathx = require("mypkg.math")      -- cached: runs the file once, reuses result
+```
+
+- `require` searches `package.path` (Lua) and `package.cpath` (C), caches in `package.loaded`. A module's top level runs **once**.
+- Never rely on the deprecated global `module()` function (removed/forbidden). Never set globals from a module.
+- Dots in module names map to directory separators via the path templates.
+
+### F. Coroutines
+
+Cooperative, single-threaded "stackful" coroutines — for generators, iterators, async/IO scheduling, and state machines. They yield/resume; they are **not** OS threads (no preemption, no parallelism — for that see [`performance.md`](guides://performance.md) on multiple Lua states).
+
+```lua
+local function range(n)                  -- generator
+  return coroutine.wrap(function()
+    for i = 1, n do coroutine.yield(i) end
+  end)
+end
+for i in range(3) do print(i) end        -- 1 2 3
+```
+
+- `coroutine.create` + `resume`/`yield`/`status` for full control; `coroutine.wrap` wraps a coroutine as an iterator function (errors propagate instead of returning `false, err`).
+- `resume` is protected (returns `false, err` on error) — `wrap` is not, so wrap-driven errors raise. Choose per call site.
+- A coroutine that yields across a C call is only safe on Lua 5.4 / LuaJIT with `lua_callk`-aware hosts — verify before yielding through C.
+
+### G. Error handling — pcall/error binding
+
+Policy (when to raise vs. return, propagation, context) is owned by [`error-handling.md`](guides://error-handling.md). Lua binding:
+
+```lua
+local ok, result = pcall(may_fail, arg)              -- catch; ok=false → result is the error
+if not ok then return nil, ("load failed: %s"):format(result) end
+
+local ok2, res2 = xpcall(may_fail, debug.traceback)  -- attach a stack trace at throw site
+```
+
+- `error(msg)` raises; `error(msg, 2)` blames the **caller** (better messages for argument validation). `error(table)` raises a structured error object — pcall returns it unchanged, enabling typed errors.
+- **Stdlib convention:** expected failures return `nil, message` (e.g. `io.open`, `tonumber`); reserve `error()`/`assert()` for programmer/contract violations and protect host boundaries with `pcall`.
+- `assert(v, msg)` raises `msg` when `v` is falsy — concise contract checks; remember `assert` evaluates its message argument eagerly.
+
+### H. Standard library essentials
+
+Small and portable — prefer it over dependencies. `string` (pattern matching — **Lua patterns, not regex**: `%a %d %s`, anchors `^ $`, `-` lazy, captures `()`; `string.format`, `gsub`, `gmatch`), `table` (`insert`, `remove`, `concat` for O(n) joins, `sort`, `unpack`/`table.unpack`), `math`, `os`/`io` (sandbox these at untrusted boundaries — see `secure-coding.md`), `utf8` (5.3+). Build strings with `table.concat`, never repeated `..` in a loop.
+
+### I. LuaJIT vs PUC-Lua
+
+| | PUC-Lua 5.4 | LuaJIT |
+|---|---|---|
+| Language base | 5.4 (integers, `goto`, `<close>`, bitwise ops) | 5.1 + select 5.2/5.3 extensions |
+| Speed | reference interpreter | JIT-compiled, often 10–100× hot loops |
+| FFI | none (C modules only) | `ffi` library — call C directly, struct cdata |
+| Integers | true 64-bit integer subtype | all numbers are doubles (no integer subtype) |
+
+- Write to the **common subset** unless the project targets one runtime. Guard 5.4-only syntax (`//`, `<close>`, `goto`, bitwise `&`/`|`) and LuaJIT-only `ffi`/`bit` behind explicit detection.
+- Performance work (object pooling, table pre-sizing, avoiding allocations in hot loops, NYI-trace awareness on LuaJIT) is owned by [`performance.md`](guides://performance.md) — apply its rules; do not premature-optimize PUC code that should run on LuaJIT.
+
+### J. Embedding & the C API (basics)
+
+Lua's reason for existing is embedding. The C side drives a virtual **stack** (1-based, like Lua sequences):
+
+```c
+lua_State *L = luaL_newstate();
+luaL_openlibs(L);
+if (luaL_dofile(L, "script.lua") != LUA_OK)   /* protected: never longjmps past you */
+    fprintf(stderr, "lua: %s\n", lua_tostring(L, -1));   /* error on top of stack */
+lua_close(L);
+```
+
+- Cross the boundary only through `luaL_*`/`lua_*`; every value passes via the stack — push args, `lua_pcall`, read results, then `lua_settop`/balance the stack.
+- **Always call into Lua with `lua_pcall`** (not `lua_call`) from C so a Lua `error` cannot `longjmp` past host cleanup. This is the C-side mirror of LUA-ERR-01.
+- Expose C functions as `lua_CFunction` (return count, args on stack); register with a `luaL_Reg` array. On LuaJIT prefer `ffi` over hand-written C bindings for speed and less glue.
+
+### K. Common footguns → fixes
+
+- Accidental global (missing `local`) → enable luacheck `std`+`globals`; treat unset-global warnings as errors.
+- `#t` on a table with holes → don't store `nil` in sequences; track count or use `table.remove`.
+- `table.remove` inside `ipairs` → iterate downward or rebuild the table (see §5.A).
+- `a == b` on tables compares **identity**, not contents → define `__eq` or compare fields explicitly.
+- `0`-based assumptions / C-boundary indexing → remember Lua is 1-based; translate at the FFI/C edge.
+- `string.find(s, ".")` matches *any* char → it's a pattern; escape with `%.` or pass `true` as the plain flag.
+- Numeric `for` with float step / 5.4 integer-vs-float (`3 == 3.0` true, but `math.type` differs) → be explicit when keys or equality depend on subtype.
+
+---
+
+## 6. Tooling & Dependencies
+
+Security/supply-chain *policy* → [`secure-coding.md`](guides://secure-coding.md); versioning → [`semver.md`](guides://semver.md). Lua binding:
+
+```bash
+luarocks install --only-deps <pkg>-<ver>.rockspec   # install pinned deps
+luarocks make                                       # build/install this project from its rockspec
+luarocks list                                        # installed rocks + versions
+trivy fs --scanners vuln .                            # LUA-SEC-02: CVE scan (no native LuaRocks audit)
+```
+
+- **LuaRocks has no lockfile.** Pin **exact** versions in `dependencies` (e.g. `"luasocket == 3.1.0-1"`), not open ranges — this is the reproducibility gate (LUA-SEC-02).
+- A `.rockspec` declares `dependencies` and a `build.modules` map (module name → file). Commit it; tag releases.
+- Use a per-project tree (`luarocks --tree ./.rocks` or `luarocks --local`) to avoid polluting the system; never `sudo luarocks install`.
+
+---
+
+## 7. Quick Reference
+
+```bash
+stylua .                       # format
+luacheck .                     # lint (globals, unused, security)
+luac -p file.lua               # syntax/compile check
+busted --coverage && luacov    # test + coverage
+ldoc -f markdown .             # docs
+luarocks make                  # build/install from rockspec
+```
+
+```lua
+local M = {}                         -- module
+function M.f() end
 return M
 
--- Class pattern
-local Class = {}
-Class.__index = Class
-function Class.new() return setmetatable({}, Class) end
+local C = {}; C.__index = C          -- class via metatable
+function C.new() return setmetatable({}, C) end
 
--- Error handling
-local ok, result = pcall(risky_function)
-if not ok then handle_error(result) end
-```
-
-### Project Structure
-
-```
-my_project/
-├── src/
-│   ├── init.lua
-│   └── modules/
-├── test/
-│   └── test_*.lua
-├── rockspec
-└── .luacheckrc
-```
-
-### .luacheckrc Template
-
-```lua
-std = "luajit"
-globals = {"myapp"}
-ignore = {"611", "612"}
-max_line_length = 120
+local ok, err = pcall(risky)         -- protected call
+local v = (obj or {}).field or DEF   -- safe nil access
+for i = 1, #t do end                 -- 1-based sequence loop
 ```
 
 ---
 
-## 15. Deployment Checklist
+## 8. Deployment Checklist
 
-### Build & Syntax
-- [ ] Code parses: `luac -p *.lua` returns exit 0 for all files
-- [ ] Luacheck passes: `luacheck src/ test/` reports no errors
-- [ ] No global variable leaks (all variables declared `local`)
-- [ ] Correct Lua version targeted (5.1/5.4/LuaJIT)
+Generated from §2 — one box per requirement ID.
 
-### Testing
-- [ ] All tests pass: `busted test/` returns exit 0
-- [ ] Code coverage at 80%+: `busted --coverage test/`
-- [ ] Edge cases tested (nil inputs, empty tables, large data)
-- [ ] Performance benchmarks pass for critical paths
-
-### Security
-- [ ] No `loadstring()` or `load()` on untrusted input
-- [ ] No `os.execute()` or `io.popen()` with unsanitized arguments
-- [ ] Dependencies pinned in rockspec
-- [ ] LuaRocks packages verified for known vulnerabilities
-
-### Agent Workflow
-- [ ] Agent-generated code was parsed with `luac -p` before delivery
-- [ ] Agent-generated code was tested with `busted`
-- [ ] LDoc documentation present for all public modules and functions
-- [ ] Code follows hexagonal architecture (ports and adapters)
+- [ ] LUA-FMT-01 — `stylua --check` clean
+- [ ] LUA-LINT-01 — `luacheck` clean (no globals, no unused)
+- [ ] LUA-SYN-01 — every file compiles (`luac -p` / `luajit -bl`)
+- [ ] LUA-TST-01/02/03 — tests pass, bugs have regression tests, coverage ≥ gate
+- [ ] LUA-SEC-01 — no `load`/`loadstring`/`dofile` or `os.execute`/`io.popen` on untrusted input
+- [ ] LUA-SEC-02 — deps pinned exactly in rockspec, CVE scan clean
+- [ ] LUA-ERR-01 — host/IO boundaries protected; expected failures return `nil, err`
+- [ ] LUA-DOC-01 — public modules/functions have LDoc, docs build clean
+- [ ] Agent ran every §3 command and documented any fixes
 
 ---
-
-## 16. Why This Configuration Works
-
-1. **Local-by-Default Variables**: Enforcing `local` declarations prevents accidental global namespace pollution, eliminates hard-to-trace bugs from variable shadowing, and improves performance since local variable access is faster in the Lua VM.
-
-2. **Hexagonal Architecture with Module Pattern**: Separating core logic from I/O adapters makes Lua modules independently testable and reusable across different host environments (game engines, embedded systems, web servers).
-
-3. **pcall/xpcall Error Handling**: Explicit protected calls with structured error returns prevent uncaught exceptions from crashing host applications, which is critical in embedded Lua environments where the runtime cannot simply exit.
-
-4. **Busted + Luacheck Toolchain**: Busted provides BDD-style testing with mocks and stubs, while Luacheck catches common pitfalls (unused variables, global leaks, type mismatches) before runtime. Together they catch the majority of Lua-specific bugs at development time.
-
-5. **Table Pre-allocation and Object Pooling**: Lua's garbage collector can cause latency spikes in real-time applications. Pre-allocating tables and reusing objects keeps memory allocation predictable and GC pauses minimal.
-
----
-
-## References
-
-- [Lua Reference Manual](https://www.lua.org/manual/5.4/)
-- [LuaRocks Documentation](https://luarocks.org/)
-- [Busted Testing Framework](https://olivinelabs.com/busted/)
-- [LDoc Documentation](https://stevedonovan.github.io/ldoc/)
-
-
-**End of Modern Lua Development Guidelines**
+**End of Lua Guidelines**
