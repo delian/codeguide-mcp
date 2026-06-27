@@ -2,6 +2,7 @@ guides://CONVENTIONS.md - How every guide in this MCP server is structured so th
 guides://TEMPLATE.md - Mandatory coding standards for [TECHNOLOGY_NAME]: [SHORT_GOALS_LIST]. [TOOL_LIST_WITH_VERSIONS].
 guides://accessibility.md - Mandatory, auditable standards for accessible web and app UIs: WCAG 2.2 AA, semantic structure, ARIA, keyboard & focus, contrast, screen-reader support, automated + manual a11y testing. axe-core, Lighthouse, Pa11y, NVDA/VoiceOver/JAWS.
 guides://adr.md - Mandatory standards for capturing architecture decisions as immutable, numbered, reviewable records. Markdown, adr-tools, MADR, Log4brains, Git.
+guides://agentic-workflow.md - Mandatory process standards for how an AI agent works on a codebase: plan first, isolate parallel work, learn from corrections, verify before done, rubber-duck with a second reviewer, track tasks and docs. Governs HOW you work; the language/tool...
 guides://agents-md.md - Mandatory standards for authoring and maintaining AGENTS.md — the repo-root instruction file that tells AI coding agents how to build, test, and conform to a project.
 guides://android.md - Mandatory standards for native Android apps: Compose-first, unidirectional state, layered architecture, DI'd and test-covered. Android SDK 35, Kotlin 2.x, Jetpack Compose, Hilt, Coroutines/Flow, Room, WorkManager.
 guides://angular.md - Mandatory standards for modern Angular: standalone-by-default, signal-driven, zoneless-ready, strictly typed. Angular 20, TypeScript 5.8, signals, new control flow, inject(), typed forms.

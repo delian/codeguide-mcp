@@ -2,6 +2,10 @@
 
 This MCP server provides **mandatory** coding guidelines and best practices. The guides define coding standards that **must be followed** when writing, reviewing, or modifying code.
 
+## Read on principle: the workflow guide
+
+Before starting **any non-trivial task** (3+ steps, a new module/algorithm, a refactor, or any behavior change), fetch and apply **`guides://agentic-workflow.md`** as a standing instruction — read it *on principle*, not only when asked. It is the canonical owner of **how you work**: plan-first and re-plan on drift, subagent use and parallel **git-worktree isolation**, the lessons-learned loop (read `docs/lessons.md` before, record corrections after), verification-before-done with an independent second-model **rubber-duck review**, task/checkbox + changelog + docs tracking, configurable constants, and externalized LLM prompts. The language/framework/tool guides govern *what* you write; `agentic-workflow.md` governs *how*. A project's own `CLAUDE.md` / `AGENTS.md` / `CLAUDE.local.md` are authoritative and override it where they differ.
+
 ## When to Use
 
 **Before writing or modifying code**, fetch the relevant guides for the project's languages, frameworks, and tools. Apply their standards as mandatory rules — not optional suggestions.
