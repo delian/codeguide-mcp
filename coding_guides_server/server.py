@@ -3,7 +3,9 @@ from pathlib import Path
 from functools import lru_cache
 from typing import Optional
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 import asyncio
+import threading
 import httpx
 import base64
 from cachetools import cached, TTLCache
@@ -39,6 +41,12 @@ _github_file_cache: TTLCache = TTLCache(maxsize=100, ttl=599)
 _guide_from_cache: TTLCache = TTLCache(maxsize=100, ttl=599)
 _guides_list_cache: TTLCache = TTLCache(maxsize=1, ttl=600)
 _guide_content_cache: TTLCache = TTLCache(maxsize=100, ttl=599)
+
+# cachetools caches are NOT thread-safe on their own. Requests may run
+# concurrently and _run_sync() offloads coroutines to worker threads, so guard
+# every cache get/set with this lock. cachetools releases it during the wrapped
+# call, so nested @cached calls cannot deadlock on it.
+_cache_lock = threading.Lock()
 
 
 def _next_non_empty(lines: list[str], start_idx: int) -> tuple[int, Optional[str]]:
@@ -162,10 +170,13 @@ def register_prompts_from_markdown() -> None:
 
             def _build_prompt(messages: list[dict[str, str]]):
                 def _dynamic_prompt() -> list[PromptMessage]:
+                    # PromptMessage.role accepts only "user"/"assistant" and
+                    # TextContent.type only "text"; coerce so a typo in a prompt
+                    # markdown file cannot raise at invocation time.
                     return [
                         PromptMessage(
-                            role=message["role"],
-                            content=TextContent(type=message["type"], text=message["text"]),
+                            role=message["role"] if message["role"] in ("user", "assistant") else "assistant",
+                            content=TextContent(type="text", text=message["text"]),
                         )
                         for message in messages
                     ]
@@ -180,6 +191,26 @@ def register_prompts_from_markdown() -> None:
             logger.warning(f"Failed to register prompts from {prompt_file.name}: {e}")
 
     logger.info(f"Registered {registered} dynamic prompts from {PROMPTS_DIR}")
+
+def _run_sync(coro):
+    """Run an async coroutine to completion from synchronous code, whether or not
+    an event loop is already running in the current thread.
+
+    `asyncio.run()` raises "asyncio.run() cannot be called from a running event
+    loop" when the caller is already inside one — which is the case for MCP tool
+    and resource handlers executing in the server's event loop. When a loop is
+    running we offload the coroutine to a dedicated worker thread that owns its
+    own loop; otherwise we run it directly.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # No running loop in this thread — safe to drive the coroutine directly.
+        return asyncio.run(coro)
+    # A loop is already running in this thread; run the coroutine in its own thread.
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
 
 async def _check_network_available_async() -> bool:
     """
@@ -200,7 +231,7 @@ async def _check_network_available_async() -> bool:
         return False
 
 
-@cached(cache=_network_cache)
+@cached(cache=_network_cache, lock=_cache_lock)
 def check_network_available() -> bool:
     """
     Check if network access is available by attempting to connect to GitHub API.
@@ -208,7 +239,7 @@ def check_network_available() -> bool:
     Returns:
         True if network is available, False otherwise.
     """
-    return asyncio.run(_check_network_available_async())
+    return _run_sync(_check_network_available_async())
 
 
 async def _fetch_github_directory_listing_async() -> Optional[list[dict]]:
@@ -274,7 +305,7 @@ def fetch_github_directory_listing() -> Optional[list[dict]]:
     Returns:
         List of file/directory information from GitHub API, or None if failed.
     """
-    return asyncio.run(_fetch_github_directory_listing_async())
+    return _run_sync(_fetch_github_directory_listing_async())
 
 async def _fetch_github_file_content_async(file_path: str) -> Optional[str]:
     """
@@ -310,7 +341,7 @@ async def _fetch_github_file_content_async(file_path: str) -> Optional[str]:
         return None
 
 
-@cached(cache=_github_file_cache)
+@cached(cache=_github_file_cache, lock=_cache_lock)
 def fetch_github_file_content(file_path: str) -> Optional[str]:
     """
     Fetch file content from GitHub API.
@@ -321,7 +352,7 @@ def fetch_github_file_content(file_path: str) -> Optional[str]:
     Returns:
         File content as string, or None if failed.
     """
-    return asyncio.run(_fetch_github_file_content_async(file_path))
+    return _run_sync(_fetch_github_file_content_async(file_path))
 
 
 def cache_guide_locally(guide_name: str, content: str) -> Path:
@@ -340,7 +371,7 @@ def cache_guide_locally(guide_name: str, content: str) -> Path:
     logger.debug(f"Cached guide {guide_name} locally")
     return cache_path
 
-@cached(cache=_guide_from_cache)
+@cached(cache=_guide_from_cache, lock=_cache_lock)
 def get_guide_from_cache(guide_name: str) -> Optional[str]:
     """
     Get guide content from local cache.
@@ -416,7 +447,7 @@ def _normalize_list_to_guide_uris(list_text: str) -> str:
     return "\n".join(lines) if lines else list_text
 
 
-@cached(cache=_guides_list_cache)
+@cached(cache=_guides_list_cache, lock=_cache_lock)
 def get_guides_list() -> str:
     """
     Get list of available guides, fetching from GitHub if available,
@@ -540,7 +571,7 @@ def get_guide_resource(guide_name: str) -> str:
 def cached_read_text(path: Path) -> str:
     return path.read_text()
 
-@cached(cache=_guide_content_cache)
+@cached(cache=_guide_content_cache, lock=_cache_lock)
 def fetch_guide_content(guide_name: str) -> Optional[str]:
     """
     Fetch the content of a guide, trying GitHub first if network is available,
@@ -603,9 +634,11 @@ def get_guide(guide_name: str) -> str:
 
 
 @mcp.prompt("list_guides", description="List all available coding guides.")
-def list_guides() -> str:
+def list_guides_prompt() -> str:
     """List all available coding guides."""
-    return "\n".join(get_guides_list())
+    # get_guides_list() already returns a newline-joined string; do NOT
+    # "\n".join() it (that would insert a newline between every character).
+    return get_guides_list()
 
 @mcp.prompt("get_guide", description="Get the content of a specific coding guide.")
 def get_guide_prompt(guide_name: str) -> str:
@@ -615,7 +648,11 @@ def get_guide_prompt(guide_name: str) -> str:
 @mcp.prompt("help", description="Get help information about available resources and tools.")
 def help_prompt() -> str:
     """Get help information about available resources and tools."""
-    return mcp.get_help()
+    # FastMCP has no get_help(); surface the server instructions instead.
+    return mcp.instructions or (
+        "Codeguide MCP. Resources: guides://list, guides://{name}. "
+        "Tool: get_guide(guide_name). Prompts: list_guides, get_guide, clear_cache, help."
+    )
 
 @mcp.prompt("security_check", description="Check if the MCP server is secure and not exposing sensitive information.")
 def security_check_prompt() -> str:
@@ -625,8 +662,9 @@ def security_check_prompt() -> str:
 @mcp.prompt("exit", description="Exit the MCP server.")
 def exit_prompt() -> str:
     """Exit the MCP server."""
-    mcp.stop()
-    return "Exiting..."
+    # FastMCP exposes no programmatic stop(); a prompt must not crash trying to
+    # call one. The server lifecycle is owned by the client/host that launched it.
+    return "This server is managed by its host; stop it from the client/host that launched it."
 
 @mcp.prompt("clear_cache", description="Clear the local cache of guides.")
 def clear_cache_prompt() -> str:
