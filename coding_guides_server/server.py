@@ -48,6 +48,21 @@ _guide_content_cache: TTLCache = TTLCache(maxsize=100, ttl=599)
 # call, so nested @cached calls cannot deadlock on it.
 _cache_lock = threading.Lock()
 
+# Scaffolding/meta files that live in guides/ but are NOT coding-standard guides:
+# TEMPLATE.md is placeholder content ([TECHNOLOGY_NAME] …) and CONVENTIONS.md is
+# the authoring spec. They are hidden from guides://list so an agent is never
+# offered them, but remain fetchable by name (e.g. guides://CONVENTIONS.md
+# references inside guides still resolve).
+_HIDDEN_FROM_LIST = {"TEMPLATE.md", "CONVENTIONS.md"}
+
+
+def _list_line_guide_name(line: str) -> str:
+    """Extract the guide filename from a list line, e.g. 'guides://x.md - d' -> 'x.md'."""
+    head = line.split(" - ", 1)[0].strip()
+    if head.startswith("guides://"):
+        head = head[len("guides://"):]
+    return head.strip()
+
 
 def _next_non_empty(lines: list[str], start_idx: int) -> tuple[int, Optional[str]]:
     idx = start_idx
@@ -436,6 +451,8 @@ def _normalize_list_to_guide_uris(list_text: str) -> str:
         line = line.strip()
         if not line:
             continue
+        if _list_line_guide_name(line) in _HIDDEN_FROM_LIST:
+            continue
         if line.startswith("guides://"):
             lines.append(line)
         elif " - " in line:
@@ -470,6 +487,8 @@ def get_guides_list() -> str:
                 # Only process .md files
                 if item.get("type") == "file" and item.get("name", "").endswith(".md"):
                     guide_name = item["name"]
+                    if guide_name in _HIDDEN_FROM_LIST:
+                        continue
                     try:
                         # Try to get from cache first
                         content = get_guide_from_cache(guide_name)
@@ -497,6 +516,8 @@ def get_guides_list() -> str:
     # First try cache directory
     if CACHE_DIR.exists():
         for guide_file in sorted(CACHE_DIR.glob("*.md")):
+            if guide_file.name in _HIDDEN_FROM_LIST:
+                continue
             try:
                 content = cached_read_text(guide_file)
                 brief = extract_brief(content)
@@ -509,6 +530,8 @@ def get_guides_list() -> str:
         # Fill the missing guides from local directory
         for guide_file in sorted(GUIDES_DIR.glob("*.md")):
             if guide_file.name in guides: continue
+            if guide_file.name in _HIDDEN_FROM_LIST:
+                continue
             try:
                 content = cached_read_text(guide_file)
                 brief = extract_brief(content)

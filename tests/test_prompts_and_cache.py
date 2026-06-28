@@ -71,5 +71,39 @@ class CacheThreadSafety(unittest.TestCase):
         self.assertTrue(all(isinstance(r, str) and r for r in results))
 
 
+class ListFiltering(unittest.TestCase):
+    """guides://list must not offer scaffolding/meta files, but they stay fetchable."""
+
+    def setUp(self):
+        self._orig = server.check_network_available
+        server.check_network_available = lambda: False  # local dir-scan path
+        server.clear_cache()
+
+    def tearDown(self):
+        server.check_network_available = self._orig
+        server.clear_cache()
+
+    def test_template_and_conventions_hidden_from_list(self):
+        names = {
+            server._list_line_guide_name(l)
+            for l in server.get_guides_list().splitlines()
+            if l.strip()
+        }
+        self.assertNotIn("TEMPLATE.md", names)
+        self.assertNotIn("CONVENTIONS.md", names)
+        self.assertIn("python.md", names)  # real guides still present
+
+    def test_normalize_drops_hidden_even_if_brief_contains_them(self):
+        brief = "guides://TEMPLATE.md - x\nguides://CONVENTIONS.md - y\nguides://tdd.md - z"
+        out = server._normalize_list_to_guide_uris(brief)
+        kept = {server._list_line_guide_name(l) for l in out.splitlines() if l.strip()}
+        self.assertEqual(kept, {"tdd.md"})
+
+    def test_hidden_guides_remain_fetchable_by_name(self):
+        # References like guides://CONVENTIONS.md inside guides must still resolve.
+        self.assertTrue(server.get_guide("CONVENTIONS.md"))
+        self.assertTrue(server.get_guide("TEMPLATE.md"))
+
+
 if __name__ == "__main__":
     unittest.main()
