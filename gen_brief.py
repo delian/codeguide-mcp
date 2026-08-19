@@ -22,7 +22,7 @@ def extract_brief(content: str, max_length: int = BRIEF_MAX_LENGTH) -> str:
             continue
         if line == "---":
             break
-        if line.startswith("#") or line.startswith("```"):
+        if line.startswith(("#", "```")):
             continue
         brief_parts.append(line)
         if len(" ".join(brief_parts)) >= max_length:
@@ -46,7 +46,9 @@ def main() -> None:
             brief = extract_brief(content)
             entries.append(f"guides://{guide_file.name} - {brief}")
         except Exception as e:
-            entries.append(f"guides://{guide_file.name} - Error reading description ({e})")
+            entries.append(
+                f"guides://{guide_file.name} - Error reading description ({e})"
+            )
 
     BRIEF_OUTPUT.write_text("\n".join(entries) + "\n", encoding="utf-8")
     print(f"Wrote {len(entries)} entries to {BRIEF_OUTPUT}")

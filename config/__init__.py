@@ -1,5 +1,6 @@
 from pathlib import Path
-from dynaconf import Dynaconf, Validator
+
+from dynaconf import Dynaconf
 
 BASE_DIR = Path(__file__).parent.parent
 

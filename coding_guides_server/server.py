@@ -1,17 +1,18 @@
+import asyncio
+import base64
 import logging
-from pathlib import Path
-from functools import lru_cache
-from typing import Optional
+import threading
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
-import asyncio
-import threading
-import httpx
-import base64
-from cachetools import cached, TTLCache
+from functools import lru_cache
+from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP
-from mcp.types import PromptMessage, TextContent
+import httpx
+from cachetools import TTLCache, cached
+
+# mcp>=1.26 renamed FastMCP (mcp.server.fastmcp) to MCPServer (mcp.server.mcpserver);
+# the decorator API (.tool/.resource/.prompt/.run) is unchanged.
+from mcp.server.mcpserver import MCPServer
 
 from config import Settings
 
@@ -19,8 +20,8 @@ from config import Settings
 logging.basicConfig(level=Settings.log_level)
 logger = logging.getLogger(__name__)
 
-# Initialize FastMCP server
-mcp = FastMCP(
+# Initialize MCP server
+mcp = MCPServer(
     name=Settings.mcp_name,
     instructions=Path(Settings.instructions).read_text(),
 )
@@ -59,12 +60,11 @@ _HIDDEN_FROM_LIST = {"TEMPLATE.md", "CONVENTIONS.md"}
 def _list_line_guide_name(line: str) -> str:
     """Extract the guide filename from a list line, e.g. 'guides://x.md - d' -> 'x.md'."""
     head = line.split(" - ", 1)[0].strip()
-    if head.startswith("guides://"):
-        head = head[len("guides://"):]
+    head = head.removeprefix("guides://")
     return head.strip()
 
 
-def _next_non_empty(lines: list[str], start_idx: int) -> tuple[int, Optional[str]]:
+def _next_non_empty(lines: list[str], start_idx: int) -> tuple[int, str | None]:
     idx = start_idx
     while idx < len(lines):
         value = lines[idx].strip()
@@ -74,14 +74,16 @@ def _next_non_empty(lines: list[str], start_idx: int) -> tuple[int, Optional[str
     return idx, None
 
 
-def _parse_meta_value(line: str, key: str) -> Optional[str]:
+def _parse_meta_value(line: str, key: str) -> str | None:
     prefix = f"{key}:"
     if line.lower().startswith(prefix):
-        return line[len(prefix):].strip()
+        return line[len(prefix) :].strip()
     return None
 
 
-def _parse_prompt_definition_from_markdown(content: str, file_stem: str) -> Optional[dict[str, object]]:
+def _parse_prompt_definition_from_markdown(
+    content: str, file_stem: str
+) -> dict[str, object] | None:
     lines = content.splitlines()
     idx, first = _next_non_empty(lines, 0)
     if not first:
@@ -184,15 +186,20 @@ def register_prompts_from_markdown() -> None:
             prompt_messages = list(prompt["messages"])
 
             def _build_prompt(messages: list[dict[str, str]]):
-                def _dynamic_prompt() -> list[PromptMessage]:
-                    # PromptMessage.role accepts only "user"/"assistant" and
-                    # TextContent.type only "text"; coerce so a typo in a prompt
+                def _dynamic_prompt() -> list[dict[str, object]]:
+                    # Return plain dicts: the SDK's prompt renderer validates them
+                    # into its own Message models. Returning mcp.types.PromptMessage
+                    # here is WRONG — the renderer doesn't recognize that class and
+                    # falls back to JSON-dumping it as user-role text.
+                    # Roles are coerced to "user"/"assistant" so a typo in a prompt
                     # markdown file cannot raise at invocation time.
                     return [
-                        PromptMessage(
-                            role=message["role"] if message["role"] in ("user", "assistant") else "assistant",
-                            content=TextContent(type="text", text=message["text"]),
-                        )
+                        {
+                            "role": message["role"]
+                            if message["role"] in ("user", "assistant")
+                            else "assistant",
+                            "content": {"type": "text", "text": message["text"]},
+                        }
                         for message in messages
                     ]
 
@@ -206,6 +213,7 @@ def register_prompts_from_markdown() -> None:
             logger.warning(f"Failed to register prompts from {prompt_file.name}: {e}")
 
     logger.info(f"Registered {registered} dynamic prompts from {PROMPTS_DIR}")
+
 
 def _run_sync(coro):
     """Run an async coroutine to completion from synchronous code, whether or not
@@ -230,13 +238,13 @@ def _run_sync(coro):
 async def _check_network_available_async() -> bool:
     """
     Async version: Check if network access is available by attempting to connect to GitHub API.
-    
+
     Returns:
         True if network is available, False otherwise.
     """
     if not GITHUB_REPO:
         return False
-    
+
     try:
         # Try to connect to GitHub API with a short timeout
         async with httpx.AsyncClient(timeout=3.0) as client:
@@ -250,49 +258,49 @@ async def _check_network_available_async() -> bool:
 def check_network_available() -> bool:
     """
     Check if network access is available by attempting to connect to GitHub API.
-    
+
     Returns:
         True if network is available, False otherwise.
     """
     return _run_sync(_check_network_available_async())
 
 
-async def _fetch_github_directory_listing_async() -> Optional[list[dict]]:
+async def _fetch_github_directory_listing_async() -> list[dict] | None:
     """
     Async version: Fetch the directory listing from GitHub API with pagination support.
-    
+
     Returns:
         List of file/directory information from GitHub API, or None if failed.
     """
     if not GITHUB_REPO:
         return None
-    
+
     try:
         # GitHub API endpoint for repository contents
         # Format: https://api.github.com/repos/{owner}/{repo}/contents/{path}
         url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_PATH}"
         params = {"ref": GITHUB_BRANCH, "per_page": 100}
-        
+
         all_items = []
-        
+
         async with httpx.AsyncClient(timeout=10.0) as client:
             while url:
                 response = await client.get(url, params=params, follow_redirects=True)
                 response.raise_for_status()
-                
+
                 items = response.json()
                 if isinstance(items, list):
                     all_items.extend(items)
                 else:
                     # Single file, not a directory
                     return items
-                
+
                 # Check for pagination in Link header
                 # Link header format: <url>; rel="next", <url>; rel="last"
                 link_header = response.headers.get("Link", "")
                 url = None  # Reset for next iteration
                 params = None  # Params are in the URL from Link header
-                
+
                 if link_header:
                     # Parse Link header to find next page
                     for link in link_header.split(","):
@@ -300,50 +308,51 @@ async def _fetch_github_directory_listing_async() -> Optional[list[dict]]:
                             # Extract URL from <url>
                             url = link.split(";")[0].strip().strip("<>")
                             break
-                
+
                 if not url:
                     # No more pages
                     break
-        
+
         logger.info(f"Fetched {len(all_items)} items from GitHub (with pagination)")
         return all_items
-        
+
     except Exception as e:
         logger.warning(f"Failed to fetch GitHub directory listing: {e}")
         return None
 
 
-def fetch_github_directory_listing() -> Optional[list[dict]]:
+def fetch_github_directory_listing() -> list[dict] | None:
     """
     Fetch the directory listing from GitHub API.
-    
+
     Returns:
         List of file/directory information from GitHub API, or None if failed.
     """
     return _run_sync(_fetch_github_directory_listing_async())
 
-async def _fetch_github_file_content_async(file_path: str) -> Optional[str]:
+
+async def _fetch_github_file_content_async(file_path: str) -> str | None:
     """
     Async version: Fetch file content from GitHub API.
-    
+
     Args:
         file_path: Path to the file in the GitHub repository.
-    
+
     Returns:
         File content as string, or None if failed.
     """
     if not GITHUB_REPO:
         return None
-    
+
     try:
         url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
         params = {"ref": GITHUB_BRANCH}
-        
+
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(url, params=params, follow_redirects=True)
             response.raise_for_status()
             data = response.json()
-            
+
             # Decode base64 content
             if data.get("encoding") == "base64":
                 content = base64.b64decode(data["content"]).decode("utf-8")
@@ -357,13 +366,13 @@ async def _fetch_github_file_content_async(file_path: str) -> Optional[str]:
 
 
 @cached(cache=_github_file_cache, lock=_cache_lock)
-def fetch_github_file_content(file_path: str) -> Optional[str]:
+def fetch_github_file_content(file_path: str) -> str | None:
     """
     Fetch file content from GitHub API.
-    
+
     Args:
         file_path: Path to the file in the GitHub repository.
-    
+
     Returns:
         File content as string, or None if failed.
     """
@@ -373,11 +382,11 @@ def fetch_github_file_content(file_path: str) -> Optional[str]:
 def cache_guide_locally(guide_name: str, content: str) -> Path:
     """
     Cache a guide file locally.
-    
+
     Args:
         guide_name: Name of the guide file.
         content: Content of the guide file.
-    
+
     Returns:
         Path to the cached file.
     """
@@ -386,14 +395,15 @@ def cache_guide_locally(guide_name: str, content: str) -> Path:
     logger.debug(f"Cached guide {guide_name} locally")
     return cache_path
 
+
 @cached(cache=_guide_from_cache, lock=_cache_lock)
-def get_guide_from_cache(guide_name: str) -> Optional[str]:
+def get_guide_from_cache(guide_name: str) -> str | None:
     """
     Get guide content from local cache.
-    
+
     Args:
         guide_name: Name of the guide file.
-    
+
     Returns:
         Guide content if found in cache, None otherwise.
     """
@@ -406,41 +416,41 @@ def get_guide_from_cache(guide_name: str) -> Optional[str]:
 def extract_brief(content: str, max_length: int = Settings.brief_max_length) -> str:
     """
     Extract a brief description from guide content.
-    
+
     Args:
         content: The full content of the guide file.
         max_length: Maximum length of the brief description.
-    
+
     Returns:
         A brief description extracted from the guide.
     """
-    lines = content.split('\n')
+    lines = content.split("\n")
     brief_parts = []
-    
+
     # Skip the title (first line if it starts with #)
-    start_idx = 1 if lines and lines[0].strip().startswith('#') else 0
-    
+    start_idx = 1 if lines and lines[0].strip().startswith("#") else 0
+
     # Collect non-empty lines until we have enough content
     for line in lines[start_idx:]:
         line = line.strip()
         if not line:
             continue
         # Stop at YAML frontmatter delimiter
-        if line == '---':
+        if line == "---":
             break
         # Skip markdown headers and code blocks
-        if line.startswith('#') or line.startswith('```'):
+        if line.startswith(("#", "```")):
             continue
         brief_parts.append(line)
         # Stop if we have enough content
-        if len(' '.join(brief_parts)) >= max_length:
+        if len(" ".join(brief_parts)) >= max_length:
             break
-    
-    brief = ' '.join(brief_parts)
+
+    brief = " ".join(brief_parts)
     # Truncate to max_length and add ellipsis if needed
     if len(brief) > max_length:
-        brief = brief[:max_length].rsplit(' ', 1)[0] + '...'
-    
+        brief = brief[:max_length].rsplit(" ", 1)[0] + "..."
+
     return brief if brief else "No description available."
 
 
@@ -473,14 +483,14 @@ def get_guides_list() -> str:
     # Try GitHub first if network is available
     if check_network_available():
         logger.info("Network available, fetching guides from GitHub")
-        
-        brief_path = f"brief.md"
+
+        brief_path = "brief.md"
         brief_content = fetch_github_file_content(brief_path)
         if brief_content:
             return _normalize_list_to_guide_uris(brief_content)
-        
+
         github_files = fetch_github_directory_listing()
-        
+
         if github_files:
             guides = []
             for item in github_files:
@@ -492,27 +502,29 @@ def get_guides_list() -> str:
                     try:
                         # Try to get from cache first
                         content = get_guide_from_cache(guide_name)
-                        
+
                         if content is None:
                             # Fetch from GitHub and cache it
                             content = fetch_github_file_content(item["path"])
                             if content:
                                 cache_guide_locally(guide_name, content)
-                        
+
                         if content:
                             brief = extract_brief(content)
                             guides.append(f"guides://{guide_name} - {brief}")
                     except Exception as e:
                         logger.warning(f"Error processing guide {guide_name}: {e}")
-                        guides.append(f"guides://{guide_name} - Error reading description")
-            
+                        guides.append(
+                            f"guides://{guide_name} - Error reading description"
+                        )
+
             if guides:
                 return "\n".join(sorted(guides))
-    
+
     # Fall back to local cache
     logger.info("Using local cache or local directory")
     guides = {}
-    
+
     # First try cache directory
     if CACHE_DIR.exists():
         for guide_file in sorted(CACHE_DIR.glob("*.md")):
@@ -524,12 +536,13 @@ def get_guides_list() -> str:
                 guides[guide_file.name] = f"guides://{guide_file.name} - {brief}"
             except Exception as e:
                 logger.warning(f"Error reading cached guide {guide_file.name}: {e}")
-    
+
     # If no cached guides, try local directory
     if GUIDES_DIR.exists():
         # Fill the missing guides from local directory
         for guide_file in sorted(GUIDES_DIR.glob("*.md")):
-            if guide_file.name in guides: continue
+            if guide_file.name in guides:
+                continue
             if guide_file.name in _HIDDEN_FROM_LIST:
                 continue
             try:
@@ -538,13 +551,13 @@ def get_guides_list() -> str:
                 guides[guide_file.name] = f"guides://{guide_file.name} - {brief}"
             except Exception as e:
                 logger.warning(f"Error reading guide {guide_file.name}: {e}")
-    
+
     # Sort and format the guides
     guides = sorted(guides.values())
-    
+
     if not guides:
         return "No guides found. Check network connection, local cache and local directory."
-    
+
     return "\n".join(guides)
 
 
@@ -563,8 +576,7 @@ def list_guides() -> str:
 def _guide_name_from_uri(name_or_uri: str) -> str:
     """Return guide filename, stripping guides:// prefix if present."""
     s = (name_or_uri or "").strip()
-    if s.startswith("guides://"):
-        s = s[9:]
+    s = s.removeprefix("guides://")
     return s
 
 
@@ -594,15 +606,16 @@ def get_guide_resource(guide_name: str) -> str:
 def cached_read_text(path: Path) -> str:
     return path.read_text()
 
+
 @cached(cache=_guide_content_cache, lock=_cache_lock)
-def fetch_guide_content(guide_name: str) -> Optional[str]:
+def fetch_guide_content(guide_name: str) -> str | None:
     """
     Fetch the content of a guide, trying GitHub first if network is available,
     then falling back to local cache and local directory.
-    
+
     Args:
         guide_name: The name of the guide file (e.g., 'python_style.md').
-    
+
     Returns:
         The content of the guide if found, otherwise None.
     """
@@ -610,10 +623,10 @@ def fetch_guide_content(guide_name: str) -> Optional[str]:
     # Try GitHub first if network is available
     if check_network_available() and GITHUB_REPO:
         logger.info(f"Network available, fetching guide {guide_name} from GitHub")
-        
+
         # Construct GitHub path
         github_file_path = f"{GITHUB_PATH}/{guide_name}" if GITHUB_PATH else guide_name
-        
+
         content = fetch_github_file_content(github_file_path)
         if content:
             cache_guide_locally(guide_name, content)
@@ -645,15 +658,15 @@ def get_guide(guide_name: str) -> str:
     """
     guide_name = _guide_name_from_uri(guide_name)
     if not guide_name or "/" in guide_name or "\\" in guide_name or ".." in guide_name:
-        return "Invalid guide name."
+        # Raise so the client sees a proper MCP tool error (isError=true),
+        # not a success result whose text happens to describe a failure.
+        raise ValueError("Invalid guide name.")
 
     content = fetch_guide_content(guide_name)
     if content:
         return content
-    
-    # Return MCP error if guide not found
+
     raise ValueError(f"Guide '{guide_name}' not found.")
-    # return f"ERROR: Guide '{guide_name}' not found! Retry later!"
 
 
 @mcp.prompt("list_guides", description="List all available coding guides.")
@@ -663,37 +676,48 @@ def list_guides_prompt() -> str:
     # "\n".join() it (that would insert a newline between every character).
     return get_guides_list()
 
+
 @mcp.prompt("get_guide", description="Get the content of a specific coding guide.")
 def get_guide_prompt(guide_name: str) -> str:
     """Get the content of a specific coding guide."""
     return get_guide(guide_name)
 
-@mcp.prompt("help", description="Get help information about available resources and tools.")
+
+@mcp.prompt(
+    "help", description="Get help information about available resources and tools."
+)
 def help_prompt() -> str:
     """Get help information about available resources and tools."""
-    # FastMCP has no get_help(); surface the server instructions instead.
+    # MCPServer has no get_help(); surface the server instructions instead.
     return mcp.instructions or (
         "Codeguide MCP. Resources: guides://list, guides://{name}. "
         "Tool: get_guide(guide_name). Prompts: list_guides, get_guide, clear_cache, help."
     )
 
-@mcp.prompt("security_check", description="Check if the MCP server is secure and not exposing sensitive information.")
+
+@mcp.prompt(
+    "security_check",
+    description="Check if the MCP server is secure and not exposing sensitive information.",
+)
 def security_check_prompt() -> str:
     """Check if the MCP server is secure and not exposing sensitive information."""
     return "Security check passed. No sensitive information is being exposed."
 
+
 @mcp.prompt("exit", description="Exit the MCP server.")
 def exit_prompt() -> str:
     """Exit the MCP server."""
-    # FastMCP exposes no programmatic stop(); a prompt must not crash trying to
+    # MCPServer exposes no programmatic stop(); a prompt must not crash trying to
     # call one. The server lifecycle is owned by the client/host that launched it.
     return "This server is managed by its host; stop it from the client/host that launched it."
+
 
 @mcp.prompt("clear_cache", description="Clear the local cache of guides.")
 def clear_cache_prompt() -> str:
     """Clear the local cache of guides."""
     clear_cache()
     return "Cache cleared."
+
 
 def clear_cache() -> None:
     """Clear all caches: TTL caches, lru_cache, and local cache directory."""
@@ -713,6 +737,7 @@ def clear_cache() -> None:
             f.unlink()
 
     logger.info("All caches cleared")
+
 
 def main() -> None:
     """Run the MCP server."""

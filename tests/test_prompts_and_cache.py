@@ -20,7 +20,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 sys.path.insert(0, str(_REPO_ROOT / "coding_guides_server"))
 
-import server  # noqa: E402
+import server
 
 
 class PromptHandlers(unittest.TestCase):
@@ -29,7 +29,9 @@ class PromptHandlers(unittest.TestCase):
         # Must equal the raw list string, NOT a per-character newline explosion.
         self.assertEqual(out, server.get_guides_list())
         first_line = out.split("\n")[0]
-        self.assertGreater(len(first_line), 5, "lines should be guide entries, not single chars")
+        self.assertGreater(
+            len(first_line), 5, "lines should be guide entries, not single chars"
+        )
         self.assertTrue(first_line.startswith("guides://"))
 
     def test_help_prompt_does_not_raise_and_returns_text(self):
@@ -94,7 +96,9 @@ class ListFiltering(unittest.TestCase):
         self.assertIn("python.md", names)  # real guides still present
 
     def test_normalize_drops_hidden_even_if_brief_contains_them(self):
-        brief = "guides://TEMPLATE.md - x\nguides://CONVENTIONS.md - y\nguides://tdd.md - z"
+        brief = (
+            "guides://TEMPLATE.md - x\nguides://CONVENTIONS.md - y\nguides://tdd.md - z"
+        )
         out = server._normalize_list_to_guide_uris(brief)
         kept = {server._list_line_guide_name(l) for l in out.splitlines() if l.strip()}
         self.assertEqual(kept, {"tdd.md"})

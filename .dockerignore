@@ -1,0 +1,25 @@
+# Secrets / local-only config — must never enter the build context
+.mcp.json
+config.toml
+.env
+
+# IDE / tool state
+.idea/
+.kilo/
+.claude/
+.devcontainer/
+
+# Python environment and caches
+.venv/
+__pycache__/
+*.pyc
+.ruff_cache/
+.guides-cache/
+
+# VCS
+.git/
+.gitignore
+.pre-commit-config.yaml
+
+# Backups and scratch
+*.backup

@@ -6,3 +6,5 @@ __pycache__
 requirements.txt
 .mcp.json
 scripts/
+.idea/
+.kilo/

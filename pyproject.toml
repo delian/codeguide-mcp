@@ -5,11 +5,11 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "cachetools>=6.2.4",
-    "dynaconf>=3.2.12",
+    "cachetools>=7.1.7",
+    "dynaconf>=3.3.5",
     "httpx>=0.28.1",
-    "mcp>=1.23.0",
+    "mcp>=2.0.0",
 ]
 
 [dependency-groups]
-dev = ["pre-commit>=4.4.0", "ruff>=0.14.6"]
+dev = ["pre-commit>=4.6.2", "ruff>=0.16.3"]
