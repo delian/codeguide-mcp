@@ -22,18 +22,40 @@ from config import Settings
 logging.basicConfig(level=Settings.log_level)
 logger = logging.getLogger(__name__)
 
+_PKG_DIR = Path(__file__).resolve().parent
+_BASE_DIR = _PKG_DIR.parent
+
+
+def _resolve_data_path(value: str) -> Path:
+    """Locate a bundled data path (MCP-instructions.md, guides/, prompts/).
+
+    Tried in order: exactly as configured — absolute, or relative to the working
+    directory, which covers a repo checkout and the container's WORKDIR — then
+    inside the installed package, then beside it. Returns the original value when
+    nothing matches, so the failure names what was actually configured.
+    """
+    path = Path(value)
+    if path.is_absolute() or path.exists():
+        return path
+    for root in (_PKG_DIR, _BASE_DIR):
+        candidate = root / path
+        if candidate.exists():
+            return candidate
+    return path
+
+
 # Initialize MCP server
 mcp = MCPServer(
     name=Settings.mcp_name,
-    instructions=Path(Settings.instructions).read_text(),
+    instructions=_resolve_data_path(Settings.instructions).read_text(),
 )
 
-GUIDES_DIR = Path(Settings.guides_dir)
+GUIDES_DIR = _resolve_data_path(Settings.guides_dir)
 CACHE_DIR = Path(Settings.cache_dir)
 GITHUB_REPO = Settings.github_repo
 GITHUB_PATH = Settings.github_path
 GITHUB_BRANCH = Settings.github_branch
-PROMPTS_DIR = Path(Settings.prompts_dir)
+PROMPTS_DIR = _resolve_data_path(Settings.prompts_dir)
 
 # Ensure cache directory exists
 CACHE_DIR.mkdir(parents=True, exist_ok=True)

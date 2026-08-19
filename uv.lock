@@ -151,7 +151,7 @@ wheels = [
 [[package]]
 name = "coding-guides-server"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "cachetools" },
     { name = "dynaconf" },

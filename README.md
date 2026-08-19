@@ -31,7 +31,7 @@ git clone https://github.com/delian/codeguide-mcp.git
 cd codeguide-mcp
 
 # Install with uv (recommended)
-uv install
+uv sync
 
 # Or with pip
 pip install -e .
@@ -191,16 +191,43 @@ gcloud run deploy codeguide-mcp \
 - Set `GUIDES_ALLOWED_HOSTS` to your service hostname to enable Host-header
   validation if you expose the service under a custom domain.
 
-### Listing it in the MCP Registry as a remote
+## Publishing to the MCP Registry
 
-Once deployed, add the live URL to `server.json` alongside the `packages` entry
-and re-publish with `mcp-publisher publish`:
+The MCP servers list in the VS Code Extensions view (type `@mcp` in the search
+bar) is fed by the GitHub MCP Registry, which ingests from the official
+[MCP Registry](https://registry.modelcontextprotocol.io). Publishing there is
+therefore how this server becomes discoverable in VS Code — no VS Code extension
+of its own is required.
 
-```json
-"remotes": [
-  { "type": "streamable-http", "url": "https://codeguide-mcp-86057491046.europe-west1.run.app/mcp" }
-]
+[`server.json`](server.json) holds the registry metadata: the Docker image for
+clients that want to run it locally, and the hosted URL for clients that would
+rather not. Ownership of the image is proven by the
+`io.modelcontextprotocol.server.name` label in the [Dockerfile](Dockerfile),
+whose value **must** equal `.name` in `server.json`.
+
+Authenticate once (an interactive device-code flow), then run the publish script:
+
+```bash
+mcp-publisher login github     # namespace io.github.<your-username>/*
+tools/publish.sh
 ```
+
+[`tools/publish.sh`](tools/publish.sh) does the whole release: it checks the
+required tooling and Docker login, verifies that `server.json` and
+`pyproject.toml` agree on the version and that the Dockerfile label matches the
+server name, builds and pushes `:VERSION` and `:latest`, validates `server.json`
+against the live registry, publishes, then reads the entry back to confirm.
+
+```bash
+tools/publish.sh --dry-run          # everything except push and publish
+tools/publish.sh --version 0.2.0    # bump server.json + pyproject + image tag, then release
+tools/publish.sh --skip-build       # reuse images already on Docker Hub
+```
+
+Install `mcp-publisher` from the
+[registry quickstart](https://modelcontextprotocol.io/registry/quickstart) if
+you do not have it. After publishing, inclusion in GitHub's curated list may
+need a request to `partnerships@github.com`.
 
 ## Adding Guides
 
