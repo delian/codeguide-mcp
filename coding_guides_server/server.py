@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import logging
+import os
 import threading
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -13,6 +14,7 @@ from cachetools import TTLCache, cached
 # mcp>=1.26 renamed FastMCP (mcp.server.fastmcp) to MCPServer (mcp.server.mcpserver);
 # the decorator API (.tool/.resource/.prompt/.run) is unchanged.
 from mcp.server.mcpserver import MCPServer
+from mcp.server.transport_security import TransportSecuritySettings
 
 from config import Settings
 
@@ -739,10 +741,66 @@ def clear_cache() -> None:
     logger.info("All caches cleared")
 
 
+def _resolve_transport() -> str:
+    """Resolve the configured transport, expanding "auto".
+
+    "auto" means: use streamable-http when the platform injected a PORT env var
+    (Cloud Run and most PaaS providers do, and they require the process to
+    listen on it), otherwise stdio for local MCP clients over a pipe.
+    """
+    transport = str(Settings.get("transport", "auto")).strip().lower()
+    if transport == "auto":
+        transport = "streamable-http" if os.environ.get("PORT") else "stdio"
+    if transport not in ("stdio", "sse", "streamable-http"):
+        raise ValueError(
+            f"Unsupported transport {transport!r}; use 'stdio', 'streamable-http', 'sse' or 'auto'."
+        )
+    return transport
+
+
+def _http_kwargs() -> dict[str, object]:
+    """Build the streamable-http keyword arguments from settings and the environment."""
+    # Cloud Run (and most PaaS) dictate the listening port via $PORT; it must win
+    # over the configured default or the container is killed as unhealthy.
+    port = int(os.environ.get("PORT") or Settings.get("port", 8080))
+    host = str(Settings.get("host", "0.0.0.0"))
+
+    allowed_hosts = list(Settings.get("allowed_hosts", []) or [])
+    allowed_origins = list(Settings.get("allowed_origins", []) or [])
+    transport_security = None
+    if allowed_hosts or allowed_origins:
+        transport_security = TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=allowed_hosts,
+            allowed_origins=allowed_origins,
+        )
+
+    return {
+        "host": host,
+        "port": port,
+        "streamable_http_path": str(Settings.get("http_path", "/mcp")),
+        "stateless_http": bool(Settings.get("stateless_http", True)),
+        "json_response": bool(Settings.get("json_response", False)),
+        "transport_security": transport_security,
+    }
+
+
 def main() -> None:
     """Run the MCP server."""
     register_prompts_from_markdown()
-    mcp.run()
+
+    transport = _resolve_transport()
+    if transport == "stdio":
+        logger.info("Starting MCP server on stdio")
+        mcp.run()
+        return
+
+    kwargs = _http_kwargs()
+    logger.info(
+        f"Starting MCP server with {transport} transport on "
+        f"http://{kwargs['host']}:{kwargs['port']}{kwargs['streamable_http_path']}"
+    )
+    mcp.run(transport, **kwargs)
 
 
 if __name__ == "__main__":

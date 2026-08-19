@@ -1,18 +1,26 @@
 """
-Verify the codeguide-mcp server using an MCP client over stdio.
+Verify the codeguide-mcp server using an MCP client.
 
-Starts the server as a subprocess and checks via the MCP protocol that:
+By default it starts the server as a subprocess and talks stdio. Pass
+`--http URL` to verify an already-running remote deployment instead, e.g.
+
+    uv run python verify_server.py --http https://my-service.run.app/mcp
+
+Checks via the MCP protocol that:
 - Instructions are provided (in InitializeResult)
 - Resource guides://list and resource template guides://{guide_name} are exposed
 - Tool get_guide(guide_name) is exposed
 - All can be used: read_resource(guides://list), read_resource(guides://python.md), call_tool(get_guide)
 - Non-existent guide (e.g. xxxxxx.md) returns an error via both ReadResource(guides://xxxxxx.md) and get_guide tool
+- Every prompt is listed and renders non-empty messages
 """
 
+import argparse
 import asyncio
 import logging
 import os
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 # Add project root to path (for imports if any)
@@ -27,15 +35,19 @@ logging.getLogger("coding_guides_server").setLevel(logging.WARNING)
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from mcp.client.streamable_http import streamable_http_client
 
 
-async def verify():
-    print("=" * 60)
-    print("MCP Server Verification (client over stdio)")
-    print("=" * 60)
-
-    errors = []
-    warnings = []
+@asynccontextmanager
+async def _connect(http_url: str | None):
+    """Yield an initialized-capable ClientSession over HTTP or stdio."""
+    if http_url:
+        async with (
+            streamable_http_client(http_url) as (read_stream, write_stream),
+            ClientSession(read_stream, write_stream) as session,
+        ):
+            yield session
+        return
 
     server_params = StdioServerParameters(
         command="uv",
@@ -43,11 +55,22 @@ async def verify():
         cwd=str(ROOT),
         env=os.environ.copy(),
     )
-
     async with (
         stdio_client(server_params) as (read_stream, write_stream),
         ClientSession(read_stream, write_stream) as session,
     ):
+        yield session
+
+
+async def verify(http_url: str | None = None):
+    print("=" * 60)
+    print(f"MCP Server Verification (client over {http_url or 'stdio'})")
+    print("=" * 60)
+
+    errors = []
+    warnings = []
+
+    async with _connect(http_url) as session:
         # --- 1. Initialize and check instructions ---
         print("\n" + "-" * 60)
         print("1. Initialize and check instructions...")
@@ -299,6 +322,45 @@ async def verify():
                 errors.append(f"call_tool(get_guide, {nonexistent}): {e}")
                 print(f"❌ FAIL: {e}")
 
+        # --- 10. Every prompt is listed and renders ---
+        print("\n" + "-" * 60)
+        print("10. Checking prompts render non-empty messages...")
+        print("-" * 60)
+        try:
+            prompts = (await session.list_prompts()).prompts or []
+            if not prompts:
+                errors.append("No prompts exposed by the server")
+                print("❌ FAIL: No prompts exposed")
+            else:
+                rendered = 0
+                for prompt in prompts:
+                    # Supply a usable value for any required argument so the
+                    # prompt can actually render (e.g. get_guide(guide_name)).
+                    args = {
+                        arg.name: sample_guide
+                        for arg in (prompt.arguments or [])
+                        if arg.required
+                    }
+                    try:
+                        result = await session.get_prompt(prompt.name, args)
+                        text = "".join(
+                            getattr(message.content, "text", "")
+                            for message in result.messages
+                        )
+                        if text.strip():
+                            rendered += 1
+                        else:
+                            errors.append(f"prompt {prompt.name} rendered empty")
+                            print(f"❌ FAIL: prompt {prompt.name} rendered empty")
+                    except Exception as e:
+                        errors.append(f"prompt {prompt.name}: {e}")
+                        print(f"❌ FAIL: prompt {prompt.name}: {e}")
+                if rendered == len(prompts):
+                    print(f"✅ PASS: all {rendered} prompts render non-empty messages")
+        except Exception as e:
+            errors.append(f"list_prompts(): {e}")
+            print(f"❌ FAIL: {e}")
+
     # --- Summary ---
     print("\n" + "=" * 60)
     print("Summary")
@@ -318,7 +380,15 @@ async def verify():
 
 
 def main():
-    asyncio.run(verify())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--http",
+        metavar="URL",
+        help="Verify a running server over Streamable HTTP (e.g. https://host/mcp) "
+        "instead of spawning a local stdio subprocess.",
+    )
+    args = parser.parse_args()
+    asyncio.run(verify(args.http))
 
 
 if __name__ == "__main__":

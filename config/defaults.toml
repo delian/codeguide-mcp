@@ -10,6 +10,23 @@ github_branch = "main"
 cache_dir = ".guides-cache"
 prompts_dir = "prompts"
 
+# Transport: "stdio" (local MCP clients), "streamable-http" (remote/hosted),
+# or "auto" — which picks streamable-http when a PORT env var is present
+# (Cloud Run, Heroku, Fly and friends always set it) and stdio otherwise.
+transport = "auto"
+host = "0.0.0.0"
+port = 8080
+http_path = "/mcp"
+# Cloud Run may route consecutive requests to different instances, so no
+# per-session state may live in one instance's memory.
+stateless_http = true
+json_response = false
+# Host header allowlist for DNS-rebinding protection, e.g.
+# ["codeguide-mcp-abc123.europe-west1.run.app", "*.run.app"]. Empty = no
+# Host validation (fine for a public read-only server behind Cloud Run's proxy).
+allowed_hosts = []
+allowed_origins = []
+
 [development]
 log_level = "DEBUG"
 
